@@ -69,6 +69,58 @@ test("verification preserves a leading-zero OTP and returns a patient session re
   assert.equal(typeof body.token, "string");
 });
 
+test("legacy phone-and-OTP clients resolve the active request before verification", async (t) => {
+  let resolvedPhone;
+  let submittedVerification;
+  const app = express();
+  app.use(express.json());
+  app.use(
+    "/api/auth",
+    createAuthRouter({
+      db: {},
+      otpService: {
+        async findActiveRequestIdByPhone(phone) {
+          resolvedPhone = phone;
+          return REQUEST_ID;
+        },
+        async verifyOtp(payload) {
+          submittedVerification = payload;
+          return {
+            status: "verified",
+            user: {
+              id: 42,
+              first_name: "Test",
+              last_name: "Patient",
+              email: "patient@example.test",
+              phone: "639333333333",
+              role: "patient",
+              status: "Active",
+              is_verified: true,
+            },
+          };
+        },
+      },
+      authenticateToken: (_req, _res, next) => next(),
+      jwtSecret: "test-jwt-secret",
+    })
+  );
+
+  const server = await startServer(app);
+  t.after(server.close);
+
+  const response = await fetch(`${server.baseUrl}/api/auth/verify-otp`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ phone: "09333333333", otp: "012345" }),
+  });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(resolvedPhone, "639333333333");
+  assert.deepEqual(submittedVerification, { requestId: REQUEST_ID, otp: "012345" });
+  assert.equal(body.redirectTo, "/patient/dashboard");
+});
+
 test("verification rejects an OTP sent as a number because leading zeros would be lost", async (t) => {
   let serviceCalled = false;
   const app = express();

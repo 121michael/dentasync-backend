@@ -190,13 +190,7 @@ function createAuthRouter({ db, otpService, authenticateToken, jwtSecret }) {
 
   // --- 3. VERIFY THE CURRENT OTP REQUEST ---
   router.post("/verify-otp", async (req, res) => {
-    const { requestId, otp } = req.body || {};
-
-    if (!isOtpRequestId(requestId)) {
-      return res.status(400).json({
-        message: "A valid OTP request ID is required.",
-      });
-    }
+    const { requestId: submittedRequestId, phone, otp } = req.body || {};
 
     if (!normalizeOtp(otp)) {
       return res.status(400).json({
@@ -205,6 +199,28 @@ function createAuthRouter({ db, otpService, authenticateToken, jwtSecret }) {
     }
 
     try {
+      let requestId = submittedRequestId;
+
+      if (requestId === undefined || requestId === null || requestId === "") {
+        // Existing clients sent { phone, otp }. Resolve only the newest active
+        // request for that normalized phone, then use the same atomic verifier.
+        const normalizedPhone = normalizePhone(phone);
+        if (!normalizedPhone) {
+          return res.status(400).json({
+            message: "A valid OTP request ID or phone number is required.",
+          });
+        }
+
+        requestId = await otpService.findActiveRequestIdByPhone(normalizedPhone);
+        if (!isOtpRequestId(requestId)) {
+          return res.status(400).json({ message: "Invalid or expired OTP code." });
+        }
+      } else if (!isOtpRequestId(requestId)) {
+        return res.status(400).json({
+          message: "A valid OTP request ID is required.",
+        });
+      }
+
       const result = await otpService.verifyOtp({ requestId, otp });
       if (result.status !== "verified") {
         return res.status(400).json({ message: "Invalid or expired OTP code." });

@@ -24,6 +24,17 @@ function createInMemoryOtpStore({ users, now }) {
   return {
     requests,
 
+    async findActiveRequestIdByPhone(phone) {
+      const activeRequests = Array.from(requests.values()).filter(
+        (request) =>
+          request.phone === phone &&
+          !request.usedAt &&
+          !request.invalidatedAt &&
+          request.expiresAt.getTime() > now().getTime()
+      );
+      return activeRequests.at(-1)?.requestId || null;
+    },
+
     async withIssuanceLock(userId, callback) {
       const previous = locks.get(String(userId)) || Promise.resolve();
       let release;
@@ -73,6 +84,7 @@ function createInMemoryOtpStore({ users, now }) {
               requestId,
               userId: user.id,
               email: user.email,
+              phone: user.phone,
               otpHash,
               createdAt,
               expiresAt: new Date(createdAt.getTime() + ttlSeconds * 1000),

@@ -261,7 +261,24 @@ function createPostgresOtpStore(pool) {
     }
   }
 
+  async function findActiveRequestIdByPhone(phone) {
+    const result = await pool.query(
+      `SELECT request_id
+       FROM ${OTP_REQUESTS_TABLE}
+       WHERE phone = $1
+         AND used_at IS NULL
+         AND invalidated_at IS NULL
+         AND expires_at > CURRENT_TIMESTAMP
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [phone]
+    );
+
+    return result.rows[0]?.request_id || null;
+  }
+
   return {
+    findActiveRequestIdByPhone,
     withIssuanceLock,
     consume,
   };

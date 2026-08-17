@@ -75,7 +75,12 @@ function createOtpService({
   codeGenerator = generateOtp,
   ttlSeconds = OTP_TTL_SECONDS,
 }) {
-  if (!store || typeof store.withIssuanceLock !== "function" || typeof store.consume !== "function") {
+  if (
+    !store ||
+    typeof store.withIssuanceLock !== "function" ||
+    typeof store.consume !== "function" ||
+    typeof store.findActiveRequestIdByPhone !== "function"
+  ) {
     throw new Error("An OTP store with issuance and consumption support is required.");
   }
 
@@ -181,7 +186,12 @@ function createOtpService({
     return result;
   }
 
+  async function findActiveRequestIdByPhone(phone) {
+    return store.findActiveRequestIdByPhone(phone);
+  }
+
   return {
+    findActiveRequestIdByPhone,
     issueOtp,
     verifyOtp,
   };

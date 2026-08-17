@@ -47,6 +47,12 @@ and returns a new `requestId`. Replace the locally stored request ID with this
 new value. Disable the resend and verify buttons while their respective
 requests are pending to avoid duplicate submissions.
 
+For compatibility with an existing verification page, `POST /api/auth/verify-otp`
+also accepts `{ "phone": "...", "otp": "012345" }` when `requestId` is absent.
+The server normalizes the phone and resolves only its newest active request.
+New clients should continue using `requestId`, which is more explicit and
+survives page refreshes without an additional lookup.
+
 The server records privacy-safe OTP audit events containing the request ID,
 hashed account fingerprint, timestamps, lookup outcome, expiry state, and
 match outcome. It never logs the OTP itself.
