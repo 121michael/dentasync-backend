@@ -60,6 +60,14 @@ export function RecordsPage() {
     }
   }
 
+  async function downloadPortalDocument(document) {
+    try {
+      await api.downloadPortalDocument(document);
+    } catch (downloadError) {
+      setError(downloadError.message);
+    }
+  }
+
   if (error && !recordsData) return <ErrorState message={error} onRetry={load} />;
   if (!recordsData) return <LoadingState label="Opening your secure treatment archive" />;
 
@@ -191,7 +199,12 @@ export function RecordsPage() {
           {recordsData.documents.length ? (
             <div className="document-list">
               {recordsData.documents.map((document) => (
-                <div className="document-row" key={document.id}>
+                <button
+                  className="document-row"
+                  key={document.id}
+                  onClick={() => downloadPortalDocument(document)}
+                  title={`Download ${document.name}`}
+                >
                   <span className="document-row__icon">
                     {document.mimeType.startsWith("image") ? <FileImage size={18} /> : <FileText size={18} />}
                   </span>
@@ -199,7 +212,8 @@ export function RecordsPage() {
                     <strong>{document.name}</strong>
                     <small>{document.type.replaceAll("_", " ")} · {formatSize(document.size)}</small>
                   </div>
-                </div>
+                  <Download size={16} />
+                </button>
               ))}
             </div>
           ) : (

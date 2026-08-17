@@ -12,7 +12,7 @@ import {
   UsersRound,
 } from "lucide-react";
 import { BrandMark } from "./BrandMark";
-import { useAuth } from "../auth";
+import { useAuth } from "../useAuth";
 
 const navigation = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },

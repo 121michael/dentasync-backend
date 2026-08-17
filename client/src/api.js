@@ -94,6 +94,8 @@ export const api = {
       `/patient/records/${recordId}/documents/${document.id}/download`,
       document.name
     ),
+  downloadPortalDocument: (document) =>
+    download(`/patient/documents/${document.id}/download`, document.name),
   uploadHmoAuthorization: (file) => {
     const data = new FormData();
     data.append("file", file);

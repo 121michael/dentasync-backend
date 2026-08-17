@@ -7,16 +7,13 @@ import {
   CreditCard,
   KeyRound,
   LockKeyhole,
-  Moon,
-  QrCode,
   Save,
   ShieldCheck,
-  Sun,
   UserRound,
 } from "lucide-react";
 import { api } from "../api";
-import { useAuth } from "../auth";
 import { ErrorState, LoadingState, SectionHeading } from "../components/UI";
+import { useAuth } from "../useAuth";
 
 function formatDate(value) {
   if (!value) return "—";
@@ -60,9 +57,6 @@ function profileToForm(profile) {
     dentalConcerns: profile.dental_concerns || "",
     hmoProvider: profile.hmo_provider || "",
     hmoMemberNumber: profile.hmo_member_number || "",
-    oralHealthScore: profile.oral_health_score ?? "",
-    lastCleaning: profile.last_cleaning || "",
-    nextCheckup: profile.next_checkup || "",
   };
 }
 
@@ -112,10 +106,7 @@ export function ProfilePage({ theme, onThemeChange }) {
     setSuccess("");
     setIsSaving(true);
     try {
-      const response = await api.updateProfile({
-        ...form,
-        oralHealthScore: form.oralHealthScore === "" ? null : Number(form.oralHealthScore),
-      });
+      const response = await api.updateProfile(form);
       setProfile((current) => ({ ...current, ...response.profile, firstName: form.firstName, lastName: form.lastName, email: form.email, phone: form.phone }));
       updateUser((current) => ({
         ...current,
@@ -267,9 +258,11 @@ export function ProfilePage({ theme, onThemeChange }) {
             <div className="field-grid field-grid--two">
               <label className="field"><span>HMO provider</span><input name="hmoProvider" value={form.hmoProvider} onChange={updateForm} /></label>
               <label className="field"><span>HMO member number</span><input name="hmoMemberNumber" value={form.hmoMemberNumber} onChange={updateForm} /></label>
-              <label className="field"><span>Oral health score</span><input name="oralHealthScore" type="number" min="0" max="100" value={form.oralHealthScore} onChange={updateForm} /></label>
-              <label className="field"><span>Last cleaning</span><input name="lastCleaning" type="date" value={form.lastCleaning} onChange={updateForm} /></label>
-              <label className="field"><span>Next checkup</span><input name="nextCheckup" type="date" value={form.nextCheckup} onChange={updateForm} /></label>
+            </div>
+            <div className="care-summary">
+              <span><small>Oral health score</small><strong>{profile.oral_health_score ?? "Awaiting clinician assessment"}</strong></span>
+              <span><small>Last cleaning</small><strong>{profile.last_cleaning ? formatDate(profile.last_cleaning) : "Not recorded"}</strong></span>
+              <span><small>Next checkup</small><strong>{profile.next_checkup ? formatDate(profile.next_checkup) : "To be recommended"}</strong></span>
             </div>
           </section>
         </form>

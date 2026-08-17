@@ -12,8 +12,8 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { ApiError, api } from "../api";
-import { useAuth } from "../auth";
 import { BrandMark } from "../components/BrandMark";
+import { useAuth } from "../useAuth";
 
 const PENDING_OTP_KEY = "amethyst_pending_otp";
 

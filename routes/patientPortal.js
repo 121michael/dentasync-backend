@@ -441,6 +441,9 @@ function createPatientPortalRouter({
         appointment: mapAppointment(result.rows[0]),
       });
     } catch (error) {
+      if (error.code === "23505") {
+        return res.status(409).json({ message: "That time was just booked. Please choose another available slot." });
+      }
       console.error("Create appointment error:", error.message);
       return res.status(500).json({ message: "Unable to confirm the appointment." });
     }
@@ -740,6 +743,32 @@ function createPatientPortalRouter({
     }
   });
 
+  router.get("/documents/:documentId/download", async (req, res) => {
+    try {
+      const result = await db.query(
+        `SELECT original_name, stored_name
+         FROM patient_portal_documents
+         WHERE id = $1
+           AND user_id = $2`,
+        [req.params.documentId, userIdFor(req)]
+      );
+      if (result.rows.length === 0) {
+        return res.status(404).json({ message: "Document not found." });
+      }
+
+      const document = result.rows[0];
+      const filePath = path.resolve(uploadDirectory, document.stored_name);
+      if (path.dirname(filePath) !== path.resolve(uploadDirectory) || !fs.existsSync(filePath)) {
+        return res.status(404).json({ message: "Document file is unavailable." });
+      }
+
+      return res.download(filePath, document.original_name);
+    } catch (error) {
+      console.error("Patient document download error:", error.message);
+      return res.status(500).json({ message: "Unable to download document." });
+    }
+  });
+
   router.post("/uploads/hmo-authorization", upload.single("file"), async (req, res) => {
     if (!req.file) {
       return res.status(400).json({ message: "Choose a PDF, JPG, or PNG authorization document." });
@@ -839,10 +868,10 @@ function createPatientPortalRouter({
            user_id, date_of_birth, gender, address, emergency_contact_name,
            emergency_contact_relationship, emergency_contact_phone, allergies,
            existing_conditions, current_medications, dental_concerns, hmo_provider,
-           hmo_member_number, hmo_status, oral_health_score, last_cleaning, next_checkup
+           hmo_member_number, hmo_status
          ) VALUES (
            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-           $14, $15, $16, $17
+           $14
          )
          ON CONFLICT (user_id) DO UPDATE SET
            date_of_birth = EXCLUDED.date_of_birth,
@@ -858,9 +887,6 @@ function createPatientPortalRouter({
            hmo_provider = EXCLUDED.hmo_provider,
            hmo_member_number = EXCLUDED.hmo_member_number,
            hmo_status = EXCLUDED.hmo_status,
-           oral_health_score = EXCLUDED.oral_health_score,
-           last_cleaning = EXCLUDED.last_cleaning,
-           next_checkup = EXCLUDED.next_checkup,
            updated_at = CURRENT_TIMESTAMP
          RETURNING *`,
         [
@@ -878,11 +904,6 @@ function createPatientPortalRouter({
           stringValue(body.hmoProvider, 120),
           stringValue(body.hmoMemberNumber, 120),
           body.hmoProvider ? "pending_verification" : "not_enrolled",
-          Number.isInteger(body.oralHealthScore) && body.oralHealthScore >= 0 && body.oralHealthScore <= 100
-            ? body.oralHealthScore
-            : null,
-          isIsoDate(body.lastCleaning) ? body.lastCleaning : null,
-          isIsoDate(body.nextCheckup) ? body.nextCheckup : null,
         ]
       );
 

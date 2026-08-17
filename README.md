@@ -56,3 +56,44 @@ survives page refreshes without an additional lookup.
 The server records privacy-safe OTP audit events containing the request ID,
 hashed account fingerprint, timestamps, lookup outcome, expiry state, and
 match outcome. It never logs the OTP itself.
+
+## Amethyst Dental patient portal
+
+The responsive patient experience lives in [`client/`](./client). It includes
+the dashboard, appointment booking, live queue, treatment archive, profile,
+notifications, mobile navigation, and a persisted dark-mode preference.
+
+Apply both migrations before starting the portal API:
+
+```bash
+npm run migrate
+npm start
+```
+
+Then, in a second terminal:
+
+```bash
+cd client
+npm install
+npm run dev
+```
+
+The Vite development server proxies `/api` to `http://localhost:5000`. For a
+separate backend deployment, set `VITE_API_URL` to that deployment's `/api`
+base URL before building the client.
+
+The patient APIs are all authenticated and scoped to the JWT patient account:
+
+- `GET /api/patient/dashboard`
+- `GET` / `POST /api/patient/appointments`
+- `GET /api/patient/queue` and `POST /api/patient/queue/check-in`
+- `GET /api/patient/records`
+- `GET` / `PUT /api/patient/profile`
+- `POST /api/patient/uploads/hmo-authorization`
+- `GET /api/patient/notifications`
+
+The portal migration creates isolated `patient_portal_*` tables, avoiding
+assumptions about legacy appointment table schemas. Uploaded authorization
+documents are stored under `uploads/patient-portal/`; keep that directory on
+durable private storage in production and never expose it as a public static
+directory.

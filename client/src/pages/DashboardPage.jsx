@@ -15,7 +15,7 @@ import {
   UsersRound,
 } from "lucide-react";
 import { api } from "../api";
-import { DetailLink, EmptyState, ErrorState, LoadingState } from "../components/UI";
+import { DetailLink, ErrorState, LoadingState } from "../components/UI";
 
 function greeting() {
   const hour = new Date().getHours();

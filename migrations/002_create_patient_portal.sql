@@ -63,6 +63,10 @@ CREATE INDEX IF NOT EXISTS patient_portal_appointments_dentist_slot_idx
   ON patient_portal_appointments (dentist_id, appointment_date, appointment_time)
   WHERE status <> 'cancelled';
 
+CREATE UNIQUE INDEX IF NOT EXISTS patient_portal_appointments_active_slot_unique
+  ON patient_portal_appointments (dentist_id, appointment_date, appointment_time)
+  WHERE status <> 'cancelled';
+
 CREATE TABLE IF NOT EXISTS patient_portal_queue_entries (
   id BIGSERIAL PRIMARY KEY,
   user_id TEXT NOT NULL,
