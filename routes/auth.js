@@ -1,19 +1,11 @@
 const express = require("express");
-const router = express.Router();
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
-const db = require("../db");
-const { authenticateToken } = require("../middleware/authMiddleware");
-const nodemailer = require("nodemailer");
-
-// --- NODEMAILER SETUP ---
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
+const {
+  OtpDeliveryError,
+  isOtpRequestId,
+  normalizeOtp,
+} = require("../services/otpService");
 
 // Helper function to format consistent user responses across all endpoints
 const formatUserPayload = (user) => {
@@ -29,239 +21,290 @@ const formatUserPayload = (user) => {
     email: user.email,
     phone: user.phone || null,
     role: user.role,
-    status: user.status.toLowerCase(),
+    status: (user.status || "active").toLowerCase(),
     isVerified: user.is_verified,
   };
 };
 
-// --- 1.  NEW USER ---
-router.post("/register", async (req, res) => {
-  const { firstName, lastName, fullName, email, phone, password, role } = req.body;
-
-  if (!email || !password) {
-    return res.status(400).json({ message: "Email and password are required." });
+function normalizeEmail(value) {
+  if (typeof value !== "string") {
+    return null;
   }
 
-  // 🐛 DEBUG LOG 1
-  console.log(`📩 Received registration request for: ${email}`);
+  const email = value.trim().toLowerCase();
+  return email && email.includes("@") ? email : null;
+}
 
-  const computedFirstName = firstName || (fullName ? fullName.split(" ")[0] : "");
-  const computedLastName = lastName || (fullName ? fullName.split(" ").slice(1).join(" ") : "");
-  const computedFullName = fullName || `${computedFirstName} ${computedLastName}`.trim();
-  const normalizedEmail = email.toLowerCase().trim();
-  const assignedRole = (role || "patient").toLowerCase();
+function normalizePhone(value) {
+  if (typeof value !== "string" && typeof value !== "number") {
+    return null;
+  }
 
-  try {
-    // Check duplicate email or phone
-    const existingUser = await db.query(
-      "SELECT id FROM users WHERE LOWER(email) = $1 OR (phone = $2 AND phone IS NOT NULL AND $2 != '')",
-      [normalizedEmail, phone || ""]
-    );
+  const digits = String(value).replace(/\D/g, "");
+  if (!digits) {
+    return null;
+  }
 
-    if (existingUser.rows.length > 0) {
-      console.log(`🚧 Duplicate account found for: ${normalizedEmail}. Email logic skipped.`);
-      return res.status(409).json({ message: "Email or mobile number is already registered." });
+  // DentaSync's existing records use Philippine phone numbers. Canonicalizing
+  // the local and E.164 forms avoids a registration/resend format mismatch.
+  if (/^0\d{10}$/.test(digits)) {
+    return `63${digits.slice(1)}`;
+  }
+
+  return digits;
+}
+
+function createAuthRouter({ db, otpService, authenticateToken, jwtSecret }) {
+  const router = express.Router();
+
+  // --- 1. PATIENT REGISTRATION AND FIRST OTP ---
+  router.post("/register", async (req, res) => {
+    const { firstName, lastName, fullName, email, phone, password, role } = req.body;
+    const normalizedEmail = normalizeEmail(email);
+    const normalizedPhone = normalizePhone(phone);
+    const requestedRole = (role || "patient").toLowerCase();
+
+    if (!normalizedEmail || !normalizedPhone || !password) {
+      return res.status(400).json({
+        message: "Email, phone number, and password are required.",
+      });
     }
 
-    const saltRounds = 10;
-    const hashedPassword = await bcrypt.hash(password, saltRounds);
+    if (requestedRole !== "patient") {
+      return res.status(403).json({
+        message: "Self-registration is available only for patient accounts.",
+      });
+    }
 
-    // Save user record
-    const isVerified = assignedRole !== "patient";
-    const initialStatus = "active";
-
-    await db.query(
-      `INSERT INTO users (first_name, last_name, full_name, email, phone, password_hash, role, is_verified, status) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-      [
-        computedFirstName,
-        computedLastName,
-        computedFullName,
-        normalizedEmail,
-        phone || null,
-        hashedPassword,
-        assignedRole,
-        isVerified,
-        initialStatus,
-      ]
-    );
-
-    // 🐛 DEBUG LOG 2 - Very critical!
-    console.log(`🔍 Checking conditions: Role=[${assignedRole}], Phone=[${phone}]`);
-
-    // --- REAL OTP GENERATION & EMAIL SENDING ---
-    if (assignedRole === "patient" && phone) {
-      
-      // 🐛 DEBUG LOG 3
-      console.log(`🔥 Conditions met. Initiating email send to: ${normalizedEmail}`);
-
-      // Generate a random 6-digit number
-      const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString(); 
-      const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-
-      // Save to database
-      await db.query(
-        "INSERT INTO otps (phone, otp_code, expires_at) VALUES ($1, $2, $3)",
-        [phone, generatedOtp, expiresAt]
+    const computedFirstName = firstName || (fullName ? fullName.split(" ")[0] : "");
+    const computedLastName =
+      lastName || (fullName ? fullName.split(" ").slice(1).join(" ") : "");
+    try {
+      const existingUser = await db.query(
+        "SELECT id FROM users WHERE LOWER(email) = $1 OR phone = $2",
+        [normalizedEmail, normalizedPhone]
       );
 
-      // Send to Gmail
-      try {
-        await transporter.sendMail({
-          from: `"Amethyst Dental" <${process.env.EMAIL_USER}>`,
-          to: normalizedEmail,
-          subject: "Your Amethyst Registration OTP",
-          html: `
-            <div style="font-family: Arial, sans-serif; padding: 20px;">
-              <h2>Welcome to Amethyst Dental Clinic!</h2>
-              <p>Your 6-digit registration code is:</p>
-              <h1 style="color: #6b21a8; letter-spacing: 5px;">${generatedOtp}</h1>
-            </div>
-          `,
+      if (existingUser.rows.length > 0) {
+        return res.status(409).json({
+          message: "Email or mobile number is already registered.",
         });
-        console.log(`✅ OTP Email sent successfully to ${normalizedEmail}`);
-      } catch (emailErr) {
-        console.error("❌ Failed to send email:", emailErr);
       }
 
-      return res.status(201).json({
-        message: "Registration initiated. Verification OTP sent to email.",
-        requiresOtp: true,
+      const hashedPassword = await bcrypt.hash(password, 10);
+      const userResult = await db.query(
+        `INSERT INTO users
+           (first_name, last_name, email, phone, password_hash, role, is_verified, status)
+         VALUES ($1, $2, $3, $4, $5, 'patient', FALSE, 'Active')
+         RETURNING id, first_name, last_name, email, phone, role, status, is_verified`,
+        [
+          computedFirstName,
+          computedLastName,
+          normalizedEmail,
+          normalizedPhone,
+          hashedPassword,
+        ]
+      );
+
+      try {
+        const request = await otpService.issueOtp(userResult.rows[0]);
+        return res.status(201).json({
+          message: "Registration started. A verification code was sent to your email.",
+          requiresOtp: true,
+          requestId: request.requestId,
+          expiresAt: request.expiresAt,
+        });
+      } catch (error) {
+        if (error instanceof OtpDeliveryError) {
+          return res.status(503).json({
+            message:
+              "Your account was created, but the verification code could not be delivered. Please request a new code.",
+            requiresOtp: true,
+            resendAvailable: true,
+          });
+        }
+        throw error;
+      }
+    } catch (error) {
+      console.error("Patient registration error:", error.message);
+      return res.status(500).json({ message: "Server error during registration." });
+    }
+  });
+
+  // --- 2. RESEND OTP FOR THE SAME UNVERIFIED PATIENT ---
+  router.post("/send-otp", async (req, res) => {
+    const normalizedEmail = normalizeEmail(req.body?.email);
+    const normalizedPhone = normalizePhone(req.body?.phone);
+
+    if (!normalizedEmail || !normalizedPhone) {
+      return res.status(400).json({
+        message: "Email and phone number are required to resend a verification code.",
       });
     }
 
-    // 🐛 DEBUG LOG 4
-    console.log(`⚠️ Email conditions NOT met. RequiresOtp set to false.`);
+    try {
+      const userResult = await db.query(
+        `SELECT id, first_name, last_name, email, phone, role, status, is_verified
+         FROM users
+         WHERE LOWER(email) = $1 AND role = 'patient'
+         LIMIT 1`,
+        [normalizedEmail]
+      );
 
-    res.status(201).json({
-      message: "Account created successfully. You can now log in.",
-      requiresOtp: false,
-    });
-  } catch (err) {
-    console.error("❌ General Registration Error:", err);
-    res.status(500).json({ message: "Server error during account registration." });
-  }
-});
+      const user = userResult.rows[0];
+      if (!user || normalizePhone(user.phone) !== normalizedPhone) {
+        return res.status(404).json({
+          message: "No matching patient verification request was found.",
+        });
+      }
 
-// --- 2. VERIFY REGISTRATION OTP ---
-router.post("/verify-otp", async (req, res) => {
-  const { phone, otp } = req.body;
+      if (user.is_verified) {
+        return res.status(409).json({ message: "This patient account is already verified." });
+      }
 
-  if (!phone || !otp) {
-    return res.status(400).json({ message: "Phone number and OTP code are required." });
-  }
+      const request = await otpService.issueOtp(user);
+      return res.status(200).json({
+        message: "A new verification code was sent to your email.",
+        requestId: request.requestId,
+        expiresAt: request.expiresAt,
+      });
+    } catch (error) {
+      if (error instanceof OtpDeliveryError) {
+        return res.status(503).json({
+          message: "The verification code could not be delivered. Please try again.",
+        });
+      }
 
-  try {
-    const otpResult = await db.query(
-      "SELECT * FROM otps WHERE phone = $1 AND otp_code = $2 AND expires_at > NOW() ORDER BY created_at DESC LIMIT 1",
-      [phone, otp]
-    );
-
-    if (otpResult.rows.length === 0) {
-      return res.status(400).json({ message: "Invalid or expired OTP code." });
+      console.error("OTP resend error:", error.message);
+      return res.status(500).json({ message: "Unable to send a verification code." });
     }
+  });
 
-    const userResult = await db.query(
-      "UPDATE users SET is_verified = TRUE, updated_at = CURRENT_TIMESTAMP WHERE phone = $1 RETURNING *",
-      [phone]
-    );
+  // --- 3. VERIFY THE CURRENT OTP REQUEST ---
+  router.post("/verify-otp", async (req, res) => {
+    const { requestId, otp } = req.body || {};
 
-    if (userResult.rows.length === 0) {
-      return res.status(404).json({ message: "Associated user account not found." });
-    }
-
-    await db.query("DELETE FROM otps WHERE phone = $1", [phone]);
-
-    const user = userResult.rows[0];
-    res.status(200).json({
-      message: "Email verified successfully!",
-      user: formatUserPayload(user),
-    });
-  } catch (err) {
-    console.error("OTP Verification Error:", err);
-    res.status(500).json({ message: "Server error during OTP verification." });
-  }
-});
-
-// --- 3. UNIFIED LOGIN (Role Inferred from Database) ---
-router.post("/login", async (req, res) => {
-  const { identifier, email, password } = req.body;
-  const loginInput = (identifier || email || "").toLowerCase().trim();
-  const rawPassword = password;
-
-  if (!loginInput || !rawPassword) {
-    return res.status(400).json({ message: "Email/Phone and password are required." });
-  }
-
-  try {
-    const userResult = await db.query(
-      "SELECT * FROM users WHERE LOWER(email) = $1 OR (phone = $1 AND phone IS NOT NULL)",
-      [loginInput]
-    );
-
-    if (userResult.rows.length === 0) {
-      return res.status(401).json({ message: "Invalid credentials." });
-    }
-
-    const user = userResult.rows[0];
-
-    const isPasswordMatch = await bcrypt.compare(rawPassword, user.password_hash);
-    if (!isPasswordMatch) {
-      return res.status(401).json({ message: "Invalid credentials." });
-    }
-
-    if (!user.is_verified) {
-      return res.status(403).json({
-        message: "Account unverified. Please complete OTP verification first.",
-        requiresOtp: true,
-        phone: user.phone,
+    if (!isOtpRequestId(requestId)) {
+      return res.status(400).json({
+        message: "A valid OTP request ID is required.",
       });
     }
 
-    const currentStatus = (user.status || "active").toLowerCase();
-    if (["inactive", "disabled", "suspended"].includes(currentStatus)) {
-      return res.status(403).json({
-        message: `Account is ${currentStatus}. Please contact the administrator.`,
+    if (!normalizeOtp(otp)) {
+      return res.status(400).json({
+        message: "OTP must be sent as a six-digit string.",
       });
     }
 
-    const token = jwt.sign(
-      { id: user.id, role: user.role },
-      process.env.JWT_SECRET || "dentasync_default_capstone_jwt_secret",
-      { expiresIn: "8h" }
-    );
+    try {
+      const result = await otpService.verifyOtp({ requestId, otp });
+      if (result.status !== "verified") {
+        return res.status(400).json({ message: "Invalid or expired OTP code." });
+      }
 
-    res.status(200).json({
-      message: "Login successful!",
-      token,
-      user: formatUserPayload(user),
-    });
-  } catch (err) {
-    console.error("Login Error:", err);
-    res.status(500).json({ message: "Server error during authentication." });
-  }
-});
+      const token = jwt.sign(
+        { id: result.user.id, role: result.user.role },
+        jwtSecret,
+        { expiresIn: "8h" }
+      );
 
-// --- 4. GET CURRENT USER (Session Hydration) ---
-router.get("/me", authenticateToken, async (req, res) => {
-  try {
-    const userResult = await db.query(
-      "SELECT * FROM users WHERE id = $1",
-      [req.user.id]
-    );
+      return res.status(200).json({
+        message: "Account verified successfully!",
+        token,
+        user: formatUserPayload(result.user),
+        redirectTo: "/patient/dashboard",
+      });
+    } catch (error) {
+      console.error("OTP verification error:", error.message);
+      return res.status(500).json({ message: "Server error during OTP verification." });
+    }
+  });
 
-    if (userResult.rows.length === 0) {
-      return res.status(404).json({ message: "User account no longer exists." });
+  // --- 4. PATIENT LOGIN ---
+  router.post("/login", async (req, res) => {
+    const { identifier, email, password } = req.body;
+    const rawIdentifier = String(identifier || email || "").trim();
+    const loginInput = rawIdentifier.includes("@")
+      ? normalizeEmail(rawIdentifier)
+      : normalizePhone(rawIdentifier);
+
+    if (!loginInput || !password) {
+      return res.status(400).json({ message: "Email/phone and password are required." });
     }
 
-    const user = userResult.rows[0];
-    res.status(200).json({
-      user: formatUserPayload(user),
-    });
-  } catch (err) {
-    console.error("Auth /me Error:", err);
-    res.status(500).json({ message: "Server error retrieving profile." });
-  }
-});
+    try {
+      const userResult = await db.query(
+        "SELECT * FROM users WHERE LOWER(email) = $1 OR phone = $1 OR phone = $2",
+        [loginInput, rawIdentifier]
+      );
 
-module.exports = router;
+      if (userResult.rows.length === 0) {
+        return res.status(401).json({ message: "Invalid credentials." });
+      }
+
+      const user = userResult.rows[0];
+      const isPasswordMatch = await bcrypt.compare(password, user.password_hash);
+      if (!isPasswordMatch) {
+        return res.status(401).json({ message: "Invalid credentials." });
+      }
+
+      if (!user.is_verified) {
+        return res.status(403).json({
+          message: "Account unverified. Please complete OTP verification first.",
+          requiresOtp: true,
+          email: user.email,
+          phone: user.phone,
+        });
+      }
+
+      const currentStatus = (user.status || "active").toLowerCase();
+      if (["inactive", "disabled", "suspended"].includes(currentStatus)) {
+        return res.status(403).json({
+          message: `Account is ${currentStatus}. Please contact the administrator.`,
+        });
+      }
+
+      const token = jwt.sign(
+        { id: user.id, role: user.role },
+        jwtSecret,
+        { expiresIn: "8h" }
+      );
+
+      return res.status(200).json({
+        message: "Login successful!",
+        token,
+        user: formatUserPayload(user),
+      });
+    } catch (error) {
+      console.error("Login error:", error.message);
+      return res.status(500).json({ message: "Server error during authentication." });
+    }
+  });
+
+  // --- 5. GET CURRENT USER (SESSION HYDRATION) ---
+  router.get("/me", authenticateToken, async (req, res) => {
+    try {
+      const userResult = await db.query("SELECT * FROM users WHERE id = $1", [req.user.id]);
+
+      if (userResult.rows.length === 0) {
+        return res.status(404).json({ message: "User account no longer exists." });
+      }
+
+      return res.status(200).json({
+        user: formatUserPayload(userResult.rows[0]),
+      });
+    } catch (error) {
+      console.error("Auth /me error:", error.message);
+      return res.status(500).json({ message: "Server error retrieving profile." });
+    }
+  });
+
+  return router;
+}
+
+module.exports = {
+  createAuthRouter,
+  formatUserPayload,
+  normalizeEmail,
+  normalizePhone,
+};

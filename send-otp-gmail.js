@@ -10,22 +10,25 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-// 2. Generate random 6-digit OTP
-const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-
-// 3. Send Test Email
+// 2. Send a delivery-only test email. Authentication codes must be generated
+// and persisted by the API, never by a standalone mail script.
 async function main() {
   try {
     const info = await transporter.sendMail({
       from: `"DentaSync" <${process.env.EMAIL_USER}>`,
       to: process.env.EMAIL_USER, // Sends a test email to yourself
-      subject: 'DentaSync OTP Test',
-      html: `<h2>Your OTP Code is: <b>${otpCode}</b></h2>`,
+      subject: "DentaSync Email Delivery Test",
+      html: `
+        <h2>Email delivery is configured.</h2>
+        <p>
+          Request verification codes through the DentaSync API so the code sent
+          by email is stored with its OTP request.
+        </p>
+      `,
     });
 
     console.log('✅ Success! Test email sent.');
     console.log('Message ID:', info.messageId);
-    console.log('Generated OTP:', otpCode);
   } catch (error) {
     console.error('❌ Email failed to send:', error);
   }
