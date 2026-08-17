@@ -96,13 +96,17 @@ router.post("/register", async (req, res) => {
       console.log(`🔥 Conditions met. Initiating email send to: ${normalizedEmail}`);
 
       // Generate a random 6-digit number
-      const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString(); 
-      const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+      const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
 
-      // Save to database
+      // Invalidate any previous pending codes for this phone.
+      await db.query("DELETE FROM otps WHERE phone = $1", [phone]);
+
+      // Compute the expiry using the database's own clock (NOW() + INTERVAL)
+      // rather than the app server's clock, so it always agrees with the
+      // NOW() comparison used during verification below.
       await db.query(
-        "INSERT INTO otps (phone, otp_code, expires_at) VALUES ($1, $2, $3)",
-        [phone, generatedOtp, expiresAt]
+        "INSERT INTO otps (phone, otp_code, expires_at) VALUES ($1, $2, NOW() + INTERVAL '5 minutes')",
+        [phone, generatedOtp]
       );
 
       // Send to Gmail
@@ -151,10 +155,13 @@ router.post("/verify-otp", async (req, res) => {
     return res.status(400).json({ message: "Phone number and OTP code are required." });
   }
 
+  const normalizedPhone = phone.trim();
+  const normalizedOtp = otp.toString().trim();
+
   try {
     const otpResult = await db.query(
       "SELECT * FROM otps WHERE phone = $1 AND otp_code = $2 AND expires_at > NOW() ORDER BY created_at DESC LIMIT 1",
-      [phone, otp]
+      [normalizedPhone, normalizedOtp]
     );
 
     if (otpResult.rows.length === 0) {
@@ -163,14 +170,14 @@ router.post("/verify-otp", async (req, res) => {
 
     const userResult = await db.query(
       "UPDATE users SET is_verified = TRUE, updated_at = CURRENT_TIMESTAMP WHERE phone = $1 RETURNING *",
-      [phone]
+      [normalizedPhone]
     );
 
     if (userResult.rows.length === 0) {
       return res.status(404).json({ message: "Associated user account not found." });
     }
 
-    await db.query("DELETE FROM otps WHERE phone = $1", [phone]);
+    await db.query("DELETE FROM otps WHERE phone = $1", [normalizedPhone]);
 
     const user = userResult.rows[0];
     res.status(200).json({

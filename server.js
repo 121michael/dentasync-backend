@@ -146,18 +146,27 @@ app.post("/api/auth/send-otp", async (req, res) => {
     return res.status(400).json({ message: "Email and Phone number are required." });
   }
 
+  const normalizedPhone = phone.trim();
+
   try {
     // Generate random 6-digit OTP
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-    
-    // Set expiration to 5 minutes from now
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
-    // Save OTP into your database 'otps' table
+    // Invalidate any previous, still-pending codes for this phone so only the
+    // latest code (the one just emailed out) can ever be accepted.
+    await db.query("DELETE FROM otps WHERE phone = $1", [normalizedPhone]);
+
+    // IMPORTANT: compute the expiration using the database's own clock
+    // (NOW() + INTERVAL) instead of the Node process's clock (new Date()).
+    // The verification query below also compares against the database's
+    // NOW(), so if the app server and DB server clocks/timezones ever drift
+    // apart, computing the expiry on the app side can make a brand-new,
+    // correctly-entered OTP appear already "expired". Doing the arithmetic
+    // in SQL guarantees both sides always agree.
     await db.query(
       `INSERT INTO otps (phone, otp_code, expires_at) 
-       VALUES ($1, $2, $3)`,
-      [phone, otpCode, expiresAt]
+       VALUES ($1, $2, NOW() + INTERVAL '5 minutes')`,
+      [normalizedPhone, otpCode]
     );
 
     // Trigger your existing sendEmailOtp function
@@ -168,7 +177,7 @@ app.post("/api/auth/send-otp", async (req, res) => {
     res.status(200).json({ 
       message: `Verification code sent to ${email}`,
       email: email,
-      phone: phone
+      phone: normalizedPhone
     });
 
   } catch (error) {
@@ -226,20 +235,32 @@ app.post("/api/auth/register", async (req, res) => {
 // --- VERIFY OTP ---
 app.post("/api/auth/verify-otp", async (req, res) => {
   const { phone, otp } = req.body;
+
+  if (!phone || !otp) {
+    return res.status(400).json({ message: "Phone number and OTP code are required." });
+  }
+
+  const normalizedPhone = phone.trim();
+  const normalizedOtp = otp.toString().trim();
+
   try {
     const otpResult = await db.query(
       "SELECT * FROM otps WHERE phone = $1 AND otp_code = $2 AND expires_at > NOW() ORDER BY created_at DESC LIMIT 1",
-      [phone, otp]
+      [normalizedPhone, normalizedOtp]
     );
 
     if (otpResult.rows.length === 0) return res.status(400).json({ message: "Invalid or expired OTP code." });
 
     const userResult = await db.query(
       "UPDATE users SET is_verified = TRUE WHERE phone = $1 RETURNING id, first_name, last_name, email, phone, role",
-      [phone]
+      [normalizedPhone]
     );
 
-    await db.query("DELETE FROM otps WHERE phone = $1", [phone]);
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ message: "No account found for this phone number." });
+    }
+
+    await db.query("DELETE FROM otps WHERE phone = $1", [normalizedPhone]);
     const user = userResult.rows[0];
 
     res.status(200).json({
