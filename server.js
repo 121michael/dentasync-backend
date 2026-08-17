@@ -6,6 +6,7 @@ const jwt = require("jsonwebtoken");
 const nodemailer = require("nodemailer");
 const twilio = require("twilio");
 const db = require("./db");
+const { normalizePhone, normalizeOtp, phoneMatchVariants } = require("./utils/otp");
 
 const app = express();
 
@@ -141,36 +142,42 @@ app.get("/api/auth/seed-users", async (req, res) => {
 // --- SEND SIGNUP OTP TO GMAIL ---
 app.post("/api/auth/send-otp", async (req, res) => {
   const { email, phone } = req.body;
+  const normalizedPhone = normalizePhone(phone);
+  const normalizedEmail = (email || "").toLowerCase().trim();
 
-  if (!email || !phone) {
+  if (!normalizedEmail || !normalizedPhone) {
     return res.status(400).json({ message: "Email and Phone number are required." });
   }
 
   try {
     // Generate random 6-digit OTP
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-    
-    // Set expiration to 5 minutes from now
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
-    // Save OTP into your database 'otps' table
+    // Clear older codes for this phone, then store with DB-based expiry (avoids timezone skew)
+    const phoneVariants = phoneMatchVariants(normalizedPhone);
     await db.query(
-      `INSERT INTO otps (phone, otp_code, expires_at) 
-       VALUES ($1, $2, $3)`,
-      [phone, otpCode, expiresAt]
+      `DELETE FROM otps
+       WHERE regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = ANY($1::text[])
+          OR phone = $2`,
+      [phoneVariants, normalizedPhone]
+    );
+
+    await db.query(
+      `INSERT INTO otps (phone, otp_code, expires_at)
+       VALUES ($1, $2, NOW() + INTERVAL '5 minutes')`,
+      [normalizedPhone, otpCode]
     );
 
     // Trigger your existing sendEmailOtp function
-    await sendEmailOtp(email, otpCode);
+    await sendEmailOtp(normalizedEmail, otpCode);
 
-    console.log(`✅ OTP sent successfully to Gmail: ${email}`);
+    console.log(`✅ OTP sent successfully to Gmail: ${normalizedEmail}`);
 
-    res.status(200).json({ 
-      message: `Verification code sent to ${email}`,
-      email: email,
-      phone: phone
+    res.status(200).json({
+      message: `Verification code sent to ${normalizedEmail}`,
+      email: normalizedEmail,
+      phone: normalizedPhone,
     });
-
   } catch (error) {
     console.error("❌ Send OTP Error:", error);
     res.status(500).json({ message: "Failed to send OTP code to Gmail.", error: error.message });
@@ -180,8 +187,14 @@ app.post("/api/auth/send-otp", async (req, res) => {
 // --- REGISTER (Auto-Login Instant Patient Access) ---
 app.post("/api/auth/register", async (req, res) => {
   const { firstName, lastName, email, phone, password, role } = req.body;
+  const normalizedPhone = normalizePhone(phone);
+  const normalizedEmail = (email || "").toLowerCase().trim();
+
   try {
-    const userCheck = await db.query("SELECT id FROM users WHERE email = $1 OR phone = $2", [email, phone]);
+    const userCheck = await db.query(
+      "SELECT id FROM users WHERE LOWER(email) = $1 OR phone = $2",
+      [normalizedEmail, normalizedPhone]
+    );
     if (userCheck.rows.length > 0) return res.status(400).json({ message: "Email or Mobile Number is already registered." });
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -191,7 +204,7 @@ app.post("/api/auth/register", async (req, res) => {
       `INSERT INTO users (first_name, last_name, email, phone, password_hash, role, is_verified, status) 
        VALUES ($1, $2, $3, $4, $5, $6, TRUE, 'Active')
        RETURNING id, first_name, last_name, email, phone, role`,
-      [firstName, lastName, email, phone, hashedPassword, role || "patient"]
+      [firstName, lastName, normalizedEmail, normalizedPhone || phone, hashedPassword, role || "patient"]
     );
 
     const user = newUserResult.rows[0];
@@ -225,26 +238,70 @@ app.post("/api/auth/register", async (req, res) => {
 
 // --- VERIFY OTP ---
 app.post("/api/auth/verify-otp", async (req, res) => {
-  const { phone, otp } = req.body;
+  const { phone, otp, otpCode, code } = req.body;
+  const normalizedPhone = normalizePhone(phone);
+  const normalizedOtp = normalizeOtp(otp ?? otpCode ?? code);
+
+  if (!normalizedPhone || !normalizedOtp) {
+    return res.status(400).json({ message: "Phone number and OTP code are required." });
+  }
+
   try {
+    const phoneVariants = phoneMatchVariants(normalizedPhone);
+
     const otpResult = await db.query(
-      "SELECT * FROM otps WHERE phone = $1 AND otp_code = $2 AND expires_at > NOW() ORDER BY created_at DESC LIMIT 1",
-      [phone, otp]
+      `SELECT * FROM otps
+       WHERE regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = ANY($1::text[])
+         AND TRIM(otp_code::text) = $2
+         AND expires_at > NOW()
+       ORDER BY expires_at DESC
+       LIMIT 1`,
+      [phoneVariants, normalizedOtp]
     );
 
-    if (otpResult.rows.length === 0) return res.status(400).json({ message: "Invalid or expired OTP code." });
+    if (otpResult.rows.length === 0) {
+      return res.status(400).json({ message: "Invalid or expired OTP code." });
+    }
 
     const userResult = await db.query(
-      "UPDATE users SET is_verified = TRUE WHERE phone = $1 RETURNING id, first_name, last_name, email, phone, role",
-      [phone]
+      `UPDATE users
+       SET is_verified = TRUE, phone = COALESCE(NULLIF(phone, ''), $2)
+       WHERE regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = ANY($1::text[])
+          OR phone = $2
+       RETURNING id, first_name, last_name, email, phone, role`,
+      [phoneVariants, normalizedPhone]
     );
 
-    await db.query("DELETE FROM otps WHERE phone = $1", [phone]);
+    await db.query(
+      `DELETE FROM otps
+       WHERE regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = ANY($1::text[])
+          OR phone = $2`,
+      [phoneVariants, normalizedPhone]
+    );
+
     const user = userResult.rows[0];
+    if (!user) {
+      return res.status(404).json({ message: "Associated user account not found." });
+    }
+
+    const token = jwt.sign(
+      { id: user.id, role: user.role },
+      process.env.JWT_SECRET || "your_super_secret_key_here",
+      { expiresIn: "8h" }
+    );
 
     res.status(200).json({
       message: "Account verified successfully!",
-      user: { id: user.id, firstName: user.first_name, lastName: user.last_name, name: `${user.first_name} ${user.last_name}`, email: user.email, phone: user.phone, role: user.role }
+      token,
+      user: {
+        id: user.id,
+        firstName: user.first_name,
+        lastName: user.last_name,
+        name: `${user.first_name} ${user.last_name}`,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+      },
     });
   } catch (error) {
     res.status(500).json({ message: "OTP verification failed", error: error.message });
@@ -253,15 +310,32 @@ app.post("/api/auth/verify-otp", async (req, res) => {
 
 // --- DIRECT LOGIN ---
 app.post("/api/auth/login", async (req, res) => {
-  const { identifier, password } = req.body;
+  const { identifier, email, password } = req.body;
+  const rawLogin = (identifier || email || "").trim();
+  const loginInput = rawLogin.toLowerCase();
+  const phoneLogin = normalizePhone(rawLogin);
+
   try {
-    const userResult = await db.query("SELECT * FROM users WHERE email = $1 OR phone = $1", [identifier]);
+    const userResult = await db.query(
+      `SELECT * FROM users
+       WHERE LOWER(email) = $1
+          OR phone = $1
+          OR phone = $2
+          OR regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $2`,
+      [loginInput, phoneLogin || loginInput]
+    );
     if (userResult.rows.length === 0) return res.status(400).json({ message: "User not found." });
 
     const user = userResult.rows[0];
     const isPasswordValid = await bcrypt.compare(password, user.password_hash);
     if (!isPasswordValid) return res.status(400).json({ message: "Invalid credentials." });
-    if (!user.is_verified) return res.status(403).json({ message: "Please complete OTP verification first." });
+    if (!user.is_verified) {
+      return res.status(403).json({
+        message: "Please complete OTP verification first.",
+        requiresOtp: true,
+        phone: user.phone,
+      });
+    }
     
     if (user.status === "Disabled" || user.status === "Inactive") {
       return res.status(403).json({ message: "Account disabled by administrator." });

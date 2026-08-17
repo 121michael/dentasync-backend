@@ -5,6 +5,7 @@ const jwt = require("jsonwebtoken");
 const db = require("../db");
 const { authenticateToken } = require("../middleware/authMiddleware");
 const nodemailer = require("nodemailer");
+const { normalizePhone, normalizeOtp, phoneMatchVariants } = require("../utils/otp");
 
 // --- NODEMAILER SETUP ---
 const transporter = nodemailer.createTransport({
@@ -49,13 +50,14 @@ router.post("/register", async (req, res) => {
   const computedLastName = lastName || (fullName ? fullName.split(" ").slice(1).join(" ") : "");
   const computedFullName = fullName || `${computedFirstName} ${computedLastName}`.trim();
   const normalizedEmail = email.toLowerCase().trim();
+  const normalizedPhone = normalizePhone(phone);
   const assignedRole = (role || "patient").toLowerCase();
 
   try {
     // Check duplicate email or phone
     const existingUser = await db.query(
       "SELECT id FROM users WHERE LOWER(email) = $1 OR (phone = $2 AND phone IS NOT NULL AND $2 != '')",
-      [normalizedEmail, phone || ""]
+      [normalizedEmail, normalizedPhone || ""]
     );
 
     if (existingUser.rows.length > 0) {
@@ -78,7 +80,7 @@ router.post("/register", async (req, res) => {
         computedLastName,
         computedFullName,
         normalizedEmail,
-        phone || null,
+        normalizedPhone || null,
         hashedPassword,
         assignedRole,
         isVerified,
@@ -87,22 +89,21 @@ router.post("/register", async (req, res) => {
     );
 
     // 🐛 DEBUG LOG 2 - Very critical!
-    console.log(`🔍 Checking conditions: Role=[${assignedRole}], Phone=[${phone}]`);
+    console.log(`🔍 Checking conditions: Role=[${assignedRole}], Phone=[${normalizedPhone}]`);
 
     // --- REAL OTP GENERATION & EMAIL SENDING ---
-    if (assignedRole === "patient" && phone) {
+    if (assignedRole === "patient" && normalizedPhone) {
       
       // 🐛 DEBUG LOG 3
       console.log(`🔥 Conditions met. Initiating email send to: ${normalizedEmail}`);
 
       // Generate a random 6-digit number
-      const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString(); 
-      const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+      const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
 
-      // Save to database
+      // Use DB clock for expiry so Node/Postgres timezone skew cannot invalidate valid OTPs
       await db.query(
-        "INSERT INTO otps (phone, otp_code, expires_at) VALUES ($1, $2, $3)",
-        [phone, generatedOtp, expiresAt]
+        "INSERT INTO otps (phone, otp_code, expires_at) VALUES ($1, $2, NOW() + INTERVAL '5 minutes')",
+        [normalizedPhone, generatedOtp]
       );
 
       // Send to Gmail
@@ -145,16 +146,26 @@ router.post("/register", async (req, res) => {
 
 // --- 2. VERIFY REGISTRATION OTP ---
 router.post("/verify-otp", async (req, res) => {
-  const { phone, otp } = req.body;
+  const { phone, otp, otpCode, code } = req.body;
+  const normalizedPhone = normalizePhone(phone);
+  const normalizedOtp = normalizeOtp(otp ?? otpCode ?? code);
 
-  if (!phone || !otp) {
+  if (!normalizedPhone || !normalizedOtp) {
     return res.status(400).json({ message: "Phone number and OTP code are required." });
   }
 
   try {
+    const phoneVariants = phoneMatchVariants(normalizedPhone);
+
+    // Compare as text and match phone by digits so formatting differences do not fail valid codes
     const otpResult = await db.query(
-      "SELECT * FROM otps WHERE phone = $1 AND otp_code = $2 AND expires_at > NOW() ORDER BY created_at DESC LIMIT 1",
-      [phone, otp]
+      `SELECT * FROM otps
+       WHERE regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = ANY($1::text[])
+         AND TRIM(otp_code::text) = $2
+         AND expires_at > NOW()
+       ORDER BY expires_at DESC
+       LIMIT 1`,
+      [phoneVariants, normalizedOtp]
     );
 
     if (otpResult.rows.length === 0) {
@@ -162,19 +173,35 @@ router.post("/verify-otp", async (req, res) => {
     }
 
     const userResult = await db.query(
-      "UPDATE users SET is_verified = TRUE, updated_at = CURRENT_TIMESTAMP WHERE phone = $1 RETURNING *",
-      [phone]
+      `UPDATE users
+       SET is_verified = TRUE, updated_at = CURRENT_TIMESTAMP, phone = $2
+       WHERE regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = ANY($1::text[])
+          OR phone = $2
+       RETURNING *`,
+      [phoneVariants, normalizedPhone]
     );
 
     if (userResult.rows.length === 0) {
       return res.status(404).json({ message: "Associated user account not found." });
     }
 
-    await db.query("DELETE FROM otps WHERE phone = $1", [phone]);
+    await db.query(
+      `DELETE FROM otps
+       WHERE regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = ANY($1::text[])
+          OR phone = $2`,
+      [phoneVariants, normalizedPhone]
+    );
 
     const user = userResult.rows[0];
+    const token = jwt.sign(
+      { id: user.id, role: user.role },
+      process.env.JWT_SECRET || "dentasync_default_capstone_jwt_secret",
+      { expiresIn: "8h" }
+    );
+
     res.status(200).json({
       message: "Email verified successfully!",
+      token,
       user: formatUserPayload(user),
     });
   } catch (err) {
@@ -186,7 +213,9 @@ router.post("/verify-otp", async (req, res) => {
 // --- 3. UNIFIED LOGIN (Role Inferred from Database) ---
 router.post("/login", async (req, res) => {
   const { identifier, email, password } = req.body;
-  const loginInput = (identifier || email || "").toLowerCase().trim();
+  const rawLogin = (identifier || email || "").trim();
+  const loginInput = rawLogin.toLowerCase();
+  const phoneLogin = normalizePhone(rawLogin);
   const rawPassword = password;
 
   if (!loginInput || !rawPassword) {
@@ -195,8 +224,14 @@ router.post("/login", async (req, res) => {
 
   try {
     const userResult = await db.query(
-      "SELECT * FROM users WHERE LOWER(email) = $1 OR (phone = $1 AND phone IS NOT NULL)",
-      [loginInput]
+      `SELECT * FROM users
+       WHERE LOWER(email) = $1
+          OR (phone IS NOT NULL AND (
+                phone = $1
+             OR phone = $2
+             OR regexp_replace(phone, '\\D', '', 'g') = $2
+          ))`,
+      [loginInput, phoneLogin || loginInput]
     );
 
     if (userResult.rows.length === 0) {
