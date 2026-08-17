@@ -54,7 +54,13 @@ function normalizePhone(value) {
   return digits;
 }
 
-function createAuthRouter({ db, otpService, authenticateToken, jwtSecret }) {
+function createAuthRouter({
+  db,
+  otpService,
+  passwordResetService,
+  authenticateToken,
+  jwtSecret,
+}) {
   const router = express.Router();
 
   async function recordLoginActivity(user, req, eventType) {
@@ -332,7 +338,95 @@ function createAuthRouter({ db, otpService, authenticateToken, jwtSecret }) {
     }
   });
 
-  // --- 5. GET CURRENT USER (SESSION HYDRATION) ---
+  // --- 5. REQUEST A PASSWORD RESET ---
+  router.post("/forgot-password", async (req, res) => {
+    const acceptedResponse = {
+      message:
+        "If a verified patient account matches that email, a password reset link will arrive shortly.",
+    };
+    const normalizedEmail = normalizeEmail(req.body?.email);
+
+    if (!passwordResetService) {
+      return res.status(503).json({
+        message: "Password reset is temporarily unavailable. Please contact the clinic.",
+      });
+    }
+
+    if (!normalizedEmail) {
+      return res.status(202).json(acceptedResponse);
+    }
+
+    try {
+      const userResult = await db.query(
+        `SELECT id, first_name, last_name, email, phone, role, status, is_verified
+         FROM users
+         WHERE LOWER(email) = $1
+           AND role = 'patient'
+           AND is_verified = TRUE
+         LIMIT 1`,
+        [normalizedEmail]
+      );
+      const user = userResult.rows[0];
+
+      if (user) {
+        try {
+          await passwordResetService.issuePasswordReset(user);
+        } catch (error) {
+          // Preserve a uniform response so this endpoint cannot disclose
+          // whether an address belongs to a patient account.
+          console.error("Password reset email delivery failed:", error.message);
+        }
+      }
+
+      return res.status(202).json(acceptedResponse);
+    } catch (error) {
+      console.error("Password reset request error:", error.message);
+      return res.status(503).json({
+        message: "Password reset is temporarily unavailable. Please try again later.",
+      });
+    }
+  });
+
+  // --- 6. COMPLETE A PASSWORD RESET ---
+  router.post("/reset-password", async (req, res) => {
+    const { token, newPassword } = req.body || {};
+
+    if (!passwordResetService) {
+      return res.status(503).json({
+        message: "Password reset is temporarily unavailable. Please contact the clinic.",
+      });
+    }
+    if (typeof newPassword !== "string" || newPassword.length < 10) {
+      return res.status(400).json({
+        message: "Choose a new password of at least 10 characters.",
+      });
+    }
+
+    try {
+      const passwordHash = await bcrypt.hash(newPassword, 12);
+      const result = await passwordResetService.resetPassword({
+        token,
+        passwordHash,
+      });
+      if (result.status !== "reset") {
+        return res.status(400).json({
+          message: "This password reset link is invalid or expired. Request a new link.",
+        });
+      }
+
+      await recordLoginActivity(result.user, req, "password_reset");
+      return res.status(200).json({
+        message: "Your password has been reset. You can now sign in.",
+      });
+    } catch (error) {
+      console.error("Password reset completion error:", error.message);
+      return res.status(500).json({
+        message: "Unable to reset your password. Please request a new link.",
+      });
+    }
+  });
+
+  // --- 7. GET CURRENT USER (SESSION HYDRATION) ---
   router.get("/me", authenticateToken, async (req, res) => {
     try {
       const userResult = await db.query("SELECT * FROM users WHERE id = $1", [req.user.id]);

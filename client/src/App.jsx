@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { AuthProvider } from "./auth";
 import { LoadingState } from "./components/UI";
 import { PortalLayout } from "./components/PortalLayout";
@@ -7,6 +7,7 @@ import { AppointmentsPage } from "./pages/AppointmentsPage";
 import { AuthPage } from "./pages/AuthPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { NotificationsPage } from "./pages/NotificationsPage";
+import { PasswordResetPage } from "./pages/PasswordResetPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { QueuePage } from "./pages/QueuePage";
 import { RecordsPage } from "./pages/RecordsPage";
@@ -34,7 +35,7 @@ function ProtectedPortal({ theme, onThemeChange }) {
 function PublicOnly() {
   const { user, isLoading } = useAuth();
   if (isLoading) return <LoadingState label="Checking your secure session" />;
-  return user ? <Navigate to="/dashboard" replace /> : <AuthPage />;
+  return user ? <Navigate to="/dashboard" replace /> : <Outlet />;
 }
 
 function PortalRoutes() {
@@ -47,8 +48,12 @@ function PortalRoutes() {
 
   return (
     <Routes>
-      <Route path="/login" element={<PublicOnly />} />
-      <Route path="/register" element={<PublicOnly />} />
+      <Route element={<PublicOnly />}>
+        <Route path="/login" element={<AuthPage />} />
+        <Route path="/register" element={<AuthPage />} />
+        <Route path="/forgot-password" element={<PasswordResetPage mode="request" />} />
+        <Route path="/reset-password" element={<PasswordResetPage mode="reset" />} />
+      </Route>
       <Route element={<ProtectedPortal theme={theme} onThemeChange={setTheme} />}>
         <Route path="/patient/dashboard" element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<DashboardPage />} />

@@ -57,6 +57,23 @@ The server records privacy-safe OTP audit events containing the request ID,
 hashed account fingerprint, timestamps, lookup outcome, expiry state, and
 match outcome. It never logs the OTP itself.
 
+## Password reset setup
+
+`npm run migrate` also installs the one-time password-reset storage. Configure
+these production values:
+
+```env
+PASSWORD_RESET_SECRET=a-separate-high-entropy-server-secret
+PASSWORD_RESET_URL=https://your-patient-portal.example/reset-password
+```
+
+`POST /api/auth/forgot-password` accepts an email address and always returns
+the same accepted response, whether or not that address belongs to a verified
+patient. For a matching patient, it sends a 30-minute, one-time reset link.
+`POST /api/auth/reset-password` accepts the opaque link token and a new
+password of at least 10 characters. Reset tokens are HMAC-hashed at rest,
+expire server-side, and are invalidated after use or resend.
+
 ## Amethyst Dental patient portal
 
 The responsive patient experience lives in [`client/`](./client). It includes

@@ -8,7 +8,9 @@ const db = require("./db");
 const { createAuthRouter } = require("./routes/auth");
 const { createPatientPortalRouter } = require("./routes/patientPortal");
 const { createPostgresOtpStore } = require("./repositories/postgresOtpStore");
+const { createPostgresPasswordResetStore } = require("./repositories/postgresPasswordResetStore");
 const { createOtpService } = require("./services/otpService");
+const { createPasswordResetService } = require("./services/passwordResetService");
 
 const app = express();
 const JWT_SECRET = process.env.JWT_SECRET || "your_super_secret_key_here";
@@ -16,9 +18,13 @@ const OTP_SECRET =
   process.env.OTP_SECRET ||
   process.env.JWT_SECRET ||
   (process.env.NODE_ENV === "production" ? null : "development-only-otp-secret");
+const PASSWORD_RESET_SECRET =
+  process.env.PASSWORD_RESET_SECRET ||
+  OTP_SECRET ||
+  (process.env.NODE_ENV === "production" ? null : "development-only-password-reset-secret");
 
-if (!OTP_SECRET) {
-  throw new Error("OTP_SECRET must be configured in production.");
+if (!OTP_SECRET || !PASSWORD_RESET_SECRET) {
+  throw new Error("OTP_SECRET and PASSWORD_RESET_SECRET must be configured in production.");
 }
 
 app.use(cors());
@@ -85,6 +91,40 @@ async function sendEmailOtp({ to, otp, expiresAt }) {
   return transporter.sendMail(mailOptions);
 }
 
+async function sendPasswordResetEmail({ to, token, expiresAt }) {
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    throw new Error("Email delivery is not configured.");
+  }
+
+  const expiration = new Date(expiresAt);
+  const minutesRemaining = Number.isNaN(expiration.getTime())
+    ? 30
+    : Math.max(1, Math.ceil((expiration.getTime() - Date.now()) / 60000));
+  const resetUrl = new URL(
+    process.env.PASSWORD_RESET_URL || "http://localhost:5173/reset-password"
+  );
+  resetUrl.searchParams.set("token", token);
+
+  return transporter.sendMail({
+    from: `"DentaSync Care" <${process.env.EMAIL_USER}>`,
+    to,
+    subject: "Reset your DentaSync password",
+    html: `
+      <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
+        <h2>Reset your password</h2>
+        <p>We received a request to reset your DentaSync patient portal password.</p>
+        <p>
+          <a href="${resetUrl.toString()}" style="display:inline-block;padding:12px 18px;border-radius:8px;color:#fff;background:#5B2A86;text-decoration:none;">
+            Reset password
+          </a>
+        </p>
+        <p>This link expires in approximately ${minutesRemaining} minute${minutesRemaining === 1 ? "" : "s"} and can be used once.</p>
+        <p>If you did not request this change, you can safely ignore this email.</p>
+      </div>
+    `,
+  });
+}
+
 const twilioClient =
   process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN
     ? twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN)
@@ -111,6 +151,11 @@ const otpService = createOtpService({
   deliverOtp: sendEmailOtp,
   otpSecret: OTP_SECRET,
 });
+const passwordResetService = createPasswordResetService({
+  store: createPostgresPasswordResetStore(db),
+  deliverResetLink: sendPasswordResetEmail,
+  passwordResetSecret: PASSWORD_RESET_SECRET,
+});
 
 // ==========================================
 // 1. HEALTH CHECK
@@ -133,6 +178,7 @@ app.use(
   createAuthRouter({
     db,
     otpService,
+    passwordResetService,
     authenticateToken,
     jwtSecret: JWT_SECRET,
   })

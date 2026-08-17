@@ -328,6 +328,15 @@ export function AuthPage() {
                 </button>
               </span>
             </label>
+            {!isRegistration && (
+              <button
+                type="button"
+                className="text-link auth-card__forgot-link"
+                onClick={() => navigate("/forgot-password")}
+              >
+                Forgot password?
+              </button>
+            )}
             {message && <p className="form-message">{message}</p>}
             <button className="button button--primary button--wide" disabled={isBusy}>
               {isBusy

@@ -8,7 +8,8 @@
     "test": "node --test",
     "migrate:otp": "node scripts/migrate-otp.js",
     "migrate:portal": "node scripts/migrate-patient-portal.js",
-    "migrate": "npm run migrate:otp && npm run migrate:portal"
+    "migrate:password-reset": "node scripts/migrate-password-reset.js",
+    "migrate": "npm run migrate:otp && npm run migrate:portal && npm run migrate:password-reset"
   },
   "keywords": [],
   "author": "",

@@ -634,6 +634,17 @@ strong {
   font-weight: 650;
 }
 
+.form-message--success {
+  color: var(--emerald) !important;
+  background: var(--emerald-wash);
+}
+
+.auth-card__forgot-link {
+  width: max-content;
+  justify-self: end;
+  margin-top: -0.35rem;
+}
+
 .auth-security-note {
   display: flex;
   align-items: center;

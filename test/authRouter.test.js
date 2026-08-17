@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const http = require("node:http");
 const test = require("node:test");
 
+const bcrypt = require("bcrypt");
 const express = require("express");
 const { createAuthRouter } = require("../routes/auth");
 
@@ -153,4 +154,104 @@ test("verification rejects an OTP sent as a number because leading zeros would b
   assert.equal(response.status, 400);
   assert.match(body.message, /six-digit string/i);
   assert.equal(serviceCalled, false);
+});
+
+test("forgot-password uses one response for known and unknown patient emails", async (t) => {
+  const issuedFor = [];
+  const app = express();
+  app.use(express.json());
+  app.use(
+    "/api/auth",
+    createAuthRouter({
+      db: {
+        async query(_query, [email]) {
+          return {
+            rows:
+              email === "patient@example.test"
+                ? [{
+                    id: 42,
+                    email,
+                    phone: "639333333333",
+                    role: "patient",
+                    is_verified: true,
+                  }]
+                : [],
+          };
+        },
+      },
+      otpService: {},
+      passwordResetService: {
+        async issuePasswordReset(user) {
+          issuedFor.push(user.email);
+        },
+      },
+      authenticateToken: (_req, _res, next) => next(),
+      jwtSecret: "test-jwt-secret",
+    })
+  );
+  const server = await startServer(app);
+  t.after(server.close);
+
+  const known = await fetch(`${server.baseUrl}/api/auth/forgot-password`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "patient@example.test" }),
+  });
+  const unknown = await fetch(`${server.baseUrl}/api/auth/forgot-password`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "unknown@example.test" }),
+  });
+
+  assert.equal(known.status, 202);
+  assert.equal(unknown.status, 202);
+  assert.deepEqual(await known.json(), await unknown.json());
+  assert.deepEqual(issuedFor, ["patient@example.test"]);
+});
+
+test("reset-password hashes the submitted password before consuming a reset token", async (t) => {
+  let submittedReset;
+  const app = express();
+  app.use(express.json());
+  app.use(
+    "/api/auth",
+    createAuthRouter({
+      db: {
+        async query() {
+          return { rows: [] };
+        },
+      },
+      otpService: {},
+      passwordResetService: {
+        async resetPassword(payload) {
+          submittedReset = payload;
+          return {
+            status: "reset",
+            user: { id: 42, email: "patient@example.test" },
+          };
+        },
+      },
+      authenticateToken: (_req, _res, next) => next(),
+      jwtSecret: "test-jwt-secret",
+    })
+  );
+  const server = await startServer(app);
+  t.after(server.close);
+
+  const response = await fetch(`${server.baseUrl}/api/auth/reset-password`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      token: "a".repeat(43),
+      newPassword: "a-new-secure-password",
+    }),
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(submittedReset.token, "a".repeat(43));
+  assert.notEqual(submittedReset.passwordHash, "a-new-secure-password");
+  assert.equal(
+    await bcrypt.compare("a-new-secure-password", submittedReset.passwordHash),
+    true
+  );
 });

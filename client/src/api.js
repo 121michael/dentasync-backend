@@ -68,6 +68,10 @@ export const api = {
   register: (body) => request("/auth/register", { method: "POST", body, authenticated: false }),
   resendOtp: (body) => request("/auth/send-otp", { method: "POST", body, authenticated: false }),
   verifyOtp: (body) => request("/auth/verify-otp", { method: "POST", body, authenticated: false }),
+  requestPasswordReset: (body) =>
+    request("/auth/forgot-password", { method: "POST", body, authenticated: false }),
+  resetPassword: (body) =>
+    request("/auth/reset-password", { method: "POST", body, authenticated: false }),
   getCurrentUser: () => request("/auth/me"),
   getDashboard: () => request("/patient/dashboard"),
   getCatalog: () => request("/patient/catalog"),
