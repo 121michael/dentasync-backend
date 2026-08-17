@@ -57,6 +57,31 @@ function normalizePhone(value) {
 function createAuthRouter({ db, otpService, authenticateToken, jwtSecret }) {
   const router = express.Router();
 
+  async function recordLoginActivity(user, req, eventType) {
+    if (typeof db.query !== "function") {
+      return;
+    }
+
+    try {
+      await db.query(
+        `INSERT INTO patient_portal_login_activity (
+           user_id, event_type, ip_address, user_agent
+         ) VALUES ($1, $2, $3, $4)`,
+        [
+          String(user.id),
+          eventType,
+          req.ip || req.socket?.remoteAddress || null,
+          req.get("user-agent") || null,
+        ]
+      );
+    } catch (error) {
+      // The portal migration may not yet be installed during a rolling deploy.
+      if (error.code !== "42P01") {
+        console.warn("Unable to record login activity:", error.message);
+      }
+    }
+  }
+
   // --- 1. PATIENT REGISTRATION AND FIRST OTP ---
   router.post("/register", async (req, res) => {
     const { firstName, lastName, fullName, email, phone, password, role } = req.body;
@@ -231,6 +256,7 @@ function createAuthRouter({ db, otpService, authenticateToken, jwtSecret }) {
         jwtSecret,
         { expiresIn: "8h" }
       );
+      await recordLoginActivity(result.user, req, "otp_verified");
 
       return res.status(200).json({
         message: "Account verified successfully!",
@@ -293,6 +319,7 @@ function createAuthRouter({ db, otpService, authenticateToken, jwtSecret }) {
         jwtSecret,
         { expiresIn: "8h" }
       );
+      await recordLoginActivity(user, req, "login");
 
       return res.status(200).json({
         message: "Login successful!",

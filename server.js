@@ -6,6 +6,7 @@ const nodemailer = require("nodemailer");
 const twilio = require("twilio");
 const db = require("./db");
 const { createAuthRouter } = require("./routes/auth");
+const { createPatientPortalRouter } = require("./routes/patientPortal");
 const { createPostgresOtpStore } = require("./repositories/postgresOtpStore");
 const { createOtpService } = require("./services/otpService");
 
@@ -134,6 +135,14 @@ app.use(
     otpService,
     authenticateToken,
     jwtSecret: JWT_SECRET,
+  })
+);
+
+app.use(
+  "/api/patient",
+  createPatientPortalRouter({
+    db,
+    authenticateToken,
   })
 );
 
