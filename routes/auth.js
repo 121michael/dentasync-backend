@@ -126,6 +126,10 @@ function createAuthRouter({ db, otpService, authenticateToken, jwtSecret }) {
         throw error;
       }
     } catch (error) {
+      if (error.code === "OTP_ACCOUNT_ALREADY_VERIFIED") {
+        return res.status(409).json({ message: "This patient account is already verified." });
+      }
+
       console.error("Patient registration error:", error.message);
       return res.status(500).json({ message: "Server error during registration." });
     }
@@ -173,6 +177,10 @@ function createAuthRouter({ db, otpService, authenticateToken, jwtSecret }) {
         return res.status(503).json({
           message: "The verification code could not be delivered. Please try again.",
         });
+      }
+
+      if (error.code === "OTP_ACCOUNT_ALREADY_VERIFIED") {
+        return res.status(409).json({ message: "This patient account is already verified." });
       }
 
       console.error("OTP resend error:", error.message);

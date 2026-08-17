@@ -70,6 +70,21 @@ function createPostgresOtpStore(pool) {
             await client.query("BEGIN");
             transactionOpen = true;
 
+            const accountResult = await client.query(
+              `SELECT id
+               FROM users
+               WHERE id = $1
+                 AND is_verified = FALSE
+               FOR UPDATE`,
+              [String(user.id)]
+            );
+
+            if (accountResult.rows.length === 0) {
+              const error = new Error("The patient account is already verified.");
+              error.code = "OTP_ACCOUNT_ALREADY_VERIFIED";
+              throw error;
+            }
+
             await client.query(
               `UPDATE ${OTP_REQUESTS_TABLE}
                SET invalidated_at = CURRENT_TIMESTAMP

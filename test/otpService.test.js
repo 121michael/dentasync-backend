@@ -49,6 +49,15 @@ function createInMemoryOtpStore({ users, now }) {
           },
 
           async createRequest({ requestId, user, otpHash, ttlSeconds }) {
+            const storedUser = users.find(
+              (candidate) => String(candidate.id) === String(user.id)
+            );
+            if (!storedUser || storedUser.is_verified) {
+              const error = new Error("The patient account is already verified.");
+              error.code = "OTP_ACCOUNT_ALREADY_VERIFIED";
+              throw error;
+            }
+
             const createdAt = now();
             for (const request of requests.values()) {
               if (
@@ -300,4 +309,18 @@ test("duplicate verification submissions consume a correct OTP exactly once", as
 
   assert.equal(results.filter((result) => result.status === "verified").length, 1);
   assert.equal(results.filter((result) => result.status === "inactive").length, 1);
+});
+
+test("a verified patient cannot receive a new OTP during a resend race", async () => {
+  const fixture = createFixture({ codeGenerator: () => "483920" });
+  const request = await fixture.service.issueOtp(fixture.user);
+  await fixture.service.verifyOtp({
+    requestId: request.requestId,
+    otp: fixture.deliveries[0].otp,
+  });
+
+  await assert.rejects(
+    fixture.service.issueOtp(fixture.user),
+    (error) => error.code === "OTP_ACCOUNT_ALREADY_VERIFIED"
+  );
 });
