@@ -39,7 +39,7 @@ export function PortalLayout({ theme, onToggleTheme }) {
 
   function handleLogout() {
     logout();
-    navigate("/login");
+    navigate("/login", { replace: true });
   }
 
   return (

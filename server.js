@@ -7,10 +7,12 @@ const twilio = require("twilio");
 const db = require("./db");
 const { createAuthRouter } = require("./routes/auth");
 const { createPatientPortalRouter } = require("./routes/patientPortal");
+const { createStaffPortalRouter } = require("./routes/staffPortal");
 const { createPostgresOtpStore } = require("./repositories/postgresOtpStore");
 const { createPostgresPasswordResetStore } = require("./repositories/postgresPasswordResetStore");
 const { createOtpService } = require("./services/otpService");
 const { createPasswordResetService } = require("./services/passwordResetService");
+const { notifyActiveStaff } = require("./services/staffNotifications");
 
 const app = express();
 const JWT_SECRET = process.env.JWT_SECRET || "your_super_secret_key_here";
@@ -226,6 +228,17 @@ app.use(
   createPatientPortalRouter({
     db,
     authenticateToken,
+    notifyStaff: (notification) => notifyActiveStaff(db, notification),
+  })
+);
+
+app.use(
+  "/api/staff",
+  createStaffPortalRouter({
+    db,
+    authenticateToken,
+    passwordResetService,
+    notifyStaff: (notification) => notifyActiveStaff(db, notification),
   })
 );
 

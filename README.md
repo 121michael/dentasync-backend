@@ -97,7 +97,7 @@ The responsive patient experience lives in [`client/`](./client). It includes
 the dashboard, appointment booking, live queue, treatment archive, profile,
 notifications, mobile navigation, and a persisted dark-mode preference.
 
-Apply both migrations before starting the portal API:
+Apply all portal migrations before starting the API:
 
 ```bash
 npm run migrate
@@ -131,3 +131,34 @@ assumptions about legacy appointment table schemas. Uploaded authorization
 documents are stored under `uploads/patient-portal/`; keep that directory on
 durable private storage in production and never expose it as a public static
 directory.
+
+## Amethyst Dental staff dashboard
+
+The same React client includes a separate staff workspace at
+`/staff/check-ins`. It provides patient check-in tracking, live queue updates,
+appointment actions, patient search and registration, staff notifications,
+profile settings, and CSV exports.
+
+Run the staff storage migration (or the combined migration) before deploying:
+
+```bash
+npm run migrate:staff-portal
+# or
+npm run migrate
+```
+
+Only a live, active, verified `users.role = 'staff'` record can access
+`/api/staff/*`. Each staff request verifies the authenticated account against
+the database; a role supplied by frontend code or carried only in a stale token
+does not grant access.
+
+The staff APIs reuse the existing `users`, `patient_portal_appointments`,
+`patient_portal_queue_entries`, `patient_portal_treatment_records`, and
+`patient_portal_notifications` tables. The migration adds only:
+
+- `staff_portal_notifications` for per-staff read/unread activity;
+- `staff_portal_dentist_availability` for actual clinic-entered availability.
+
+No example availability data is seeded. Enter real dentist schedules in
+`staff_portal_dentist_availability` through your approved back-office process
+before expecting them to appear in the availability modal.

@@ -176,9 +176,20 @@ function createPatientPortalRouter({
   db,
   authenticateToken,
   uploadDirectory = path.join(process.cwd(), "uploads", "patient-portal"),
+  notifyStaff = async () => {},
 }) {
   const router = express.Router();
   fs.mkdirSync(uploadDirectory, { recursive: true });
+
+  async function notifyClinicStaff(notification) {
+    try {
+      await notifyStaff(notification);
+    } catch (error) {
+      // An operational patient action should not fail because the separate
+      // staff notification feed is temporarily unavailable.
+      console.warn("Unable to notify staff:", error.message);
+    }
+  }
 
   const upload = multer({
     storage: multer.diskStorage({
@@ -435,6 +446,13 @@ function createPatientPortalRouter({
           `${service.name} is booked with ${dentist.name} on ${appointmentDate} at ${appointmentTime}.`,
         ]
       );
+      await notifyClinicStaff({
+        type: "appointment",
+        title: "New appointment booking",
+        body: `${userId} booked ${service.name} with ${dentist.name} on ${appointmentDate} at ${appointmentTime}.`,
+        entityType: "appointment",
+        entityId: result.rows[0].id,
+      });
 
       return res.status(201).json({
         message: "Your appointment is confirmed.",
@@ -465,6 +483,13 @@ function createPatientPortalRouter({
         return res.status(404).json({ message: "A cancellable appointment was not found." });
       }
 
+      await notifyClinicStaff({
+        type: "appointment",
+        title: "Appointment cancellation",
+        body: `A patient cancelled ${result.rows[0].service_name} scheduled for ${result.rows[0].appointment_date} at ${String(result.rows[0].appointment_time).slice(0, 5)}.`,
+        entityType: "appointment",
+        entityId: result.rows[0].id,
+      });
       return res.json({ appointment: mapAppointment(result.rows[0]) });
     } catch (error) {
       console.error("Cancel appointment error:", error.message);
@@ -595,6 +620,13 @@ function createPatientPortalRouter({
       );
       await client.query("COMMIT");
       transactionOpen = false;
+      await notifyClinicStaff({
+        type: "check_in",
+        title: "Patient check-in alert",
+        body: `A patient checked in and received queue token ${queueResult.rows[0].token}.`,
+        entityType: "queue",
+        entityId: queueResult.rows[0].token,
+      });
 
       return res.status(201).json({ queueEntry: queueResult.rows[0] });
     } catch (error) {
@@ -789,6 +821,13 @@ function createPatientPortalRouter({
           req.file.size,
         ]
       );
+      await notifyClinicStaff({
+        type: "document",
+        title: "Document submission alert",
+        body: `A patient submitted ${req.file.originalname} for staff review.`,
+        entityType: "document",
+        entityId: documentId,
+      });
       return res.status(201).json({
         document: {
           id: documentId,

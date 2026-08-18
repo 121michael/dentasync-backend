@@ -9,7 +9,8 @@
     "migrate:otp": "node scripts/migrate-otp.js",
     "migrate:portal": "node scripts/migrate-patient-portal.js",
     "migrate:password-reset": "node scripts/migrate-password-reset.js",
-    "migrate": "npm run migrate:otp && npm run migrate:portal && npm run migrate:password-reset"
+    "migrate:staff-portal": "node scripts/migrate-staff-portal.js",
+    "migrate": "npm run migrate:otp && npm run migrate:portal && npm run migrate:password-reset && npm run migrate:staff-portal"
   },
   "keywords": [],
   "author": "",

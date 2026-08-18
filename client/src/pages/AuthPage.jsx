@@ -68,7 +68,9 @@ export function AuthPage() {
         password: form.password,
       });
       startSession(response.token, response.user);
-      navigate("/dashboard");
+      navigate(response.user?.role?.toLowerCase() === "staff" ? "/staff/check-ins" : "/dashboard", {
+        replace: true,
+      });
     } catch (error) {
       if (error instanceof ApiError && error.data?.requiresOtp) {
         savePendingOtp({
@@ -256,11 +258,11 @@ export function AuthPage() {
               <ShieldCheck size={26} />
             </span>
             <span className="eyebrow">{isRegistration ? "Begin your care journey" : "Welcome back"}</span>
-            <h2>{isRegistration ? "Create your private portal" : "Sign in to your care portal"}</h2>
+            <h2>{isRegistration ? "Create your private portal" : "Sign in to Amethyst Dental"}</h2>
             <p>
               {isRegistration
                 ? "Your account will be verified with a one-time code before access is granted."
-                : "Your care plan, appointments, and records are waiting."}
+                : "Access your authorized patient or clinic workspace securely."}
             </p>
 
             {isRegistration && (

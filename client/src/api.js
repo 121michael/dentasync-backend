@@ -113,4 +113,26 @@ export const api = {
   getNotifications: () => request("/patient/notifications"),
   markNotificationRead: (notificationId) =>
     request(`/patient/notifications/${notificationId}/read`, { method: "PATCH" }),
+  getStaffDashboard: () => request("/staff/dashboard"),
+  getStaffCheckIns: () => request("/staff/check-ins"),
+  getStaffQueue: () => request("/staff/queue"),
+  updateStaffQueue: (queueEntryId, body) =>
+    request(`/staff/queue/${queueEntryId}`, { method: "PATCH", body }),
+  getStaffAppointments: () => request("/staff/appointments"),
+  updateStaffAppointment: (appointmentId, body) =>
+    request(`/staff/appointments/${appointmentId}`, { method: "PATCH", body }),
+  getStaffDentistAvailability: () => request("/staff/dentist-availability"),
+  getStaffPatients: (search = "") =>
+    request(`/staff/patients${search ? `?search=${encodeURIComponent(search)}` : ""}`),
+  createStaffPatient: (body) => request("/staff/patients", { method: "POST", body }),
+  getStaffPatient: (patientId) => request(`/staff/patients/${patientId}`),
+  getStaffNotifications: () => request("/staff/notifications"),
+  markStaffNotificationRead: (notificationId) =>
+    request(`/staff/notifications/${notificationId}/read`, { method: "PATCH" }),
+  markAllStaffNotificationsRead: () =>
+    request("/staff/notifications/read-all", { method: "PATCH" }),
+  getStaffProfile: () => request("/staff/profile"),
+  updateStaffProfile: (body) => request("/staff/profile", { method: "PUT", body }),
+  downloadStaffExport: (report) =>
+    download(`/staff/export/${encodeURIComponent(report)}`, `${report}-log.csv`),
 };
