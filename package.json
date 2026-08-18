@@ -10,7 +10,8 @@
     "migrate:portal": "node scripts/migrate-patient-portal.js",
     "migrate:password-reset": "node scripts/migrate-password-reset.js",
     "migrate:staff-portal": "node scripts/migrate-staff-portal.js",
-    "migrate": "npm run migrate:otp && npm run migrate:portal && npm run migrate:password-reset && npm run migrate:staff-portal"
+    "migrate": "npm run migrate:otp && npm run migrate:portal && npm run migrate:password-reset && npm run migrate:staff-portal",
+    "seed:staff": "node scripts/seed-staff.js"
   },
   "keywords": [],
   "author": "",

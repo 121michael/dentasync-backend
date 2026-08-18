@@ -340,10 +340,19 @@ function createAuthRouter({
       );
       await recordLoginActivity(user, req, "login");
 
+      const normalizedRole = String(user.role || "").toLowerCase();
+      const redirectTo =
+        normalizedRole === "staff"
+          ? "/staff/check-ins"
+          : normalizedRole === "patient"
+            ? "/dashboard"
+            : "/access-denied";
+
       return res.status(200).json({
         message: "Login successful!",
         token,
         user: formatUserPayload(user),
+        redirectTo,
       });
     } catch (error) {
       console.error("Login error:", error.message);

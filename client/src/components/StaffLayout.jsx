@@ -107,12 +107,15 @@ export function StaffLayout() {
             <Menu size={21} />
           </button>
           <div>
-            <span className="eyebrow">Amethyst Dental Clinic</span>
+            <span className="staff-header__badge">Staff Workspace</span>
             <p>{date}</p>
           </div>
-          <NavLink to="/staff/notifications" className="icon-button" aria-label="Open notifications">
-            <Bell size={19} />
-          </NavLink>
+          <div className="staff-header__actions">
+            <span className="staff-header__role">Staff / Secretary</span>
+            <NavLink to="/staff/notifications" className="icon-button" aria-label="Open notifications">
+              <Bell size={19} />
+            </NavLink>
+          </div>
         </header>
 
         <main className="staff-content">

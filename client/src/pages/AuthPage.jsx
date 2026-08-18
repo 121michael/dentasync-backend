@@ -68,9 +68,11 @@ export function AuthPage() {
         password: form.password,
       });
       startSession(response.token, response.user);
-      navigate(response.user?.role?.toLowerCase() === "staff" ? "/staff/check-ins" : "/dashboard", {
-        replace: true,
-      });
+      const role = String(response.user?.role || "").toLowerCase();
+      const redirectTo =
+        response.redirectTo ||
+        (role === "staff" ? "/staff/check-ins" : role === "patient" ? "/dashboard" : "/access-denied");
+      navigate(redirectTo, { replace: true });
     } catch (error) {
       if (error instanceof ApiError && error.data?.requiresOtp) {
         savePendingOtp({
