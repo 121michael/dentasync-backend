@@ -8,11 +8,13 @@ const db = require("./db");
 const { createAuthRouter } = require("./routes/auth");
 const { createPatientPortalRouter } = require("./routes/patientPortal");
 const { createStaffPortalRouter } = require("./routes/staffPortal");
+const { createAdminPortalRouter } = require("./routes/adminPortal");
 const { createPostgresOtpStore } = require("./repositories/postgresOtpStore");
 const { createPostgresPasswordResetStore } = require("./repositories/postgresPasswordResetStore");
 const { createOtpService } = require("./services/otpService");
 const { createPasswordResetService } = require("./services/passwordResetService");
 const { notifyActiveStaff } = require("./services/staffNotifications");
+const { notifyActiveAdmins } = require("./services/adminNotifications");
 
 const app = express();
 const JWT_SECRET = process.env.JWT_SECRET || "your_super_secret_key_here";
@@ -229,6 +231,7 @@ app.use(
     db,
     authenticateToken,
     notifyStaff: (notification) => notifyActiveStaff(db, notification),
+    notifyAdmin: (notification) => notifyActiveAdmins(db, notification),
   })
 );
 
@@ -242,50 +245,15 @@ app.use(
   })
 );
 
-// ==========================================
-// 3. ADMIN DASHBOARD ENDPOINTS
-// ==========================================
-app.get('/api/admin/users', authenticateToken, async (req, res) => {
-  try {
-    const result = await db.query(
-      `SELECT id, CONCAT(first_name, ' ', last_name) AS name, role, email, 
-       CASE WHEN is_verified THEN 'Operational' ELSE 'Pending Verification' END AS status 
-       FROM users WHERE role != 'patient' AND is_archived = FALSE ORDER BY created_at DESC`
-    );
-    res.status(200).json(result.rows);
-  } catch (error) {
-    res.status(500).json({ error: "Failed to fetch staff users" });
-  }
-});
-
-app.get('/api/admin/patients', authenticateToken, async (req, res) => {
-  try {
-    const result = await db.query(
-      `SELECT u.id, CONCAT(u.first_name, ' ', u.last_name) AS name, 
-       COALESCE(TO_CHAR(MAX(a.requested_date), 'Month DD, YYYY'), 'No Visits Yet') AS "lastVisit", 
-       'Dr. Sarah Cruz' AS dentist, 
-       CASE WHEN u.is_verified THEN 'Cleared' ELSE 'Pending' END AS status 
-       FROM users u LEFT JOIN appointments a ON u.phone = a.phone 
-       WHERE u.role = 'patient' AND u.is_archived = FALSE 
-       GROUP BY u.id, u.first_name, u.last_name, u.is_verified ORDER BY u.created_at DESC`
-    );
-    res.status(200).json(result.rows);
-  } catch (error) {
-    res.status(500).json({ error: "Failed to fetch patient records" });
-  }
-});
-
-app.get('/api/admin/archived', authenticateToken, async (req, res) => {
-  try {
-    const result = await db.query(
-      `SELECT id, CONCAT(first_name, ' ', last_name) AS name, role, email, 'Archived Vault' AS hierarchy 
-       FROM users WHERE is_archived = TRUE ORDER BY created_at DESC`
-    );
-    res.status(200).json(result.rows);
-  } catch (error) {
-    res.status(500).json({ error: "Failed to fetch archived records" });
-  }
-});
+app.use(
+  "/api/admin",
+  createAdminPortalRouter({
+    db,
+    authenticateToken,
+    passwordResetService,
+    emailDeliveryIsConfigured,
+  })
+);
 
 // ==========================================
 // 4. EXTERNAL ROUTE MODULES
