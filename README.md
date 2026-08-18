@@ -162,3 +162,35 @@ The staff APIs reuse the existing `users`, `patient_portal_appointments`,
 No example availability data is seeded. Enter real dentist schedules in
 `staff_portal_dentist_availability` through your approved back-office process
 before expecting them to appear in the availability modal.
+
+## Amethyst Dental admin dashboard
+
+The React client also includes a full administrator workspace at
+`/admin/dashboard`. It covers clinic overview metrics, patient/staff/dentist
+management, appointments, analytics, system settings, security/access control,
+cloud synchronization/health checks, notifications, and the admin profile.
+
+Apply the admin storage migration (or the combined migration) before deploying:
+
+```bash
+npm run migrate:admin-portal
+# or
+npm run migrate
+npm run seed:admin
+```
+
+The seed creates/resets `admin@amethyst.com` / `admin123` as a verified admin.
+Change that password immediately after first login in any shared environment.
+
+Only a live, active, verified `users.role = 'admin'` record can access
+`/api/admin/*`. Each admin request verifies the authenticated account against
+the database; a role claim from the frontend or JWT alone is not enough.
+
+The admin APIs reuse the existing `users` and `patient_portal_*` tables. The
+migration adds only:
+
+- `admin_portal_notifications` for per-admin alerts;
+- `admin_portal_settings` for clinic configuration JSON;
+- `admin_portal_dentist_profiles` for specialization/schedule notes;
+- `admin_portal_sync_events` for synchronization audit history.
+

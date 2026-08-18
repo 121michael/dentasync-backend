@@ -71,7 +71,13 @@ export function AuthPage() {
       const role = String(response.user?.role || "").toLowerCase();
       const redirectTo =
         response.redirectTo ||
-        (role === "staff" ? "/staff/check-ins" : role === "patient" ? "/dashboard" : "/access-denied");
+        (role === "admin"
+          ? "/admin/dashboard"
+          : role === "staff"
+            ? "/staff/check-ins"
+            : role === "patient"
+              ? "/dashboard"
+              : "/access-denied");
       navigate(redirectTo, { replace: true });
     } catch (error) {
       if (error instanceof ApiError && error.data?.requiresOtp) {

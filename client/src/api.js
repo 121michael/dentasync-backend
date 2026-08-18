@@ -135,4 +135,50 @@ export const api = {
   updateStaffProfile: (body) => request("/staff/profile", { method: "PUT", body }),
   downloadStaffExport: (report) =>
     download(`/staff/export/${encodeURIComponent(report)}`, `${report}-log.csv`),
+  getAdminDashboard: () => request("/admin/dashboard"),
+  getAdminPatients: (params = {}) => {
+    const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value || value === 0));
+    return request(`/admin/patients${search.size ? `?${search}` : ""}`);
+  },
+  createAdminPatient: (body) => request("/admin/patients", { method: "POST", body }),
+  updateAdminPatient: (id, body) => request(`/admin/patients/${id}`, { method: "PATCH", body }),
+  getAdminPatient: (id) => request(`/admin/patients/${id}`),
+  getAdminStaff: (params = {}) => {
+    const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value || value === 0));
+    return request(`/admin/staff${search.size ? `?${search}` : ""}`);
+  },
+  createAdminStaff: (body) => request("/admin/staff", { method: "POST", body }),
+  updateAdminStaff: (id, body) => request(`/admin/staff/${id}`, { method: "PATCH", body }),
+  getAdminDentists: (params = {}) => {
+    const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value || value === 0));
+    return request(`/admin/dentists${search.size ? `?${search}` : ""}`);
+  },
+  createAdminDentist: (body) => request("/admin/dentists", { method: "POST", body }),
+  updateAdminDentist: (id, body) => request(`/admin/dentists/${id}`, { method: "PATCH", body }),
+  getAdminAccounts: (params = {}) => {
+    const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value || value === 0));
+    return request(`/admin/accounts${search.size ? `?${search}` : ""}`);
+  },
+  updateAdminAccountStatus: (id, body) => request(`/admin/accounts/${id}/status`, { method: "PATCH", body }),
+  deleteAdminAccount: (id) => request(`/admin/accounts/${id}`, { method: "DELETE" }),
+  getAdminAppointments: (params = {}) => {
+    const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value || value === 0));
+    return request(`/admin/appointments${search.size ? `?${search}` : ""}`);
+  },
+  updateAdminAppointment: (id, body) => request(`/admin/appointments/${id}`, { method: "PATCH", body }),
+  getAdminAnalytics: (range = "month") => request(`/admin/analytics?range=${encodeURIComponent(range)}`),
+  getAdminSettings: () => request("/admin/settings"),
+  updateAdminSettings: (body) => request("/admin/settings", { method: "PUT", body }),
+  getAdminSecurity: () => request("/admin/security"),
+  getAdminSystemHealth: () => request("/admin/system-health"),
+  getAdminSync: () => request("/admin/sync"),
+  runAdminSync: () => request("/admin/sync", { method: "POST" }),
+  getAdminNotifications: () => request("/admin/notifications"),
+  markAdminNotificationRead: (id) => request(`/admin/notifications/${id}/read`, { method: "PATCH" }),
+  markAllAdminNotificationsRead: () => request("/admin/notifications/read-all", { method: "PATCH" }),
+  getAdminProfile: () => request("/admin/profile"),
+  updateAdminProfile: (body) => request("/admin/profile", { method: "PUT", body }),
+  updateAdminPassword: (body) => request("/admin/password", { method: "PUT", body }),
+  downloadAdminExport: (report) =>
+    download(`/admin/export/${encodeURIComponent(report)}`, `${report}-export.csv`),
 };

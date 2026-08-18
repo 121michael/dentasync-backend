@@ -177,6 +177,7 @@ function createPatientPortalRouter({
   authenticateToken,
   uploadDirectory = path.join(process.cwd(), "uploads", "patient-portal"),
   notifyStaff = async () => {},
+  notifyAdmin = async () => {},
 }) {
   const router = express.Router();
   fs.mkdirSync(uploadDirectory, { recursive: true });
@@ -188,6 +189,14 @@ function createPatientPortalRouter({
       // An operational patient action should not fail because the separate
       // staff notification feed is temporarily unavailable.
       console.warn("Unable to notify staff:", error.message);
+    }
+  }
+
+  async function notifyClinicAdmins(notification) {
+    try {
+      await notifyAdmin(notification);
+    } catch (error) {
+      console.warn("Unable to notify admins:", error.message);
     }
   }
 
@@ -447,6 +456,13 @@ function createPatientPortalRouter({
         ]
       );
       await notifyClinicStaff({
+        type: "appointment",
+        title: "New Appointment Request",
+        body: `A patient requested ${service.name} with ${dentist.name} on ${appointmentDate} at ${appointmentTime}.`,
+        entityType: "appointment",
+        entityId: result.rows[0].id,
+      });
+      await notifyClinicAdmins({
         type: "appointment",
         title: "New Appointment Request",
         body: `A patient requested ${service.name} with ${dentist.name} on ${appointmentDate} at ${appointmentTime}.`,

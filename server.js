@@ -252,6 +252,7 @@ app.use(
     authenticateToken,
     passwordResetService,
     emailDeliveryIsConfigured,
+    notifyAdmin: (notification) => notifyActiveAdmins(db, notification),
   })
 );
 

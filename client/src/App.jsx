@@ -4,6 +4,7 @@ import { AuthProvider } from "./auth";
 import { LoadingState } from "./components/UI";
 import { PortalLayout } from "./components/PortalLayout";
 import { StaffLayout } from "./components/StaffLayout";
+import { AdminLayout } from "./components/AdminLayout";
 import { AppointmentsPage } from "./pages/AppointmentsPage";
 import { AuthPage } from "./pages/AuthPage";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -19,6 +20,15 @@ import { StaffPatientsPage } from "./pages/StaffPatientsPage";
 import { StaffProfilePage } from "./pages/StaffProfilePage";
 import { StaffQueuePage } from "./pages/StaffQueuePage";
 import { SupportPage } from "./pages/SupportPage";
+import { AdminDashboardPage } from "./pages/AdminDashboardPage";
+import { AdminPatientsPage, AdminStaffPage, AdminDentistsPage } from "./pages/AdminUsersPages";
+import { AdminAppointmentsPage } from "./pages/AdminAppointmentsPage";
+import { AdminAnalyticsPage } from "./pages/AdminAnalyticsPage";
+import { AdminSettingsPage } from "./pages/AdminSettingsPage";
+import { AdminSecurityPage } from "./pages/AdminSecurityPage";
+import { AdminSyncPage } from "./pages/AdminSyncPage";
+import { AdminNotificationsPage } from "./pages/AdminNotificationsPage";
+import { AdminProfilePage } from "./pages/AdminProfilePage";
 import { useAuth } from "./useAuth";
 
 function roleFor(user) {
@@ -26,6 +36,7 @@ function roleFor(user) {
 }
 
 function landingRoute(user) {
+  if (roleFor(user) === "admin") return "/admin/dashboard";
   if (roleFor(user) === "staff") return "/staff/check-ins";
   if (roleFor(user) === "patient") return "/dashboard";
   return "/access-denied";
@@ -33,36 +44,27 @@ function landingRoute(user) {
 
 function RequireAuthenticated() {
   const { user, isLoading } = useAuth();
-
-  if (isLoading) {
-    return <LoadingState label="Opening your secure clinic session" />;
-  }
-  if (!user) {
-    return <Navigate to="/login" replace />;
-  }
-
+  if (isLoading) return <LoadingState label="Opening your secure clinic session" />;
+  if (!user) return <Navigate to="/login" replace />;
   return <Outlet />;
 }
 
 function PatientPortal({ theme, onThemeChange }) {
   const { user } = useAuth();
-  const role = roleFor(user);
-
-  if (role !== "patient") {
-    return <Navigate to={landingRoute(user)} replace />;
-  }
-
+  if (roleFor(user) !== "patient") return <Navigate to={landingRoute(user)} replace />;
   return <PortalLayout theme={theme} onToggleTheme={() => onThemeChange(theme === "dark" ? "light" : "dark")} />;
 }
 
 function StaffPortal() {
   const { user } = useAuth();
-
-  if (roleFor(user) !== "staff") {
-    return <Navigate to={landingRoute(user)} replace />;
-  }
-
+  if (roleFor(user) !== "staff") return <Navigate to={landingRoute(user)} replace />;
   return <StaffLayout />;
+}
+
+function AdminPortal() {
+  const { user } = useAuth();
+  if (roleFor(user) !== "admin") return <Navigate to={landingRoute(user)} replace />;
+  return <AdminLayout />;
 }
 
 function PublicOnly() {
@@ -74,18 +76,14 @@ function PublicOnly() {
 function AccessDeniedPage() {
   const { logout } = useAuth();
   const navigate = useNavigate();
-
-  function signOut() {
-    logout();
-    navigate("/login", { replace: true });
-  }
-
   return (
     <main className="role-access-denied">
       <section className="empty-state empty-state--error">
         <h1>Portal access is unavailable</h1>
-        <p>This account does not have access to the patient or staff dashboard in this application.</p>
-        <button className="button button--primary" onClick={signOut}>Return to sign in</button>
+        <p>This account does not have access to the selected Amethyst Dental workspace.</p>
+        <button className="button button--primary" onClick={() => { logout(); navigate("/login", { replace: true }); }}>
+          Return to sign in
+        </button>
       </section>
     </main>
   );
@@ -127,6 +125,20 @@ function PortalRoutes() {
           <Route path="/staff/patients" element={<StaffPatientsPage />} />
           <Route path="/staff/notifications" element={<StaffNotificationsPage />} />
           <Route path="/staff/profile" element={<StaffProfilePage />} />
+        </Route>
+        <Route element={<AdminPortal />}>
+          <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
+          <Route path="/admin/dashboard" element={<AdminDashboardPage />} />
+          <Route path="/admin/patients" element={<AdminPatientsPage />} />
+          <Route path="/admin/staff" element={<AdminStaffPage />} />
+          <Route path="/admin/dentists" element={<AdminDentistsPage />} />
+          <Route path="/admin/appointments" element={<AdminAppointmentsPage />} />
+          <Route path="/admin/analytics" element={<AdminAnalyticsPage />} />
+          <Route path="/admin/settings" element={<AdminSettingsPage />} />
+          <Route path="/admin/security" element={<AdminSecurityPage />} />
+          <Route path="/admin/sync" element={<AdminSyncPage />} />
+          <Route path="/admin/notifications" element={<AdminNotificationsPage />} />
+          <Route path="/admin/profile" element={<AdminProfilePage />} />
         </Route>
         <Route path="/access-denied" element={<AccessDeniedPage />} />
       </Route>
