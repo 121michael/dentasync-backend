@@ -285,10 +285,7 @@ strong {
 
 .field input,
 .field select,
-.field textarea,
-.search-field input,
-.filter-field input,
-.filter-field select {
+.field textarea {
   width: 100%;
   min-height: 43px;
   padding: 0.65rem 0.75rem;
@@ -308,10 +305,7 @@ strong {
 
 .field input:focus,
 .field select:focus,
-.field textarea:focus,
-.search-field input:focus,
-.filter-field input:focus,
-.filter-field select:focus {
+.field textarea:focus {
   border-color: var(--amethyst-500);
   box-shadow: 0 0 0 3px rgba(152, 100, 215, 0.12);
 }
@@ -1625,30 +1619,6 @@ strong {
 .checkin-card__actions { display: flex; flex-wrap: wrap; gap: .45rem; }
 
 /* Records */
-.record-filters {
-  display: grid;
-  grid-template-columns: minmax(180px, 1.4fr) repeat(3, minmax(110px, .55fr)) auto;
-  gap: .55rem;
-  padding: .65rem;
-}
-
-.search-field,
-.filter-field {
-  display: flex;
-  align-items: center;
-  gap: .4rem;
-  min-width: 0;
-  color: var(--text-muted);
-}
-
-.search-field { padding-left: .65rem; border: 1px solid var(--border); border-radius: 11px; background: var(--surface-solid); }
-.search-field input { min-width: 0; padding-left: 0; border: 0; background: transparent; box-shadow: none !important; }
-.filter-field { position: relative; }
-.filter-field > svg { position: absolute; left: .6rem; z-index: 1; pointer-events: none; }
-.filter-field select { padding-left: 2rem; }
-.filter-field > span { position: absolute; left: .65rem; z-index: 1; color: var(--text-muted); font-size: .6rem; font-weight: 750; pointer-events: none; }
-.filter-field:has(> span) input { padding-left: 2.25rem; }
-
 .records-summary-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -1839,8 +1809,6 @@ strong {
   .queue-stepper { overflow-x: auto; grid-template-columns: repeat(5, minmax(85px, 1fr)); padding-bottom: .25rem; }
   .care-timeline { grid-template-columns: 1fr 1fr; }
   .queue-table__header, .queue-table__row { grid-template-columns: .8fr 1fr .8fr; padding-right: 0; padding-left: 0; }
-  .record-filters { grid-template-columns: 1fr 1fr; }
-  .record-filters .search-field { grid-column: 1 / -1; }
   .records-summary-grid { grid-template-columns: repeat(2,1fr); }
   .record-entry { grid-template-columns: 1fr; padding-left: 1.1rem; }
   .record-entry__date { order: -1; }
@@ -1869,6 +1837,4 @@ strong {
   .wellness-card__score { align-items: flex-start; flex-direction: column; }
   .booking-progress { gap: .4rem; }
   .booking-progress span { font-size: .58rem; }
-  .record-filters { grid-template-columns: 1fr; }
-  .record-filters .search-field { grid-column: auto; }
 }

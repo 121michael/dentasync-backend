@@ -3,10 +3,7 @@ import {
   Download,
   FileImage,
   FileText,
-  Filter,
   LockKeyhole,
-  Search,
-  SlidersHorizontal,
 } from "lucide-react";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
@@ -35,18 +32,16 @@ function RecordSummary({ label, value, tone }) {
 
 export function RecordsPage() {
   const [recordsData, setRecordsData] = useState(null);
-  const [filters, setFilters] = useState({ search: "", treatment: "", from: "", to: "" });
-  const [appliedFilters, setAppliedFilters] = useState(filters);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
     setError("");
     try {
-      setRecordsData(await api.getRecords(appliedFilters));
+      setRecordsData(await api.getRecords());
     } catch (loadError) {
       setError(loadError.message);
     }
-  }, [appliedFilters]);
+  }, []);
 
   useEffect(() => {
     load();
@@ -71,8 +66,6 @@ export function RecordsPage() {
   if (error && !recordsData) return <ErrorState message={error} onRetry={load} />;
   if (!recordsData) return <LoadingState label="Opening your secure treatment archive" />;
 
-  const treatmentOptions = [...new Set(recordsData.records.map((record) => record.treatment))];
-
   return (
     <div className="records-page">
       <SectionHeading
@@ -80,52 +73,6 @@ export function RecordsPage() {
         title="Treatment history"
         detail="Secure access to your dental treatment records and documents."
       />
-
-      <form
-        className="record-filters glass-card"
-        onSubmit={(event) => {
-          event.preventDefault();
-          setAppliedFilters(filters);
-        }}
-      >
-        <label className="search-field">
-          <Search size={18} />
-          <input
-            placeholder="Search treatments or dentists"
-            value={filters.search}
-            onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))}
-          />
-        </label>
-        <label className="filter-field">
-          <Filter size={16} />
-          <select
-            value={filters.treatment}
-            onChange={(event) => setFilters((current) => ({ ...current, treatment: event.target.value }))}
-          >
-            <option value="">All treatments</option>
-            {treatmentOptions.map((treatment) => (
-              <option key={treatment} value={treatment}>{treatment}</option>
-            ))}
-          </select>
-        </label>
-        <label className="filter-field">
-          <span>From</span>
-          <input
-            type="date"
-            value={filters.from}
-            onChange={(event) => setFilters((current) => ({ ...current, from: event.target.value }))}
-          />
-        </label>
-        <label className="filter-field">
-          <span>To</span>
-          <input
-            type="date"
-            value={filters.to}
-            onChange={(event) => setFilters((current) => ({ ...current, to: event.target.value }))}
-          />
-        </label>
-        <button className="button button--secondary"><SlidersHorizontal size={16} /> Apply</button>
-      </form>
 
       {error && <p className="inline-alert inline-alert--error">{error}</p>}
 
