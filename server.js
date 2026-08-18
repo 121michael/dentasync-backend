@@ -57,16 +57,44 @@ const authenticateToken = (req, res, next) => {
 // ==========================================
 // REAL OTP DELIVERY SERVICES SETUP
 // ==========================================
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
+const EMAIL_PASSWORD = process.env.EMAIL_PASSWORD || process.env.EMAIL_PASS;
+const EMAIL_SENDER = process.env.EMAIL_FROM || process.env.EMAIL_USER;
+const transporter = process.env.EMAIL_HOST
+  ? nodemailer.createTransport({
+      host: process.env.EMAIL_HOST,
+      port: Number(process.env.EMAIL_PORT || 587),
+      secure:
+        process.env.EMAIL_SECURE === "true" ||
+        (!process.env.EMAIL_SECURE && Number(process.env.EMAIL_PORT) === 465),
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: EMAIL_PASSWORD,
+      },
+    })
+  : nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: EMAIL_PASSWORD,
+      },
+    });
+
+function emailDeliveryIsConfigured() {
+  return Boolean(process.env.EMAIL_USER && EMAIL_PASSWORD && EMAIL_SENDER);
+}
+
+function escapeHtml(value) {
+  return String(value || "").replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[character]);
+}
 
 async function sendEmailOtp({ to, otp, expiresAt }) {
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+  if (!emailDeliveryIsConfigured()) {
     throw new Error("Email delivery is not configured.");
   }
 
@@ -76,7 +104,7 @@ async function sendEmailOtp({ to, otp, expiresAt }) {
     : Math.max(1, Math.ceil((expiration.getTime() - Date.now()) / 60000));
 
   const mailOptions = {
-    from: `"DentaSync Care" <${process.env.EMAIL_USER}>`,
+    from: `"Amethyst Dental Clinic" <${EMAIL_SENDER}>`,
     to,
     subject: "Your DentaSync Verification Code",
     html: `
@@ -91,8 +119,8 @@ async function sendEmailOtp({ to, otp, expiresAt }) {
   return transporter.sendMail(mailOptions);
 }
 
-async function sendPasswordResetEmail({ to, token, expiresAt }) {
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+async function sendPasswordResetEmail({ to, token, expiresAt, recipientName }) {
+  if (!emailDeliveryIsConfigured()) {
     throw new Error("Email delivery is not configured.");
   }
 
@@ -101,21 +129,30 @@ async function sendPasswordResetEmail({ to, token, expiresAt }) {
     ? 30
     : Math.max(1, Math.ceil((expiration.getTime() - Date.now()) / 60000));
   const resetUrl = new URL(
-    process.env.PASSWORD_RESET_URL || "http://localhost:5173/reset-password"
+    process.env.FRONTEND_URL ||
+      process.env.PASSWORD_RESET_URL ||
+      "http://localhost:5173"
   );
-  resetUrl.searchParams.set("token", token);
+  const basePath = resetUrl.pathname.replace(/\/$/, "");
+  const resetPath = basePath.endsWith("/reset-password")
+    ? basePath
+    : `${basePath}/reset-password`;
+  resetUrl.pathname = `${resetPath}/${encodeURIComponent(token)}`;
+  resetUrl.search = "";
+  const safeRecipientName = escapeHtml(recipientName || "there");
 
   return transporter.sendMail({
-    from: `"DentaSync Care" <${process.env.EMAIL_USER}>`,
+    from: `"Amethyst Dental Clinic" <${EMAIL_SENDER}>`,
     to,
-    subject: "Reset your DentaSync password",
+    subject: "Password Reset Request - Amethyst Dental Clinic",
     html: `
       <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
         <h2>Reset your password</h2>
-        <p>We received a request to reset your DentaSync patient portal password.</p>
+        <p>Hello ${safeRecipientName},</p>
+        <p>We received a request to reset your password for your Amethyst Dental Clinic account.</p>
         <p>
           <a href="${resetUrl.toString()}" style="display:inline-block;padding:12px 18px;border-radius:8px;color:#fff;background:#5B2A86;text-decoration:none;">
-            Reset password
+            Reset Password
           </a>
         </p>
         <p>This link expires in approximately ${minutesRemaining} minute${minutesRemaining === 1 ? "" : "s"} and can be used once.</p>

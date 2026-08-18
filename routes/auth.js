@@ -1,11 +1,15 @@
 const express = require("express");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const { rateLimit } = require("express-rate-limit");
 const {
   OtpDeliveryError,
   isOtpRequestId,
   normalizeOtp,
 } = require("../services/otpService");
+
+const RESETTABLE_ROLES = ["admin", "dentist", "staff", "patient"];
+const INACTIVE_ACCOUNT_STATUSES = ["inactive", "disabled", "suspended"];
 
 // Helper function to format consistent user responses across all endpoints
 const formatUserPayload = (user) => {
@@ -32,7 +36,7 @@ function normalizeEmail(value) {
   }
 
   const email = value.trim().toLowerCase();
-  return email && email.includes("@") ? email : null;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null;
 }
 
 function normalizePhone(value) {
@@ -62,6 +66,15 @@ function createAuthRouter({
   jwtSecret,
 }) {
   const router = express.Router();
+  const forgotPasswordRateLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 5,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+    message: {
+      message: "Too many password reset requests. Please wait 15 minutes and try again.",
+    },
+  });
 
   async function recordLoginActivity(user, req, eventType) {
     if (typeof db.query !== "function") {
@@ -339,10 +352,10 @@ function createAuthRouter({
   });
 
   // --- 5. REQUEST A PASSWORD RESET ---
-  router.post("/forgot-password", async (req, res) => {
+  router.post("/forgot-password", forgotPasswordRateLimiter, async (req, res) => {
     const acceptedResponse = {
       message:
-        "If a verified patient account matches that email, a password reset link will arrive shortly.",
+        "If a verified Amethyst Dental account matches that email, a password reset link will arrive shortly.",
     };
     const normalizedEmail = normalizeEmail(req.body?.email);
 
@@ -353,7 +366,9 @@ function createAuthRouter({
     }
 
     if (!normalizedEmail) {
-      return res.status(202).json(acceptedResponse);
+      return res.status(400).json({
+        message: "Please enter a valid email address.",
+      });
     }
 
     try {
@@ -361,10 +376,12 @@ function createAuthRouter({
         `SELECT id, first_name, last_name, email, phone, role, status, is_verified
          FROM users
          WHERE LOWER(email) = $1
-           AND role = 'patient'
+           AND LOWER(role) = ANY($2::text[])
            AND is_verified = TRUE
+           AND COALESCE(is_archived, FALSE) = FALSE
+           AND LOWER(COALESCE(status, 'active')) <> ALL($3::text[])
          LIMIT 1`,
-        [normalizedEmail]
+        [normalizedEmail, RESETTABLE_ROLES, INACTIVE_ACCOUNT_STATUSES]
       );
       const user = userResult.rows[0];
 
@@ -373,7 +390,7 @@ function createAuthRouter({
           await passwordResetService.issuePasswordReset(user);
         } catch (error) {
           // Preserve a uniform response so this endpoint cannot disclose
-          // whether an address belongs to a patient account.
+          // whether an address belongs to an active account.
           console.error("Password reset email delivery failed:", error.message);
         }
       }
@@ -389,21 +406,22 @@ function createAuthRouter({
 
   // --- 6. COMPLETE A PASSWORD RESET ---
   router.post("/reset-password", async (req, res) => {
-    const { token, newPassword } = req.body || {};
+    const { token, newPassword, password } = req.body || {};
+    const submittedPassword = newPassword || password;
 
     if (!passwordResetService) {
       return res.status(503).json({
         message: "Password reset is temporarily unavailable. Please contact the clinic.",
       });
     }
-    if (typeof newPassword !== "string" || newPassword.length < 10) {
+    if (typeof submittedPassword !== "string" || submittedPassword.length < 10) {
       return res.status(400).json({
         message: "Choose a new password of at least 10 characters.",
       });
     }
 
     try {
-      const passwordHash = await bcrypt.hash(newPassword, 12);
+      const passwordHash = await bcrypt.hash(submittedPassword, 12);
       const result = await passwordResetService.resetPassword({
         token,
         passwordHash,

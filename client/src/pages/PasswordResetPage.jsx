@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   ArrowRight,
@@ -29,7 +29,7 @@ function AuthShowcase() {
       <div className="auth-showcase__features">
         {[
           "One-time, time-limited reset links",
-          "Private patient account protection",
+          "Private account protection",
           "Secure return to your care portal",
         ].map((feature) => (
           <span key={feature}>
@@ -71,6 +71,7 @@ function PasswordField({ id, label, value, onChange, showPassword, onToggle, aut
 
 export function PasswordResetPage({ mode }) {
   const navigate = useNavigate();
+  const { token: pathToken } = useParams();
   const [searchParams] = useSearchParams();
   const [email, setEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -79,7 +80,7 @@ export function PasswordResetPage({ mode }) {
   const [isBusy, setIsBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [complete, setComplete] = useState(false);
-  const token = searchParams.get("token") || "";
+  const token = pathToken || searchParams.get("token") || "";
   const isRequest = mode === "request";
 
   async function submitRequest(event) {
@@ -135,7 +136,7 @@ export function PasswordResetPage({ mode }) {
             <h2>Forgot your password?</h2>
             <p>
               Enter your email address and we’ll send a secure, one-time reset link
-              if it matches a verified patient account.
+              if it matches a verified Amethyst Dental account.
             </p>
             {!complete && (
               <label className="field">

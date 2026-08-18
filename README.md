@@ -64,15 +64,31 @@ these production values:
 
 ```env
 PASSWORD_RESET_SECRET=a-separate-high-entropy-server-secret
-PASSWORD_RESET_URL=https://your-patient-portal.example/reset-password
+FRONTEND_URL=https://your-portal.example
+
+# Use either a generic SMTP provider:
+EMAIL_HOST=smtp.example.com
+EMAIL_PORT=587
+EMAIL_USER=mailer@example.com
+EMAIL_PASSWORD=your-smtp-password
+
+# Or retain the existing Gmail setup:
+# EMAIL_USER=your-gmail-address
+# EMAIL_PASS=your-gmail-app-password
 ```
 
-`POST /api/auth/forgot-password` accepts an email address and always returns
-the same accepted response, whether or not that address belongs to a verified
-patient. For a matching patient, it sends a 30-minute, one-time reset link.
-`POST /api/auth/reset-password` accepts the opaque link token and a new
-password of at least 10 characters. Reset tokens are HMAC-hashed at rest,
-expire server-side, and are invalidated after use or resend.
+`POST /api/auth/forgot-password` accepts a valid email address for active,
+verified Admin, Dentist, Staff, and Patient accounts. It is rate-limited to
+five requests per IP address per 15 minutes. The endpoint intentionally gives
+the same accepted response for registered and unregistered addresses so it
+does not disclose which accounts exist.
+
+For a matching account, it sends a 30-minute, one-time reset link using the
+form `https://your-portal.example/reset-password/<secure-token>`.
+`POST /api/auth/reset-password` accepts the opaque token and either
+`newPassword` or `password` (at least 10 characters). Reset tokens are
+HMAC-hashed at rest, expire server-side, and are invalidated after use or
+resend. Passwords are never sent by email or stored in plain text.
 
 ## Amethyst Dental patient portal
 

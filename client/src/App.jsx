@@ -53,6 +53,7 @@ function PortalRoutes() {
         <Route path="/register" element={<AuthPage />} />
         <Route path="/forgot-password" element={<PasswordResetPage mode="request" />} />
         <Route path="/reset-password" element={<PasswordResetPage mode="reset" />} />
+        <Route path="/reset-password/:token" element={<PasswordResetPage mode="reset" />} />
       </Route>
       <Route element={<ProtectedPortal theme={theme} onThemeChange={setTheme} />}>
         <Route path="/patient/dashboard" element={<Navigate to="/dashboard" replace />} />

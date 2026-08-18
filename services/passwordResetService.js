@@ -109,6 +109,10 @@ function createPasswordResetService({
           to: user.email,
           token,
           expiresAt: request.expiresAt,
+          recipientName:
+            `${user.first_name || ""} ${user.last_name || ""}`.trim() ||
+            user.full_name ||
+            "Amethyst Dental member",
         });
       } catch {
         await invalidateRequest(requestId);

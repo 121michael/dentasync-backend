@@ -56,13 +56,15 @@ function createPostgresPasswordResetStore(pool) {
               `SELECT id
                FROM users
                WHERE id = $1
-                 AND role = 'patient'
+                 AND LOWER(role) IN ('admin', 'dentist', 'staff', 'patient')
                  AND is_verified = TRUE
+                 AND COALESCE(is_archived, FALSE) = FALSE
+                 AND LOWER(COALESCE(status, 'active')) NOT IN ('inactive', 'disabled', 'suspended')
                FOR UPDATE`,
               [String(user.id)]
             );
             if (accountResult.rows.length === 0) {
-              const error = new Error("The patient account is unavailable for a password reset.");
+              const error = new Error("The account is unavailable for a password reset.");
               error.code = "PASSWORD_RESET_ACCOUNT_UNAVAILABLE";
               throw error;
             }
@@ -217,12 +219,15 @@ function createPostgresPasswordResetStore(pool) {
          SET password_hash = $1,
              password_changed_at = CURRENT_TIMESTAMP
          WHERE id = $2
-           AND role = 'patient'
-         RETURNING id, email`,
+           AND LOWER(role) IN ('admin', 'dentist', 'staff', 'patient')
+           AND is_verified = TRUE
+           AND COALESCE(is_archived, FALSE) = FALSE
+           AND LOWER(COALESCE(status, 'active')) NOT IN ('inactive', 'disabled', 'suspended')
+         RETURNING id, email, role`,
         [passwordHash, record.user_id]
       );
       if (userResult.rows.length === 0) {
-        throw new Error("Password reset request refers to an unavailable patient.");
+        throw new Error("Password reset request refers to an unavailable account.");
       }
 
       await client.query(

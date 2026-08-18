@@ -156,8 +156,14 @@ test("verification rejects an OTP sent as a number because leading zeros would b
   assert.equal(serviceCalled, false);
 });
 
-test("forgot-password uses one response for known and unknown patient emails", async (t) => {
+test("forgot-password accepts active verified accounts across all supported roles", async (t) => {
   const issuedFor = [];
+  const accounts = {
+    "admin@example.test": { id: 1, role: "admin" },
+    "dentist@example.test": { id: 2, role: "dentist" },
+    "staff@example.test": { id: 3, role: "staff" },
+    "patient@example.test": { id: 4, role: "patient" },
+  };
   const app = express();
   app.use(express.json());
   app.use(
@@ -165,17 +171,16 @@ test("forgot-password uses one response for known and unknown patient emails", a
     createAuthRouter({
       db: {
         async query(_query, [email]) {
+          const account = accounts[email];
           return {
-            rows:
-              email === "patient@example.test"
-                ? [{
-                    id: 42,
+            rows: account
+              ? [{
+                    ...account,
                     email,
                     phone: "639333333333",
-                    role: "patient",
                     is_verified: true,
                   }]
-                : [],
+              : [],
           };
         },
       },
@@ -192,21 +197,80 @@ test("forgot-password uses one response for known and unknown patient emails", a
   const server = await startServer(app);
   t.after(server.close);
 
-  const known = await fetch(`${server.baseUrl}/api/auth/forgot-password`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email: "patient@example.test" }),
-  });
-  const unknown = await fetch(`${server.baseUrl}/api/auth/forgot-password`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ email: "unknown@example.test" }),
-  });
+  async function requestReset(email) {
+    return fetch(`${server.baseUrl}/api/auth/forgot-password`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+  }
 
-  assert.equal(known.status, 202);
-  assert.equal(unknown.status, 202);
-  assert.deepEqual(await known.json(), await unknown.json());
-  assert.deepEqual(issuedFor, ["patient@example.test"]);
+  const responses = await Promise.all([
+    requestReset("admin@example.test"),
+    requestReset("dentist@example.test"),
+    requestReset("staff@example.test"),
+    requestReset("patient@example.test"),
+    requestReset("unknown@example.test"),
+  ]);
+
+  assert.ok(responses.every((response) => response.status === 202));
+  assert.deepEqual(await responses[0].json(), await responses[4].json());
+  assert.deepEqual(issuedFor.sort(), [
+    "admin@example.test",
+    "dentist@example.test",
+    "patient@example.test",
+    "staff@example.test",
+  ]);
+});
+
+test("forgot-password validates malformed emails and throttles repeated requests", async (t) => {
+  const app = express();
+  app.use(express.json());
+  app.use(
+    "/api/auth",
+    createAuthRouter({
+      db: {
+        async query() {
+          return { rows: [] };
+        },
+      },
+      otpService: {},
+      passwordResetService: {
+        async issuePasswordReset() {},
+      },
+      authenticateToken: (_req, _res, next) => next(),
+      jwtSecret: "test-jwt-secret",
+    })
+  );
+  const server = await startServer(app);
+  t.after(server.close);
+
+  const malformed = await fetch(`${server.baseUrl}/api/auth/forgot-password`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "not-an-email" }),
+  });
+  assert.equal(malformed.status, 400);
+  assert.match((await malformed.json()).message, /valid email/i);
+
+  const responses = [];
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    responses.push(
+      await fetch(`${server.baseUrl}/api/auth/forgot-password`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: `unknown${attempt}@example.test` }),
+      })
+    );
+  }
+  assert.ok(responses.every((response) => response.status === 202));
+
+  const throttled = await fetch(`${server.baseUrl}/api/auth/forgot-password`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "too-many@example.test" }),
+  });
+  assert.equal(throttled.status, 429);
 });
 
 test("reset-password hashes the submitted password before consuming a reset token", async (t) => {
