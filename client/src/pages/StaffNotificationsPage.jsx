@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
-import { formatStaffDateTime } from "../components/StaffUI";
+import { formatStaffDateTime } from "../staffUtils";
 
 const notificationIcons = {
   appointment: CalendarDays,

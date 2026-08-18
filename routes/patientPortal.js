@@ -416,9 +416,9 @@ function createPatientPortalRouter({
         `INSERT INTO patient_portal_appointments (
            user_id, service_id, service_name, dentist_id, dentist_name,
            appointment_date, appointment_time, coverage_type, hmo_provider,
-           hmo_member_number, authorization_document_id, estimated_cost, notes
+           hmo_member_number, authorization_document_id, estimated_cost, notes, status
          ) VALUES (
-           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'pending'
          )
          RETURNING *`,
         [
@@ -440,22 +440,22 @@ function createPatientPortalRouter({
 
       await db.query(
         `INSERT INTO patient_portal_notifications (user_id, type, title, body)
-         VALUES ($1, 'appointment', 'Your visit is confirmed', $2)`,
+         VALUES ($1, 'appointment', 'Appointment request received', $2)`,
         [
           userId,
-          `${service.name} is booked with ${dentist.name} on ${appointmentDate} at ${appointmentTime}.`,
+          `${service.name} with ${dentist.name} on ${appointmentDate} at ${appointmentTime} is waiting for clinic confirmation.`,
         ]
       );
       await notifyClinicStaff({
         type: "appointment",
-        title: "New appointment booking",
-        body: `${userId} booked ${service.name} with ${dentist.name} on ${appointmentDate} at ${appointmentTime}.`,
+        title: "New Appointment Request",
+        body: `A patient requested ${service.name} with ${dentist.name} on ${appointmentDate} at ${appointmentTime}.`,
         entityType: "appointment",
         entityId: result.rows[0].id,
       });
 
       return res.status(201).json({
-        message: "Your appointment is confirmed.",
+        message: "Your appointment request was submitted for clinic confirmation.",
         appointment: mapAppointment(result.rows[0]),
       });
     } catch (error) {

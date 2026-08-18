@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Check, Mail, Pencil, Phone, Save, UserRound } from "lucide-react";
 import { api } from "../api";
 import { ErrorState, LoadingState, SectionHeading } from "../components/UI";
-import { staffInitials } from "../components/StaffUI";
+import { staffInitials } from "../staffUtils";
 import { useAuth } from "../useAuth";
 
 export function StaffProfilePage() {

@@ -2,10 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import { Download, RefreshCw, Save } from "lucide-react";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
+import { statusLabel } from "../staffUtils";
 import {
   StaffDataTable,
   StaffStatusBadge,
-  statusLabel,
 } from "../components/StaffUI";
 
 const queueStatuses = ["checked_in", "waiting", "preparing", "in_chair", "completed", "no_show"];

@@ -2,9 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { Eye, Plus, Search, UserPlus } from "lucide-react";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
+import { formatStaffDate, formatStaffTime } from "../staffUtils";
 import {
-  formatStaffDate,
-  formatStaffTime,
   StaffDataTable,
   StaffModal,
   StaffStatusBadge,

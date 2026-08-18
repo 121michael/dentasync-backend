@@ -55,7 +55,9 @@ export function AuthProvider({ children }) {
         setUser(sessionUser);
       },
       updateUser(nextUser) {
-        setUser(nextUser);
+        setUser((current) =>
+          typeof nextUser === "function" ? nextUser(current) : nextUser
+        );
       },
       logout() {
         localStorage.removeItem(TOKEN_KEY);

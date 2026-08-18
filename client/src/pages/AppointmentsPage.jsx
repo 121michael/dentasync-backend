@@ -113,7 +113,7 @@ export function AppointmentsPage() {
         ...form,
         authorizationDocumentId,
       });
-      setSuccess(`${response.appointment.treatment} is confirmed for ${displayDate(response.appointment.date)}.`);
+      setSuccess(`${response.appointment.treatment} was submitted for ${displayDate(response.appointment.date)}.`);
       setForm((current) => ({
         ...current,
         serviceId: "",
@@ -365,7 +365,7 @@ export function AppointmentsPage() {
             className="button button--primary button--wide"
             disabled={isBusy || !form.serviceId || !form.dentistId || !form.appointmentTime}
           >
-            {isBusy ? "Confirming your visit…" : "Confirm appointment"} <ChevronRight size={18} />
+            {isBusy ? "Submitting your request…" : "Request appointment"} <ChevronRight size={18} />
           </button>
           <p>Final treatment recommendations and costs are confirmed by your dental team.</p>
         </aside>

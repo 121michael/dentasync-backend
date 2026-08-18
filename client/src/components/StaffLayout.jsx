@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { useAuth } from "../useAuth";
-import { staffInitials } from "./StaffUI";
+import { staffInitials } from "../staffUtils";
 
 const navigation = [
   { to: "/staff/check-ins", label: "Patient Check-in", icon: ClipboardPlus },

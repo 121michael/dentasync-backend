@@ -11,9 +11,8 @@ import {
 } from "lucide-react";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
+import { formatStaffDate, formatStaffTime } from "../staffUtils";
 import {
-  formatStaffDate,
-  formatStaffTime,
   StaffModal,
   StaffStatusBadge,
 } from "../components/StaffUI";

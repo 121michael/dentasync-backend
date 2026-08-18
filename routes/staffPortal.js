@@ -4,7 +4,6 @@ const crypto = require("crypto");
 const bcrypt = require("bcrypt");
 const express = require("express");
 
-const INACTIVE_ACCOUNT_STATUSES = ["inactive", "disabled", "suspended"];
 const QUEUE_STATUS_MAP = {
   checked_in: "checked_in",
   waiting: "waiting",
@@ -541,7 +540,21 @@ function createStaffPortalRouter({
 
       await client.query("COMMIT");
       transactionOpen = false;
-      return res.json({ appointment: mapAppointment(result.rows[0]) });
+
+      const patientResult = await db.query(
+        `SELECT CONCAT_WS(' ', first_name, last_name) AS patient_name, phone AS patient_phone
+         FROM users
+         WHERE id::text = $1
+         LIMIT 1`,
+        [String(current.user_id)]
+      );
+      return res.json({
+        appointment: mapAppointment({
+          ...result.rows[0],
+          patient_name: patientResult.rows[0]?.patient_name,
+          patient_phone: patientResult.rows[0]?.patient_phone,
+        }),
+      });
     } catch (error) {
       if (transactionOpen) {
         await client.query("ROLLBACK");
