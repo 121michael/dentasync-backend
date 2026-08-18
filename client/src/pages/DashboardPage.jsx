@@ -24,18 +24,39 @@ function greeting() {
   return "Good evening";
 }
 
-function prettyDate(value) {
-  if (!value) return "To be recommended";
+function prettyDate(value, fallback = "To be recommended") {
+  if (!value) return fallback;
+
+  const rawValue = value instanceof Date ? value : String(value).trim();
+  const date = rawValue instanceof Date
+    ? rawValue
+    : /^\d{4}-\d{2}-\d{2}$/.test(rawValue)
+      ? new Date(`${rawValue}T00:00:00`)
+      : new Date(rawValue);
+
+  if (Number.isNaN(date.getTime())) {
+    return fallback;
+  }
+
   return new Intl.DateTimeFormat("en-US", {
     month: "long",
     day: "numeric",
     year: "numeric",
-  }).format(new Date(`${value}T00:00:00`));
+  }).format(date);
 }
 
 function prettyTime(value) {
-  if (!value) return "";
+  if (typeof value !== "string") return "Time to be confirmed";
   const [hours, minutes] = value.split(":");
+  if (
+    !/^\d{1,2}$/.test(hours || "") ||
+    !/^\d{2}$/.test(minutes || "") ||
+    Number(hours) > 23 ||
+    Number(minutes) > 59
+  ) {
+    return "Time to be confirmed";
+  }
+
   return new Intl.DateTimeFormat("en-US", {
     hour: "numeric",
     minute: "2-digit",
@@ -77,8 +98,8 @@ export function DashboardPage() {
   if (!dashboard) return <LoadingState />;
 
   const appointment = dashboard.nextAppointment;
-  const firstName = dashboard.patient.firstName || "there";
-  const wellness = dashboard.wellness;
+  const firstName = dashboard.patient?.firstName || "there";
+  const wellness = dashboard.wellness || {};
   const healthScore = wellness.oralHealthScore;
 
   return (
@@ -107,7 +128,7 @@ export function DashboardPage() {
             <h2>{appointment.treatment}</h2>
             <div className="next-visit-card__details">
               <span>
-                <CalendarDays size={17} /> {prettyDate(appointment.date)}
+                <CalendarDays size={17} /> {prettyDate(appointment.date, "Date to be confirmed")}
               </span>
               <span>
                 <Clock3 size={17} /> {prettyTime(appointment.time)}
@@ -203,7 +224,7 @@ export function DashboardPage() {
           <div className="wellness-card__facts">
             <span>
               <small>Last cleaning</small>
-              <strong>{wellness.lastCleaning ? prettyDate(wellness.lastCleaning) : "Not recorded"}</strong>
+              <strong>{prettyDate(wellness.lastCleaning, "Not recorded")}</strong>
             </span>
             <span>
               <small>Next recommended checkup</small>
