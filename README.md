@@ -179,7 +179,11 @@ npm run migrate
 npm run seed:admin
 ```
 
-The seed creates/resets `admin@amethyst.com` / `admin123` as a verified admin.
+The seed creates or resets `admin@amethyst.com` / `admin123` as a verified admin
+(without deleting other clinic data). If login returns **Invalid credentials**,
+re-run `npm run seed:admin` from `C:\DentaSync-backend`, confirm it prints
+`Password hash check: OK`, then restart the API and use the Vite client in
+`C:\DentaSync-backend\client` (not an older separate frontend folder).
 Change that password immediately after first login in any shared environment.
 
 Only a live, active, verified `users.role = 'admin'` record can access
