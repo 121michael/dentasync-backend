@@ -385,14 +385,19 @@ function createAuthRouter({
       );
       const user = userResult.rows[0];
 
-      if (user) {
-        try {
-          await passwordResetService.issuePasswordReset(user);
-        } catch (error) {
-          // Preserve a uniform response so this endpoint cannot disclose
-          // whether an address belongs to an active account.
-          console.error("Password reset email delivery failed:", error.message);
-        }
+      if (!user) {
+        return res.status(404).json({
+          message: "Email address not found. Please check your email and try again.",
+        });
+      }
+
+      try {
+        await passwordResetService.issuePasswordReset(user);
+      } catch (error) {
+        console.error("Password reset email delivery failed:", error.message);
+        return res.status(503).json({
+          message: "Unable to send the reset email. Please try again later.",
+        });
       }
 
       return res.status(202).json(acceptedResponse);

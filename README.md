@@ -79,9 +79,10 @@ EMAIL_PASSWORD=your-smtp-password
 
 `POST /api/auth/forgot-password` accepts a valid email address for active,
 verified Admin, Dentist, Staff, and Patient accounts. It is rate-limited to
-five requests per IP address per 15 minutes. The endpoint intentionally gives
-the same accepted response for registered and unregistered addresses so it
-does not disclose which accounts exist.
+five requests per IP address per 15 minutes. Per the current product
+requirement, it returns `404` with an email-not-found message for unregistered
+or unavailable accounts. This is less resistant to account-enumeration attacks
+than a generic reset response.
 
 For a matching account, it sends a 30-minute, one-time reset link using the
 form `https://your-portal.example/reset-password/<secure-token>`.
