@@ -107,10 +107,10 @@ export function StaffPatientsPage() {
       <SectionHeading
         eyebrow="Clinical records"
         title="Patient Record"
-        detail="Search, register, and review patient information with staff-authorized access."
+        detail="Create and maintain clinical patient charts. These are not login accounts — patients self-register for the portal."
         action={
           <button className="button button--primary" onClick={() => setIsRegistrationOpen(true)}>
-            <UserPlus size={17} /> Register Patient
+            <UserPlus size={17} /> Add Clinical Record
           </button>
         }
       />
@@ -186,7 +186,7 @@ export function StaffPatientsPage() {
       </section>
 
       {isRegistrationOpen && (
-        <StaffModal title="Register Patient" onClose={() => setIsRegistrationOpen(false)} wide>
+        <StaffModal title="Add Clinical Patient Record" onClose={() => setIsRegistrationOpen(false)} wide>
           <form className="staff-register-form" onSubmit={registerPatient}>
             <div className="field-grid field-grid--two">
               <label className="field"><span>First Name</span><input name="firstName" value={registration.firstName} onChange={updateRegistration} required /></label>
@@ -211,11 +211,11 @@ export function StaffPatientsPage() {
                 <textarea name="medicalDentalNotes" rows="4" value={registration.medicalDentalNotes} onChange={updateRegistration} />
               </label>
             </div>
-            <p className="staff-form-note">A secure account-setup email is sent when clinic email delivery is configured.</p>
+            <p className="staff-form-note">This creates a clinical chart only. It does not create a patient login account.</p>
             <div className="staff-modal__actions">
               <button type="button" className="button button--secondary" onClick={() => setIsRegistrationOpen(false)}>Cancel</button>
               <button className="button button--primary" disabled={isSaving}>
-                <Plus size={16} /> {isSaving ? "Registering…" : "Register Patient"}
+                <Plus size={16} /> {isSaving ? "Saving…" : "Save Clinical Record"}
               </button>
             </div>
           </form>
