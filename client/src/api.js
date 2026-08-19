@@ -154,9 +154,19 @@ export const api = {
     const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value || value === 0));
     return request(`/admin/patients${search.size ? `?${search}` : ""}`);
   },
-  createAdminPatient: (body) => request("/admin/patients", { method: "POST", body }),
+  getAdminClinicalRecords: (params = {}) => {
+    const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value || value === 0));
+    return request(`/admin/clinical-records${search.size ? `?${search}` : ""}`);
+  },
+  getAdminClinicalRecord: (id) => request(`/admin/clinical-records/${id}`),
+  createAdminPatient: () =>
+    Promise.reject(new ApiError("Administrators cannot create patient accounts.", 403)),
   updateAdminPatient: (id, body) => request(`/admin/patients/${id}`, { method: "PATCH", body }),
   getAdminPatient: (id) => request(`/admin/patients/${id}`),
+  updateStaffPatient: (id, body) => request(`/staff/patients/${id}`, { method: "PATCH", body }),
+  deleteStaffPatient: (id) => request(`/staff/patients/${id}`, { method: "DELETE" }),
+  updateDentistPatient: (id, body) => request(`/dentist/patients/${id}`, { method: "PATCH", body }),
+  deleteDentistPatient: (id) => request(`/dentist/patients/${id}`, { method: "DELETE" }),
   getAdminStaff: (params = {}) => {
     const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value || value === 0));
     return request(`/admin/staff${search.size ? `?${search}` : ""}`);

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { Cloud, RefreshCw, Save, Upload } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Camera, Cloud, RefreshCw, Save, Upload, X } from "lucide-react";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { useAdminUi } from "../components/AdminLayout";
@@ -41,12 +41,16 @@ function StatusDot({ ok, label, detail }) {
 
 export function AdminSyncPage() {
   const { pushToast, confirm } = useAdminUi();
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
   const [healthData, setHealthData] = useState(null);
   const [jobs, setJobs] = useState([]);
   const [activeJob, setActiveJob] = useState(null);
   const [payload, setPayload] = useState(emptyPayload);
   const [sourceType, setSourceType] = useState("soft_copy");
   const [file, setFile] = useState(null);
+  const [captureMode, setCaptureMode] = useState("file");
+  const [cameraOpen, setCameraOpen] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState("");
@@ -69,6 +73,14 @@ export function AdminSyncPage() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+      }
+    };
+  }, []);
+
   function updatePatient(field, value) {
     setPayload((current) => ({
       ...current,
@@ -83,10 +95,60 @@ export function AdminSyncPage() {
     }));
   }
 
+  async function startCamera() {
+    setError("");
+    setCaptureMode("camera");
+    setSourceType("hard_copy_scan");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" } },
+        audio: false,
+      });
+      streamRef.current = stream;
+      setCameraOpen(true);
+      window.requestAnimationFrame(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+      });
+    } catch (cameraError) {
+      setError(cameraError.message || "Unable to open the camera. Check browser permissions.");
+      pushToast("Unable to open the camera.", "error");
+    }
+  }
+
+  function stopCamera() {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    setCameraOpen(false);
+  }
+
+  async function captureFromCamera() {
+    if (!videoRef.current) return;
+    const video = videoRef.current;
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth || 1280;
+    canvas.height = video.videoHeight || 720;
+    const context = canvas.getContext("2d");
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
+    if (!blob) {
+      setError("Unable to capture camera frame.");
+      return;
+    }
+    const captured = new File([blob], `camera-scan-${Date.now()}.jpg`, { type: "image/jpeg" });
+    setFile(captured);
+    setSourceType("hard_copy_scan");
+    stopCamera();
+    pushToast("Camera scan captured. Review the file, then extract.");
+  }
+
   async function scanDocument(event) {
     event.preventDefault();
     if (!file) {
-      setError("Choose a PDF, TXT, JPG, or PNG document to scan.");
+      setError("Choose a file or capture a camera scan first.");
       return;
     }
     setBusy("scan");
@@ -132,7 +194,8 @@ export function AdminSyncPage() {
     if (!activeJob) return;
     const ok = await confirm({
       title: "Confirm database sync",
-      message: "Review is complete. Sync this approved patient and procedure data into PostgreSQL? Existing records will not be overwritten without this confirmation.",
+      message:
+        "Sync this reviewed document into a clinical patient record? This does not create a patient login account.",
       confirmLabel: "Sync Data",
       tone: "primary",
     });
@@ -181,17 +244,14 @@ export function AdminSyncPage() {
 
       <section className="admin-panel admin-sync-hero">
         <div>
-          <span className="eyebrow">Branch synchronization</span>
+          <span className="eyebrow">Document intake</span>
           <h2>Cloud Data Synchronization</h2>
           <p>
-            Upload or scan documents, extract patient and dental procedure data, review and correct fields,
-            then confirm before storing approved information in PostgreSQL.
+            Upload a file or scan with the camera, extract patient and dental procedure data, review and correct
+            fields, then sync into a clinical patient record.
           </p>
           <div className="admin-heading-actions" style={{ marginTop: "0.85rem" }}>
             <button className="button button--secondary" onClick={load}><RefreshCw size={16} /> Refresh</button>
-            <button className="button button--primary" onClick={() => api.runAdminSync().then(() => pushToast("Sync Data started.")).catch((e) => pushToast(e.message, "error"))}>
-              <Cloud size={16} /> Start Sync
-            </button>
           </div>
         </div>
         <Cloud size={42} aria-hidden="true" />
@@ -201,30 +261,80 @@ export function AdminSyncPage() {
         <StatusDot ok={health.database} label="Database connection" detail={health.database ? "Ready to receive sync" : "Disconnected"} />
         <StatusDot ok={health.api} label="Current sync status" detail={health.api ? "Online" : "Offline"} />
         <StatusDot ok={true} label="Document OCR" detail="PDF text + image OCR enabled" />
-        <StatusDot ok={health.auth} label="Branch sync authorization" detail={health.auth ? "Authenticated" : "Unavailable"} />
+        <StatusDot ok={health.auth} label="Admin authorization" detail={health.auth ? "Authenticated" : "Unavailable"} />
       </section>
 
       <section className="admin-panel">
-        <h2>1. Upload / Scan Document</h2>
+        <h2>1. Upload File or Scan via Camera</h2>
+        <div className="admin-tabs" role="tablist" aria-label="Capture method">
+          <button
+            type="button"
+            className={`admin-tab ${captureMode === "file" ? "is-active" : ""}`}
+            onClick={() => {
+              stopCamera();
+              setCaptureMode("file");
+            }}
+          >
+            Choose File
+          </button>
+          <button
+            type="button"
+            className={`admin-tab ${captureMode === "camera" ? "is-active" : ""}`}
+            onClick={startCamera}
+          >
+            Scan via Camera
+          </button>
+        </div>
+
         <form className="admin-form" onSubmit={scanDocument}>
-          <div className="field-grid field-grid--two">
-            <label className="field">
-              <span>Document source</span>
-              <select value={sourceType} onChange={(event) => setSourceType(event.target.value)}>
-                <option value="soft_copy">Soft copy (PDF / TXT)</option>
-                <option value="hard_copy_scan">Hard copy scan (JPG / PNG)</option>
-              </select>
-            </label>
-            <label className="field">
-              <span>Choose file</span>
-              <input
-                type="file"
-                accept=".pdf,.txt,.csv,.jpg,.jpeg,.png,.webp"
-                onChange={(event) => setFile(event.target.files?.[0] || null)}
-              />
-            </label>
-          </div>
-          <button className="button button--primary" disabled={Boolean(busy)}>
+          {captureMode === "file" ? (
+            <div className="field-grid field-grid--two">
+              <label className="field">
+                <span>Document source</span>
+                <select value={sourceType} onChange={(event) => setSourceType(event.target.value)}>
+                  <option value="soft_copy">Soft copy (PDF / TXT)</option>
+                  <option value="hard_copy_scan">Hard copy scan (JPG / PNG)</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Choose file</span>
+                <input
+                  type="file"
+                  accept=".pdf,.txt,.csv,.jpg,.jpeg,.png,.webp"
+                  onChange={(event) => setFile(event.target.files?.[0] || null)}
+                />
+              </label>
+            </div>
+          ) : (
+            <div className="admin-camera-panel">
+              {cameraOpen ? (
+                <>
+                  <video ref={videoRef} autoPlay playsInline muted className="admin-camera-preview" />
+                  <div className="admin-heading-actions">
+                    <button type="button" className="button button--primary" onClick={captureFromCamera}>
+                      <Camera size={16} /> Capture Scan
+                    </button>
+                    <button type="button" className="button button--secondary" onClick={stopCamera}>
+                      <X size={16} /> Close Camera
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <p className="muted-copy">
+                  {file ? `Captured: ${file.name}` : "Open the camera to scan a hard-copy dental record."}
+                </p>
+              )}
+              {!cameraOpen ? (
+                <button type="button" className="button button--secondary" onClick={startCamera}>
+                  <Camera size={16} /> Open Camera
+                </button>
+              ) : null}
+            </div>
+          )}
+
+          {file ? <p className="muted-copy">Ready to extract: <strong>{file.name}</strong></p> : null}
+
+          <button className="button button--primary" disabled={Boolean(busy) || !file}>
             <Upload size={16} /> {busy === "scan" ? "Scanning & extracting…" : "Scan & Extract Data"}
           </button>
         </form>
@@ -236,7 +346,7 @@ export function AdminSyncPage() {
             <div>
               <span className="eyebrow">Extracted draft · {activeJob.status}</span>
               <h2>2. Review & Edit Before Sync</h2>
-              <p>{activeJob.extractionNotes || "Verify patient and procedure fields, then sync to the database."}</p>
+              <p>{activeJob.extractionNotes || "Verify patient and procedure fields, then sync to a clinical record."}</p>
               <small className="muted-copy">Source file: {activeJob.originalName}</small>
             </div>
           </div>
@@ -277,13 +387,13 @@ export function AdminSyncPage() {
               <Save size={16} /> {busy === "save" ? "Saving…" : "Save Review"}
             </button>
             <button type="button" className="button button--primary" onClick={syncToDatabase} disabled={Boolean(busy) || activeJob.status === "synced"}>
-              <FileScan size={16} /> {busy === "sync" ? "Syncing…" : activeJob.status === "synced" ? "Already Synced" : "Sync to Database"}
+              <Cloud size={16} /> {busy === "sync" ? "Syncing…" : activeJob.status === "synced" ? "Already Synced" : "Sync to Database"}
             </button>
           </div>
 
           {activeJob.status === "synced" ? (
             <p className="inline-alert inline-alert--success">
-              Synced patient #{activeJob.linkedPatientId} · treatment #{activeJob.linkedTreatmentId} · {formatAdminDateTime(activeJob.syncedAt)}
+              Synced clinical record #{activeJob.linkedPatientId} · treatment #{activeJob.linkedTreatmentId} · {formatAdminDateTime(activeJob.syncedAt)}
             </p>
           ) : null}
         </section>
@@ -321,7 +431,7 @@ export function AdminSyncPage() {
             </table>
           </div>
         ) : (
-          <EmptyState title="No document sync jobs yet." detail="Upload a dental document above to begin extraction and review." />
+          <EmptyState title="No document sync jobs yet." detail="Upload a file or scan with the camera to begin extraction." />
         )}
       </section>
     </div>

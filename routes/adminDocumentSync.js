@@ -3,7 +3,6 @@
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
-const bcrypt = require("bcrypt");
 const multer = require("multer");
 const {
   emptyPayload,
@@ -11,6 +10,7 @@ const {
   normalizePhone,
   normalizeDate,
 } = require("../services/documentSyncExtraction");
+const clinicalPatients = require("../services/clinicalPatients");
 
 const ALLOWED_TYPES = new Set([
   "application/pdf",
@@ -314,92 +314,70 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
         return res.status(400).json({ message: "Provide a valid treatment date (YYYY-MM-DD)." });
       }
 
-      let patientId = null;
-      if (patient.email) {
+      let clinicalRecordId = null;
+      if (patient.email || patient.phone) {
         const existing = await client.query(
-          `SELECT id FROM users WHERE LOWER(email) = LOWER($1) AND LOWER(role) = 'patient' LIMIT 1`,
-          [patient.email]
+          `SELECT id
+           FROM clinic_patient_records
+           WHERE COALESCE(is_archived, FALSE) = FALSE
+             AND (
+               ($1::text IS NOT NULL AND LOWER(email) = LOWER($1))
+               OR ($2::text IS NOT NULL AND phone = $2)
+             )
+           ORDER BY updated_at DESC
+           LIMIT 1`,
+          [patient.email || null, patient.phone || null]
         );
         if (existing.rows.length) {
-          patientId = existing.rows[0].id;
-          await client.query(
-            `UPDATE users
-             SET first_name = $1,
-                 last_name = $2,
-                 phone = COALESCE(NULLIF($3, ''), phone)
-             WHERE id = $4`,
-            [patient.firstName, patient.lastName, patient.phone || null, patientId]
+          clinicalRecordId = existing.rows[0].id;
+          await clinicalPatients.updateClinicalRecord(
+            client,
+            clinicalRecordId,
+            {
+              firstName: patient.firstName,
+              lastName: patient.lastName,
+              email: patient.email,
+              phone: patient.phone,
+              dateOfBirth: patient.dateOfBirth,
+              gender: patient.gender,
+              address: patient.address,
+            },
+            { id: req.admin.id, role: "admin-sync" }
           );
         }
       }
 
-      if (!patientId && patient.phone) {
-        const existingPhone = await client.query(
-          `SELECT id FROM users WHERE phone = $1 AND LOWER(role) = 'patient' LIMIT 1`,
-          [patient.phone]
+      if (!clinicalRecordId) {
+        const created = await clinicalPatients.createClinicalRecord(
+          client,
+          {
+            firstName: patient.firstName,
+            lastName: patient.lastName,
+            email: patient.email,
+            phone: patient.phone,
+            dateOfBirth: patient.dateOfBirth,
+            gender: patient.gender,
+            address: patient.address,
+            notes: `Synced from document: ${job.original_name}`,
+          },
+          { id: req.admin.id, role: "admin-sync" }
         );
-        if (existingPhone.rows.length) {
-          patientId = existingPhone.rows[0].id;
-          await client.query(
-            `UPDATE users
-             SET first_name = $1,
-                 last_name = $2,
-                 email = COALESCE(NULLIF($3, ''), email)
-             WHERE id = $4`,
-            [patient.firstName, patient.lastName, patient.email || null, patientId]
-          );
-        }
+        clinicalRecordId = created.id;
       }
 
-      if (!patientId) {
-        const email =
-          patient.email ||
-          `synced.${Date.now()}.${crypto.randomBytes(3).toString("hex")}@amethyst.local`;
-        const phone = patient.phone || `6391${String(Date.now()).slice(-8)}`;
-        const passwordHash = await bcrypt.hash(crypto.randomBytes(24).toString("base64url"), 12);
-        const created = await client.query(
-          `INSERT INTO users (
-             first_name, last_name, email, phone, password_hash, role, is_verified, status
-           ) VALUES ($1, $2, $3, $4, $5, 'patient', TRUE, 'Active')
-           RETURNING id`,
-          [patient.firstName, patient.lastName, email, phone, passwordHash]
-        );
-        patientId = created.rows[0].id;
-      }
-
-      await client.query(
-        `INSERT INTO patient_portal_profiles (
-           user_id, date_of_birth, gender, address
-         ) VALUES ($1, $2, $3, $4)
-         ON CONFLICT (user_id) DO UPDATE SET
-           date_of_birth = COALESCE(EXCLUDED.date_of_birth, patient_portal_profiles.date_of_birth),
-           gender = COALESCE(EXCLUDED.gender, patient_portal_profiles.gender),
-           address = COALESCE(EXCLUDED.address, patient_portal_profiles.address),
-           updated_at = CURRENT_TIMESTAMP`,
-        [
-          String(patientId),
-          patient.dateOfBirth || null,
-          patient.gender || null,
-          patient.address || null,
-        ]
-      );
-
-      const treatmentDate = procedure.treatmentDate || new Date().toISOString().slice(0, 10);
-      const treatmentResult = await client.query(
-        `INSERT INTO patient_portal_treatment_records (
-           user_id, treatment, dentist_name, clinic_location, coverage_status, status, treatment_date, notes
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-         RETURNING id`,
-        [
-          String(patientId),
-          procedure.treatment,
-          procedure.dentistName || null,
-          procedure.clinicLocation || "Amethyst Dental Clinic",
-          procedure.coverageStatus || null,
-          procedure.status || "completed",
-          treatmentDate,
-          procedure.notes || `Synced from document: ${job.original_name}`,
-        ]
+      const treatment = await clinicalPatients.addClinicalTreatment(
+        client,
+        clinicalRecordId,
+        {
+          treatment: procedure.treatment,
+          dentistName: procedure.dentistName,
+          clinicLocation: procedure.clinicLocation || "Amethyst Dental Clinic",
+          coverageStatus: procedure.coverageStatus,
+          status: procedure.status || "completed",
+          treatmentDate: procedure.treatmentDate || new Date().toISOString().slice(0, 10),
+          notes: procedure.notes || `Synced from document: ${job.original_name}`,
+        },
+        { id: req.admin.id, role: "admin-sync" }
       );
 
       await client.query(
@@ -414,8 +392,8 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
          WHERE id = $4`,
         [
           JSON.stringify(payload),
-          String(patientId),
-          treatmentResult.rows[0].id,
+          String(clinicalRecordId),
+          treatment.id,
           job.id,
         ]
       );
@@ -426,7 +404,7 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
          ) VALUES ($1, 'success', TRUE, TRUE, TRUE, $2)`,
         [
           String(req.admin.id),
-          `Document sync committed for patient ${patient.firstName} ${patient.lastName} (${procedure.treatment}).`,
+          `Document sync committed clinical record for ${patient.firstName} ${patient.lastName} (${procedure.treatment}).`,
         ]
       );
 
@@ -439,11 +417,11 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
       );
 
       return res.json({
-        message: "Document data synced to the database.",
+        message: "Document data synced as a clinical patient record (not a login account).",
         job: mapJob(refreshed.rows[0]),
         linked: {
-          patientId: String(patientId),
-          treatmentId: treatmentResult.rows[0].id,
+          clinicalRecordId: String(clinicalRecordId),
+          treatmentId: treatment.id,
         },
       });
     } catch (error) {
@@ -451,7 +429,7 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
         await client.query("ROLLBACK");
       }
       console.error("Document sync commit error:", error.message);
-      return res.status(500).json({
+      return res.status(error.status || 500).json({
         message: error.message || "Unable to sync document data to the database.",
       });
     } finally {

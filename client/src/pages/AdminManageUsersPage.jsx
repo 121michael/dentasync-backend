@@ -21,10 +21,6 @@ const emptyForm = {
   position: "Senior Desk Administrator",
   specialization: "",
   scheduleNotes: "",
-  dateOfBirth: "",
-  gender: "",
-  address: "",
-  notes: "",
 };
 
 export function AdminManageUsersPage() {
@@ -67,6 +63,10 @@ export function AdminManageUsersPage() {
   }, [data, tab]);
 
   function openCreate() {
+    if (tab === "patient") {
+      pushToast("Patients self-register. Approve pending requests below.", "warning");
+      return;
+    }
     setEditing(null);
     setForm({
       ...emptyForm,
@@ -92,16 +92,18 @@ export function AdminManageUsersPage() {
 
   async function saveUser(event) {
     event.preventDefault();
+    if (tab === "patient") {
+      pushToast("Administrators cannot create patient login accounts.", "error");
+      return;
+    }
     setBusy(true);
     try {
       if (editing) {
-        const updater =
-          tab === "patient" ? api.updateAdminPatient : tab === "staff" ? api.updateAdminStaff : api.updateAdminDentist;
+        const updater = tab === "staff" ? api.updateAdminStaff : api.updateAdminDentist;
         await updater(editing.id, form);
         pushToast("Account updated successfully.");
       } else {
-        const creator =
-          tab === "patient" ? api.createAdminPatient : tab === "staff" ? api.createAdminStaff : api.createAdminDentist;
+        const creator = tab === "staff" ? api.createAdminStaff : api.createAdminDentist;
         const response = await creator(form);
         pushToast(response.message || "Profile provisioned successfully.");
       }
@@ -215,10 +217,16 @@ export function AdminManageUsersPage() {
         <div className="admin-panel__heading">
           <div>
             <span className="eyebrow">Account operations</span>
-            <h2>{tab === "staff" ? "Staff Accounts" : tab === "dentist" ? "Dentist Accounts" : "Patient Accounts"}</h2>
-            <p>Provision, verify, and manage clinic identities with full lifecycle controls.</p>
+            <h2>{tab === "staff" ? "Staff Accounts" : tab === "dentist" ? "Dentist Accounts" : "Patient Portal Accounts"}</h2>
+            <p>
+              {tab === "patient"
+                ? "Patients self-register. Verify or approve accounts before they can open the dashboard and book appointments."
+                : "Provision dentist and staff identities with full lifecycle controls."}
+            </p>
           </div>
-          <button className="button button--primary" onClick={openCreate}><Plus size={16} /> Provision Profile</button>
+          {tab !== "patient" ? (
+            <button className="button button--primary" onClick={openCreate}><Plus size={16} /> Provision Profile</button>
+          ) : null}
         </div>
 
         <form

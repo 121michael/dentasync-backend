@@ -12,7 +12,7 @@ const emptyForm = {
   phone: "",
   dateOfBirth: "",
   gender: "",
-  password: "",
+  notes: "",
 };
 
 export function DentistRecordsPage() {
@@ -74,7 +74,7 @@ export function DentistRecordsPage() {
       <SectionHeading
         eyebrow="Clinical archive"
         title="Dental Records Vault"
-        detail={formatDentistDateTime(new Date())}
+        detail="Create clinical patient records for charting. These are not login accounts — patients self-register for the portal."
         action={
           <button className="button button--primary" onClick={() => setFormOpen(true)}>
             <Plus size={16} /> Add New Patient
@@ -127,13 +127,13 @@ export function DentistRecordsPage() {
               <tbody>
                 {patients.map((patient) => (
                   <tr key={patient.id}>
-                    <td><code>{patient.profileCode || patient.id}</code></td>
-                    <td><strong>{patient.fullName}</strong></td>
+                    <td><code>{patient.recordCode || patient.profileCode || patient.id}</code></td>
+                    <td><strong>{patient.fullName || patient.patientName}</strong></td>
                     <td>{patient.phone || "—"}</td>
-                    <td>{patient.ageSex}</td>
+                    <td>{patient.ageSex || [patient.age ?? "—", patient.gender || "—"].join(" / ")}</td>
                     <td>
                       <span className="dentist-date-pill">
-                        {formatDentistDate(patient.lastTreatment, "No visits yet")}
+                        {formatDentistDate(patient.lastTreatmentDate || patient.lastTreatment, "No visits yet")}
                       </span>
                     </td>
                     <td>
@@ -152,19 +152,20 @@ export function DentistRecordsPage() {
       </section>
 
       {formOpen ? (
-        <DentistModal title="Add New Patient" onClose={() => setFormOpen(false)}>
+        <DentistModal title="Add Clinical Patient Record" onClose={() => setFormOpen(false)}>
           <form className="dentist-form" onSubmit={createPatient}>
+            <p className="muted-copy">Creates a clinical chart record only — not a patient login account.</p>
             <div className="field-grid field-grid--two">
               <label className="field"><span>First Name</span><input value={form.firstName} onChange={(event) => setForm((current) => ({ ...current, firstName: event.target.value }))} required /></label>
               <label className="field"><span>Last Name</span><input value={form.lastName} onChange={(event) => setForm((current) => ({ ...current, lastName: event.target.value }))} required /></label>
-              <label className="field"><span>Email</span><input type="email" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} required /></label>
-              <label className="field"><span>Phone</span><input value={form.phone} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} required /></label>
+              <label className="field"><span>Email (optional)</span><input type="email" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} /></label>
+              <label className="field"><span>Phone (optional)</span><input value={form.phone} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} /></label>
               <label className="field"><span>Date of Birth</span><input type="date" value={form.dateOfBirth} onChange={(event) => setForm((current) => ({ ...current, dateOfBirth: event.target.value }))} /></label>
               <label className="field"><span>Sex</span><input value={form.gender} onChange={(event) => setForm((current) => ({ ...current, gender: event.target.value }))} placeholder="Female / Male" /></label>
             </div>
             <div className="dentist-modal__actions">
               <button type="button" className="button button--secondary" onClick={() => setFormOpen(false)}>Cancel</button>
-              <button className="button button--primary" disabled={busy}>{busy ? "Saving…" : "Save Patient"}</button>
+              <button className="button button--primary" disabled={busy}>{busy ? "Saving…" : "Save Clinical Record"}</button>
             </div>
           </form>
         </DentistModal>

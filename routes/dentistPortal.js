@@ -3,6 +3,7 @@
 const crypto = require("crypto");
 const bcrypt = require("bcrypt");
 const express = require("express");
+const clinicalPatients = require("../services/clinicalPatients");
 
 const QUEUE_STATUS_MAP = {
   checked_in: "checked_in",
@@ -659,269 +660,161 @@ function createDentistPortalRouter({ db, authenticateToken }) {
 
   router.get("/patients", async (req, res) => {
     const search = stringValue(req.query.search, 100);
-    const scope = dentistScopeClause("appointment", req.dentist);
-    const params = [...scope.params];
-    let searchSql = "";
-    if (search) {
-      params.push(`%${search}%`);
-      const index = params.length;
-      searchSql = ` AND (
-        patient.first_name ILIKE $${index}
-        OR patient.last_name ILIKE $${index}
-        OR patient.email ILIKE $${index}
-        OR patient.phone ILIKE $${index}
-        OR patient.id::text ILIKE $${index}
-      )`;
-    }
-
     try {
-      const result = await db.query(
-        `SELECT
-           patient.id,
-           patient.first_name,
-           patient.last_name,
-           patient.email,
-           patient.phone,
-           patient.status AS account_status,
-           patient.is_verified,
-           CONCAT_WS(' ', patient.first_name, patient.last_name) AS patient_name,
-           profile.date_of_birth,
-           profile.gender,
-           MAX(appointment.appointment_date) AS last_visit,
-           (
-             SELECT treatment.treatment
-             FROM patient_portal_treatment_records AS treatment
-             WHERE treatment.user_id = patient.id::text
-             ORDER BY treatment.treatment_date DESC NULLS LAST, treatment.id DESC
-             LIMIT 1
-           ) AS last_treatment_name,
-           (
-             SELECT treatment.treatment_date
-             FROM patient_portal_treatment_records AS treatment
-             WHERE treatment.user_id = patient.id::text
-             ORDER BY treatment.treatment_date DESC NULLS LAST, treatment.id DESC
-             LIMIT 1
-           ) AS last_treatment
-         FROM users AS patient
-         JOIN patient_portal_appointments AS appointment
-           ON appointment.user_id = patient.id::text
-         LEFT JOIN patient_portal_profiles AS profile
-           ON profile.user_id = patient.id::text
-         WHERE ${scope.sql}
-           AND LOWER(patient.role) = 'patient'
-           AND COALESCE(patient.is_archived, FALSE) = FALSE
-           ${searchSql}
-         GROUP BY
-           patient.id, patient.first_name, patient.last_name, patient.email, patient.phone,
-           patient.status, patient.is_verified, profile.date_of_birth, profile.gender
-         ORDER BY patient.last_name ASC NULLS LAST, patient.first_name ASC NULLS LAST
-         LIMIT 100`,
-        params
-      );
-
+      const patients = await clinicalPatients.listClinicalRecords(db, {
+        search,
+        limit: 100,
+      });
       return res.json({
-        patients: result.rows.map((row) =>
-          mapPatient({
-            ...row,
-            last_treatment: row.last_treatment || row.last_visit,
-          })
-        ),
+        patients: patients.map((record) => ({
+          id: record.id,
+          recordCode: record.recordCode,
+          firstName: record.firstName,
+          lastName: record.lastName,
+          fullName: record.fullName,
+          patientName: record.fullName,
+          email: record.email,
+          phone: record.phone,
+          dateOfBirth: record.dateOfBirth,
+          gender: record.gender,
+          lastVisit: record.lastTreatmentDate,
+          lastTreatment: record.lastTreatment,
+          lastTreatmentName: record.lastTreatment,
+          accountStatus: record.linkedUserId ? "linked_account" : "clinical_record",
+          linkedUserId: record.linkedUserId,
+          isClinicalRecord: true,
+        })),
       });
     } catch (error) {
+      if (clinicalPatients.isMissingRelation(error)) {
+        return res.status(503).json({
+          message: "Clinical patient records are not available. Run npm run migrate:clinical-records.",
+        });
+      }
       console.error("Dentist patients error:", error.message);
       return res.status(500).json({ message: "Unable to load patient records." });
     }
   });
 
   router.post("/patients", async (req, res) => {
-    const firstName = stringValue(req.body?.firstName, 80);
-    const lastName = stringValue(req.body?.lastName, 80);
-    const email = normalizeEmail(req.body?.email);
-    const phone = normalizePhone(req.body?.phone);
-    const dateOfBirth = stringValue(req.body?.dateOfBirth, 10);
-    const gender = stringValue(req.body?.gender, 40);
-    const password = typeof req.body?.password === "string" ? req.body.password : null;
-
-    if (!firstName || !lastName || !email || !phone) {
-      return res.status(400).json({
-        message: "First name, last name, email, and phone are required.",
-      });
-    }
-    if (dateOfBirth && !isIsoDate(dateOfBirth)) {
-      return res.status(400).json({ message: "Provide a valid date of birth." });
-    }
-    if (password && password.length < 10) {
-      return res.status(400).json({
-        message: "Password must be at least 10 characters long.",
-      });
-    }
-
-    const client = await db.connect();
-    let transactionOpen = false;
     try {
-      await client.query("BEGIN");
-      transactionOpen = true;
+      const record = await clinicalPatients.createClinicalRecord(db, req.body || {}, {
+        id: req.dentist.id,
+        role: "dentist",
+      });
 
-      const existing = await client.query(
-        "SELECT id FROM users WHERE LOWER(email) = $1 OR phone = $2 LIMIT 1",
-        [email, phone]
-      );
-      if (existing.rows.length) {
-        await client.query("ROLLBACK");
-        transactionOpen = false;
-        return res.status(409).json({
-          message: "That email address or phone number is already registered.",
-        });
-      }
-
-      const plainPassword = password || crypto.randomBytes(32).toString("base64url");
-      const passwordHash = await bcrypt.hash(plainPassword, 12);
-      const userResult = await client.query(
-        `INSERT INTO users (
-           first_name, last_name, email, phone, password_hash, role, is_verified, status
-         ) VALUES ($1, $2, $3, $4, $5, 'patient', TRUE, 'Active')
-         RETURNING id, first_name, last_name, email, phone, status, is_verified`,
-        [firstName, lastName, email, phone, passwordHash]
-      );
-      const patient = userResult.rows[0];
-
-      await client.query(
-        `INSERT INTO patient_portal_profiles (user_id, date_of_birth, gender)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (user_id) DO UPDATE SET
-           date_of_birth = COALESCE(EXCLUDED.date_of_birth, patient_portal_profiles.date_of_birth),
-           gender = COALESCE(EXCLUDED.gender, patient_portal_profiles.gender)`,
-        [String(patient.id), dateOfBirth || null, gender || null]
+      await clinicalPatients.addClinicalTreatment(
+        db,
+        record.id,
+        {
+          treatment: req.body?.treatment || "Clinical intake / new patient",
+          dentistName:
+            `Dr. ${`${req.dentist.first_name || ""} ${req.dentist.last_name || ""}`.trim()}`.trim() ||
+            "Amethyst Dentist",
+          notes: req.body?.notes || "Registered from dentist patient records vault",
+          treatmentDate: new Date().toISOString().slice(0, 10),
+          status: "planned",
+        },
+        { id: req.dentist.id, role: "dentist" }
       );
 
-      // Link the patient to this dentist's schedule so they appear in Records Vault.
-      const catalogId =
-        stringValue(req.dentist.catalog_dentist_id, 80) || String(req.dentist.id);
-      const dentistName =
-        `Dr. ${`${req.dentist.first_name || ""} ${req.dentist.last_name || ""}`.trim()}`.trim() ||
-        "Amethyst Dentist";
-      const intakeTime = `${String(new Date().getHours()).padStart(2, "0")}:${String(
-        new Date().getMinutes()
-      ).padStart(2, "0")}`;
-      await client.query(
-        `INSERT INTO patient_portal_appointments (
-           user_id, service_id, service_name, dentist_id, dentist_name,
-           appointment_date, appointment_time, coverage_type, estimated_cost, status, notes
-         ) VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, $6, 'self_pay', 0, 'pending', $7)`,
-        [
-          String(patient.id),
-          "clinical-intake",
-          "Clinical intake / new patient",
-          catalogId,
-          dentistName,
-          intakeTime,
-          "Registered from dentist patient records vault",
-        ]
-      );
-
-      await client.query("COMMIT");
-      transactionOpen = false;
       return res.status(201).json({
-        message: "Patient account created.",
-        patient: mapPatient({
-          ...patient,
-          patient_name: `${firstName} ${lastName}`,
-          date_of_birth: dateOfBirth,
-          gender,
-          account_status: patient.status,
-          last_visit: new Date().toISOString().slice(0, 10),
-        }),
+        message: "Patient clinical record created (not a login account).",
+        patient: {
+          ...record,
+          patientName: record.fullName,
+          isClinicalRecord: true,
+        },
       });
     } catch (error) {
-      if (transactionOpen) {
-        await client.query("ROLLBACK");
+      if (clinicalPatients.isMissingRelation(error)) {
+        return res.status(503).json({
+          message: "Clinical patient records are not available. Run npm run migrate:clinical-records.",
+        });
       }
       console.error("Dentist patient create error:", error.message);
-      return res.status(500).json({ message: "Unable to create the patient account." });
-    } finally {
-      client.release();
+      return res.status(error.status || 500).json({
+        message: error.status ? error.message : "Unable to create the patient record.",
+      });
+    }
+  });
+
+  router.patch("/patients/:id", async (req, res) => {
+    const recordId = Number.parseInt(req.params.id, 10);
+    if (!Number.isSafeInteger(recordId) || recordId <= 0) {
+      return res.status(400).json({ message: "A valid patient record ID is required." });
+    }
+    try {
+      const record = await clinicalPatients.updateClinicalRecord(db, recordId, req.body || {}, {
+        id: req.dentist.id,
+        role: "dentist",
+      });
+      return res.json({
+        message: "Patient record updated.",
+        patient: { ...record, patientName: record.fullName, isClinicalRecord: true },
+      });
+    } catch (error) {
+      return res.status(error.status || 500).json({
+        message: error.status ? error.message : "Unable to update the patient record.",
+      });
+    }
+  });
+
+  router.delete("/patients/:id", async (req, res) => {
+    const recordId = Number.parseInt(req.params.id, 10);
+    if (!Number.isSafeInteger(recordId) || recordId <= 0) {
+      return res.status(400).json({ message: "A valid patient record ID is required." });
+    }
+    try {
+      const record = await clinicalPatients.archiveClinicalRecord(db, recordId, {
+        id: req.dentist.id,
+        role: "dentist",
+      });
+      return res.json({
+        message: "Patient record archived.",
+        patient: { ...record, isClinicalRecord: true },
+      });
+    } catch (error) {
+      return res.status(error.status || 500).json({
+        message: error.status ? error.message : "Unable to archive the patient record.",
+      });
     }
   });
 
   router.get("/patients/:id", async (req, res) => {
-    const patientId = stringValue(req.params.id, 120);
-    if (!patientId) {
-      return res.status(400).json({ message: "A valid patient ID is required." });
+    const recordId = Number.parseInt(req.params.id, 10);
+    if (!Number.isSafeInteger(recordId) || recordId <= 0) {
+      return res.status(400).json({ message: "A valid patient record ID is required." });
     }
 
-    const scope = dentistScopeClause("appointment", req.dentist);
     try {
-      const access = await db.query(
-        `SELECT 1
-         FROM patient_portal_appointments AS appointment
-         WHERE ${scope.sql}
-           AND appointment.user_id = $${scope.params.length + 1}
-         LIMIT 1`,
-        [...scope.params, patientId]
-      );
-      if (!access.rows.length) {
-        return res.status(403).json({
-          message: "You can only view patients assigned to your clinical schedule.",
-        });
+      const detail = await clinicalPatients.getClinicalRecord(db, recordId);
+      if (!detail || detail.record.archived) {
+        return res.status(404).json({ message: "Patient record not found." });
       }
-
-      const [patientResult, appointmentsResult, treatmentsResult] = await Promise.all([
-        db.query(
-          `SELECT
-             patient.id,
-             patient.first_name,
-             patient.last_name,
-             patient.email,
-             patient.phone,
-             patient.status AS account_status,
-             CONCAT_WS(' ', patient.first_name, patient.last_name) AS patient_name,
-             profile.date_of_birth,
-             profile.gender,
-             profile.address
-           FROM users AS patient
-           LEFT JOIN patient_portal_profiles AS profile
-             ON profile.user_id = patient.id::text
-           WHERE patient.id::text = $1
-             AND LOWER(patient.role) = 'patient'
-           LIMIT 1`,
-          [patientId]
-        ),
-        db.query(
-          `SELECT appointment.*
-           FROM patient_portal_appointments AS appointment
-           WHERE ${scope.sql}
-             AND appointment.user_id = $${scope.params.length + 1}
-           ORDER BY appointment.appointment_date DESC, appointment.appointment_time DESC
-           LIMIT 20`,
-          [...scope.params, patientId]
-        ),
-        db.query(
-          `SELECT *
-           FROM patient_portal_treatment_records
-           WHERE user_id = $1
-           ORDER BY treatment_date DESC NULLS LAST, id DESC
-           LIMIT 20`,
-          [patientId]
-        ),
-      ]);
-
-      if (!patientResult.rows.length) {
-        return res.status(404).json({ message: "Patient not found." });
-      }
-
       return res.json({
-        patient: mapPatient(patientResult.rows[0]),
-        appointments: appointmentsResult.rows.map(mapAppointment),
-        treatments: treatmentsResult.rows.map((row) => ({
+        patient: {
+          ...detail.record,
+          patientName: detail.record.fullName,
+          accountStatus: detail.record.linkedUserId ? "linked_account" : "clinical_record",
+          isClinicalRecord: true,
+        },
+        appointments: [],
+        treatments: detail.treatments.map((row) => ({
           id: row.id,
           name: row.treatment,
-          dentist: row.dentist_name,
-          date: row.treatment_date,
+          dentist: row.dentistName,
+          date: row.treatmentDate,
           status: row.status,
           notes: row.notes || "",
         })),
       });
     } catch (error) {
+      if (clinicalPatients.isMissingRelation(error)) {
+        return res.status(503).json({
+          message: "Clinical patient records are not available. Run npm run migrate:clinical-records.",
+        });
+      }
       console.error("Dentist patient detail error:", error.message);
       return res.status(500).json({ message: "Unable to load the patient record." });
     }

@@ -20,7 +20,7 @@ async function startServer(app) {
   };
 }
 
-test("verification preserves a leading-zero OTP and returns a patient session redirect", async (t) => {
+test("verification preserves a leading-zero OTP and waits for administrator approval", async (t) => {
   let submittedVerification;
   const otpService = {
     async verifyOtp(payload) {
@@ -34,7 +34,7 @@ test("verification preserves a leading-zero OTP and returns a patient session re
           email: "patient@example.test",
           phone: "639333333333",
           role: "patient",
-          status: "Active",
+          status: "Pending",
           is_verified: true,
         },
       };
@@ -46,7 +46,11 @@ test("verification preserves a leading-zero OTP and returns a patient session re
   app.use(
     "/api/auth",
     createAuthRouter({
-      db: {},
+      db: {
+        async query() {
+          return { rows: [] };
+        },
+      },
       otpService,
       authenticateToken: (_req, _res, next) => next(),
       jwtSecret: "test-jwt-secret",
@@ -65,9 +69,9 @@ test("verification preserves a leading-zero OTP and returns a patient session re
 
   assert.equal(response.status, 200);
   assert.deepEqual(submittedVerification, { requestId: REQUEST_ID, otp: "012345" });
-  assert.equal(body.redirectTo, "/patient/dashboard");
+  assert.equal(body.requiresAdminApproval, true);
   assert.equal(body.user.isVerified, true);
-  assert.equal(typeof body.token, "string");
+  assert.equal(body.token, undefined);
 });
 
 test("legacy phone-and-OTP clients resolve the active request before verification", async (t) => {
@@ -78,7 +82,11 @@ test("legacy phone-and-OTP clients resolve the active request before verificatio
   app.use(
     "/api/auth",
     createAuthRouter({
-      db: {},
+      db: {
+        async query() {
+          return { rows: [] };
+        },
+      },
       otpService: {
         async findActiveRequestIdByPhone(phone) {
           resolvedPhone = phone;
@@ -95,7 +103,7 @@ test("legacy phone-and-OTP clients resolve the active request before verificatio
               email: "patient@example.test",
               phone: "639333333333",
               role: "patient",
-              status: "Active",
+              status: "Pending",
               is_verified: true,
             },
           };
@@ -119,7 +127,7 @@ test("legacy phone-and-OTP clients resolve the active request before verificatio
   assert.equal(response.status, 200);
   assert.equal(resolvedPhone, "639333333333");
   assert.deepEqual(submittedVerification, { requestId: REQUEST_ID, otp: "012345" });
-  assert.equal(body.redirectTo, "/patient/dashboard");
+  assert.equal(body.requiresAdminApproval, true);
 });
 
 test("verification rejects an OTP sent as a number because leading zeros would be lost", async (t) => {

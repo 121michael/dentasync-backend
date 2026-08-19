@@ -90,6 +90,8 @@ export function AuthPage() {
         });
         setScreen("otp");
         setMessage("Your account still needs verification. Request a fresh code to continue.");
+      } else if (error instanceof ApiError && error.data?.requiresAdminApproval) {
+        setMessage(error.message);
       } else {
         setMessage(error.message);
       }
@@ -158,6 +160,15 @@ export function AuthPage() {
         otp: form.otp,
       });
       sessionStorage.removeItem(PENDING_OTP_KEY);
+      if (response.requiresAdminApproval || !response.token) {
+        setPendingOtp(null);
+        setMessage(
+          response.message ||
+            "Email verified. Wait for administrator approval before signing in to book appointments."
+        );
+        navigate("/login");
+        return;
+      }
       startSession(response.token, response.user);
       navigate(response.redirectTo || "/dashboard");
     } catch (error) {

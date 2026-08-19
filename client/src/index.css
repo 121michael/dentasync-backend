@@ -2402,9 +2402,23 @@ strong {
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
 }
-.admin-status--operational,
-.admin-status--verified { color: var(--emerald); background: var(--emerald-wash); }
-.admin-status--archived { color: #3974ad; background: #eaf3ff; }
+.admin-camera-panel {
+  display: grid;
+  gap: .85rem;
+  margin: .35rem 0 1rem;
+}
+.admin-camera-preview {
+  width: min(100%, 720px);
+  max-height: 420px;
+  border-radius: 18px;
+  background: #1a1024;
+  object-fit: cover;
+  box-shadow: 0 18px 40px rgba(40, 18, 70, .18);
+}
+.admin-status--clinical_record,
+.admin-status--linked_account { text-transform: capitalize; }
+.admin-status--clinical_record { color: #3974ad; background: #eaf3ff; }
+.admin-status--linked_account { color: var(--emerald); background: var(--emerald-wash); }
 .admin-stat-card__top {
   display: flex;
   align-items: center;

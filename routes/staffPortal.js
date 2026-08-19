@@ -3,6 +3,7 @@
 const crypto = require("crypto");
 const bcrypt = require("bcrypt");
 const express = require("express");
+const clinicalPatients = require("../services/clinicalPatients");
 
 const QUEUE_STATUS_MAP = {
   checked_in: "checked_in",
@@ -599,234 +600,174 @@ function createStaffPortalRouter({
 
   router.get("/patients", async (req, res) => {
     const search = stringValue(req.query.search, 100);
-    const params = [];
-    const clauses = [
-      "LOWER(patient.role) = 'patient'",
-      "COALESCE(patient.is_archived, FALSE) = FALSE",
-    ];
-
-    if (search) {
-      params.push(`%${search}%`);
-      clauses.push(
-        `(patient.first_name ILIKE $${params.length}
-          OR patient.last_name ILIKE $${params.length}
-          OR patient.email ILIKE $${params.length}
-          OR patient.phone ILIKE $${params.length})`
-      );
-    }
-
     try {
-      const result = await db.query(
-        `SELECT
-           patient.id,
-           patient.first_name,
-           patient.last_name,
-           patient.email,
-           patient.phone,
-           patient.status AS account_status,
-           patient.is_verified,
-           CONCAT_WS(' ', patient.first_name, patient.last_name) AS patient_name,
-           MAX(appointment.appointment_date) AS last_visit
-         FROM users AS patient
-         LEFT JOIN patient_portal_appointments AS appointment ON appointment.user_id = patient.id::text
-         WHERE ${clauses.join(" AND ")}
-         GROUP BY patient.id, patient.first_name, patient.last_name, patient.email, patient.phone, patient.status, patient.is_verified
-         ORDER BY patient.last_name ASC NULLS LAST, patient.first_name ASC NULLS LAST
-         LIMIT 100`,
-        params
-      );
-      return res.json({ patients: result.rows.map(mapPatient) });
+      const patients = await clinicalPatients.listClinicalRecords(db, { search, limit: 100 });
+      return res.json({
+        patients: patients.map((record) => ({
+          id: record.id,
+          recordCode: record.recordCode,
+          firstName: record.firstName,
+          lastName: record.lastName,
+          fullName: record.fullName,
+          patientName: record.fullName,
+          email: record.email,
+          phone: record.phone,
+          dateOfBirth: record.dateOfBirth,
+          gender: record.gender,
+          lastVisit: record.lastTreatmentDate,
+          accountStatus: record.linkedUserId ? "linked_account" : "clinical_record",
+          isVerified: Boolean(record.linkedUserId),
+          isClinicalRecord: true,
+        })),
+      });
     } catch (error) {
+      if (clinicalPatients.isMissingRelation(error)) {
+        return res.status(503).json({
+          message: "Clinical patient records are not available. Run npm run migrate:clinical-records.",
+        });
+      }
       console.error("Staff patient search error:", error.message);
       return res.status(500).json({ message: "Unable to load patient records." });
     }
   });
 
   router.post("/patients", async (req, res) => {
-    const firstName = stringValue(req.body?.firstName, 80);
-    const lastName = stringValue(req.body?.lastName, 80);
-    const dateOfBirth = stringValue(req.body?.dateOfBirth, 10);
-    const gender = stringValue(req.body?.gender, 40);
-    const phone = normalizePhone(req.body?.phone);
-    const email = normalizeEmail(req.body?.email);
-    const address = stringValue(req.body?.address, 500);
-    const emergencyContact = stringValue(req.body?.emergencyContact, 180);
-    const notes = stringValue(req.body?.medicalDentalNotes, 2000);
-
-    if (!firstName || !lastName || !dateOfBirth || !isIsoDate(dateOfBirth) || !gender || !phone || !email || !address || !emergencyContact) {
-      return res.status(400).json({
-        message: "Complete the required patient information before registering the record.",
-      });
-    }
-
-    const client = await db.connect();
-    let transactionOpen = false;
-    let patient;
     try {
-      await client.query("BEGIN");
-      transactionOpen = true;
-      const existing = await client.query(
-        "SELECT id FROM users WHERE LOWER(email) = $1 OR phone = $2 LIMIT 1",
-        [email, phone]
+      const record = await clinicalPatients.createClinicalRecord(
+        db,
+        {
+          firstName: req.body?.firstName,
+          lastName: req.body?.lastName,
+          email: req.body?.email,
+          phone: req.body?.phone,
+          dateOfBirth: req.body?.dateOfBirth,
+          gender: req.body?.gender,
+          address: req.body?.address,
+          notes: [req.body?.emergencyContact, req.body?.medicalDentalNotes]
+            .filter(Boolean)
+            .join(" | "),
+        },
+        { id: req.staff.id, role: "staff" }
       );
-      if (existing.rows.length) {
-        await client.query("ROLLBACK");
-        transactionOpen = false;
-        return res.status(409).json({ message: "That email address or phone number is already registered." });
+
+      try {
+        await notifyStaff({
+          type: "patient",
+          title: "Patient clinical record registered",
+          body: `${record.fullName} was added to the clinical patient registry (not a login account).`,
+          entityType: "clinical_patient",
+          entityId: record.id,
+        });
+      } catch (notifyError) {
+        console.warn("Staff registration notification was not created:", notifyError.message);
       }
 
-      const temporaryPassword = crypto.randomBytes(32).toString("base64url");
-      const passwordHash = await bcrypt.hash(temporaryPassword, 12);
-      const userResult = await client.query(
-        `INSERT INTO users (
-           first_name, last_name, email, phone, password_hash, role, is_verified, status
-         ) VALUES ($1, $2, $3, $4, $5, 'patient', TRUE, 'Active')
-         RETURNING id, first_name, last_name, email, phone, status, is_verified`,
-        [firstName, lastName, email, phone, passwordHash]
-      );
-      patient = userResult.rows[0];
-
-      await client.query(
-        `INSERT INTO patient_portal_profiles (
-           user_id, date_of_birth, gender, address, emergency_contact_name, dental_concerns
-         ) VALUES ($1, $2, $3, $4, $5, $6)`,
-        [String(patient.id), dateOfBirth, gender, address, emergencyContact, notes]
-      );
-
-      await client.query("COMMIT");
-      transactionOpen = false;
+      return res.status(201).json({
+        message: "Patient clinical record created (not a login account).",
+        patient: {
+          ...record,
+          patientName: record.fullName,
+          accountStatus: "clinical_record",
+          isClinicalRecord: true,
+        },
+        invitationSent: false,
+      });
     } catch (error) {
-      if (transactionOpen) {
-        await client.query("ROLLBACK");
-      }
-      if (error.code === "23505") {
-        return res.status(409).json({ message: "That email address or phone number is already registered." });
+      if (clinicalPatients.isMissingRelation(error)) {
+        return res.status(503).json({
+          message: "Clinical patient records are not available. Run npm run migrate:clinical-records.",
+        });
       }
       console.error("Staff patient registration error:", error.message);
-      return res.status(500).json({ message: "Unable to register the patient." });
-    } finally {
-      client.release();
+      return res.status(error.status || 500).json({
+        message: error.status ? error.message : "Unable to register the patient record.",
+      });
     }
+  });
 
-    let invitationSent = false;
-    if (passwordResetService) {
-      try {
-        await passwordResetService.issuePasswordReset({
-          ...patient,
-          role: "patient",
-          first_name: patient.first_name,
-          last_name: patient.last_name,
-        });
-        invitationSent = true;
-      } catch (error) {
-        console.warn("Patient invitation email was not sent:", error.message);
-      }
+  router.patch("/patients/:id", async (req, res) => {
+    const recordId = Number.parseInt(req.params.id, 10);
+    if (!Number.isSafeInteger(recordId) || recordId <= 0) {
+      return res.status(400).json({ message: "A valid patient record ID is required." });
     }
-
     try {
-      await notifyStaff({
-        type: "patient",
-        title: "Patient record registered",
-        body: `${firstName} ${lastName} was added to the patient database.`,
-        entityType: "patient",
-        entityId: patient.id,
+      const record = await clinicalPatients.updateClinicalRecord(db, recordId, req.body || {}, {
+        id: req.staff.id,
+        role: "staff",
+      });
+      return res.json({
+        message: "Patient record updated.",
+        patient: { ...record, patientName: record.fullName, isClinicalRecord: true },
       });
     } catch (error) {
-      console.warn("Staff registration notification was not created:", error.message);
+      return res.status(error.status || 500).json({
+        message: error.status ? error.message : "Unable to update the patient record.",
+      });
     }
+  });
 
-    return res.status(201).json({
-      message: invitationSent
-        ? "Patient record created and a secure account setup link was sent."
-        : "Patient record created successfully.",
-      patient: mapPatient({
-        ...patient,
-        patient_name: `${patient.first_name} ${patient.last_name}`,
-        account_status: patient.status,
-      }),
-      invitationSent,
-    });
+  router.delete("/patients/:id", async (req, res) => {
+    const recordId = Number.parseInt(req.params.id, 10);
+    if (!Number.isSafeInteger(recordId) || recordId <= 0) {
+      return res.status(400).json({ message: "A valid patient record ID is required." });
+    }
+    try {
+      const record = await clinicalPatients.archiveClinicalRecord(db, recordId, {
+        id: req.staff.id,
+        role: "staff",
+      });
+      return res.json({
+        message: "Patient record archived.",
+        patient: { ...record, isClinicalRecord: true },
+      });
+    } catch (error) {
+      return res.status(error.status || 500).json({
+        message: error.status ? error.message : "Unable to archive the patient record.",
+      });
+    }
   });
 
   router.get("/patients/:id", async (req, res) => {
-    const patientId = stringValue(req.params.id, 120);
-    if (!patientId) {
-      return res.status(400).json({ message: "A valid patient ID is required." });
+    const recordId = Number.parseInt(req.params.id, 10);
+    if (!Number.isSafeInteger(recordId) || recordId <= 0) {
+      return res.status(400).json({ message: "A valid patient record ID is required." });
     }
 
     try {
-      const [patientResult, profileResult, appointmentResult, recordResult] = await Promise.all([
-        db.query(
-          `SELECT
-             id, first_name, last_name, email, phone, status, is_verified, created_at,
-             CONCAT_WS(' ', first_name, last_name) AS patient_name
-           FROM users
-           WHERE id::text = $1
-             AND LOWER(role) = 'patient'
-             AND COALESCE(is_archived, FALSE) = FALSE
-           LIMIT 1`,
-          [patientId]
-        ),
-        db.query(
-          `SELECT date_of_birth, gender, address, emergency_contact_name,
-                  emergency_contact_relationship, emergency_contact_phone,
-                  allergies, existing_conditions, current_medications, dental_concerns,
-                  hmo_provider, hmo_status
-           FROM patient_portal_profiles
-           WHERE user_id = $1`,
-          [patientId]
-        ),
-        db.query(
-          `SELECT id, service_name, dentist_name, appointment_date, appointment_time, status, notes
-           FROM patient_portal_appointments
-           WHERE user_id = $1
-           ORDER BY appointment_date DESC, appointment_time DESC
-           LIMIT 30`,
-          [patientId]
-        ),
-        db.query(
-          `SELECT id, treatment, dentist_name, treatment_date, status, notes
-           FROM patient_portal_treatment_records
-           WHERE user_id = $1
-           ORDER BY treatment_date DESC
-           LIMIT 30`,
-          [patientId]
-        ),
-      ]);
-
-      if (!patientResult.rows.length) {
+      const detail = await clinicalPatients.getClinicalRecord(db, recordId);
+      if (!detail || detail.record.archived) {
         return res.status(404).json({ message: "Patient record not found." });
       }
-
-      const patient = patientResult.rows[0];
       return res.json({
         patient: {
-          ...mapPatient({
-            ...patient,
-            account_status: patient.status,
-          }),
-          createdAt: patient.created_at,
-          profile: profileResult.rows[0] || null,
-          appointments: appointmentResult.rows.map((appointment) => ({
-            id: appointment.id,
-            treatment: appointment.service_name,
-            dentist: appointment.dentist_name,
-            date: appointment.appointment_date,
-            time: appointment.appointment_time,
-            status: appointment.status,
-            notes: appointment.notes || "",
-          })),
-          treatments: recordResult.rows.map((record) => ({
+          ...detail.record,
+          patientName: detail.record.fullName,
+          accountStatus: detail.record.linkedUserId ? "linked_account" : "clinical_record",
+          isClinicalRecord: true,
+          createdAt: detail.record.createdAt,
+          profile: {
+            date_of_birth: detail.record.dateOfBirth,
+            gender: detail.record.gender,
+            address: detail.record.address,
+            dental_concerns: detail.record.notes,
+          },
+          appointments: [],
+          treatments: detail.treatments.map((record) => ({
             id: record.id,
             treatment: record.treatment,
-            dentist: record.dentist_name,
-            date: record.treatment_date,
+            dentist: record.dentistName,
+            date: record.treatmentDate,
             status: record.status,
             notes: record.notes || "",
           })),
         },
       });
     } catch (error) {
+      if (clinicalPatients.isMissingRelation(error)) {
+        return res.status(503).json({
+          message: "Clinical patient records are not available. Run npm run migrate:clinical-records.",
+        });
+      }
       console.error("Staff patient detail error:", error.message);
       return res.status(500).json({ message: "Unable to load the patient record." });
     }

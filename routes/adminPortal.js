@@ -7,6 +7,7 @@ const express = require("express");
 const { attachAdminDocumentSyncRoutes } = require("./adminDocumentSync");
 const { attachAdminCommandCenterRoutes } = require("./adminCommandCenter");
 const { writeAdminAudit } = require("../services/adminAudit");
+const clinicalPatients = require("../services/clinicalPatients");
 
 const APPOINTMENT_ACTIONS = new Set([
   "approve",
@@ -134,7 +135,7 @@ function statusFilterClause(alias, status, params) {
   }
 
   if (normalized === "pending") {
-    return `${alias}.is_verified = FALSE`;
+    return `(${alias}.is_verified = FALSE OR LOWER(COALESCE(${alias}.status, 'active')) IN ('pending', 'unverified'))`;
   }
   if (normalized === "active") {
     return `LOWER(COALESCE(${alias}.status, 'active')) = 'active' AND ${alias}.is_verified = TRUE`;
@@ -620,125 +621,74 @@ function createAdminPortalRouter({
   router.get("/staff", (req, res) => listAccountsByRole(req, res, "staff"));
   router.get("/dentists", (req, res) => listAccountsByRole(req, res, "dentist"));
 
-  router.post("/patients", async (req, res) => {
-    const firstName = stringValue(req.body?.firstName, 80);
-    const lastName = stringValue(req.body?.lastName, 80);
-    const email = normalizeEmail(req.body?.email);
-    const phone = normalizePhone(req.body?.phone);
-    const dateOfBirth = stringValue(req.body?.dateOfBirth, 10);
-    const gender = stringValue(req.body?.gender, 40);
-    const address = stringValue(req.body?.address, 500);
-    const notes = stringValue(req.body?.notes, 2000);
-
-    if (!firstName || !lastName || !email || !phone) {
-      return res.status(400).json({
-        message: "First name, last name, email, and phone are required.",
-      });
-    }
-    if (dateOfBirth && !isIsoDate(dateOfBirth)) {
-      return res.status(400).json({ message: "Provide a valid date of birth (YYYY-MM-DD)." });
-    }
-
-    const client = await db.connect();
-    let transactionOpen = false;
-    let patient;
+  router.get("/clinical-records", async (req, res) => {
+    const search = stringValue(req.query.search, 100);
     try {
-      await client.query("BEGIN");
-      transactionOpen = true;
-
-      const existing = await client.query(
-        "SELECT id FROM users WHERE LOWER(email) = $1 OR phone = $2 LIMIT 1",
-        [email, phone]
-      );
-      if (existing.rows.length) {
-        await client.query("ROLLBACK");
-        transactionOpen = false;
-        return res.status(409).json({
-          message: "That email address or phone number is already registered.",
-        });
-      }
-
-      const temporaryPassword = crypto.randomBytes(32).toString("base64url");
-      const passwordHash = await bcrypt.hash(temporaryPassword, 12);
-      const userResult = await client.query(
-        `INSERT INTO users (
-           first_name, last_name, email, phone, password_hash, role, is_verified, status
-         ) VALUES ($1, $2, $3, $4, $5, 'patient', TRUE, 'Active')
-         RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at`,
-        [firstName, lastName, email, phone, passwordHash]
-      );
-      patient = userResult.rows[0];
-
-      if (dateOfBirth || gender || address || notes) {
-        await client.query(
-          `INSERT INTO patient_portal_profiles (
-             user_id, date_of_birth, gender, address, dental_concerns
-           ) VALUES ($1, $2, $3, $4, $5)
-           ON CONFLICT (user_id) DO UPDATE SET
-             date_of_birth = COALESCE(EXCLUDED.date_of_birth, patient_portal_profiles.date_of_birth),
-             gender = COALESCE(EXCLUDED.gender, patient_portal_profiles.gender),
-             address = COALESCE(EXCLUDED.address, patient_portal_profiles.address),
-             dental_concerns = COALESCE(EXCLUDED.dental_concerns, patient_portal_profiles.dental_concerns),
-             updated_at = CURRENT_TIMESTAMP`,
-          [String(patient.id), dateOfBirth, gender, address, notes]
-        );
-      }
-
-      await client.query("COMMIT");
-      transactionOpen = false;
+      const records = await clinicalPatients.listClinicalRecords(db, {
+        search,
+        limit: Number.parseInt(req.query.limit, 10) || 50,
+        offset: Number.parseInt(req.query.offset, 10) || 0,
+      });
+      return res.json({
+        records,
+        total: records.length,
+        note: "Clinical patient records are maintained by dentists and staff. Administrators have view-only access.",
+      });
     } catch (error) {
-      if (transactionOpen) {
-        await client.query("ROLLBACK");
-      }
-      if (error.code === "23505") {
-        return res.status(409).json({
-          message: "That email address or phone number is already registered.",
+      if (clinicalPatients.isMissingRelation(error)) {
+        return res.status(503).json({
+          message: "Clinical patient records are not available. Run npm run migrate:clinical-records.",
         });
       }
-      if (isMissingRelation(error)) {
-        return migrationUnavailable(res, "Patient portal");
-      }
-      console.error("Admin patient create error:", error.message);
-      return res.status(500).json({ message: "Unable to create the patient account." });
-    } finally {
-      client.release();
+      console.error("Admin clinical records error:", error.message);
+      return res.status(500).json({ message: "Unable to load clinical patient records." });
     }
+  });
 
-    let invitationSent = false;
-    if (passwordResetService) {
-      try {
-        await passwordResetService.issuePasswordReset({
-          ...patient,
-          role: "patient",
-          first_name: patient.first_name,
-          last_name: patient.last_name,
+  router.get("/clinical-records/:id", async (req, res) => {
+    const recordId = numericId(req.params.id);
+    if (!recordId) {
+      return res.status(400).json({ message: "A valid clinical record ID is required." });
+    }
+    try {
+      const detail = await clinicalPatients.getClinicalRecord(db, recordId);
+      if (!detail) {
+        return res.status(404).json({ message: "Clinical patient record not found." });
+      }
+      return res.json(detail);
+    } catch (error) {
+      if (clinicalPatients.isMissingRelation(error)) {
+        return res.status(503).json({
+          message: "Clinical patient records are not available. Run npm run migrate:clinical-records.",
         });
-        invitationSent = true;
-      } catch (error) {
-        console.warn("Patient invitation email was not sent:", error.message);
       }
+      console.error("Admin clinical record detail error:", error.message);
+      return res.status(500).json({ message: "Unable to load the clinical patient record." });
     }
+  });
 
-    if (typeof notifyAdmin === "function") {
-      try {
-        await notifyAdmin({
-          type: "patient",
-          title: "Patient account created",
-          body: `${firstName} ${lastName} was added by an administrator.`,
-          entityType: "patient",
-          entityId: patient.id,
-        });
-      } catch (error) {
-        console.warn("Admin patient notification was not created:", error.message);
-      }
-    }
+  router.post("/patients", async (_req, res) => {
+    return res.status(403).json({
+      message:
+        "Administrators cannot create patient login accounts. Patients self-register and await admin approval. Dentists and staff create clinical patient records only.",
+    });
+  });
 
-    return res.status(201).json({
-      message: invitationSent
-        ? "Patient account created and a secure setup link was sent."
-        : "Patient account created successfully.",
-      patient: mapAccount(patient),
-      invitationSent,
+  router.post("/clinical-records", async (_req, res) => {
+    return res.status(403).json({
+      message: "Only dentists and staff can create or edit clinical patient records.",
+    });
+  });
+
+  router.patch("/clinical-records/:id", async (_req, res) => {
+    return res.status(403).json({
+      message: "Only dentists and staff can create or edit clinical patient records.",
+    });
+  });
+
+  router.delete("/clinical-records/:id", async (_req, res) => {
+    return res.status(403).json({
+      message: "Only dentists and staff can archive clinical patient records.",
     });
   });
 

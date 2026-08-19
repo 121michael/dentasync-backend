@@ -139,7 +139,7 @@ function createAuthRouter({
       const userResult = await db.query(
         `INSERT INTO users
            (first_name, last_name, email, phone, password_hash, role, is_verified, status)
-         VALUES ($1, $2, $3, $4, $5, 'patient', FALSE, 'Active')
+         VALUES ($1, $2, $3, $4, $5, 'patient', FALSE, 'Pending')
          RETURNING id, first_name, last_name, email, phone, role, status, is_verified`,
         [
           computedFirstName,
@@ -270,18 +270,28 @@ function createAuthRouter({
         return res.status(400).json({ message: "Invalid or expired OTP code." });
       }
 
-      const token = jwt.sign(
-        { id: result.user.id, role: result.user.role },
-        jwtSecret,
-        { expiresIn: "8h" }
-      );
-      await recordLoginActivity(result.user, req, "otp_verified");
+      // Keep account pending until an administrator approves portal access.
+      try {
+        await db.query(
+          `UPDATE users
+           SET status = CASE
+             WHEN LOWER(COALESCE(status, 'pending')) IN ('active') THEN status
+             ELSE 'Pending'
+           END
+           WHERE id = $1`,
+          [result.user.id]
+        );
+      } catch (statusError) {
+        console.warn("Unable to mark patient as pending approval:", statusError.message);
+      }
+
+      await recordLoginActivity(result.user, req, "otp_verified_pending_approval");
 
       return res.status(200).json({
-        message: "Account verified successfully!",
-        token,
-        user: formatUserPayload(result.user),
-        redirectTo: "/patient/dashboard",
+        message:
+          "Email verified. An administrator must approve your account before you can open the patient dashboard and book appointments.",
+        requiresAdminApproval: true,
+        user: formatUserPayload({ ...result.user, is_verified: true, status: "Pending" }),
       });
     } catch (error) {
       console.error("OTP verification error:", error.message);
@@ -327,6 +337,13 @@ function createAuthRouter({
       }
 
       const currentStatus = (user.status || "active").toLowerCase();
+      if (["pending", "unverified"].includes(currentStatus)) {
+        return res.status(403).json({
+          message:
+            "Your account is awaiting administrator approval. Once approved, you can open the dashboard and create appointments.",
+          requiresAdminApproval: true,
+        });
+      }
       if (["inactive", "disabled", "suspended", "rejected"].includes(currentStatus)) {
         return res.status(403).json({
           message: `Account is ${currentStatus}. Please contact the administrator.`,
