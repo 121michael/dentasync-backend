@@ -384,7 +384,9 @@ export function AdminSyncPage() {
                 </>
               ) : (
                 <p className="muted-copy">
-                  {file ? `Captured: ${file.name}` : "Open the camera to scan a hard-copy dental record."}
+                  {file
+                    ? `Captured: ${file.name}`
+                    : "Allow camera access when prompted. On a laptop, use the built-in webcam; on phone/tablet, point at the paper record."}
                 </p>
               )}
               {!cameraOpen ? (
