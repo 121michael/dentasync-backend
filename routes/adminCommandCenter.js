@@ -226,7 +226,7 @@ function attachAdminCommandCenterRoutes(router, { db }) {
              is_verified = FALSE
              OR LOWER(COALESCE(status, 'active')) IN ('pending', 'unverified')
            )
-           AND LOWER(role) IN ('patient', 'staff', 'dentist')`
+           AND LOWER(role) = 'patient'`
       );
       const result = await db.query(
         `SELECT
@@ -238,7 +238,7 @@ function attachAdminCommandCenterRoutes(router, { db }) {
              is_verified = FALSE
              OR LOWER(COALESCE(status, 'active')) IN ('pending', 'unverified')
            )
-           AND LOWER(role) IN ('patient', 'staff', 'dentist')
+           AND LOWER(role) = 'patient'
          ORDER BY created_at DESC
          LIMIT $1 OFFSET $2`,
         [limit, offset]

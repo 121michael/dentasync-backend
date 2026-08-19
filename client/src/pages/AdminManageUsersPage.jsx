@@ -46,7 +46,7 @@ export function AdminManageUsersPage() {
         api.getAdminPendingRegistrations({ limit: 50 }),
       ]);
       setData(list);
-      setPending(pendingResponse.requests || []);
+      setPending((pendingResponse.requests || []).filter((request) => request.role === "patient"));
       setError("");
     } catch (loadError) {
       setError(loadError.message);
@@ -76,6 +76,10 @@ export function AdminManageUsersPage() {
   }
 
   function openEdit(user) {
+    if (tab === "patient") {
+      pushToast("Patient portal accounts are self-registered. Use Approve or Reject instead.", "warning");
+      return;
+    }
     setEditing(user);
     setForm({
       ...emptyForm,
@@ -220,8 +224,8 @@ export function AdminManageUsersPage() {
             <h2>{tab === "staff" ? "Staff Accounts" : tab === "dentist" ? "Dentist Accounts" : "Patient Portal Accounts"}</h2>
             <p>
               {tab === "patient"
-                ? "Patients self-register. Verify or approve accounts before they can open the dashboard and book appointments."
-                : "Provision dentist and staff identities with full lifecycle controls."}
+                ? "Patients create their own accounts. Approve them here so they can sign in, open the dashboard, and book appointments. Admin does not create patient accounts."
+                : "Admin can create dentist and staff accounts only."}
             </p>
           </div>
           {tab !== "patient" ? (
@@ -250,7 +254,7 @@ export function AdminManageUsersPage() {
                 <tr>
                   <th>Account Name</th>
                   <th>System ID</th>
-                  <th>{tab === "staff" ? "Operational Role" : tab === "dentist" ? "Specialization" : "Contact Endpoint"}</th>
+                  <th>{tab === "staff" ? "Operational Role" : tab === "dentist" ? "Specialization" : "Email"}</th>
                   <th>{tab === "patient" ? "Phone" : "Contact Endpoint"}</th>
                   <th>Operational Status</th>
                   <th>Lifecycle Action</th>
@@ -270,19 +274,29 @@ export function AdminManageUsersPage() {
                     </td>
                     <td>{tab === "patient" ? user.phone || "—" : user.email}</td>
                     <td>
-                      <AdminStatusBadge status={!user.verified ? "pending" : user.status === "active" ? "operational" : user.status} />
+                      <AdminStatusBadge status={!user.verified || user.status === "pending" ? "pending" : user.status === "active" ? "operational" : user.status} />
                     </td>
                     <td>
                       <div className="admin-row-actions">
                         <button className="button button--secondary button--compact" onClick={() => setDetail(user)}><Eye size={14} /> View</button>
-                        <button className="button button--secondary button--compact" onClick={() => openEdit(user)}><Pencil size={14} /> Edit</button>
-                        <button className="button button--secondary button--compact" onClick={() => runLifecycle(user, "verify", `Verify ${user.fullName}?`)}><ShieldCheck size={14} /> Verify</button>
-                        <button className="button button--secondary button--compact" onClick={() => runLifecycle(user, "approve", `Approve ${user.fullName}?`)}>Approve</button>
-                        <button className="button button--secondary button--compact" onClick={() => runLifecycle(user, "reject", `Reject ${user.fullName}?`)}>Reject</button>
-                        <button className="button button--secondary button--compact" onClick={() => runLifecycle(user, "suspend", `Suspend ${user.fullName}?`)}>Suspend</button>
-                        <button className="button button--secondary button--compact" onClick={() => runLifecycle(user, "archive", `Are you sure you want to archive this account?`)}>Archive</button>
-                        <button className="button button--secondary button--compact" onClick={() => changeRole(user)}>Role</button>
-                        <button className="button button--secondary button--compact" onClick={() => resetPassword(user)}><KeyRound size={14} /> Reset</button>
+                        {tab === "patient" ? (
+                          <>
+                            <button className="button button--primary button--compact" onClick={() => runLifecycle(user, "approve", `Approve ${user.fullName} so they can open the patient dashboard and book appointments?`)}>Approve</button>
+                            <button className="button button--danger button--compact" onClick={() => runLifecycle(user, "reject", `Reject ${user.fullName}? Login access will be blocked.`)}>Reject</button>
+                            <button className="button button--secondary button--compact" onClick={() => runLifecycle(user, "suspend", `Suspend ${user.fullName}?`)}>Suspend</button>
+                          </>
+                        ) : (
+                          <>
+                            <button className="button button--secondary button--compact" onClick={() => openEdit(user)}><Pencil size={14} /> Edit</button>
+                            <button className="button button--secondary button--compact" onClick={() => runLifecycle(user, "verify", `Verify ${user.fullName}?`)}><ShieldCheck size={14} /> Verify</button>
+                            <button className="button button--secondary button--compact" onClick={() => runLifecycle(user, "approve", `Approve ${user.fullName}?`)}>Approve</button>
+                            <button className="button button--secondary button--compact" onClick={() => runLifecycle(user, "reject", `Reject ${user.fullName}?`)}>Reject</button>
+                            <button className="button button--secondary button--compact" onClick={() => runLifecycle(user, "suspend", `Suspend ${user.fullName}?`)}>Suspend</button>
+                            <button className="button button--secondary button--compact" onClick={() => runLifecycle(user, "archive", `Are you sure you want to archive this account?`)}>Archive</button>
+                            <button className="button button--secondary button--compact" onClick={() => changeRole(user)}>Role</button>
+                            <button className="button button--secondary button--compact" onClick={() => resetPassword(user)}><KeyRound size={14} /> Reset</button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -291,7 +305,10 @@ export function AdminManageUsersPage() {
             </table>
           </div>
         ) : (
-          <EmptyState title="No accounts found" detail="Provision a new profile or adjust your search filters." />
+          <EmptyState
+            title={tab === "patient" ? "No patient portal accounts yet" : "No accounts found"}
+            detail={tab === "patient" ? "Patients must register themselves. Approved accounts appear here." : "Provision a dentist or staff profile to get started."}
+          />
         )}
       </section>
 
@@ -299,8 +316,11 @@ export function AdminManageUsersPage() {
         <div className="admin-panel__heading">
           <div>
             <span className="eyebrow">Registration verification</span>
-            <h2>Pending Registration Requests</h2>
-            <p>Approve verified identities or reject requests to block protected dashboard access.</p>
+            <h2>Pending Patient Registration Requests</h2>
+            <p>
+              After OTP verification, patients wait here for admin approval. Once approved, they can sign in and
+              open the dashboard to create appointments.
+            </p>
           </div>
         </div>
         {pending.length ? (
