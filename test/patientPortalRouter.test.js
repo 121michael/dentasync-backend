@@ -52,7 +52,8 @@ test("patient portal exposes the booking catalog only to patient accounts", asyn
 
     assert.equal(body.services.length, 8);
     assert.equal(body.services[0].id, "cleaning");
-    assert.equal(body.dentists.length, 3);
+    assert.equal(body.dentists.length, 4);
+    assert.equal(body.dentists[0].id, "dr-sarah-cruz");
   } finally {
     await portal.close();
   }
