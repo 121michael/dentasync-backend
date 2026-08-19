@@ -6,6 +6,7 @@ const path = require("path");
 const bcrypt = require("bcrypt");
 const express = require("express");
 const multer = require("multer");
+const { linkClinicalRecordsToUser } = require("../services/clinicalPatients");
 
 const SERVICES = [
   {
@@ -733,7 +734,29 @@ function createPatientPortalRouter({
     }
 
     try {
-      const [recordsResult, documentsResult, summaryResult] = await Promise.all([
+      // Attach any matching clinical charts created by dentist/staff.
+      try {
+        const profile = await db.query(
+          `SELECT email, phone, first_name, last_name
+           FROM users
+           WHERE id::text = $1
+           LIMIT 1`,
+          [userId]
+        );
+        if (profile.rows[0]) {
+          await linkClinicalRecordsToUser(db, {
+            id: userId,
+            email: profile.rows[0].email,
+            phone: profile.rows[0].phone,
+          });
+        }
+      } catch (linkError) {
+        if (linkError?.code !== "42P01") {
+          console.warn("Clinical record link skipped:", linkError.message);
+        }
+      }
+
+      const [recordsResult, documentsResult, summaryResult, clinicalResult] = await Promise.all([
         db.query(
           `SELECT *
            FROM patient_portal_treatment_records
@@ -757,6 +780,29 @@ function createPatientPortalRouter({
            WHERE user_id = $1`,
           [userId]
         ),
+        db.query(
+          `SELECT
+             treatment.id,
+             treatment.treatment,
+             treatment.dentist_name,
+             treatment.clinic_location,
+             treatment.coverage_status,
+             treatment.status,
+             treatment.treatment_date,
+             treatment.notes
+           FROM clinic_patient_treatments AS treatment
+           INNER JOIN clinic_patient_records AS record
+             ON record.id = treatment.clinical_record_id
+           WHERE record.linked_user_id = $1
+             AND COALESCE(record.is_archived, FALSE) = FALSE
+           ORDER BY treatment.treatment_date DESC, treatment.id DESC`,
+          [userId]
+        ).catch((error) => {
+          if (error?.code === "42P01") {
+            return { rows: [] };
+          }
+          throw error;
+        }),
       ]);
 
       const documents = documentsResult.rows.map((document) => ({
@@ -769,25 +815,50 @@ function createPatientPortalRouter({
         createdAt: document.created_at,
       }));
       const summary = summaryResult.rows[0];
+      const portalRecords = recordsResult.rows.map((record) => ({
+        id: record.id,
+        date: record.treatment_date,
+        treatment: record.treatment,
+        dentist: record.dentist_name,
+        clinic: record.clinic_location,
+        coverage: record.coverage_status,
+        status: record.status,
+        notes: record.notes,
+        source: "portal",
+        documents: documents.filter((document) => String(document.recordId) === String(record.id)),
+      }));
+      const clinicalRecords = clinicalResult.rows.map((record) => ({
+        id: `clinical-${record.id}`,
+        date: record.treatment_date,
+        treatment: record.treatment,
+        dentist: record.dentist_name,
+        clinic: record.clinic_location,
+        coverage: record.coverage_status,
+        status: record.status,
+        notes: record.notes,
+        source: "clinical",
+        documents: [],
+      }));
+
+      const records = [...portalRecords, ...clinicalRecords].sort((left, right) => {
+        const leftDate = String(left.date || "");
+        const rightDate = String(right.date || "");
+        return rightDate.localeCompare(leftDate);
+      });
+
+      const clinicalCompleted = clinicalRecords.filter((record) => record.status === "completed").length;
+      const clinicalActive = clinicalRecords.filter((record) =>
+        ["planned", "in_progress"].includes(String(record.status || ""))
+      ).length;
 
       return res.json({
         summary: {
-          totalVisits: resultCount(summary, "total_visits"),
-          completedTreatments: resultCount(summary, "completed_treatments"),
+          totalVisits: resultCount(summary, "total_visits") + clinicalRecords.length,
+          completedTreatments: resultCount(summary, "completed_treatments") + clinicalCompleted,
           xRaysAvailable: documents.filter((document) => document.type === "xray").length,
-          activeTreatmentPlans: resultCount(summary, "active_treatment_plans"),
+          activeTreatmentPlans: resultCount(summary, "active_treatment_plans") + clinicalActive,
         },
-        records: recordsResult.rows.map((record) => ({
-          id: record.id,
-          date: record.treatment_date,
-          treatment: record.treatment,
-          dentist: record.dentist_name,
-          clinic: record.clinic_location,
-          coverage: record.coverage_status,
-          status: record.status,
-          notes: record.notes,
-          documents: documents.filter((document) => String(document.recordId) === String(record.id)),
-        })),
+        records,
         documents: documents.filter((document) => !document.recordId),
       });
     } catch (error) {

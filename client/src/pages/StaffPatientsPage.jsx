@@ -97,7 +97,19 @@ export function StaffPatientsPage() {
     setIsLoadingPatient(false);
   }
 
-  if (error && !patientData) return <ErrorState message={error} onRetry={load} />;
+  if (error && !patientData) {
+    const needsMigration = /migrate:clinical-records/i.test(error);
+    return (
+      <ErrorState
+        message={
+          needsMigration
+            ? "Patient records need a database update. In C:\\DentaSync-backend run: npm run migrate:clinical-records, then restart npm start."
+            : error
+        }
+        onRetry={load}
+      />
+    );
+  }
   if (!patientData) return <LoadingState label="Loading patient records…" />;
 
   const patients = patientData.patients || [];

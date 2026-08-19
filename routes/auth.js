@@ -7,6 +7,7 @@ const {
   isOtpRequestId,
   normalizeOtp,
 } = require("../services/otpService");
+const { linkClinicalRecordsToUser } = require("../services/clinicalPatients");
 
 const RESETTABLE_ROLES = ["admin", "dentist", "staff", "patient"];
 const INACTIVE_ACCOUNT_STATUSES = ["inactive", "disabled", "suspended"];
@@ -356,6 +357,14 @@ function createAuthRouter({
         { expiresIn: "8h" }
       );
       await recordLoginActivity(user, req, "login");
+
+      if (String(user.role || "").toLowerCase() === "patient") {
+        try {
+          await linkClinicalRecordsToUser(db, user);
+        } catch (linkError) {
+          console.warn("Unable to link clinical records on login:", linkError.message);
+        }
+      }
 
       const normalizedRole = String(user.role || "").toLowerCase();
       const redirectTo =

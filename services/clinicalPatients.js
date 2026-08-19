@@ -362,6 +362,43 @@ async function addClinicalTreatment(db, recordId, input, actor = {}) {
   return result.rows[0];
 }
 
+async function linkClinicalRecordsToUser(db, user) {
+  if (!db || !user?.id) {
+    return 0;
+  }
+
+  const email = typeof user.email === "string" ? user.email.trim().toLowerCase() : null;
+  const phone = user.phone ? String(user.phone) : null;
+  if (!email && !phone) {
+    return 0;
+  }
+
+  try {
+    const result = await db.query(
+      `UPDATE clinic_patient_records
+       SET linked_user_id = $1,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE COALESCE(is_archived, FALSE) = FALSE
+         AND (
+           linked_user_id IS NULL
+           OR linked_user_id = $1
+         )
+         AND (
+           ($2::text IS NOT NULL AND LOWER(email) = $2)
+           OR ($3::text IS NOT NULL AND phone = $3)
+         )
+       RETURNING id`,
+      [String(user.id), email, phone]
+    );
+    return result.rows.length;
+  } catch (error) {
+    if (error?.code === "42P01") {
+      return 0;
+    }
+    throw error;
+  }
+}
+
 module.exports = {
   listClinicalRecords,
   getClinicalRecord,
@@ -369,6 +406,7 @@ module.exports = {
   updateClinicalRecord,
   archiveClinicalRecord,
   addClinicalTreatment,
+  linkClinicalRecordsToUser,
   mapClinicalRecord,
   isMissingRelation,
   stringValue,

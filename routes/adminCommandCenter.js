@@ -3,6 +3,7 @@
 const crypto = require("crypto");
 const bcrypt = require("bcrypt");
 const { writeAdminAudit } = require("../services/adminAudit");
+const { linkClinicalRecordsToUser } = require("../services/clinicalPatients");
 
 const ACCOUNT_ROLES = new Set(["admin", "dentist", "staff", "patient"]);
 const SCHEDULE_TYPES = new Set([
@@ -294,10 +295,22 @@ function attachAdminCommandCenterRoutes(router, { db }) {
         detail: `Registration ${decision}d for role ${existing.rows[0].role}.`,
       });
 
+      if (decision === "approve") {
+        try {
+          await linkClinicalRecordsToUser(db, {
+            id: result.rows[0].id,
+            email: result.rows[0].email,
+            phone: result.rows[0].phone,
+          });
+        } catch (linkError) {
+          console.warn("Unable to link clinical records after approval:", linkError.message);
+        }
+      }
+
       return res.json({
         message:
           decision === "approve"
-            ? "Account approved successfully."
+            ? "Account approved successfully. The patient can now open the dashboard and book appointments."
             : "Registration rejected. Login access is blocked.",
         account: mapAccount(result.rows[0]),
       });
@@ -411,7 +424,10 @@ function attachAdminCommandCenterRoutes(router, { db }) {
                WHERE id::text = $1
                RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by`;
         params = [accountId];
-        message = action === "verify" ? "Account verified successfully." : "Account approved successfully.";
+        message =
+          action === "verify"
+            ? "Account verified successfully."
+            : "Account approved successfully. The patient can now open the dashboard and book appointments.";
       } else if (action === "reject") {
         sql = `UPDATE users SET is_verified = FALSE, status = 'Rejected'
                WHERE id::text = $1
@@ -453,6 +469,14 @@ function attachAdminCommandCenterRoutes(router, { db }) {
         targetLabel: target.email,
         result: "success",
       });
+
+      if (["approve", "verify", "activate"].includes(action) && result.rows[0]) {
+        try {
+          await linkClinicalRecordsToUser(db, result.rows[0]);
+        } catch (linkError) {
+          console.warn("Unable to link clinical records after lifecycle update:", linkError.message);
+        }
+      }
 
       return res.json({ message, account: mapAccount(result.rows[0]) });
     } catch (error) {
