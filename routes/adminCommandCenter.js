@@ -800,29 +800,47 @@ function attachAdminCommandCenterRoutes(router, { db }) {
     }
 
     try {
-      const result = await db.query(
-        `SELECT *
-         FROM admin_portal_schedules
-         WHERE ${clauses.join(" AND ")}
-         ORDER BY
-           schedule_date ASC NULLS LAST,
-           day_of_week ASC NULLS LAST,
-           start_time ASC NULLS LAST,
-           id ASC`,
-        params
-      );
+      let schedules = [];
+      let scheduleTableReady = true;
+      try {
+        const result = await db.query(
+          `SELECT *
+           FROM admin_portal_schedules
+           WHERE ${clauses.join(" AND ")}
+           ORDER BY
+             schedule_date ASC NULLS LAST,
+             day_of_week ASC NULLS LAST,
+             start_time ASC NULLS LAST,
+             id ASC`,
+          params
+        );
+        schedules = result.rows.map(mapSchedule);
+      } catch (scheduleError) {
+        if (isMissingRelation(scheduleError) || scheduleError?.code === "42703") {
+          scheduleTableReady = false;
+          schedules = [];
+        } else {
+          throw scheduleError;
+        }
+      }
 
       let appointments = [];
       try {
         const appointmentResult = await db.query(
-          `SELECT id, dentist_id, dentist_name, appointment_date, appointment_time, status, service_name,
+          `SELECT appointment.id,
+                  appointment.dentist_id,
+                  appointment.dentist_name,
+                  appointment.appointment_date,
+                  appointment.appointment_time,
+                  appointment.status,
+                  appointment.service_name,
                   CONCAT_WS(' ', patient.first_name, patient.last_name) AS patient_name
            FROM patient_portal_appointments AS appointment
            LEFT JOIN users AS patient ON patient.id::text = appointment.user_id
-           WHERE appointment_date >= CURRENT_DATE - INTERVAL '1 day'
-             AND appointment_date <= CURRENT_DATE + INTERVAL '14 days'
-             AND status NOT IN ('cancelled')
-           ORDER BY appointment_date ASC, appointment_time ASC
+           WHERE appointment.appointment_date >= CURRENT_DATE - INTERVAL '1 day'
+             AND appointment.appointment_date <= CURRENT_DATE + INTERVAL '14 days'
+             AND appointment.status NOT IN ('cancelled')
+           ORDER BY appointment.appointment_date ASC, appointment.appointment_time ASC
            LIMIT 100`
         );
         appointments = appointmentResult.rows.map((row) => ({
@@ -837,7 +855,7 @@ function attachAdminCommandCenterRoutes(router, { db }) {
         }));
       } catch (error) {
         if (!isMissingRelation(error)) {
-          throw error;
+          console.warn("Admin schedules appointment lookup skipped:", error.message);
         }
       }
 
@@ -849,21 +867,25 @@ function attachAdminCommandCenterRoutes(router, { db }) {
         clinicHours = settings.rows[0]?.setting_value?.operatingHours || null;
       } catch (error) {
         if (!isMissingRelation(error)) {
-          throw error;
+          console.warn("Admin schedules clinic hours lookup skipped:", error.message);
         }
       }
 
       return res.json({
-        schedules: result.rows.map(mapSchedule),
+        schedules,
         appointments,
         clinicHours,
+        setupRequired: !scheduleTableReady,
+        message: scheduleTableReady
+          ? undefined
+          : "Schedule tables are missing. Run npm run migrate:admin-command-center, then restart the server.",
       });
     } catch (error) {
-      if (isMissingRelation(error)) {
-        return migrationUnavailable(res, "Schedule");
-      }
       console.error("Admin schedules list error:", error.message);
-      return res.status(500).json({ message: "Unable to load clinic schedules." });
+      return res.status(500).json({
+        message: "Unable to load clinic schedules.",
+        detail: error.message,
+      });
     }
   });
 

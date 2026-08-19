@@ -93,8 +93,21 @@ export function AdminSchedulePage() {
               availability. Conflicts with existing appointments are blocked.
             </p>
           </div>
-          <button className="button button--primary" onClick={() => setFormOpen(true)}><Plus size={16} /> Add Schedule</button>
+          <button
+            className="button button--primary"
+            onClick={() => setFormOpen(true)}
+            disabled={Boolean(data.setupRequired)}
+          >
+            <Plus size={16} /> Add Schedule
+          </button>
         </div>
+
+        {data.setupRequired || data.message ? (
+          <p className="inline-alert inline-alert--error" role="status">
+            {data.message ||
+              "Schedule tables are missing. In your backend folder run: npm run migrate:admin-command-center, then restart npm start."}
+          </p>
+        ) : null}
 
         <div className="admin-overview-grid">
           <article><span>Clinic operating hours</span><strong>{data.clinicHours || "Not configured"}</strong></article>
