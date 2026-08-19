@@ -149,6 +149,7 @@ export const api = {
   getDentistProfile: () => request("/dentist/profile"),
   updateDentistProfile: (body) => request("/dentist/profile", { method: "PUT", body }),
   getAdminDashboard: () => request("/admin/dashboard"),
+  getAdminStatus: () => request("/admin/status"),
   getAdminPatients: (params = {}) => {
     const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value || value === 0));
     return request(`/admin/patients${search.size ? `?${search}` : ""}`);
@@ -173,13 +174,48 @@ export const api = {
     return request(`/admin/accounts${search.size ? `?${search}` : ""}`);
   },
   updateAdminAccountStatus: (id, body) => request(`/admin/accounts/${id}/status`, { method: "PATCH", body }),
+  updateAdminAccountLifecycle: (id, action) =>
+    request(`/admin/accounts/${id}/lifecycle`, { method: "PATCH", body: { action } }),
+  updateAdminAccountRole: (id, role) =>
+    request(`/admin/accounts/${id}/role`, { method: "PATCH", body: { role } }),
+  resetAdminAccountPassword: (id, body = {}) =>
+    request(`/admin/accounts/${id}/reset-password`, { method: "POST", body }),
   deleteAdminAccount: (id) => request(`/admin/accounts/${id}`, { method: "DELETE" }),
+  getAdminPendingRegistrations: (params = {}) => {
+    const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value || value === 0));
+    return request(`/admin/registrations/pending${search.size ? `?${search}` : ""}`);
+  },
+  approveAdminRegistration: (id) => request(`/admin/registrations/${id}/approve`, { method: "POST" }),
+  rejectAdminRegistration: (id) => request(`/admin/registrations/${id}/reject`, { method: "POST" }),
+  getAdminArchivedRecords: (params = {}) => {
+    const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value || value === 0));
+    return request(`/admin/archived${search.size ? `?${search}` : ""}`);
+  },
+  permanentlyDeleteAdminArchived: (id) =>
+    request(`/admin/archived/${id}`, { method: "DELETE", body: { confirm: "delete" } }),
+  getAdminSchedules: (params = {}) => {
+    const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value || value === 0));
+    return request(`/admin/schedules${search.size ? `?${search}` : ""}`);
+  },
+  createAdminSchedule: (body) => request("/admin/schedules", { method: "POST", body }),
+  updateAdminSchedule: (id, body) => request(`/admin/schedules/${id}`, { method: "PATCH", body }),
+  deleteAdminSchedule: (id) => request(`/admin/schedules/${id}`, { method: "DELETE" }),
+  getAdminAiSettings: () => request("/admin/ai-settings"),
+  updateAdminAiSettings: (body) => request("/admin/ai-settings", { method: "PUT", body }),
+  getAdminAuditLogs: (params = {}) => {
+    const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value || value === 0));
+    return request(`/admin/audit-logs${search.size ? `?${search}` : ""}`);
+  },
+  runAdminSecurityAudit: () => request("/admin/audit/run", { method: "POST" }),
   getAdminAppointments: (params = {}) => {
     const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value || value === 0));
     return request(`/admin/appointments${search.size ? `?${search}` : ""}`);
   },
   updateAdminAppointment: (id, body) => request(`/admin/appointments/${id}`, { method: "PATCH", body }),
-  getAdminAnalytics: (range = "month") => request(`/admin/analytics?range=${encodeURIComponent(range)}`),
+  getAdminAnalytics: (range = "month", extras = {}) => {
+    const search = new URLSearchParams({ range, ...Object.fromEntries(Object.entries(extras).filter(([, value]) => value)) });
+    return request(`/admin/analytics?${search}`);
+  },
   getAdminSettings: () => request("/admin/settings"),
   updateAdminSettings: (body) => request("/admin/settings", { method: "PUT", body }),
   getAdminSecurity: () => request("/admin/security"),

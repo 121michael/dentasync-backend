@@ -5,6 +5,8 @@ const path = require("path");
 const bcrypt = require("bcrypt");
 const express = require("express");
 const { attachAdminDocumentSyncRoutes } = require("./adminDocumentSync");
+const { attachAdminCommandCenterRoutes } = require("./adminCommandCenter");
+const { writeAdminAudit } = require("../services/adminAudit");
 
 const APPOINTMENT_ACTIONS = new Set([
   "approve",
@@ -173,8 +175,21 @@ function mapAccount(row, extras = {}) {
   if (row.catalog_dentist_id !== undefined || extras.catalogDentistId !== undefined) {
     payload.catalogDentistId = extras.catalogDentistId ?? row.catalog_dentist_id ?? null;
   }
-  if (extras.position !== undefined) {
-    payload.position = extras.position || "";
+  if (extras.position !== undefined || row.operational_role !== undefined) {
+    payload.position = extras.position || row.operational_role || "";
+    payload.operationalRole = extras.operationalRole || row.operational_role || payload.position || "";
+  }
+  if (extras.dateOfBirth !== undefined || row.date_of_birth !== undefined) {
+    payload.dateOfBirth = extras.dateOfBirth ?? row.date_of_birth ?? null;
+  }
+  if (extras.gender !== undefined || row.gender !== undefined) {
+    payload.gender = extras.gender ?? row.gender ?? "";
+  }
+  if (extras.age !== undefined || row.age !== undefined) {
+    payload.age = extras.age ?? row.age ?? null;
+  }
+  if (extras.lastTreatment !== undefined || row.last_treatment !== undefined) {
+    payload.lastTreatment = extras.lastTreatment ?? row.last_treatment ?? "";
   }
 
   return payload;
@@ -288,6 +303,7 @@ function createAdminPortalRouter({
     db,
     uploadDirectory: path.join(process.cwd(), "uploads", "admin-document-sync"),
   });
+  attachAdminCommandCenterRoutes(router, { db });
 
   router.get("/dashboard", async (req, res) => {
     try {
@@ -296,12 +312,17 @@ function createAdminPortalRouter({
         appointmentsTodayResult,
         dentistsResult,
         staffResult,
+        totalUsersResult,
+        pendingAccountsResult,
         pendingResult,
         completedTodayResult,
         cancelledTodayResult,
+        queueResult,
+        archivedResult,
         alertsResult,
         thisMonthResult,
         previousMonthResult,
+        healthCheck,
       ] = await Promise.all([
         db.query(
           `SELECT COUNT(*) AS count
@@ -321,7 +342,7 @@ function createAdminPortalRouter({
            WHERE LOWER(role) = 'dentist'
              AND is_verified = TRUE
              AND COALESCE(is_archived, FALSE) = FALSE
-             AND LOWER(COALESCE(status, 'active')) NOT IN ('inactive', 'disabled', 'suspended')`
+             AND LOWER(COALESCE(status, 'active')) NOT IN ('inactive', 'disabled', 'suspended', 'rejected')`
         ),
         db.query(
           `SELECT COUNT(*) AS count
@@ -329,7 +350,23 @@ function createAdminPortalRouter({
            WHERE LOWER(role) = 'staff'
              AND is_verified = TRUE
              AND COALESCE(is_archived, FALSE) = FALSE
-             AND LOWER(COALESCE(status, 'active')) NOT IN ('inactive', 'disabled', 'suspended')`
+             AND LOWER(COALESCE(status, 'active')) NOT IN ('inactive', 'disabled', 'suspended', 'rejected')`
+        ),
+        db.query(
+          `SELECT COUNT(*) AS count
+           FROM users
+           WHERE COALESCE(is_archived, FALSE) = FALSE
+             AND LOWER(role) IN ('admin', 'dentist', 'staff', 'patient')`
+        ),
+        db.query(
+          `SELECT COUNT(*) AS count
+           FROM users
+           WHERE COALESCE(is_archived, FALSE) = FALSE
+             AND LOWER(role) IN ('patient', 'staff', 'dentist')
+             AND (
+               is_verified = FALSE
+               OR LOWER(COALESCE(status, 'active')) IN ('pending', 'unverified')
+             )`
         ),
         db.query(
           `SELECT COUNT(*) AS count
@@ -347,6 +384,19 @@ function createAdminPortalRouter({
            FROM patient_portal_appointments
            WHERE appointment_date = CURRENT_DATE
              AND status = 'cancelled'`
+        ),
+        db.query(
+          `SELECT COUNT(*) AS count
+           FROM patient_portal_queue_entries
+           WHERE status IN ('checked_in', 'waiting', 'preparing', 'dentist')`
+        ).catch((error) => {
+          if (isMissingRelation(error)) return { rows: [{ count: "0" }] };
+          throw error;
+        }),
+        db.query(
+          `SELECT COUNT(*) AS count
+           FROM users
+           WHERE COALESCE(is_archived, FALSE) = TRUE`
         ),
         db.query(
           `SELECT COUNT(*) AS count
@@ -370,6 +420,7 @@ function createAdminPortalRouter({
              AND created_at >= date_trunc('month', CURRENT_TIMESTAMP) - INTERVAL '1 month'
              AND created_at < date_trunc('month', CURRENT_TIMESTAMP)`
         ),
+        db.query("SELECT 1").then(() => true).catch(() => false),
       ]);
 
       const thisMonth = count(thisMonthResult.rows[0]);
@@ -381,14 +432,20 @@ function createAdminPortalRouter({
         welcomeName:
           `${req.admin.first_name || ""} ${req.admin.last_name || ""}`.trim() || "Administrator",
         date: new Date().toISOString().slice(0, 10),
+        systemStatus: healthCheck ? "online" : "offline",
         metrics: {
+          totalUsers: count(totalUsersResult.rows[0]),
           totalPatients: count(patientsResult.rows[0]),
+          activePatients: count(patientsResult.rows[0]),
           appointmentsToday: count(appointmentsTodayResult.rows[0]),
           activeDentists: count(dentistsResult.rows[0]),
           activeStaff: count(staffResult.rows[0]),
+          pendingAccountApprovals: count(pendingAccountsResult.rows[0]),
           pendingRequests: count(pendingResult.rows[0]),
+          patientsInQueue: count(queueResult.rows[0]),
           completedToday: count(completedTodayResult.rows[0]),
           cancelledToday: count(cancelledTodayResult.rows[0]),
+          archivedRecords: count(archivedResult.rows[0]),
           systemAlerts: count(alertsResult.rows[0]),
           monthGrowth,
         },
@@ -446,14 +503,30 @@ function createAdminPortalRouter({
             account.is_verified,
             account.created_at,
             CONCAT_WS(' ', account.first_name, account.last_name) AS full_name,
-            MAX(appointment.appointment_date) AS last_visit
+            MAX(appointment.appointment_date) AS last_visit,
+            profile.date_of_birth,
+            profile.gender,
+            (
+              SELECT treatment.treatment
+              FROM patient_portal_treatment_records AS treatment
+              WHERE treatment.user_id = account.id::text
+              ORDER BY treatment.treatment_date DESC, treatment.id DESC
+              LIMIT 1
+            ) AS last_treatment,
+            CASE
+              WHEN profile.date_of_birth IS NULL THEN NULL
+              ELSE DATE_PART('year', AGE(profile.date_of_birth::timestamp))::int
+            END AS age
           FROM users AS account
           LEFT JOIN patient_portal_appointments AS appointment
             ON appointment.user_id = account.id::text
+          LEFT JOIN patient_portal_profiles AS profile
+            ON profile.user_id = account.id::text
           WHERE ${whereSql}
           GROUP BY
             account.id, account.first_name, account.last_name, account.email, account.phone,
-            account.role, account.status, account.is_verified, account.created_at
+            account.role, account.status, account.is_verified, account.created_at,
+            profile.date_of_birth, profile.gender
           ORDER BY account.last_name ASC NULLS LAST, account.first_name ASC NULLS LAST
           LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`;
       } else if (role === "dentist") {
@@ -474,6 +547,26 @@ function createAdminPortalRouter({
           FROM users AS account
           LEFT JOIN admin_portal_dentist_profiles AS profile
             ON profile.user_id = account.id::text
+          WHERE ${whereSql}
+          ORDER BY account.last_name ASC NULLS LAST, account.first_name ASC NULLS LAST
+          LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`;
+      } else if (role === "staff") {
+        selectSql = `
+          SELECT
+            account.id,
+            account.first_name,
+            account.last_name,
+            account.email,
+            account.phone,
+            account.role,
+            account.status,
+            account.is_verified,
+            account.created_at,
+            CONCAT_WS(' ', account.first_name, account.last_name) AS full_name,
+            COALESCE(staff_profile.operational_role, 'Clinic Staff') AS operational_role
+          FROM users AS account
+          LEFT JOIN admin_portal_staff_profiles AS staff_profile
+            ON staff_profile.user_id = account.id::text
           WHERE ${whereSql}
           ORDER BY account.last_name ASC NULLS LAST, account.first_name ASC NULLS LAST
           LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`;
@@ -502,7 +595,17 @@ function createAdminPortalRouter({
         page,
         limit,
         total: count(countResult.rows[0]),
-        [key]: result.rows.map((row) => mapAccount(row)),
+        [key]: result.rows.map((row) =>
+          mapAccount(row, {
+            position: row.operational_role || "",
+            operationalRole: row.operational_role || "",
+            dateOfBirth: row.date_of_birth || null,
+            gender: row.gender || "",
+            age: row.age ?? null,
+            lastTreatment: row.last_treatment || "",
+            lastVisit: row.last_visit || null,
+          })
+        ),
       });
     } catch (error) {
       if (isMissingRelation(error)) {
@@ -839,6 +942,22 @@ function createAdminPortalRouter({
         [firstName, lastName, email, phone, passwordHash]
       );
       staff = userResult.rows[0];
+
+      const operationalRole = position || stringValue(req.body?.operationalRole, 120) || "Clinic Staff";
+      try {
+        await client.query(
+          `INSERT INTO admin_portal_staff_profiles (user_id, operational_role)
+           VALUES ($1, $2)
+           ON CONFLICT (user_id) DO UPDATE SET
+             operational_role = EXCLUDED.operational_role,
+             updated_at = CURRENT_TIMESTAMP`,
+          [String(staff.id), operationalRole]
+        );
+      } catch (profileError) {
+        if (!isMissingRelation(profileError)) {
+          throw profileError;
+        }
+      }
 
       await client.query("COMMIT");
       transactionOpen = false;
@@ -1370,6 +1489,17 @@ function createAdminPortalRouter({
       if (!result.rows.length) {
         return res.status(404).json({ message: "Account not found." });
       }
+      await writeAdminAudit(db, {
+        actorId: req.admin.id,
+        actorName: `${req.admin.first_name || ""} ${req.admin.last_name || ""}`.trim(),
+        actorRole: "admin",
+        action: "update_account_status",
+        targetType: "account",
+        targetId: accountId,
+        targetLabel: result.rows[0].email,
+        result: "success",
+        detail: `Status set to ${nextStatus}.`,
+      });
       return res.json({ account: mapAccount(result.rows[0]) });
     } catch (error) {
       console.error("Admin account status error:", error.message);
@@ -1428,14 +1558,27 @@ function createAdminPortalRouter({
 
       const result = await client.query(
         `UPDATE users
-         SET is_archived = TRUE, status = 'Inactive'
+         SET is_archived = TRUE,
+             status = 'Inactive',
+             archived_at = CURRENT_TIMESTAMP,
+             archived_by = $2
          WHERE id::text = $1
-         RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at`,
-        [accountId]
+         RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by`,
+        [accountId, String(req.admin.id)]
       );
 
       await client.query("COMMIT");
       transactionOpen = false;
+      await writeAdminAudit(db, {
+        actorId: req.admin.id,
+        actorName: `${req.admin.first_name || ""} ${req.admin.last_name || ""}`.trim(),
+        actorRole: "admin",
+        action: "archive_account",
+        targetType: "account",
+        targetId: accountId,
+        targetLabel: result.rows[0].email,
+        result: "success",
+      });
       return res.json({
         message: "Account archived successfully.",
         account: mapAccount(result.rows[0]),
@@ -1672,10 +1815,20 @@ function createAdminPortalRouter({
 
   router.get("/analytics", async (req, res) => {
     const range = stringValue(req.query.range, 20)?.toLowerCase() || "month";
-    if (!["today", "week", "month", "year"].includes(range)) {
+    if (!["today", "week", "month", "year", "custom"].includes(range)) {
       return res.status(400).json({
-        message: "Analytics range must be today, week, month, or year.",
+        message: "Analytics range must be today, week, month, year, or custom.",
       });
+    }
+
+    const customFrom = stringValue(req.query.from, 10);
+    const customTo = stringValue(req.query.to, 10);
+    if (range === "custom") {
+      if (!isIsoDate(customFrom) || !isIsoDate(customTo) || customFrom > customTo) {
+        return res.status(400).json({
+          message: "Custom analytics requires valid from/to dates (YYYY-MM-DD).",
+        });
+      }
     }
 
     let revenueSql;
@@ -1708,6 +1861,16 @@ function createAdminPortalRouter({
           AND appointment_date < date_trunc('month', CURRENT_DATE) + INTERVAL '1 month'
         GROUP BY date_trunc('week', appointment_date)
         ORDER BY date_trunc('week', appointment_date)`;
+    } else if (range === "custom") {
+      revenueSql = `
+        SELECT TO_CHAR(appointment_date, 'YYYY-MM-DD') AS label,
+               COALESCE(SUM(estimated_cost), 0) AS value
+        FROM patient_portal_appointments
+        WHERE status = 'completed'
+          AND appointment_date >= $1::date
+          AND appointment_date <= $2::date
+        GROUP BY appointment_date
+        ORDER BY appointment_date`;
     } else {
       revenueSql = `
         SELECT TO_CHAR(date_trunc('month', appointment_date), 'YYYY-MM') AS label,
@@ -1721,56 +1884,122 @@ function createAdminPortalRouter({
     }
 
     try {
-      const [revenueResult, breakdownResult, growthResult, dentistResult] = await Promise.all([
-        db.query(revenueSql),
-        db.query(
-          `SELECT
-             COUNT(*) FILTER (WHERE status = 'completed') AS completed,
-             COUNT(*) FILTER (WHERE status = 'pending') AS pending,
-             COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled,
-             COUNT(*) FILTER (WHERE status = 'no_show') AS no_show,
-             COUNT(*) FILTER (WHERE status = 'confirmed') AS confirmed,
-             COUNT(*) FILTER (WHERE status = 'checked_in') AS checked_in
-           FROM patient_portal_appointments`
-        ),
-        db.query(
-          `SELECT TO_CHAR(date_trunc('month', created_at), 'YYYY-MM') AS label,
-                  COUNT(*) AS count
-           FROM users
-           WHERE LOWER(role) = 'patient'
-             AND COALESCE(is_archived, FALSE) = FALSE
-             AND created_at >= date_trunc('month', CURRENT_TIMESTAMP) - INTERVAL '5 months'
-           GROUP BY date_trunc('month', created_at)
-           ORDER BY date_trunc('month', created_at)`
-        ),
-        db.query(
-          `SELECT
-             COALESCE(dentist_name, 'Unassigned') AS dentist,
-             COUNT(*) FILTER (WHERE status = 'completed') AS completed,
-             COUNT(*) AS total
-           FROM patient_portal_appointments
-           GROUP BY dentist_name
-           ORDER BY completed DESC, total DESC, dentist ASC
-           LIMIT 20`
-        ),
-      ]);
+      const revenueParams = range === "custom" ? [customFrom, customTo] : [];
+      const [revenueResult, breakdownResult, growthResult, dentistResult, volumeResult, queueResult] =
+        await Promise.all([
+          db.query(revenueSql, revenueParams),
+          db.query(
+            `SELECT
+               COUNT(*) FILTER (WHERE status = 'completed') AS completed,
+               COUNT(*) FILTER (WHERE status = 'pending') AS pending,
+               COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled,
+               COUNT(*) FILTER (WHERE status = 'no_show') AS no_show,
+               COUNT(*) FILTER (WHERE status = 'confirmed') AS confirmed,
+               COUNT(*) FILTER (WHERE status = 'checked_in') AS checked_in,
+               COUNT(*) AS total,
+               COALESCE(SUM(estimated_cost) FILTER (WHERE status = 'completed'), 0) AS revenue
+             FROM patient_portal_appointments`
+          ),
+          db.query(
+            `SELECT TO_CHAR(date_trunc('month', created_at), 'YYYY-MM') AS label,
+                    COUNT(*) AS count
+             FROM users
+             WHERE LOWER(role) = 'patient'
+               AND COALESCE(is_archived, FALSE) = FALSE
+               AND created_at >= date_trunc('month', CURRENT_TIMESTAMP) - INTERVAL '5 months'
+             GROUP BY date_trunc('month', created_at)
+             ORDER BY date_trunc('month', created_at)`
+          ),
+          db.query(
+            `SELECT
+               COALESCE(dentist_name, 'Unassigned') AS dentist,
+               COUNT(*) FILTER (WHERE status = 'completed') AS completed,
+               COUNT(*) AS total
+             FROM patient_portal_appointments
+             GROUP BY dentist_name
+             ORDER BY completed DESC, total DESC, dentist ASC
+             LIMIT 20`
+          ),
+          db.query(
+            `SELECT TO_CHAR(appointment_date, 'YYYY-MM-DD') AS label,
+                    COUNT(*) AS count
+             FROM patient_portal_appointments
+             WHERE appointment_date >= CURRENT_DATE - INTERVAL '13 days'
+               AND appointment_date <= CURRENT_DATE
+             GROUP BY appointment_date
+             ORDER BY appointment_date`
+          ),
+          db.query(
+            `SELECT
+               COUNT(*) FILTER (WHERE status IN ('checked_in', 'waiting', 'preparing', 'dentist')) AS active,
+               COUNT(*) FILTER (WHERE status = 'completed') AS completed,
+               COUNT(*) AS total,
+               COALESCE(AVG(EXTRACT(EPOCH FROM (updated_at - checked_in_at)) / 60)
+                 FILTER (WHERE checked_in_at IS NOT NULL AND status = 'completed'), 0) AS avg_wait_minutes
+             FROM patient_portal_queue_entries
+             WHERE checked_in_at >= CURRENT_DATE - INTERVAL '7 days'`
+          ).catch((error) => {
+            if (isMissingRelation(error)) {
+              return { rows: [{ active: "0", completed: "0", total: "0", avg_wait_minutes: "0" }] };
+            }
+            throw error;
+          }),
+        ]);
 
       const breakdown = breakdownResult.rows[0] || {};
+      const queue = queueResult.rows[0] || {};
+      const completed = count(breakdown, "completed");
+      const noShow = count(breakdown, "no_show");
+      const cancelled = count(breakdown, "cancelled");
+      const totalAppointments = count(breakdown, "total") || 1;
+      const satisfaction = Math.max(
+        0,
+        Math.min(
+          100,
+          Number(
+            (
+              ((completed + count(breakdown, "confirmed") + count(breakdown, "checked_in")) /
+                totalAppointments) *
+                100 -
+              ((cancelled + noShow) / totalAppointments) * 20
+            ).toFixed(1)
+          )
+        )
+      );
+
       return res.json({
         range,
+        from: customFrom || null,
+        to: customTo || null,
+        summary: {
+          totalRevenue: Number(breakdown.revenue || 0),
+          patientSatisfaction: satisfaction,
+          totalAppointments: count(breakdown, "total"),
+          completedAppointments: completed,
+          cancelledAppointments: cancelled,
+          noShowAppointments: noShow,
+          patientGrowth: growthResult.rows.reduce((sum, row) => sum + count(row, "count"), 0),
+          queueActive: count(queue, "active"),
+          queueCompleted: count(queue, "completed"),
+          averageWaitMinutes: Number(Number(queue.avg_wait_minutes || 0).toFixed(1)),
+        },
         revenueByPeriod: revenueResult.rows.map((row) => ({
           label: row.label,
           value: Number(row.value || 0),
         })),
         appointmentBreakdown: {
-          completed: count(breakdown, "completed"),
+          completed,
           pending: count(breakdown, "pending"),
-          cancelled: count(breakdown, "cancelled"),
-          no_show: count(breakdown, "no_show"),
+          cancelled,
+          no_show: noShow,
           confirmed: count(breakdown, "confirmed"),
           checked_in: count(breakdown, "checked_in"),
         },
         patientGrowth: growthResult.rows.map((row) => ({
+          label: row.label,
+          count: count(row, "count"),
+        })),
+        patientVolume: volumeResult.rows.map((row) => ({
           label: row.label,
           count: count(row, "count"),
         })),
@@ -1779,6 +2008,12 @@ function createAdminPortalRouter({
           completed: count(row, "completed"),
           total: count(row, "total"),
         })),
+        queuePerformance: {
+          active: count(queue, "active"),
+          completed: count(queue, "completed"),
+          total: count(queue, "total"),
+          averageWaitMinutes: Number(Number(queue.avg_wait_minutes || 0).toFixed(1)),
+        },
       });
     } catch (error) {
       if (isMissingRelation(error)) {

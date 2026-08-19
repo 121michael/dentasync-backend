@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { FileScan, RefreshCw, Save, Upload } from "lucide-react";
+import { Cloud, RefreshCw, Save, Upload } from "lucide-react";
 import { api } from "../api";
-import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
+import { EmptyState, ErrorState, LoadingState } from "../components/UI";
+import { useAdminUi } from "../components/AdminLayout";
 import { formatAdminDateTime } from "../adminUtils";
 
 const emptyPayload = {
@@ -39,6 +40,7 @@ function StatusDot({ ok, label, detail }) {
 }
 
 export function AdminSyncPage() {
+  const { pushToast, confirm } = useAdminUi();
   const [healthData, setHealthData] = useState(null);
   const [jobs, setJobs] = useState([]);
   const [activeJob, setActiveJob] = useState(null);
@@ -95,10 +97,12 @@ export function AdminSyncPage() {
       setActiveJob(response.job);
       setPayload(response.job.editedPayload || response.job.extractedPayload || emptyPayload);
       setMessage(response.message);
+      pushToast(response.message || "Document scanned and extracted.");
       setFile(null);
       await load();
     } catch (scanError) {
       setError(scanError.message);
+      pushToast(scanError.message, "error");
     } finally {
       setBusy("");
     }
@@ -114,9 +118,11 @@ export function AdminSyncPage() {
       setActiveJob(response.job);
       setPayload(response.job.editedPayload);
       setMessage(response.message);
+      pushToast(response.message || "Extracted data saved for review.");
       await load();
     } catch (saveError) {
       setError(saveError.message);
+      pushToast(saveError.message, "error");
     } finally {
       setBusy("");
     }
@@ -124,6 +130,13 @@ export function AdminSyncPage() {
 
   async function syncToDatabase() {
     if (!activeJob) return;
+    const ok = await confirm({
+      title: "Confirm database sync",
+      message: "Review is complete. Sync this approved patient and procedure data into PostgreSQL? Existing records will not be overwritten without this confirmation.",
+      confirmLabel: "Sync Data",
+      tone: "primary",
+    });
+    if (!ok) return;
     setBusy("sync");
     setError("");
     setMessage("");
@@ -132,9 +145,11 @@ export function AdminSyncPage() {
       setActiveJob(response.job);
       setPayload(response.job.editedPayload);
       setMessage(response.message);
+      pushToast(response.message || "Data synchronized successfully.");
       await load();
     } catch (syncError) {
       setError(syncError.message);
+      pushToast(syncError.message, "error");
     } finally {
       setBusy("");
     }
@@ -161,37 +176,32 @@ export function AdminSyncPage() {
 
   return (
     <div className="admin-page">
-      <SectionHeading
-        eyebrow="Clinic data intake"
-        title="System Synchronization"
-        detail="Scan hard or soft-copy dental documents, review extracted patient and procedure data, then sync into the database."
-        action={
-          <button className="button button--secondary" onClick={load}>
-            <RefreshCw size={16} /> Refresh
-          </button>
-        }
-      />
-
       {error ? <p className="inline-alert inline-alert--error">{error}</p> : null}
       {message ? <p className="inline-alert inline-alert--success">{message}</p> : null}
 
       <section className="admin-panel admin-sync-hero">
         <div>
-          <span className="eyebrow">Document Data Synchronization</span>
-          <h2>Scan → Extract → Review → Sync</h2>
+          <span className="eyebrow">Branch synchronization</span>
+          <h2>Cloud Data Synchronization</h2>
           <p>
-            Upload a patient chart, treatment form, or scanned dental record. The system extracts important patient
-            and procedure fields for verification before saving to PostgreSQL.
+            Upload or scan documents, extract patient and dental procedure data, review and correct fields,
+            then confirm before storing approved information in PostgreSQL.
           </p>
+          <div className="admin-heading-actions" style={{ marginTop: "0.85rem" }}>
+            <button className="button button--secondary" onClick={load}><RefreshCw size={16} /> Refresh</button>
+            <button className="button button--primary" onClick={() => api.runAdminSync().then(() => pushToast("Sync Data started.")).catch((e) => pushToast(e.message, "error"))}>
+              <Cloud size={16} /> Start Sync
+            </button>
+          </div>
         </div>
-        <FileScan size={34} aria-hidden="true" />
+        <Cloud size={42} aria-hidden="true" />
       </section>
 
       <section className="admin-health-grid">
-        <StatusDot ok={health.database} label="Database" detail={health.database ? "Ready to receive sync" : "Disconnected"} />
-        <StatusDot ok={health.api} label="API Server" detail={health.api ? "Online" : "Offline"} />
+        <StatusDot ok={health.database} label="Database connection" detail={health.database ? "Ready to receive sync" : "Disconnected"} />
+        <StatusDot ok={health.api} label="Current sync status" detail={health.api ? "Online" : "Offline"} />
         <StatusDot ok={true} label="Document OCR" detail="PDF text + image OCR enabled" />
-        <StatusDot ok={health.auth} label="Admin Access" detail={health.auth ? "Authenticated" : "Unavailable"} />
+        <StatusDot ok={health.auth} label="Branch sync authorization" detail={health.auth ? "Authenticated" : "Unavailable"} />
       </section>
 
       <section className="admin-panel">

@@ -28,10 +28,67 @@ export function AdminModal({ title, children, onClose, wide = false }) {
   );
 }
 
-export function AdminStatCard({ label, value, detail, tone = "purple" }) {
+export function AdminConfirmModal({
+  title,
+  message,
+  confirmLabel = "Confirm",
+  tone = "danger",
+  onConfirm,
+  onCancel,
+}) {
+  return (
+    <div className="admin-modal-backdrop" role="presentation" onMouseDown={onCancel}>
+      <section
+        className="admin-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="admin-modal__header">
+          <h2>{title}</h2>
+          <button className="icon-button" onClick={onCancel} aria-label="Close confirmation">
+            <X size={18} />
+          </button>
+        </header>
+        <p className="admin-confirm-copy">{message}</p>
+        <div className="admin-modal__actions">
+          <button className="button button--secondary" onClick={onCancel}>Cancel</button>
+          <button
+            className={`button ${tone === "danger" ? "button--danger" : "button--primary"}`}
+            onClick={onConfirm}
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+export function AdminToastStack({ toasts = [], onDismiss }) {
+  if (!toasts.length) return null;
+  return (
+    <div className="admin-toast-stack" aria-live="polite">
+      {toasts.map((toast) => (
+        <div key={toast.id} className={`admin-toast admin-toast--${toast.tone || "success"}`}>
+          <span>{toast.message}</span>
+          <button className="icon-button" onClick={() => onDismiss?.(toast.id)} aria-label="Dismiss notification">
+            <X size={14} />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function AdminStatCard({ label, value, detail, tone = "purple", icon: Icon }) {
   return (
     <article className={`admin-stat-card admin-stat-card--${tone}`}>
-      <span>{label}</span>
+      <div className="admin-stat-card__top">
+        <span>{label}</span>
+        {Icon ? <Icon size={16} aria-hidden="true" /> : null}
+      </div>
       <strong>{value}</strong>
       {detail ? <small>{detail}</small> : null}
     </article>

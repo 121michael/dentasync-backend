@@ -327,7 +327,7 @@ function createAuthRouter({
       }
 
       const currentStatus = (user.status || "active").toLowerCase();
-      if (["inactive", "disabled", "suspended"].includes(currentStatus)) {
+      if (["inactive", "disabled", "suspended", "rejected"].includes(currentStatus)) {
         return res.status(403).json({
           message: `Account is ${currentStatus}. Please contact the administrator.`,
         });
