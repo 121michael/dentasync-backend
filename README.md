@@ -238,3 +238,20 @@ Only a live, verified `users.role = 'dentist'` account can access `/api/dentist/
 Queue/appointment data is scoped through `admin_portal_dentist_profiles.catalog_dentist_id`
 (for the seed account: `dr-sarah-cruz`).
 
+## Document data synchronization (Admin)
+
+Admin **System Synchronization** supports document-to-database intake:
+
+1. Upload a hard-copy scan (JPG/PNG) or soft copy (PDF/TXT)
+2. The system extracts patient and dental procedure fields (PDF text + OCR)
+3. Admin reviews/edits the extracted values
+4. **Sync to Database** creates/updates the patient and a treatment record
+
+```bash
+npm run migrate:document-sync
+# or
+npm run migrate
+```
+
+Open `/admin/sync` while signed in as admin.
+

@@ -3095,3 +3095,10 @@ strong {
   .dentist-table-wrap { margin: 0 -1rem; }
   .dentist-detail-grid { grid-template-columns: 1fr; }
 }
+
+.admin-sync-raw { margin-top: .85rem; }
+.admin-sync-raw summary { cursor: pointer; color: var(--amethyst-700); font-size: .78rem; font-weight: 750; }
+.admin-sync-raw pre { margin-top: .55rem; max-height: 220px; overflow: auto; padding: .85rem; border-radius: 12px; background: var(--surface-muted); color: var(--text); font-size: .68rem; white-space: pre-wrap; }
+.admin-status--extracted, .admin-status--reviewed, .admin-status--uploaded { color: #3974ad; background: #eaf3ff; }
+.admin-status--synced { color: var(--emerald); background: var(--emerald-wash); }
+.admin-status--failed { color: var(--danger); background: var(--danger-wash); }

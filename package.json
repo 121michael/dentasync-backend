@@ -12,7 +12,8 @@
     "migrate:staff-portal": "node scripts/migrate-staff-portal.js",
     "migrate:admin-portal": "node scripts/migrate-admin-portal.js",
     "migrate:dentist-portal": "node scripts/migrate-dentist-portal.js",
-    "migrate": "npm run migrate:otp && npm run migrate:portal && npm run migrate:password-reset && npm run migrate:staff-portal && npm run migrate:admin-portal && npm run migrate:dentist-portal",
+    "migrate:document-sync": "node scripts/migrate-document-sync.js",
+    "migrate": "npm run migrate:otp && npm run migrate:portal && npm run migrate:password-reset && npm run migrate:staff-portal && npm run migrate:admin-portal && npm run migrate:dentist-portal && npm run migrate:document-sync",
     "seed:staff": "node scripts/seed-staff.js",
     "seed:patient": "node scripts/seed-patient.js",
     "seed:dentist": "node scripts/seed-dentist.js",
@@ -32,7 +33,9 @@
     "multer": "^2.2.0",
     "mysql2": "^3.23.2",
     "nodemailer": "^9.0.5",
+    "pdf-parse": "^2.4.5",
     "pg": "^8.22.0",
+    "tesseract.js": "^7.0.0",
     "twilio": "^6.0.2"
   },
   "devDependencies": {

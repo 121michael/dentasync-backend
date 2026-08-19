@@ -1,8 +1,10 @@
 "use strict";
 
 const crypto = require("crypto");
+const path = require("path");
 const bcrypt = require("bcrypt");
 const express = require("express");
+const { attachAdminDocumentSyncRoutes } = require("./adminDocumentSync");
 
 const APPOINTMENT_ACTIONS = new Set([
   "approve",
@@ -281,6 +283,11 @@ function createAdminPortalRouter({
   const router = express.Router();
 
   router.use(authenticateToken, requireAdminAccount(db));
+
+  attachAdminDocumentSyncRoutes(router, {
+    db,
+    uploadDirectory: path.join(process.cwd(), "uploads", "admin-document-sync"),
+  });
 
   router.get("/dashboard", async (req, res) => {
     try {
@@ -2035,6 +2042,10 @@ function createAdminPortalRouter({
           checkedAt: health.checkedAt,
         },
         events: latestEvents,
+        documentSync: {
+          description:
+            "Upload hard-copy scans or soft-copy dental documents, review extracted patient/procedure fields, then sync into the clinic database.",
+        },
       });
     } catch (error) {
       console.error("Admin sync status error:", error.message);

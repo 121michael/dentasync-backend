@@ -186,6 +186,18 @@ export const api = {
   getAdminSystemHealth: () => request("/admin/system-health"),
   getAdminSync: () => request("/admin/sync"),
   runAdminSync: () => request("/admin/sync", { method: "POST" }),
+  getAdminDocumentSyncJobs: () => request("/admin/sync/documents"),
+  getAdminDocumentSyncJob: (id) => request(`/admin/sync/documents/${id}`),
+  uploadAdminDocumentSync: (file, sourceType = "soft_copy") => {
+    const data = new FormData();
+    data.append("document", file);
+    data.append("sourceType", sourceType);
+    return request("/admin/sync/documents", { method: "POST", body: data });
+  },
+  updateAdminDocumentSync: (id, body) =>
+    request(`/admin/sync/documents/${id}`, { method: "PUT", body }),
+  commitAdminDocumentSync: (id, body) =>
+    request(`/admin/sync/documents/${id}/commit`, { method: "POST", body }),
   getAdminNotifications: () => request("/admin/notifications"),
   markAdminNotificationRead: (id) => request(`/admin/notifications/${id}/read`, { method: "PATCH" }),
   markAllAdminNotificationsRead: () => request("/admin/notifications/read-all", { method: "PATCH" }),
