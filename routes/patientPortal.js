@@ -157,6 +157,33 @@ function queueSteps(status) {
   }));
 }
 
+function normalizeIsoDate(value) {
+  if (!value) return null;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+
+  const text = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) {
+    return text.slice(0, 10);
+  }
+
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return parsed.toISOString().slice(0, 10);
+}
+
+function normalizeTime(value) {
+  if (value == null) return null;
+  const text = String(value).trim();
+  const match = text.match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return null;
+  return `${match[1].padStart(2, "0")}:${match[2]}`;
+}
+
 function mapAppointment(appointment) {
   if (!appointment) {
     return null;
@@ -166,8 +193,8 @@ function mapAppointment(appointment) {
     id: appointment.id,
     treatment: appointment.service_name,
     dentist: appointment.dentist_name,
-    date: appointment.appointment_date,
-    time: appointment.appointment_time,
+    date: normalizeIsoDate(appointment.appointment_date),
+    time: normalizeTime(appointment.appointment_time),
     location: appointment.clinic_location,
     coverage: appointment.coverage_type,
     hmoProvider: appointment.hmo_provider,

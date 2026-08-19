@@ -25,15 +25,40 @@ function tomorrow() {
 }
 
 function displayDate(value) {
+  if (!value) return "Date to be confirmed";
+
+  const rawValue = value instanceof Date ? value : String(value).trim();
+  const date =
+    rawValue instanceof Date
+      ? rawValue
+      : /^\d{4}-\d{2}-\d{2}$/.test(rawValue)
+        ? new Date(`${rawValue}T00:00:00`)
+        : new Date(rawValue);
+
+  if (Number.isNaN(date.getTime())) {
+    return "Date to be confirmed";
+  }
+
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
-  }).format(new Date(`${value}T00:00:00`));
+  }).format(date);
 }
 
 function displayTime(value) {
-  const [hours, minutes] = value.split(":");
+  if (value == null) return "Time to be confirmed";
+  const text = String(value).trim();
+  const [hours, minutes] = text.split(":");
+  if (
+    !/^\d{1,2}$/.test(hours || "") ||
+    !/^\d{2}$/.test(minutes || "") ||
+    Number(hours) > 23 ||
+    Number(minutes) > 59
+  ) {
+    return "Time to be confirmed";
+  }
+
   return new Intl.DateTimeFormat("en-US", {
     hour: "numeric",
     minute: "2-digit",

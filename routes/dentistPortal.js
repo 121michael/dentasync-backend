@@ -806,8 +806,8 @@ function createDentistPortalRouter({ db, authenticateToken }) {
       await client.query(
         `INSERT INTO patient_portal_appointments (
            user_id, service_id, service_name, dentist_id, dentist_name,
-           appointment_date, appointment_time, status, notes
-         ) VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, $6, 'pending', $7)`,
+           appointment_date, appointment_time, coverage_type, estimated_cost, status, notes
+         ) VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, $6, 'self_pay', 0, 'pending', $7)`,
         [
           String(patient.id),
           "clinical-intake",
