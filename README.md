@@ -101,6 +101,7 @@ Apply all portal migrations before starting the API:
 
 ```bash
 npm run migrate
+npm run seed:patient
 npm start
 ```
 
@@ -111,6 +112,18 @@ cd client
 npm install
 npm run dev
 ```
+
+Seeded patient login (for local testing):
+
+- Email: `patient@amethyst.com`
+- Password: `PatientPass123!`
+- Opens: `/dashboard`
+
+If the browser shows `/api/patient/dashboard` **404**, the Vite app is talking
+to the wrong/outdated backend. Stop every Node process on port 5000, then start
+**only** `C:\DentaSync-backend` (`npm start`). The console must print
+`Mounted APIs: /api/auth, /api/patient, /api/staff, /api/admin`. Do not run an
+older `C:\DentaSync\backend` or `main`-branch server alongside the new client.
 
 The Vite development server proxies `/api` to `http://localhost:5000`. For a
 separate backend deployment, set `VITE_API_URL` to that deployment's `/api`

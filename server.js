@@ -269,6 +269,8 @@ const PORT = process.env.PORT || 5000;
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`✅ DentaSync server running on http://localhost:${PORT}`);
+    console.log("Mounted APIs: /api/auth, /api/patient, /api/staff, /api/admin");
+    console.log("If the patient dashboard returns 404, you are not running this backend.");
   });
 }
 

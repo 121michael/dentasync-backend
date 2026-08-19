@@ -13,6 +13,7 @@
     "migrate:admin-portal": "node scripts/migrate-admin-portal.js",
     "migrate": "npm run migrate:otp && npm run migrate:portal && npm run migrate:password-reset && npm run migrate:staff-portal && npm run migrate:admin-portal",
     "seed:staff": "node scripts/seed-staff.js",
+    "seed:patient": "node scripts/seed-patient.js",
     "seed:admin": "node seed-admin.js"
   },
   "keywords": [],

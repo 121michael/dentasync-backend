@@ -85,17 +85,14 @@ async function createAdmin() {
   }
 
   const check = await db.query(
-    `SELECT id, email, role, is_verified, phone
+    `SELECT id, email, role, is_verified, phone, password_hash
      FROM users
      WHERE LOWER(email) = LOWER($1)
      LIMIT 1`,
     [ADMIN_EMAIL]
   );
   const admin = check.rows[0];
-  const matches = await bcrypt.compare(ADMIN_PASSWORD, (await db.query(
-    `SELECT password_hash FROM users WHERE id = $1`,
-    [admin.id]
-  )).rows[0].password_hash);
+  const matches = await bcrypt.compare(ADMIN_PASSWORD, admin.password_hash);
 
   console.log("");
   console.log("Use these credentials on the Vite client login page:");
