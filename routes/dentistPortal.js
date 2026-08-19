@@ -689,7 +689,7 @@ function createDentistPortalRouter({ db, authenticateToken }) {
            profile.gender,
            MAX(appointment.appointment_date) AS last_visit,
            (
-             SELECT treatment.treatment_name
+             SELECT treatment.treatment
              FROM patient_portal_treatment_records AS treatment
              WHERE treatment.user_id = patient.id::text
              ORDER BY treatment.treatment_date DESC NULLS LAST, treatment.id DESC
@@ -794,6 +794,31 @@ function createDentistPortalRouter({ db, authenticateToken }) {
         [String(patient.id), dateOfBirth || null, gender || null]
       );
 
+      // Link the patient to this dentist's schedule so they appear in Records Vault.
+      const catalogId =
+        stringValue(req.dentist.catalog_dentist_id, 80) || String(req.dentist.id);
+      const dentistName =
+        `Dr. ${`${req.dentist.first_name || ""} ${req.dentist.last_name || ""}`.trim()}`.trim() ||
+        "Amethyst Dentist";
+      const intakeTime = `${String(new Date().getHours()).padStart(2, "0")}:${String(
+        new Date().getMinutes()
+      ).padStart(2, "0")}`;
+      await client.query(
+        `INSERT INTO patient_portal_appointments (
+           user_id, service_id, service_name, dentist_id, dentist_name,
+           appointment_date, appointment_time, status, notes
+         ) VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, $6, 'pending', $7)`,
+        [
+          String(patient.id),
+          "clinical-intake",
+          "Clinical intake / new patient",
+          catalogId,
+          dentistName,
+          intakeTime,
+          "Registered from dentist patient records vault",
+        ]
+      );
+
       await client.query("COMMIT");
       transactionOpen = false;
       return res.status(201).json({
@@ -804,6 +829,7 @@ function createDentistPortalRouter({ db, authenticateToken }) {
           date_of_birth: dateOfBirth,
           gender,
           account_status: patient.status,
+          last_visit: new Date().toISOString().slice(0, 10),
         }),
       });
     } catch (error) {
@@ -888,7 +914,7 @@ function createDentistPortalRouter({ db, authenticateToken }) {
         appointments: appointmentsResult.rows.map(mapAppointment),
         treatments: treatmentsResult.rows.map((row) => ({
           id: row.id,
-          name: row.treatment_name,
+          name: row.treatment,
           dentist: row.dentist_name,
           date: row.treatment_date,
           status: row.status,
