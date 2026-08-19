@@ -68,6 +68,11 @@ const SERVICES = [
 
 const DENTISTS = [
   {
+    id: "dr-sarah-cruz",
+    name: "Dr. Sarah Cruz",
+    specialty: "Orthodontics and Dentofacial Orthopedics",
+  },
+  {
     id: "dr-sarah-mitchell",
     name: "Dr. Sarah Mitchell",
     specialty: "General & Cosmetic Dentistry",

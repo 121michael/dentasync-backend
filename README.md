@@ -211,3 +211,30 @@ migration adds only:
 - `admin_portal_dentist_profiles` for specialization/schedule notes;
 - `admin_portal_sync_events` for synchronization audit history.
 
+## Amethyst Dental dentist dashboard
+
+Dentists use a clinical workspace at `/dentist/dashboard` with:
+
+- Clinical overview metrics and next-patient card
+- Live treatment queue (On Going / In Line / Completed) with Call Next + Complete
+- Appointments for the logged-in dentist
+- Patient records vault (scoped to patients on that dentist’s schedule)
+- Professional profile (name, specialization, schedule notes)
+
+```bash
+npm run migrate:dentist-portal
+# or
+npm run migrate
+npm run seed:dentist
+```
+
+Seeded dentist login:
+
+- Email: `dentist@amethyst.com`
+- Password: `DentistPass123!`
+- Opens: `/dentist/dashboard`
+
+Only a live, verified `users.role = 'dentist'` account can access `/api/dentist/*`.
+Queue/appointment data is scoped through `admin_portal_dentist_profiles.catalog_dentist_id`
+(for the seed account: `dr-sarah-cruz`).
+

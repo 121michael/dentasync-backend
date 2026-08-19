@@ -346,9 +346,11 @@ function createAuthRouter({
           ? "/admin/dashboard"
           : normalizedRole === "staff"
             ? "/staff/check-ins"
-            : normalizedRole === "patient"
-              ? "/dashboard"
-              : "/access-denied";
+            : normalizedRole === "dentist"
+              ? "/dentist/dashboard"
+              : normalizedRole === "patient"
+                ? "/dashboard"
+                : "/access-denied";
 
       return res.status(200).json({
         message: "Login successful!",

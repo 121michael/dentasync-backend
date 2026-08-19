@@ -11,9 +11,11 @@
     "migrate:password-reset": "node scripts/migrate-password-reset.js",
     "migrate:staff-portal": "node scripts/migrate-staff-portal.js",
     "migrate:admin-portal": "node scripts/migrate-admin-portal.js",
-    "migrate": "npm run migrate:otp && npm run migrate:portal && npm run migrate:password-reset && npm run migrate:staff-portal && npm run migrate:admin-portal",
+    "migrate:dentist-portal": "node scripts/migrate-dentist-portal.js",
+    "migrate": "npm run migrate:otp && npm run migrate:portal && npm run migrate:password-reset && npm run migrate:staff-portal && npm run migrate:admin-portal && npm run migrate:dentist-portal",
     "seed:staff": "node scripts/seed-staff.js",
     "seed:patient": "node scripts/seed-patient.js",
+    "seed:dentist": "node scripts/seed-dentist.js",
     "seed:admin": "node seed-admin.js"
   },
   "keywords": [],

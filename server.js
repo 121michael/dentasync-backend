@@ -9,6 +9,7 @@ const { createAuthRouter } = require("./routes/auth");
 const { createPatientPortalRouter } = require("./routes/patientPortal");
 const { createStaffPortalRouter } = require("./routes/staffPortal");
 const { createAdminPortalRouter } = require("./routes/adminPortal");
+const { createDentistPortalRouter } = require("./routes/dentistPortal");
 const { createPostgresOtpStore } = require("./repositories/postgresOtpStore");
 const { createPostgresPasswordResetStore } = require("./repositories/postgresPasswordResetStore");
 const { createOtpService } = require("./services/otpService");
@@ -246,6 +247,14 @@ app.use(
 );
 
 app.use(
+  "/api/dentist",
+  createDentistPortalRouter({
+    db,
+    authenticateToken,
+  })
+);
+
+app.use(
   "/api/admin",
   createAdminPortalRouter({
     db,
@@ -269,7 +278,7 @@ const PORT = process.env.PORT || 5000;
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`✅ DentaSync server running on http://localhost:${PORT}`);
-    console.log("Mounted APIs: /api/auth, /api/patient, /api/staff, /api/admin");
+    console.log("Mounted APIs: /api/auth, /api/patient, /api/staff, /api/dentist, /api/admin");
     console.log("If the patient dashboard returns 404, you are not running this backend.");
   });
 }

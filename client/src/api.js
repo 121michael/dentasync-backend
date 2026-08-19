@@ -135,6 +135,19 @@ export const api = {
   updateStaffProfile: (body) => request("/staff/profile", { method: "PUT", body }),
   downloadStaffExport: (report) =>
     download(`/staff/export/${encodeURIComponent(report)}`, `${report}-log.csv`),
+  getDentistDashboard: () => request("/dentist/dashboard"),
+  getDentistQueue: (tab = "ongoing") =>
+    request(`/dentist/queue?tab=${encodeURIComponent(tab)}`),
+  callNextDentistPatient: () => request("/dentist/queue/call-next", { method: "POST" }),
+  updateDentistQueue: (queueEntryId, body) =>
+    request(`/dentist/queue/${queueEntryId}`, { method: "PATCH", body }),
+  getDentistAppointments: () => request("/dentist/appointments"),
+  getDentistPatients: (search = "") =>
+    request(`/dentist/patients${search ? `?search=${encodeURIComponent(search)}` : ""}`),
+  createDentistPatient: (body) => request("/dentist/patients", { method: "POST", body }),
+  getDentistPatient: (patientId) => request(`/dentist/patients/${patientId}`),
+  getDentistProfile: () => request("/dentist/profile"),
+  updateDentistProfile: (body) => request("/dentist/profile", { method: "PUT", body }),
   getAdminDashboard: () => request("/admin/dashboard"),
   getAdminPatients: (params = {}) => {
     const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value || value === 0));

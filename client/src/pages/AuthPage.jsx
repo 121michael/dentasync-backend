@@ -75,9 +75,11 @@ export function AuthPage() {
           ? "/admin/dashboard"
           : role === "staff"
             ? "/staff/check-ins"
-            : role === "patient"
-              ? "/dashboard"
-              : "/access-denied");
+            : role === "dentist"
+              ? "/dentist/dashboard"
+              : role === "patient"
+                ? "/dashboard"
+                : "/access-denied");
       navigate(redirectTo, { replace: true });
     } catch (error) {
       if (error instanceof ApiError && error.data?.requiresOtp) {

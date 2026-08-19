@@ -168,6 +168,9 @@ function mapAccount(row, extras = {}) {
   if (row.schedule_notes !== undefined || extras.scheduleNotes !== undefined) {
     payload.scheduleNotes = extras.scheduleNotes ?? row.schedule_notes ?? "";
   }
+  if (row.catalog_dentist_id !== undefined || extras.catalogDentistId !== undefined) {
+    payload.catalogDentistId = extras.catalogDentistId ?? row.catalog_dentist_id ?? null;
+  }
   if (extras.position !== undefined) {
     payload.position = extras.position || "";
   }
@@ -990,6 +993,7 @@ function createAdminPortalRouter({
     const password = typeof req.body?.password === "string" ? req.body.password : null;
     const specialization = stringValue(req.body?.specialization, 180) || "";
     const scheduleNotes = stringValue(req.body?.scheduleNotes, 2000) || "";
+    const catalogDentistId = stringValue(req.body?.catalogDentistId, 80) || null;
 
     if (!firstName || !lastName || !email || !phone) {
       return res.status(400).json({
@@ -1035,9 +1039,10 @@ function createAdminPortalRouter({
       dentist = userResult.rows[0];
 
       await client.query(
-        `INSERT INTO admin_portal_dentist_profiles (user_id, specialization, schedule_notes)
-         VALUES ($1, $2, $3)`,
-        [String(dentist.id), specialization || null, scheduleNotes || null]
+        `INSERT INTO admin_portal_dentist_profiles (
+           user_id, specialization, schedule_notes, catalog_dentist_id
+         ) VALUES ($1, $2, $3, $4)`,
+        [String(dentist.id), specialization || null, scheduleNotes || null, catalogDentistId]
       );
 
       await client.query("COMMIT");
@@ -1079,7 +1084,7 @@ function createAdminPortalRouter({
       message: invitationSent
         ? "Dentist account created and a secure setup link was sent."
         : "Dentist account created successfully.",
-      dentist: mapAccount(dentist, { specialization, scheduleNotes }),
+      dentist: mapAccount(dentist, { specialization, scheduleNotes, catalogDentistId }),
       invitationSent,
     });
   });

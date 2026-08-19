@@ -5,6 +5,7 @@ import { LoadingState } from "./components/UI";
 import { PortalLayout } from "./components/PortalLayout";
 import { StaffLayout } from "./components/StaffLayout";
 import { AdminLayout } from "./components/AdminLayout";
+import { DentistLayout } from "./components/DentistLayout";
 import { AppointmentsPage } from "./pages/AppointmentsPage";
 import { AuthPage } from "./pages/AuthPage";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -29,6 +30,11 @@ import { AdminSecurityPage } from "./pages/AdminSecurityPage";
 import { AdminSyncPage } from "./pages/AdminSyncPage";
 import { AdminNotificationsPage } from "./pages/AdminNotificationsPage";
 import { AdminProfilePage } from "./pages/AdminProfilePage";
+import { DentistDashboardPage } from "./pages/DentistDashboardPage";
+import { DentistQueuePage } from "./pages/DentistQueuePage";
+import { DentistAppointmentsPage } from "./pages/DentistAppointmentsPage";
+import { DentistRecordsPage } from "./pages/DentistRecordsPage";
+import { DentistProfilePage } from "./pages/DentistProfilePage";
 import { useAuth } from "./useAuth";
 
 function roleFor(user) {
@@ -38,6 +44,7 @@ function roleFor(user) {
 function landingRoute(user) {
   if (roleFor(user) === "admin") return "/admin/dashboard";
   if (roleFor(user) === "staff") return "/staff/check-ins";
+  if (roleFor(user) === "dentist") return "/dentist/dashboard";
   if (roleFor(user) === "patient") return "/dashboard";
   return "/access-denied";
 }
@@ -65,6 +72,12 @@ function AdminPortal() {
   const { user } = useAuth();
   if (roleFor(user) !== "admin") return <Navigate to={landingRoute(user)} replace />;
   return <AdminLayout />;
+}
+
+function DentistPortal() {
+  const { user } = useAuth();
+  if (roleFor(user) !== "dentist") return <Navigate to={landingRoute(user)} replace />;
+  return <DentistLayout />;
 }
 
 function PublicOnly() {
@@ -139,6 +152,14 @@ function PortalRoutes() {
           <Route path="/admin/sync" element={<AdminSyncPage />} />
           <Route path="/admin/notifications" element={<AdminNotificationsPage />} />
           <Route path="/admin/profile" element={<AdminProfilePage />} />
+        </Route>
+        <Route element={<DentistPortal />}>
+          <Route path="/dentist" element={<Navigate to="/dentist/dashboard" replace />} />
+          <Route path="/dentist/dashboard" element={<DentistDashboardPage />} />
+          <Route path="/dentist/queue" element={<DentistQueuePage />} />
+          <Route path="/dentist/appointments" element={<DentistAppointmentsPage />} />
+          <Route path="/dentist/patient-records" element={<DentistRecordsPage />} />
+          <Route path="/dentist/profile" element={<DentistProfilePage />} />
         </Route>
         <Route path="/access-denied" element={<AccessDeniedPage />} />
       </Route>
