@@ -33,6 +33,14 @@ async function startStaffPortal({ tokenRole, databaseRole }) {
         return { rows: [{ count: "0" }] };
       }
 
+      if (sql.includes("todaysActivity") || sql.includes("LEFT JOIN patient_portal_queue_entries AS queue")) {
+        return { rows: [] };
+      }
+
+      if (sql.includes("FROM patient_portal_appointments AS appointment")) {
+        return { rows: [] };
+      }
+
       throw new Error(`Unexpected test query: ${sql}`);
     },
   };
@@ -79,8 +87,12 @@ test("staff dashboard authorizes the live database role instead of a token role 
     const response = await fetch(`${portal.url}/dashboard`);
     assert.equal(response.status, 200);
     assert.deepEqual((await response.json()).metrics, {
+      todaysAppointments: 0,
       todayCheckIns: 0,
+      checkedIn: 0,
+      waitingQueue: 0,
       activeQueue: 0,
+      completedToday: 0,
       pendingRequests: 0,
       unreadNotifications: 0,
     });

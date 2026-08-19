@@ -1,93 +1,107 @@
-import { useCallback, useEffect, useState } from "react";
-import {
-  CalendarClock,
-  Check,
-  Download,
-  RefreshCw,
-  RotateCcw,
-  Trash2,
-  UserRoundCheck,
-  X,
-} from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Eye, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
-import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
+import { EmptyState, ErrorState, LoadingState } from "../components/UI";
+import { StaffModal, StaffStatusBadge } from "../components/StaffUI";
+import { useStaffUi } from "../components/StaffLayout";
 import { formatStaffDate, formatStaffTime } from "../staffUtils";
-import {
-  StaffModal,
-  StaffStatusBadge,
-} from "../components/StaffUI";
 
-function appointmentDateValue(date) {
-  if (!date) return new Date().toISOString().slice(0, 10);
-  return String(date).slice(0, 10);
-}
+const TABS = [
+  { id: "pending", label: "Pending" },
+  { id: "confirmed", label: "Confirmed" },
+  { id: "today", label: "Today" },
+  { id: "completed", label: "Completed" },
+  { id: "cancelled", label: "Cancelled" },
+];
 
 export function StaffAppointmentsPage() {
-  const [appointmentData, setAppointmentData] = useState(null);
-  const [availability, setAvailability] = useState(null);
-  const [isAvailabilityOpen, setIsAvailabilityOpen] = useState(false);
+  const { pushToast, confirm } = useStaffUi();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [tab, setTab] = useState(searchParams.get("tab") || "today");
+  const [data, setData] = useState(null);
+  const [detail, setDetail] = useState(null);
   const [rescheduleTarget, setRescheduleTarget] = useState(null);
   const [rescheduleForm, setRescheduleForm] = useState({ appointmentDate: "", appointmentTime: "" });
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
-  const [busyAction, setBusyAction] = useState(null);
-  const [isExporting, setIsExporting] = useState(false);
+  const [busy, setBusy] = useState("");
 
   const load = useCallback(async () => {
     try {
-      const response = await api.getStaffAppointments();
-      setAppointmentData(response);
+      setData(await api.getStaffAppointments(tab));
       setError("");
     } catch (loadError) {
       setError(loadError.message);
     }
-  }, []);
+  }, [tab]);
 
   useEffect(() => {
     load();
-    const refresh = window.setInterval(load, 30000);
-    return () => window.clearInterval(refresh);
+    const timer = window.setInterval(load, 30000);
+    return () => window.clearInterval(timer);
   }, [load]);
 
-  async function openAvailability() {
-    setIsAvailabilityOpen(true);
-    setError("");
+  useEffect(() => {
+    const focusId = searchParams.get("focus");
+    if (!focusId || !data?.appointments?.length) return;
+    const match = data.appointments.find((item) => String(item.id) === String(focusId));
+    if (match) {
+      openDetails(match.id);
+      setSearchParams({}, { replace: true });
+    }
+  }, [data, searchParams, setSearchParams]);
+
+  const rows = useMemo(() => data?.appointments || [], [data]);
+
+  async function openDetails(appointmentId) {
+    setBusy(`detail-${appointmentId}`);
     try {
-      setAvailability(await api.getStaffDentistAvailability());
-    } catch (loadError) {
-      setError(loadError.message);
-      setAvailability({ availability: [] });
+      const response = await api.getStaffAppointment(appointmentId);
+      setDetail(response.appointment);
+    } catch (detailError) {
+      pushToast(detailError.message, "error");
+    } finally {
+      setBusy("");
     }
   }
 
-  async function updateAppointment(appointment, action, fields = {}) {
-    const actionKey = `${appointment.id}-${action}`;
-    setBusyAction(actionKey);
-    setError("");
-    setSuccess("");
+  async function runAction(appointment, action, fields = {}) {
+    if (action === "cancel" || action === "deny") {
+      const ok = await confirm({
+        title: action === "deny" ? "Decline request" : "Cancel appointment",
+        message:
+          action === "deny"
+            ? `Decline the appointment request for ${appointment.patientName}?`
+            : `Are you sure you want to cancel this appointment for ${appointment.patientName}?`,
+        confirmLabel: action === "deny" ? "Decline" : "Cancel appointment",
+      });
+      if (!ok) return;
+    }
+
+    setBusy(`${action}-${appointment.id}`);
     try {
       await api.updateStaffAppointment(appointment.id, { action, ...fields });
-      await load();
-      setSuccess(
-        action === "approve"
-          ? "Appointment request approved."
-          : action === "deny"
-            ? "Appointment request denied."
-            : action === "cancel"
-              ? "Appointment cancelled."
-              : "Appointment rescheduled."
+      pushToast(
+        action === "confirm" || action === "approve"
+          ? "Appointment confirmed successfully."
+          : action === "reschedule"
+            ? "Appointment rescheduled successfully."
+            : "Appointment cancelled successfully."
       );
-    } catch (updateError) {
-      setError(updateError.message);
+      setDetail(null);
+      setRescheduleTarget(null);
+      await load();
+    } catch (actionError) {
+      pushToast(actionError.message, "error");
     } finally {
-      setBusyAction(null);
+      setBusy("");
     }
   }
 
   function openReschedule(appointment) {
     setRescheduleTarget(appointment);
     setRescheduleForm({
-      appointmentDate: appointmentDateValue(appointment.date),
+      appointmentDate: String(appointment.date || "").slice(0, 10),
       appointmentTime: String(appointment.time || "").slice(0, 5),
     });
   }
@@ -95,208 +109,202 @@ export function StaffAppointmentsPage() {
   async function submitReschedule(event) {
     event.preventDefault();
     if (!rescheduleTarget) return;
-    await updateAppointment(rescheduleTarget, "reschedule", rescheduleForm);
-    setRescheduleTarget(null);
+    const ok = await confirm({
+      title: "Confirm reschedule",
+      message: `Reschedule ${rescheduleTarget.patientName} to ${rescheduleForm.appointmentDate} at ${rescheduleForm.appointmentTime}?`,
+      confirmLabel: "Reschedule",
+      tone: "primary",
+    });
+    if (!ok) return;
+    await runAction(rescheduleTarget, "reschedule", rescheduleForm);
   }
 
-  async function exportAppointments() {
-    setIsExporting(true);
-    setError("");
-    try {
-      await api.downloadStaffExport("appointments");
-    } catch (exportError) {
-      setError(exportError.message);
-    } finally {
-      setIsExporting(false);
-    }
-  }
-
-  if (error && !appointmentData) return <ErrorState message={error} onRetry={load} />;
-  if (!appointmentData) return <LoadingState label="Loading appointment operations…" />;
-
-  const appointments = appointmentData.todayAppointments || [];
-  const requests = appointmentData.pendingRequests || [];
+  if (error && !data) return <ErrorState message={error} onRetry={load} />;
+  if (!data) return <LoadingState label="Loading appointments…" />;
 
   return (
     <div className="staff-page">
-      <SectionHeading
-        eyebrow="Scheduling desk"
-        title="Appointments"
-        detail="Manage today’s care schedule and new booking requests."
-        action={
-          <div className="staff-heading-actions">
-            <button className="button button--secondary" onClick={openAvailability}>
-              <CalendarClock size={16} /> Dentist Availability
-            </button>
-            <button className="button button--primary" onClick={exportAppointments} disabled={isExporting}>
-              <Download size={16} /> {isExporting ? "Exporting…" : "Export Log"}
-            </button>
-          </div>
-        }
-      />
-
-      {error && <p className="inline-alert inline-alert--error">{error}</p>}
-      {success && <p className="inline-alert inline-alert--success"><Check size={17} /> {success}</p>}
+      {error ? <p className="inline-alert inline-alert--error">{error}</p> : null}
 
       <section className="staff-panel">
         <div className="staff-panel__heading">
           <div>
-            <span className="eyebrow">Today&apos;s schedule</span>
-            <h2>Appointment Command Center</h2>
-            <p>Today&apos;s Confirmed Bookings</p>
+            <span className="eyebrow">Scheduling desk</span>
+            <h2>Appointment Management</h2>
+            <p>Confirm, reschedule, and cancel appointments. Patient notifications are sent automatically.</p>
           </div>
-          <button className="icon-button" onClick={load} aria-label="Refresh appointments">
-            <RefreshCw size={18} />
+          <button className="button button--secondary" onClick={load}>
+            <RefreshCw size={16} /> Refresh
           </button>
         </div>
 
-        {appointments.length ? (
-          <div className="staff-appointment-grid">
-            {appointments.map((appointment) => (
-              <article className="staff-appointment-card" key={appointment.id}>
-                <div className="staff-appointment-card__time">
-                  <CalendarClock size={18} />
-                  <strong>{formatStaffTime(appointment.time)}</strong>
-                  <small>{formatStaffDate(appointment.date)}</small>
-                </div>
-                <div className="staff-appointment-card__body">
-                  <div className="staff-card-title-row">
-                    <div>
-                      <h3>{appointment.patientName}</h3>
-                      <p>{appointment.treatment}</p>
-                    </div>
-                    <StaffStatusBadge status={appointment.status} />
-                  </div>
-                  <small>{appointment.dentist} · {appointment.location || "Amethyst Dental Clinic"}</small>
-                  <div className="staff-appointment-card__actions">
-                    <button
-                      className="button button--secondary button--compact"
-                      onClick={() => openReschedule(appointment)}
-                      disabled={Boolean(busyAction)}
-                    >
-                      <RotateCcw size={15} /> Reschedule
-                    </button>
-                    <button
-                      className="button button--danger button--compact"
-                      onClick={() => {
-                        if (window.confirm(`Cancel ${appointment.patientName}'s appointment?`)) {
-                          updateAppointment(appointment, "cancel");
-                        }
-                      }}
-                      disabled={busyAction === `${appointment.id}-cancel`}
-                    >
-                      <Trash2 size={15} /> {busyAction === `${appointment.id}-cancel` ? "Cancelling…" : "Cancel"}
-                    </button>
-                  </div>
-                </div>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <EmptyState title="No confirmed bookings today" detail="Today’s confirmed appointments will appear here." />
-        )}
-      </section>
-
-      <section className="staff-panel">
-        <div className="staff-panel__heading">
-          <div>
-            <span className="eyebrow">Incoming requests</span>
-            <h2>Booking Requests</h2>
-            <p>Review requests that still need staff approval.</p>
-          </div>
-          <span className="staff-count-badge">{requests.length} pending</span>
+        <div className="admin-tabs" role="tablist">
+          {TABS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`admin-tab ${tab === item.id ? "is-active" : ""}`}
+              onClick={() => setTab(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
         </div>
 
-        {requests.length ? (
-          <div className="staff-request-list">
-            {requests.map((request) => (
-              <article className="staff-request-row" key={request.id}>
-                <span className="staff-request-row__icon"><UserRoundCheck size={20} /></span>
-                <div>
-                  <strong>{request.patientName}</strong>
-                  <p>{request.treatment} with {request.dentist}</p>
-                  <small>{formatStaffDate(request.date)} · {formatStaffTime(request.time)}</small>
-                </div>
-                <div className="staff-request-row__actions">
-                  <button
-                    className="button button--secondary button--compact"
-                    onClick={() => updateAppointment(request, "deny")}
-                    disabled={busyAction === `${request.id}-deny`}
-                  >
-                    <X size={15} /> Deny
-                  </button>
-                  <button
-                    className="button button--primary button--compact"
-                    onClick={() => updateAppointment(request, "approve")}
-                    disabled={busyAction === `${request.id}-approve`}
-                  >
-                    <Check size={15} /> {busyAction === `${request.id}-approve` ? "Approving…" : "Approve"}
-                  </button>
-                </div>
-              </article>
-            ))}
+        {rows.length ? (
+          <div className="staff-table-wrap">
+            <table className="staff-table">
+              <thead>
+                <tr>
+                  <th>Appointment ID</th>
+                  <th>Patient</th>
+                  <th>Date</th>
+                  <th>Time</th>
+                  <th>Service</th>
+                  <th>Dentist</th>
+                  <th>HMO</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((appointment) => (
+                  <tr key={appointment.id}>
+                    <td>
+                      <code>#{appointment.id}</code>
+                    </td>
+                    <td>
+                      <strong>{appointment.patientName}</strong>
+                      <small>{appointment.patientPhone || "No phone"}</small>
+                    </td>
+                    <td>{formatStaffDate(appointment.date)}</td>
+                    <td>{formatStaffTime(String(appointment.time || "").slice(0, 5))}</td>
+                    <td>{appointment.service || appointment.treatment}</td>
+                    <td>{appointment.dentist}</td>
+                    <td>
+                      {appointment.coverageType === "hmo"
+                        ? appointment.hmoProvider || "HMO"
+                        : appointment.coverageType || "Self-pay"}
+                    </td>
+                    <td>
+                      <StaffStatusBadge status={appointment.status} />
+                    </td>
+                    <td>
+                      <div className="staff-row-actions">
+                        <button
+                          className="button button--secondary button--compact"
+                          onClick={() => openDetails(appointment.id)}
+                          disabled={Boolean(busy)}
+                        >
+                          <Eye size={14} /> View
+                        </button>
+                        {appointment.status === "pending" ? (
+                          <button
+                            className="button button--primary button--compact"
+                            onClick={() => runAction(appointment, "confirm")}
+                            disabled={Boolean(busy)}
+                          >
+                            Confirm
+                          </button>
+                        ) : null}
+                        {["pending", "confirmed", "checked_in"].includes(appointment.status) ? (
+                          <>
+                            <button
+                              className="button button--secondary button--compact"
+                              onClick={() => openReschedule(appointment)}
+                              disabled={Boolean(busy)}
+                            >
+                              <RotateCcw size={14} /> Reschedule
+                            </button>
+                            <button
+                              className="button button--danger button--compact"
+                              onClick={() => runAction(appointment, "cancel")}
+                              disabled={Boolean(busy)}
+                            >
+                              <Trash2 size={14} /> Cancel
+                            </button>
+                          </>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         ) : (
-          <EmptyState title="No pending booking requests" detail="New appointment requests will appear here for staff review." />
+          <EmptyState title="No appointments in this tab" detail="Try another status filter." />
         )}
       </section>
 
-      {isAvailabilityOpen && (
-        <StaffModal title="Dentist Availability" onClose={() => setIsAvailabilityOpen(false)} wide>
-          {!availability ? (
-            <LoadingState label="Loading dentist availability…" />
-          ) : availability.availability.length ? (
-            <div className="staff-availability-list">
-              {availability.availability.map((entry) => (
-                <article className="staff-availability-row" key={entry.id}>
-                  <div>
-                    <strong>{entry.dentistName}</strong>
-                    <small>{formatStaffDate(entry.date)} · {formatStaffTime(entry.startTime)} – {formatStaffTime(entry.endTime)}</small>
-                  </div>
-                  <StaffStatusBadge status={entry.status} />
-                </article>
-              ))}
-            </div>
-          ) : (
-            <EmptyState
-              title="No availability has been published"
-              detail="Dentist schedules will appear here when they are entered in the clinic database."
-            />
-          )}
+      {detail ? (
+        <StaffModal title="Appointment request details" onClose={() => setDetail(null)} wide>
+          <div className="staff-detail-grid">
+            <p><small>Patient name</small><strong>{detail.patientName}</strong></p>
+            <p><small>Patient ID</small><strong>{detail.patientId}</strong></p>
+            <p><small>Contact</small><strong>{detail.patientPhone || detail.patientEmail || "—"}</strong></p>
+            <p><small>Date</small><strong>{formatStaffDate(detail.date)}</strong></p>
+            <p><small>Time</small><strong>{formatStaffTime(String(detail.time || "").slice(0, 5))}</strong></p>
+            <p><small>Service</small><strong>{detail.service || detail.treatment}</strong></p>
+            <p><small>Preferred dentist</small><strong>{detail.dentist}</strong></p>
+            <p><small>HMO status</small><strong>{detail.coverageType || "—"}</strong></p>
+            <p><small>HMO provider</small><strong>{detail.hmoProvider || "—"}</strong></p>
+            <p><small>HMO ID</small><strong>{detail.hmoMemberNumber || "—"}</strong></p>
+            <p><small>Company</small><strong>{detail.companyName || "—"}</strong></p>
+            <p><small>Birth date</small><strong>{detail.birthDate ? formatStaffDate(detail.birthDate) : "—"}</strong></p>
+          </div>
+          {detail.notes ? <p className="staff-detail-copy">{detail.notes}</p> : null}
+          <div className="staff-heading-actions">
+            {detail.status === "pending" ? (
+              <button className="button button--primary" onClick={() => runAction(detail, "confirm")} disabled={Boolean(busy)}>
+                Confirm
+              </button>
+            ) : null}
+            {["pending", "confirmed", "checked_in"].includes(detail.status) ? (
+              <>
+                <button className="button button--secondary" onClick={() => openReschedule(detail)} disabled={Boolean(busy)}>
+                  Reschedule
+                </button>
+                <button className="button button--danger" onClick={() => runAction(detail, "cancel")} disabled={Boolean(busy)}>
+                  Cancel
+                </button>
+              </>
+            ) : null}
+          </div>
         </StaffModal>
-      )}
+      ) : null}
 
-      {rescheduleTarget && (
-        <StaffModal title={`Reschedule ${rescheduleTarget.patientName}`} onClose={() => setRescheduleTarget(null)}>
-          <form className="staff-modal__form" onSubmit={submitReschedule}>
+      {rescheduleTarget ? (
+        <StaffModal title="Reschedule appointment" onClose={() => setRescheduleTarget(null)}>
+          <form className="admin-form" onSubmit={submitReschedule}>
             <label className="field">
               <span>New date</span>
               <input
                 type="date"
-                min={new Date().toISOString().slice(0, 10)}
-                value={rescheduleForm.appointmentDate}
-                onChange={(event) => setRescheduleForm((current) => ({ ...current, appointmentDate: event.target.value }))}
                 required
+                value={rescheduleForm.appointmentDate}
+                onChange={(event) =>
+                  setRescheduleForm((current) => ({ ...current, appointmentDate: event.target.value }))
+                }
               />
             </label>
             <label className="field">
               <span>New time</span>
               <input
                 type="time"
-                value={rescheduleForm.appointmentTime}
-                onChange={(event) => setRescheduleForm((current) => ({ ...current, appointmentTime: event.target.value }))}
                 required
+                value={rescheduleForm.appointmentTime}
+                onChange={(event) =>
+                  setRescheduleForm((current) => ({ ...current, appointmentTime: event.target.value }))
+                }
               />
             </label>
-            <div className="staff-modal__actions">
-              <button type="button" className="button button--secondary" onClick={() => setRescheduleTarget(null)}>Cancel</button>
-              <button className="button button--primary" disabled={busyAction === `${rescheduleTarget.id}-reschedule`}>
-                <RotateCcw size={16} /> {busyAction === `${rescheduleTarget.id}-reschedule` ? "Saving…" : "Confirm Reschedule"}
-              </button>
-            </div>
+            <button className="button button--primary" disabled={Boolean(busy)}>
+              Save reschedule
+            </button>
           </form>
         </StaffModal>
-      )}
+      ) : null}
     </div>
   );
 }

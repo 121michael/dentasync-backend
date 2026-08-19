@@ -115,10 +115,15 @@ export const api = {
     request(`/patient/notifications/${notificationId}/read`, { method: "PATCH" }),
   getStaffDashboard: () => request("/staff/dashboard"),
   getStaffCheckIns: () => request("/staff/check-ins"),
+  staffCheckIn: (body) => request("/staff/check-in", { method: "POST", body }),
   getStaffQueue: () => request("/staff/queue"),
+  getStaffQueueSummary: () => request("/staff/queue/summary"),
+  resetStaffQueue: () => request("/staff/queue/reset", { method: "POST" }),
   updateStaffQueue: (queueEntryId, body) =>
     request(`/staff/queue/${queueEntryId}`, { method: "PATCH", body }),
-  getStaffAppointments: () => request("/staff/appointments"),
+  getStaffAppointments: (tab = "today") =>
+    request(`/staff/appointments?tab=${encodeURIComponent(tab)}`),
+  getStaffAppointment: (appointmentId) => request(`/staff/appointments/${appointmentId}`),
   updateStaffAppointment: (appointmentId, body) =>
     request(`/staff/appointments/${appointmentId}`, { method: "PATCH", body }),
   getStaffDentistAvailability: () => request("/staff/dentist-availability"),
@@ -126,13 +131,25 @@ export const api = {
     request(`/staff/patients${search ? `?search=${encodeURIComponent(search)}` : ""}`),
   createStaffPatient: (body) => request("/staff/patients", { method: "POST", body }),
   getStaffPatient: (patientId) => request(`/staff/patients/${patientId}`),
+  updateStaffPatient: (patientId, body) =>
+    request(`/staff/patients/${patientId}`, { method: "PATCH", body }),
+  deleteStaffPatient: (patientId) =>
+    request(`/staff/patients/${patientId}`, { method: "DELETE" }),
+  getStaffBilling: (search = "") =>
+    request(`/staff/billing${search ? `?search=${encodeURIComponent(search)}` : ""}`),
+  createStaffInvoice: (body) => request("/staff/billing", { method: "POST", body }),
+  getStaffInvoice: (invoiceId) => request(`/staff/billing/${invoiceId}`),
+  updateStaffInvoice: (invoiceId, body) =>
+    request(`/staff/billing/${invoiceId}`, { method: "PATCH", body }),
   getStaffNotifications: () => request("/staff/notifications"),
   markStaffNotificationRead: (notificationId) =>
     request(`/staff/notifications/${notificationId}/read`, { method: "PATCH" }),
   markAllStaffNotificationsRead: () =>
     request("/staff/notifications/read-all", { method: "PATCH" }),
+  sendStaffSms: (body) => request("/staff/notifications/sms", { method: "POST", body }),
   getStaffProfile: () => request("/staff/profile"),
   updateStaffProfile: (body) => request("/staff/profile", { method: "PUT", body }),
+  updateStaffPassword: (body) => request("/staff/profile/password", { method: "POST", body }),
   downloadStaffExport: (report) =>
     download(`/staff/export/${encodeURIComponent(report)}`, `${report}-log.csv`),
   getDentistDashboard: () => request("/dentist/dashboard"),
@@ -163,8 +180,6 @@ export const api = {
     Promise.reject(new ApiError("Administrators cannot create patient accounts.", 403)),
   updateAdminPatient: (id, body) => request(`/admin/patients/${id}`, { method: "PATCH", body }),
   getAdminPatient: (id) => request(`/admin/patients/${id}`),
-  updateStaffPatient: (id, body) => request(`/staff/patients/${id}`, { method: "PATCH", body }),
-  deleteStaffPatient: (id) => request(`/staff/patients/${id}`, { method: "DELETE" }),
   updateDentistPatient: (id, body) => request(`/dentist/patients/${id}`, { method: "PATCH", body }),
   deleteDentistPatient: (id) => request(`/dentist/patients/${id}`, { method: "DELETE" }),
   getAdminStaff: (params = {}) => {

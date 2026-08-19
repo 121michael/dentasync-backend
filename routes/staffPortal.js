@@ -4,17 +4,22 @@ const crypto = require("crypto");
 const bcrypt = require("bcrypt");
 const express = require("express");
 const clinicalPatients = require("../services/clinicalPatients");
+const staffCheckIn = require("../services/staffCheckIn");
 
 const QUEUE_STATUS_MAP = {
   checked_in: "checked_in",
   waiting: "waiting",
   preparing: "preparing",
+  called: "preparing",
+  skipped: "no_show",
   in_chair: "dentist",
   dentist: "dentist",
+  in_treatment: "dentist",
   completed: "completed",
   no_show: "no_show",
 };
-const APPOINTMENT_ACTIONS = new Set(["approve", "deny", "cancel", "reschedule"]);
+const APPOINTMENT_ACTIONS = new Set(["approve", "confirm", "deny", "cancel", "reschedule"]);
+const PAYMENT_STATUSES = new Set(["pending", "partially_paid", "paid", "cancelled"]);
 
 function stringValue(value, maxLength = 500) {
   if (typeof value !== "string") {
@@ -104,7 +109,9 @@ function mapAppointment(row) {
     patientId: row.user_id,
     patientName: row.patient_name || "Patient",
     patientPhone: row.patient_phone || null,
+    patientEmail: row.patient_email || null,
     treatment: row.service_name,
+    service: row.service_name,
     dentistId: row.dentist_id,
     dentist: row.dentist_name,
     date: row.appointment_date,
@@ -112,8 +119,42 @@ function mapAppointment(row) {
     location: row.clinic_location,
     status: row.status,
     notes: row.notes || "",
+    coverageType: row.coverage_type || null,
+    hmoProvider: row.hmo_provider || null,
+    hmoMemberNumber: row.hmo_member_number || null,
+    estimatedCost: row.estimated_cost != null ? Number(row.estimated_cost) : null,
     createdAt: row.created_at,
   };
+}
+
+function mapInvoice(row) {
+  return {
+    id: row.id,
+    invoiceCode: row.invoice_code,
+    patientUserId: row.patient_user_id || null,
+    patientName: row.patient_name,
+    patientPhone: row.patient_phone || null,
+    appointmentId: row.appointment_id || null,
+    serviceName: row.service_name,
+    amount: Number(row.amount || 0),
+    amountPaid: Number(row.amount_paid || 0),
+    paymentStatus: row.payment_status,
+    notes: row.notes || "",
+    createdBy: row.created_by || null,
+    createdByName: row.created_by_name || null,
+    invoiceDate: row.invoice_date,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function isMissingRelation(error) {
+  return error?.code === "42P01" || error?.code === "42703";
+}
+
+function invoiceCode() {
+  const stamp = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+  return `INV-${stamp}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
 }
 
 function mapPatient(row) {
@@ -198,9 +239,23 @@ function createStaffPortalRouter({
 
   router.use(authenticateToken, requireStaffAccount(db));
 
-  router.get("/dashboard", async (_req, res) => {
+  router.get("/dashboard", async (req, res) => {
     try {
-      const [checkInResult, queueResult, pendingResult, unreadResult] = await Promise.all([
+      const [
+        appointmentsToday,
+        checkedIn,
+        waitingQueue,
+        completedToday,
+        pendingRequests,
+        unreadResult,
+        activityResult,
+      ] = await Promise.all([
+        db.query(
+          `SELECT COUNT(*) AS count
+           FROM patient_portal_appointments
+           WHERE appointment_date = CURRENT_DATE
+             AND status NOT IN ('cancelled')`
+        ),
         db.query(
           `SELECT COUNT(*) AS count
            FROM patient_portal_queue_entries
@@ -210,7 +265,13 @@ function createStaffPortalRouter({
           `SELECT COUNT(*) AS count
            FROM patient_portal_queue_entries
            WHERE DATE(checked_in_at) = CURRENT_DATE
-             AND status NOT IN ('completed', 'no_show')`
+             AND status IN ('checked_in', 'waiting', 'preparing')`
+        ),
+        db.query(
+          `SELECT COUNT(*) AS count
+           FROM patient_portal_appointments
+           WHERE appointment_date = CURRENT_DATE
+             AND status = 'completed'`
         ),
         db.query(
           `SELECT COUNT(*) AS count
@@ -221,18 +282,58 @@ function createStaffPortalRouter({
           `SELECT COUNT(*) AS count
            FROM staff_portal_notifications
            WHERE user_id = $1 AND read_at IS NULL`,
-          [String(_req.staff.id)]
+          [String(req.staff.id)]
+        ),
+        db.query(
+          `SELECT
+             queue.id AS queue_entry_id,
+             queue.token,
+             queue.position,
+             queue.status AS queue_status,
+             queue.checked_in_at,
+             appointment.id AS appointment_id,
+             appointment.service_name,
+             appointment.dentist_name,
+             appointment.appointment_time,
+             appointment.status AS appointment_status,
+             patient.id AS patient_id,
+             CONCAT_WS(' ', patient.first_name, patient.last_name) AS patient_name
+           FROM patient_portal_appointments AS appointment
+           JOIN users AS patient ON patient.id::text = appointment.user_id
+           LEFT JOIN patient_portal_queue_entries AS queue
+             ON queue.appointment_id = appointment.id
+            AND DATE(queue.checked_in_at) = CURRENT_DATE
+           WHERE appointment.appointment_date = CURRENT_DATE
+           ORDER BY appointment.appointment_time ASC, appointment.id ASC
+           LIMIT 80`
         ),
       ]);
 
       return res.json({
         date: new Date().toISOString().slice(0, 10),
+        serverTime: new Date().toISOString(),
         metrics: {
-          todayCheckIns: count(checkInResult.rows[0], "count"),
-          activeQueue: count(queueResult.rows[0], "count"),
-          pendingRequests: count(pendingResult.rows[0], "count"),
+          todaysAppointments: count(appointmentsToday.rows[0], "count"),
+          todayCheckIns: count(checkedIn.rows[0], "count"),
+          checkedIn: count(checkedIn.rows[0], "count"),
+          waitingQueue: count(waitingQueue.rows[0], "count"),
+          activeQueue: count(waitingQueue.rows[0], "count"),
+          completedToday: count(completedToday.rows[0], "count"),
+          pendingRequests: count(pendingRequests.rows[0], "count"),
           unreadNotifications: count(unreadResult.rows[0], "count"),
         },
+        todaysActivity: activityResult.rows.map((row) => ({
+          queueEntryId: row.queue_entry_id || null,
+          queueNumber: row.token || (row.position != null ? `#${row.position}` : "—"),
+          patientId: row.patient_id,
+          patientName: row.patient_name || "Patient",
+          appointmentId: row.appointment_id,
+          appointmentTime: row.appointment_time,
+          service: row.service_name || "Dental visit",
+          dentist: row.dentist_name || "Unassigned",
+          checkInStatus: row.queue_status ? displayQueueStatus(row.queue_status) : "not_checked_in",
+          appointmentStatus: row.appointment_status,
+        })),
       });
     } catch (error) {
       console.error("Staff dashboard error:", error.message);
@@ -404,25 +505,55 @@ function createStaffPortalRouter({
     }
   });
 
-  router.get("/appointments", async (_req, res) => {
+  router.get("/appointments", async (req, res) => {
+    const tab = stringValue(req.query.tab, 40)?.toLowerCase() || "today";
     try {
-      const [todayResult, pendingResult] = await Promise.all([
+      let whereSql = "TRUE";
+      if (tab === "pending") {
+        whereSql = `appointment.status = 'pending'`;
+      } else if (tab === "confirmed") {
+        whereSql = `appointment.status = 'confirmed'`;
+      } else if (tab === "today") {
+        whereSql = `appointment.appointment_date = CURRENT_DATE AND appointment.status NOT IN ('cancelled')`;
+      } else if (tab === "completed") {
+        whereSql = `appointment.status = 'completed'`;
+      } else if (tab === "cancelled") {
+        whereSql = `appointment.status IN ('cancelled', 'no_show')`;
+      } else if (tab === "all") {
+        whereSql = "TRUE";
+      }
+
+      const [listResult, todayResult, pendingResult] = await Promise.all([
         db.query(
           `SELECT
              appointment.*,
              CONCAT_WS(' ', patient.first_name, patient.last_name) AS patient_name,
-             patient.phone AS patient_phone
+             patient.phone AS patient_phone,
+             patient.email AS patient_email
+           FROM patient_portal_appointments AS appointment
+           JOIN users AS patient ON patient.id::text = appointment.user_id
+           WHERE ${whereSql}
+           ORDER BY appointment.appointment_date DESC, appointment.appointment_time DESC
+           LIMIT 200`
+        ),
+        db.query(
+          `SELECT
+             appointment.*,
+             CONCAT_WS(' ', patient.first_name, patient.last_name) AS patient_name,
+             patient.phone AS patient_phone,
+             patient.email AS patient_email
            FROM patient_portal_appointments AS appointment
            JOIN users AS patient ON patient.id::text = appointment.user_id
            WHERE appointment.appointment_date = CURRENT_DATE
-             AND appointment.status IN ('confirmed', 'checked_in', 'completed')
+             AND appointment.status IN ('confirmed', 'checked_in', 'completed', 'pending')
            ORDER BY appointment.appointment_time ASC`
         ),
         db.query(
           `SELECT
              appointment.*,
              CONCAT_WS(' ', patient.first_name, patient.last_name) AS patient_name,
-             patient.phone AS patient_phone
+             patient.phone AS patient_phone,
+             patient.email AS patient_email
            FROM patient_portal_appointments AS appointment
            JOIN users AS patient ON patient.id::text = appointment.user_id
            WHERE appointment.status = 'pending'
@@ -432,12 +563,75 @@ function createStaffPortalRouter({
       ]);
 
       return res.json({
+        tab,
+        appointments: listResult.rows.map(mapAppointment),
         todayAppointments: todayResult.rows.map(mapAppointment),
         pendingRequests: pendingResult.rows.map(mapAppointment),
       });
     } catch (error) {
       console.error("Staff appointments error:", error.message);
       return res.status(500).json({ message: "Unable to load appointments." });
+    }
+  });
+
+  router.get("/appointments/:id", async (req, res) => {
+    const appointmentId = numericId(req.params.id);
+    if (!appointmentId) {
+      return res.status(400).json({ message: "A valid appointment ID is required." });
+    }
+    try {
+      const result = await db.query(
+        `SELECT
+           appointment.*,
+           CONCAT_WS(' ', patient.first_name, patient.last_name) AS patient_name,
+           patient.phone AS patient_phone,
+           patient.email AS patient_email,
+           patient.date_of_birth AS patient_dob,
+           profile.company_name,
+           profile.birth_date
+         FROM patient_portal_appointments AS appointment
+         JOIN users AS patient ON patient.id::text = appointment.user_id
+         LEFT JOIN patient_portal_profiles AS profile ON profile.user_id = appointment.user_id
+         WHERE appointment.id = $1
+         LIMIT 1`,
+        [appointmentId]
+      );
+      if (!result.rows.length) {
+        return res.status(404).json({ message: "Appointment not found." });
+      }
+      const row = result.rows[0];
+      return res.json({
+        appointment: {
+          ...mapAppointment(row),
+          companyName: row.company_name || null,
+          birthDate: row.birth_date || row.patient_dob || null,
+        },
+      });
+    } catch (error) {
+      if (isMissingRelation(error)) {
+        try {
+          const fallback = await db.query(
+            `SELECT
+               appointment.*,
+               CONCAT_WS(' ', patient.first_name, patient.last_name) AS patient_name,
+               patient.phone AS patient_phone,
+               patient.email AS patient_email
+             FROM patient_portal_appointments AS appointment
+             JOIN users AS patient ON patient.id::text = appointment.user_id
+             WHERE appointment.id = $1
+             LIMIT 1`,
+            [appointmentId]
+          );
+          if (!fallback.rows.length) {
+            return res.status(404).json({ message: "Appointment not found." });
+          }
+          return res.json({ appointment: mapAppointment(fallback.rows[0]) });
+        } catch (fallbackError) {
+          console.error("Staff appointment detail fallback error:", fallbackError.message);
+        }
+      }
+      console.error("Staff appointment detail error:", error.message);
+      return res.status(500).json({ message: "Unable to load appointment details." });
     }
   });
 
@@ -474,7 +668,7 @@ function createStaffPortalRouter({
       let patientTitle = "Appointment updated";
       let patientBody = "";
 
-      if (action === "approve") {
+      if (action === "approve" || action === "confirm") {
         nextStatus = "confirmed";
         patientTitle = "Appointment confirmed";
         patientBody = `Your ${current.service_name} appointment is confirmed for ${current.appointment_date} at ${String(current.appointment_time).slice(0, 5)}.`;
@@ -845,12 +1039,15 @@ function createStaffPortalRouter({
     return res.json({
       profile: {
         id: staff.id,
+        staffId: staff.id,
         firstName: staff.first_name || "",
         lastName: staff.last_name || "",
         fullName: `${staff.first_name || ""} ${staff.last_name || ""}`.trim(),
         email: staff.email || "",
         phone: staff.phone || "",
         role: "Staff / Secretary",
+        position: "Front Desk Coordinator",
+        clinicBranch: "Amethyst Dental Clinic",
         accountStatus: (staff.status || "active").toLowerCase(),
       },
     });
@@ -888,6 +1085,8 @@ function createStaffPortalRouter({
           email: staff.email,
           phone: staff.phone,
           role: "Staff / Secretary",
+          position: "Front Desk Coordinator",
+          clinicBranch: "Amethyst Dental Clinic",
           accountStatus: (staff.status || "active").toLowerCase(),
         },
       });
@@ -897,6 +1096,473 @@ function createStaffPortalRouter({
       }
       console.error("Staff profile update error:", error.message);
       return res.status(500).json({ message: "Unable to save the staff profile." });
+    }
+  });
+
+  router.post("/profile/password", async (req, res) => {
+    const currentPassword = stringValue(req.body?.currentPassword, 200);
+    const newPassword = stringValue(req.body?.newPassword, 200);
+    if (!currentPassword || !newPassword || newPassword.length < 8) {
+      return res.status(400).json({ message: "Provide your current password and a new password (8+ characters)." });
+    }
+    try {
+      const result = await db.query(
+        `SELECT id, password_hash FROM users WHERE id = $1 AND LOWER(role) = 'staff' LIMIT 1`,
+        [String(req.staff.id)]
+      );
+      const staff = result.rows[0];
+      if (!staff?.password_hash) {
+        return res.status(404).json({ message: "Staff profile not found." });
+      }
+      const matches = await bcrypt.compare(currentPassword, staff.password_hash);
+      if (!matches) {
+        return res.status(401).json({ message: "Current password is incorrect." });
+      }
+      const passwordHash = await bcrypt.hash(newPassword, 10);
+      await db.query(`UPDATE users SET password_hash = $1 WHERE id = $2`, [passwordHash, String(req.staff.id)]);
+      if (passwordResetService?.revokeSessions) {
+        try {
+          await passwordResetService.revokeSessions(String(req.staff.id));
+        } catch {
+          // Optional helper.
+        }
+      }
+      return res.json({ message: "Password updated successfully." });
+    } catch (error) {
+      console.error("Staff password update error:", error.message);
+      return res.status(500).json({ message: "Unable to update the password." });
+    }
+  });
+
+  router.post("/check-in", async (req, res) => {
+    const method = stringValue(req.body?.method, 40)?.toLowerCase() || "manual";
+    const payload = staffCheckIn.parseQrPayload(req.body?.code || req.body?.qrPayload || req.body?.rfidTag);
+    const appointmentId =
+      staffCheckIn.numericId(req.body?.appointmentId) || payload?.appointmentId || null;
+    const patientId =
+      staffCheckIn.stringValue(req.body?.patientId, 120) || payload?.patientId || null;
+    const rfidTag =
+      staffCheckIn.stringValue(req.body?.rfidTag, 120) || payload?.rfidTag || payload?.code || null;
+    const phone = staffCheckIn.stringValue(req.body?.phone, 40);
+    const email = staffCheckIn.stringValue(req.body?.email, 254);
+
+    const client = await db.connect();
+    let transactionOpen = false;
+    try {
+      await client.query("BEGIN");
+      transactionOpen = true;
+      await client.query("SELECT pg_advisory_xact_lock(hashtext('patient_portal_queue'))");
+
+      let appointment = null;
+      if (appointmentId) {
+        appointment = await staffCheckIn.findAppointmentForCheckIn(client, { appointmentId });
+      }
+
+      if (!appointment) {
+        let patient = null;
+        try {
+          patient = await staffCheckIn.findPatient(client, {
+            patientId,
+            rfidTag,
+            code: payload?.code,
+            phone,
+            email,
+          });
+        } catch (lookupError) {
+          if (!isMissingRelation(lookupError)) throw lookupError;
+          patient = await staffCheckIn.findPatient(client, { patientId, code: payload?.code, phone, email });
+        }
+        if (!patient) {
+          await client.query("ROLLBACK");
+          transactionOpen = false;
+          return res.status(404).json({
+            message: "Patient not found for this RFID/QR code. Verify the tag or patient ID.",
+          });
+        }
+        if (!patient.is_verified) {
+          await client.query("ROLLBACK");
+          transactionOpen = false;
+          return res.status(403).json({
+            message: "Patient account is not verified yet.",
+            patient: {
+              id: patient.id,
+              fullName: `${patient.first_name || ""} ${patient.last_name || ""}`.trim(),
+            },
+          });
+        }
+        appointment = await staffCheckIn.findAppointmentForCheckIn(client, {
+          patientId: patient.id,
+        });
+        if (!appointment) {
+          await client.query("ROLLBACK");
+          transactionOpen = false;
+          return res.status(404).json({
+            message: "No confirmed appointment found for this patient today.",
+            patient: {
+              id: patient.id,
+              fullName: `${patient.first_name || ""} ${patient.last_name || ""}`.trim(),
+              phone: patient.phone,
+            },
+          });
+        }
+      }
+
+      const checkIn = await staffCheckIn.performStaffCheckIn(client, {
+        appointment,
+        staff: req.staff,
+        notifyClinicStaff: notifyStaff,
+      });
+
+      await client.query("COMMIT");
+      transactionOpen = false;
+
+      return res.status(checkIn.alreadyCheckedIn ? 200 : 201).json({
+        message: checkIn.alreadyCheckedIn
+          ? "Patient is already checked in."
+          : "Patient checked in successfully.",
+        method,
+        verified: true,
+        patient: {
+          id: appointment.user_id,
+          fullName: appointment.patient_name || "Patient",
+          phone: appointment.patient_phone || null,
+          email: appointment.patient_email || null,
+        },
+        appointment: {
+          id: appointment.id,
+          service: appointment.service_name,
+          dentist: appointment.dentist_name,
+          date: appointment.appointment_date,
+          time: appointment.appointment_time,
+          status: "checked_in",
+        },
+        queue: {
+          id: checkIn.queueEntry.id,
+          token: checkIn.queueEntry.token,
+          queueNumber: checkIn.queueEntry.token,
+          position: checkIn.queueEntry.position,
+          status: displayQueueStatus(checkIn.queueEntry.status),
+          waitMinutes: Number(checkIn.queueEntry.estimated_wait_minutes || 0),
+          checkedInAt: checkIn.queueEntry.checked_in_at || new Date().toISOString(),
+        },
+      });
+    } catch (error) {
+      if (transactionOpen) {
+        await client.query("ROLLBACK");
+      }
+      console.error("Staff check-in error:", error.message);
+      return res.status(500).json({
+        message: "Unable to complete patient check-in.",
+        detail: error.message,
+      });
+    } finally {
+      client.release();
+    }
+  });
+
+  router.get("/queue/summary", async (_req, res) => {
+    try {
+      const [waiting, inTreatment, completed, avgWait] = await Promise.all([
+        db.query(
+          `SELECT COUNT(*) AS count FROM patient_portal_queue_entries
+           WHERE DATE(checked_in_at) = CURRENT_DATE
+             AND status IN ('checked_in', 'waiting', 'preparing')`
+        ),
+        db.query(
+          `SELECT COUNT(*) AS count FROM patient_portal_queue_entries
+           WHERE DATE(checked_in_at) = CURRENT_DATE AND status IN ('dentist')`
+        ),
+        db.query(
+          `SELECT COUNT(*) AS count FROM patient_portal_queue_entries
+           WHERE DATE(checked_in_at) = CURRENT_DATE AND status = 'completed'`
+        ),
+        db.query(
+          `SELECT COALESCE(AVG(estimated_wait_minutes), 0) AS avg
+           FROM patient_portal_queue_entries
+           WHERE DATE(checked_in_at) = CURRENT_DATE
+             AND status IN ('checked_in', 'waiting', 'preparing')`
+        ),
+      ]);
+      return res.json({
+        currentlyWaiting: count(waiting.rows[0], "count"),
+        inTreatment: count(inTreatment.rows[0], "count"),
+        completed: count(completed.rows[0], "count"),
+        averageWaitingTime: Math.round(Number(avgWait.rows[0]?.avg || 0)),
+      });
+    } catch (error) {
+      console.error("Staff queue summary error:", error.message);
+      return res.status(500).json({ message: "Unable to load queue summary." });
+    }
+  });
+
+  router.post("/queue/reset", async (req, res) => {
+    const client = await db.connect();
+    let transactionOpen = false;
+    try {
+      await client.query("BEGIN");
+      transactionOpen = true;
+      const result = await client.query(
+        `UPDATE patient_portal_queue_entries
+         SET status = 'completed', updated_at = CURRENT_TIMESTAMP
+         WHERE DATE(checked_in_at) = CURRENT_DATE
+           AND status NOT IN ('completed', 'no_show')
+         RETURNING id`
+      );
+      await client.query("COMMIT");
+      transactionOpen = false;
+      return res.json({
+        message: "Live queue cleared for end-of-day operations.",
+        cleared: result.rowCount || 0,
+      });
+    } catch (error) {
+      if (transactionOpen) await client.query("ROLLBACK");
+      console.error("Staff queue reset error:", error.message);
+      return res.status(500).json({ message: "Unable to reset the queue." });
+    } finally {
+      client.release();
+    }
+  });
+
+  router.get("/billing", async (req, res) => {
+    const search = stringValue(req.query.search, 100);
+    try {
+      const params = [];
+      let whereSql = "TRUE";
+      if (search) {
+        params.push(`%${search}%`);
+        whereSql = `(invoice_code ILIKE $1 OR patient_name ILIKE $1 OR service_name ILIKE $1 OR COALESCE(patient_phone, '') ILIKE $1)`;
+      }
+      const result = await db.query(
+        `SELECT *
+         FROM staff_portal_invoices
+         WHERE ${whereSql}
+         ORDER BY invoice_date DESC, id DESC
+         LIMIT 200`,
+        params
+      );
+      return res.json({ invoices: result.rows.map(mapInvoice) });
+    } catch (error) {
+      if (isMissingRelation(error)) {
+        return res.json({
+          invoices: [],
+          setupRequired: true,
+          message: "Billing tables are missing. Run npm run migrate:staff-operations.",
+        });
+      }
+      console.error("Staff billing list error:", error.message);
+      return res.status(500).json({ message: "Unable to load invoices." });
+    }
+  });
+
+  router.post("/billing", async (req, res) => {
+    const patientName = stringValue(req.body?.patientName, 160);
+    const serviceName = stringValue(req.body?.serviceName, 160);
+    const amount = Number(req.body?.amount);
+    const amountPaid = Number(req.body?.amountPaid ?? 0);
+    const patientUserId = stringValue(req.body?.patientUserId, 120);
+    const patientPhone = stringValue(req.body?.patientPhone, 40);
+    const appointmentId = numericId(req.body?.appointmentId);
+    const notes = stringValue(req.body?.notes, 2000);
+    let paymentStatus = stringValue(req.body?.paymentStatus, 40)?.toLowerCase() || "pending";
+
+    if (!patientName || !serviceName || !Number.isFinite(amount) || amount < 0) {
+      return res.status(400).json({ message: "Patient name, service, and a valid amount are required." });
+    }
+    if (!Number.isFinite(amountPaid) || amountPaid < 0) {
+      return res.status(400).json({ message: "amountPaid must be zero or greater." });
+    }
+    if (!PAYMENT_STATUSES.has(paymentStatus)) {
+      paymentStatus =
+        amountPaid <= 0 ? "pending" : amountPaid >= amount ? "paid" : "partially_paid";
+    }
+
+    try {
+      const staffName = `${req.staff.first_name || ""} ${req.staff.last_name || ""}`.trim() || "Clinic Staff";
+      const result = await db.query(
+        `INSERT INTO staff_portal_invoices (
+           invoice_code, patient_user_id, patient_name, patient_phone, appointment_id,
+           service_name, amount, amount_paid, payment_status, notes, created_by, created_by_name
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+         RETURNING *`,
+        [
+          invoiceCode(),
+          patientUserId,
+          patientName,
+          patientPhone,
+          appointmentId,
+          serviceName,
+          amount,
+          amountPaid,
+          paymentStatus,
+          notes,
+          String(req.staff.id),
+          staffName,
+        ]
+      );
+      return res.status(201).json({
+        message: "Invoice generated successfully.",
+        invoice: mapInvoice(result.rows[0]),
+      });
+    } catch (error) {
+      if (isMissingRelation(error)) {
+        return res.status(503).json({
+          message: "Billing tables are missing. Run npm run migrate:staff-operations.",
+        });
+      }
+      console.error("Staff billing create error:", error.message);
+      return res.status(500).json({ message: "Unable to create the invoice." });
+    }
+  });
+
+  router.patch("/billing/:id", async (req, res) => {
+    const invoiceId = numericId(req.params.id);
+    if (!invoiceId) {
+      return res.status(400).json({ message: "A valid invoice ID is required." });
+    }
+    const amountPaid =
+      req.body?.amountPaid === undefined || req.body?.amountPaid === null || req.body?.amountPaid === ""
+        ? null
+        : Number(req.body.amountPaid);
+    const paymentStatus = stringValue(req.body?.paymentStatus, 40)?.toLowerCase();
+    const notes = stringValue(req.body?.notes, 2000);
+
+    if (amountPaid !== null && (!Number.isFinite(amountPaid) || amountPaid < 0)) {
+      return res.status(400).json({ message: "amountPaid must be zero or greater." });
+    }
+    if (paymentStatus && !PAYMENT_STATUSES.has(paymentStatus)) {
+      return res.status(400).json({ message: "Invalid payment status." });
+    }
+
+    try {
+      const current = await db.query(`SELECT * FROM staff_portal_invoices WHERE id = $1 LIMIT 1`, [invoiceId]);
+      if (!current.rows.length) {
+        return res.status(404).json({ message: "Invoice not found." });
+      }
+      const row = current.rows[0];
+      const nextPaid = amountPaid === null ? Number(row.amount_paid) : amountPaid;
+      let nextStatus = paymentStatus || row.payment_status;
+      if (!paymentStatus) {
+        nextStatus =
+          nextPaid <= 0 ? "pending" : nextPaid >= Number(row.amount) ? "paid" : "partially_paid";
+      }
+      const result = await db.query(
+        `UPDATE staff_portal_invoices
+         SET amount_paid = $1,
+             payment_status = $2,
+             notes = COALESCE($3, notes),
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $4
+         RETURNING *`,
+        [nextPaid, nextStatus, notes, invoiceId]
+      );
+      return res.json({
+        message: "Invoice updated successfully.",
+        invoice: mapInvoice(result.rows[0]),
+      });
+    } catch (error) {
+      if (isMissingRelation(error)) {
+        return res.status(503).json({
+          message: "Billing tables are missing. Run npm run migrate:staff-operations.",
+        });
+      }
+      console.error("Staff billing update error:", error.message);
+      return res.status(500).json({ message: "Unable to update the invoice." });
+    }
+  });
+
+  router.get("/billing/:id", async (req, res) => {
+    const invoiceId = numericId(req.params.id);
+    if (!invoiceId) {
+      return res.status(400).json({ message: "A valid invoice ID is required." });
+    }
+    try {
+      const result = await db.query(`SELECT * FROM staff_portal_invoices WHERE id = $1 LIMIT 1`, [invoiceId]);
+      if (!result.rows.length) {
+        return res.status(404).json({ message: "Invoice not found." });
+      }
+      return res.json({ invoice: mapInvoice(result.rows[0]) });
+    } catch (error) {
+      if (isMissingRelation(error)) {
+        return res.status(503).json({
+          message: "Billing tables are missing. Run npm run migrate:staff-operations.",
+        });
+      }
+      return res.status(500).json({ message: "Unable to load the invoice." });
+    }
+  });
+
+  router.post("/notifications/sms", async (req, res) => {
+    const patientPhone = stringValue(req.body?.phone, 40);
+    const messageBody = stringValue(req.body?.message, 480);
+    const messageType = stringValue(req.body?.messageType, 60) || "manual";
+    const patientUserId = stringValue(req.body?.patientUserId, 120);
+    const appointmentId = numericId(req.body?.appointmentId);
+
+    if (!patientPhone || !messageBody) {
+      return res.status(400).json({ message: "Phone number and message are required." });
+    }
+
+    let deliveryStatus = "pending";
+    let errorDetail = null;
+    try {
+      // Soft SMS dispatch: log intent. Live Twilio OTP already exists in server.js;
+      // clinic SMS uses the same credentials when present via optional inject.
+      if (typeof req.app?.locals?.sendClinicSms === "function") {
+        await req.app.locals.sendClinicSms(patientPhone, messageBody);
+        deliveryStatus = "sent";
+      } else if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_PHONE_NUMBER) {
+        deliveryStatus = "pending";
+        errorDetail = "Queued for SMS provider. Configure clinic SMS helper to dispatch live messages.";
+      } else {
+        deliveryStatus = "failed";
+        errorDetail = "SMS provider is not configured. Notification was logged only.";
+      }
+    } catch (smsError) {
+      deliveryStatus = "failed";
+      errorDetail = smsError.message;
+    }
+
+    try {
+      const result = await db.query(
+        `INSERT INTO staff_portal_sms_logs (
+           staff_user_id, patient_user_id, patient_phone, appointment_id,
+           message_type, message_body, delivery_status, error_detail
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         RETURNING *`,
+        [
+          String(req.staff.id),
+          patientUserId,
+          patientPhone,
+          appointmentId,
+          messageType,
+          messageBody,
+          deliveryStatus,
+          errorDetail,
+        ]
+      );
+      return res.status(deliveryStatus === "failed" ? 202 : 201).json({
+        message:
+          deliveryStatus === "sent"
+            ? "Notification sent successfully."
+            : deliveryStatus === "pending"
+              ? "SMS notification logged as pending."
+              : "SMS could not be sent. Delivery was logged as failed.",
+        sms: {
+          id: result.rows[0].id,
+          status: result.rows[0].delivery_status,
+          phone: result.rows[0].patient_phone,
+          createdAt: result.rows[0].created_at,
+          errorDetail: result.rows[0].error_detail,
+        },
+      });
+    } catch (error) {
+      if (isMissingRelation(error)) {
+        return res.status(503).json({
+          message: "SMS log tables are missing. Run npm run migrate:staff-operations.",
+        });
+      }
+      console.error("Staff SMS log error:", error.message);
+      return res.status(500).json({ message: "Unable to log the SMS notification." });
     }
   });
 

@@ -1,34 +1,28 @@
 import { useCallback, useEffect, useState } from "react";
-import {
-  Bell,
-  CalendarDays,
-  CheckCheck,
-  ClipboardCheck,
-  FileText,
-  Info,
-  RefreshCw,
-  UserPlus,
-} from "lucide-react";
+import { CheckCheck, MessageSquare, RefreshCw } from "lucide-react";
 import { api } from "../api";
-import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
+import { EmptyState, ErrorState, LoadingState } from "../components/UI";
+import { StaffModal, StaffStatusBadge } from "../components/StaffUI";
+import { useStaffUi } from "../components/StaffLayout";
 import { formatStaffDateTime } from "../staffUtils";
 
-const notificationIcons = {
-  appointment: CalendarDays,
-  check_in: ClipboardCheck,
-  document: FileText,
-  patient: UserPlus,
-};
-
 export function StaffNotificationsPage() {
+  const { pushToast } = useStaffUi();
   const [notifications, setNotifications] = useState(null);
   const [error, setError] = useState("");
-  const [isMarkingAll, setIsMarkingAll] = useState(false);
+  const [busy, setBusy] = useState("");
+  const [smsOpen, setSmsOpen] = useState(false);
+  const [smsForm, setSmsForm] = useState({
+    phone: "",
+    message: "",
+    messageType: "manual",
+    patientUserId: "",
+  });
 
   const load = useCallback(async () => {
     try {
       const response = await api.getStaffNotifications();
-      setNotifications(response.notifications);
+      setNotifications(response.notifications || []);
       setError("");
     } catch (loadError) {
       setError(loadError.message);
@@ -37,93 +31,152 @@ export function StaffNotificationsPage() {
 
   useEffect(() => {
     load();
-    const refresh = window.setInterval(load, 30000);
-    return () => window.clearInterval(refresh);
+    const timer = window.setInterval(load, 20000);
+    return () => window.clearInterval(timer);
   }, [load]);
 
   async function markRead(notificationId) {
-    setError("");
+    setBusy(`read-${notificationId}`);
     try {
       await api.markStaffNotificationRead(notificationId);
-      setNotifications((current) =>
-        current.map((notification) =>
-          notification.id === notificationId ? { ...notification, read: true } : notification
-        )
-      );
+      await load();
     } catch (markError) {
-      setError(markError.message);
+      pushToast(markError.message, "error");
+    } finally {
+      setBusy("");
     }
   }
 
-  async function markAllRead() {
-    setIsMarkingAll(true);
-    setError("");
+  async function markAll() {
+    setBusy("all");
     try {
       await api.markAllStaffNotificationsRead();
-      setNotifications((current) => current.map((notification) => ({ ...notification, read: true })));
+      pushToast("All notifications marked as read.");
+      await load();
     } catch (markError) {
-      setError(markError.message);
+      pushToast(markError.message, "error");
     } finally {
-      setIsMarkingAll(false);
+      setBusy("");
+    }
+  }
+
+  async function sendSms(event) {
+    event.preventDefault();
+    setBusy("sms");
+    try {
+      const response = await api.sendStaffSms(smsForm);
+      pushToast(response.message || "Notification sent successfully.");
+      setSmsOpen(false);
+      setSmsForm({ phone: "", message: "", messageType: "manual", patientUserId: "" });
+    } catch (smsError) {
+      pushToast(smsError.message, "error");
+    } finally {
+      setBusy("");
     }
   }
 
   if (error && !notifications) return <ErrorState message={error} onRetry={load} />;
-  if (!notifications) return <LoadingState label="Loading staff notifications…" />;
-
-  const unreadCount = notifications.filter((notification) => !notification.read).length;
+  if (!notifications) return <LoadingState label="Loading notification center…" />;
 
   return (
     <div className="staff-page">
-      <SectionHeading
-        eyebrow="Clinic activity"
-        title="Notifications"
-        detail={`${unreadCount} unread ${unreadCount === 1 ? "notification" : "notifications"}`}
-        action={
+      {error ? <p className="inline-alert inline-alert--error">{error}</p> : null}
+
+      <section className="staff-panel">
+        <div className="staff-panel__heading">
+          <div>
+            <span className="eyebrow">Operations alerts</span>
+            <h2>Notification Center</h2>
+            <p>Track appointment requests, check-ins, queue updates, and SMS delivery status.</p>
+          </div>
           <div className="staff-heading-actions">
             <button className="button button--secondary" onClick={load}>
               <RefreshCw size={16} /> Refresh
             </button>
-            <button className="button button--primary" onClick={markAllRead} disabled={!unreadCount || isMarkingAll}>
-              <CheckCheck size={16} /> {isMarkingAll ? "Updating…" : "Mark all as read"}
+            <button className="button button--secondary" onClick={markAll} disabled={Boolean(busy)}>
+              <CheckCheck size={16} /> Mark all read
+            </button>
+            <button className="button button--primary" onClick={() => setSmsOpen(true)}>
+              <MessageSquare size={16} /> Send SMS
             </button>
           </div>
-        }
-      />
+        </div>
 
-      {error && <p className="inline-alert inline-alert--error">{error}</p>}
-
-      {notifications.length ? (
-        <section className="staff-notification-list">
-          {notifications.map((notification) => {
-            const Icon = notificationIcons[notification.type] || Info;
-            return (
-              <article className={`staff-notification ${notification.read ? "" : "is-unread"}`} key={notification.id}>
-                <span className="staff-notification__icon"><Icon size={20} /></span>
-                <div className="staff-notification__body">
-                  <div>
-                    <h2>{notification.title}</h2>
-                    {!notification.read && <span className="staff-unread-dot" aria-label="Unread notification" />}
+        {notifications.length ? (
+          <div className="staff-notification-list">
+            {notifications.map((notification) => (
+              <article
+                key={notification.id}
+                className={`staff-notification-card ${notification.read ? "" : "is-unread"}`}
+              >
+                <div>
+                  <div className="staff-notification-card__meta">
+                    <StaffStatusBadge status={notification.type || "system"} />
+                    <small>{formatStaffDateTime(notification.createdAt)}</small>
                   </div>
+                  <h3>{notification.title}</h3>
                   <p>{notification.body}</p>
-                  <small>{formatStaffDateTime(notification.createdAt)}</small>
                 </div>
-                {!notification.read && (
-                  <button className="button button--secondary button--compact" onClick={() => markRead(notification.id)}>
-                    <CheckCheck size={15} /> Mark read
+                {!notification.read ? (
+                  <button
+                    className="button button--secondary button--compact"
+                    disabled={Boolean(busy)}
+                    onClick={() => markRead(notification.id)}
+                  >
+                    Mark read
                   </button>
+                ) : (
+                  <span className="muted-copy">Read</span>
                 )}
               </article>
-            );
-          })}
-        </section>
-      ) : (
-        <EmptyState
-          title="You’re all caught up"
-          detail="New patient, appointment, check-in, and document activity will appear here."
-          action={<span className="empty-state__icon"><Bell size={22} /></span>}
-        />
-      )}
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No notifications" detail="Clinic alerts and SMS events will appear here." />
+        )}
+      </section>
+
+      {smsOpen ? (
+        <StaffModal title="Send / override SMS notification" onClose={() => setSmsOpen(false)}>
+          <form className="admin-form" onSubmit={sendSms}>
+            <label className="field">
+              <span>Patient phone</span>
+              <input
+                required
+                value={smsForm.phone}
+                onChange={(event) => setSmsForm((current) => ({ ...current, phone: event.target.value }))}
+                placeholder="09xxxxxxxxx"
+              />
+            </label>
+            <label className="field">
+              <span>Message type</span>
+              <select
+                value={smsForm.messageType}
+                onChange={(event) => setSmsForm((current) => ({ ...current, messageType: event.target.value }))}
+              >
+                <option value="manual">Manual override</option>
+                <option value="appointment_confirmed">Appointment Confirmed</option>
+                <option value="appointment_rescheduled">Appointment Rescheduled</option>
+                <option value="appointment_cancelled">Appointment Cancelled</option>
+                <option value="queue_updated">Queue Updated</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Message</span>
+              <textarea
+                required
+                rows="4"
+                value={smsForm.message}
+                onChange={(event) => setSmsForm((current) => ({ ...current, message: event.target.value }))}
+                placeholder="Queue Updated – Your Current Position: #3"
+              />
+            </label>
+            <button className="button button--primary" disabled={Boolean(busy)}>
+              {busy === "sms" ? "Sending…" : "Send notification"}
+            </button>
+          </form>
+        </StaffModal>
+      ) : null}
     </div>
   );
 }

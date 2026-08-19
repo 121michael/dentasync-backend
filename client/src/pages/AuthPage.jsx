@@ -74,7 +74,7 @@ export function AuthPage() {
         (role === "admin"
           ? "/admin/dashboard"
           : role === "staff"
-            ? "/staff/check-ins"
+            ? "/staff/dashboard"
             : role === "dentist"
               ? "/dentist/dashboard"
               : role === "patient"

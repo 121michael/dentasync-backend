@@ -371,7 +371,7 @@ function createAuthRouter({
         normalizedRole === "admin"
           ? "/admin/dashboard"
           : normalizedRole === "staff"
-            ? "/staff/check-ins"
+            ? "/staff/dashboard"
             : normalizedRole === "dentist"
               ? "/dentist/dashboard"
               : normalizedRole === "patient"

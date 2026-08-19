@@ -15,7 +15,9 @@ import { ProfilePage } from "./pages/ProfilePage";
 import { QueuePage } from "./pages/QueuePage";
 import { RecordsPage } from "./pages/RecordsPage";
 import { StaffAppointmentsPage } from "./pages/StaffAppointmentsPage";
+import { StaffBillingPage } from "./pages/StaffBillingPage";
 import { StaffCheckInPage } from "./pages/StaffCheckInPage";
+import { StaffDashboardPage } from "./pages/StaffDashboardPage";
 import { StaffNotificationsPage } from "./pages/StaffNotificationsPage";
 import { StaffPatientsPage } from "./pages/StaffPatientsPage";
 import { StaffProfilePage } from "./pages/StaffProfilePage";
@@ -43,7 +45,7 @@ function roleFor(user) {
 
 function landingRoute(user) {
   if (roleFor(user) === "admin") return "/admin/dashboard";
-  if (roleFor(user) === "staff") return "/staff/check-ins";
+  if (roleFor(user) === "staff") return "/staff/dashboard";
   if (roleFor(user) === "dentist") return "/dentist/dashboard";
   if (roleFor(user) === "patient") return "/dashboard";
   return "/access-denied";
@@ -131,11 +133,15 @@ function PortalRoutes() {
           <Route path="/support" element={<SupportPage />} />
         </Route>
         <Route element={<StaffPortal />}>
-          <Route path="/staff" element={<Navigate to="/staff/check-ins" replace />} />
-          <Route path="/staff/check-ins" element={<StaffCheckInPage />} />
-          <Route path="/staff/queue" element={<StaffQueuePage />} />
+          <Route path="/staff" element={<Navigate to="/staff/dashboard" replace />} />
+          <Route path="/staff/dashboard" element={<StaffDashboardPage />} />
+          <Route path="/staff/check-in" element={<StaffCheckInPage />} />
+          <Route path="/staff/check-ins" element={<Navigate to="/staff/check-in" replace />} />
           <Route path="/staff/appointments" element={<StaffAppointmentsPage />} />
-          <Route path="/staff/patients" element={<StaffPatientsPage />} />
+          <Route path="/staff/patient-records" element={<StaffPatientsPage />} />
+          <Route path="/staff/patients" element={<Navigate to="/staff/patient-records" replace />} />
+          <Route path="/staff/queue" element={<StaffQueuePage />} />
+          <Route path="/staff/billing" element={<StaffBillingPage />} />
           <Route path="/staff/notifications" element={<StaffNotificationsPage />} />
           <Route path="/staff/profile" element={<StaffProfilePage />} />
         </Route>

@@ -1,24 +1,33 @@
 import { useCallback, useEffect, useState } from "react";
-import { Check, Mail, Pencil, Phone, Save, UserRound } from "lucide-react";
+import { KeyRound, Save } from "lucide-react";
 import { api } from "../api";
-import { ErrorState, LoadingState, SectionHeading } from "../components/UI";
-import { staffInitials } from "../staffUtils";
-import { useAuth } from "../useAuth";
+import { ErrorState, LoadingState } from "../components/UI";
+import { StaffModal, StaffStatusBadge } from "../components/StaffUI";
+import { useStaffUi } from "../components/StaffLayout";
 
 export function StaffProfilePage() {
-  const { updateUser } = useAuth();
+  const { pushToast } = useStaffUi();
   const [profile, setProfile] = useState(null);
   const [form, setForm] = useState(null);
-  const [isEditing, setIsEditing] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
+  const [busy, setBusy] = useState("");
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
 
   const load = useCallback(async () => {
     try {
       const response = await api.getStaffProfile();
       setProfile(response.profile);
-      setForm(response.profile);
+      setForm({
+        firstName: response.profile.firstName || "",
+        lastName: response.profile.lastName || "",
+        email: response.profile.email || "",
+        phone: response.profile.phone || "",
+      });
       setError("");
     } catch (loadError) {
       setError(loadError.message);
@@ -31,88 +40,165 @@ export function StaffProfilePage() {
 
   async function saveProfile(event) {
     event.preventDefault();
-    setIsSaving(true);
-    setError("");
-    setSuccess("");
+    setBusy("save");
     try {
       const response = await api.updateStaffProfile(form);
       setProfile(response.profile);
-      setForm(response.profile);
-      updateUser((current) => ({ ...current, ...response.profile }));
-      setSuccess("Profile settings saved.");
-      setIsEditing(false);
+      pushToast("Profile updated successfully.");
     } catch (saveError) {
-      setError(saveError.message);
+      pushToast(saveError.message, "error");
     } finally {
-      setIsSaving(false);
+      setBusy("");
+    }
+  }
+
+  async function changePassword(event) {
+    event.preventDefault();
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      pushToast("New password confirmation does not match.", "error");
+      return;
+    }
+    setBusy("password");
+    try {
+      const response = await api.updateStaffPassword({
+        currentPassword: passwordForm.currentPassword,
+        newPassword: passwordForm.newPassword,
+      });
+      pushToast(response.message || "Password updated successfully.");
+      setPasswordOpen(false);
+      setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+    } catch (passwordError) {
+      pushToast(passwordError.message, "error");
+    } finally {
+      setBusy("");
     }
   }
 
   if (error && !profile) return <ErrorState message={error} onRetry={load} />;
-  if (!profile || !form) return <LoadingState label="Loading your staff profile…" />;
+  if (!profile || !form) return <LoadingState label="Loading professional profile…" />;
 
   return (
     <div className="staff-page">
-      <SectionHeading
-        eyebrow="Your account"
-        title="Profile"
-        detail="Keep your staff contact details up to date."
-      />
-
-      {error && <p className="inline-alert inline-alert--error">{error}</p>}
-      {success && <p className="inline-alert inline-alert--success"><Check size={17} /> {success}</p>}
-
-      <section className="staff-profile-card">
-        <div className="staff-profile-card__hero">
-          <span className="staff-profile-card__avatar">{staffInitials(profile)}</span>
+      <section className="staff-panel">
+        <div className="staff-panel__heading">
           <div>
-            <span className="eyebrow eyebrow--light">Amethyst Dental Clinic</span>
-            <h2>{profile.fullName}</h2>
-            <p>{profile.role}</p>
+            <span className="eyebrow">Account</span>
+            <h2>Professional Profile</h2>
+            <p>Update your permitted front-desk profile details and password.</p>
           </div>
+          <StaffStatusBadge status={profile.accountStatus || "active"} />
         </div>
-        <div className="staff-profile-card__details">
-          <article>
-            <span className="staff-profile-card__icon"><Mail size={18} /></span>
-            <div><small>Email</small><strong>{profile.email}</strong></div>
-          </article>
-          <article>
-            <span className="staff-profile-card__icon"><Phone size={18} /></span>
-            <div><small>Phone</small><strong>{profile.phone || "Not recorded"}</strong></div>
-          </article>
-          <article>
-            <span className="staff-profile-card__icon"><UserRound size={18} /></span>
-            <div><small>Account status</small><strong>{profile.accountStatus}</strong></div>
-          </article>
-        </div>
-        <button className="button button--light" onClick={() => setIsEditing(true)}>
-          <Pencil size={16} /> Edit Profile Settings
-        </button>
-      </section>
 
-      {isEditing && (
-        <form className="staff-panel staff-profile-form" onSubmit={saveProfile}>
-          <div className="staff-panel__heading">
-            <div>
-              <span className="eyebrow">Profile settings</span>
-              <h2>Edit contact information</h2>
-              <p>Changes apply to your authenticated staff account.</p>
-            </div>
+        <div className="staff-profile-hero">
+          <div>
+            <strong>{profile.fullName}</strong>
+            <small>{profile.position || "Front Desk Coordinator"}</small>
           </div>
+          <div className="staff-detail-grid">
+            <p><small>Staff ID</small><strong>{profile.staffId || profile.id}</strong></p>
+            <p><small>Clinic branch</small><strong>{profile.clinicBranch || "Amethyst Dental Clinic"}</strong></p>
+          </div>
+        </div>
+
+        <form className="admin-form" onSubmit={saveProfile}>
           <div className="field-grid field-grid--two">
-            <label className="field"><span>First Name</span><input value={form.firstName} onChange={(event) => setForm((current) => ({ ...current, firstName: event.target.value }))} required /></label>
-            <label className="field"><span>Last Name</span><input value={form.lastName} onChange={(event) => setForm((current) => ({ ...current, lastName: event.target.value }))} required /></label>
-            <label className="field"><span>Email</span><input type="email" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} required /></label>
-            <label className="field"><span>Phone</span><input value={form.phone || ""} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} required /></label>
+            <label className="field">
+              <span>Full name · first</span>
+              <input
+                required
+                value={form.firstName}
+                onChange={(event) => setForm((current) => ({ ...current, firstName: event.target.value }))}
+              />
+            </label>
+            <label className="field">
+              <span>Full name · last</span>
+              <input
+                required
+                value={form.lastName}
+                onChange={(event) => setForm((current) => ({ ...current, lastName: event.target.value }))}
+              />
+            </label>
+            <label className="field">
+              <span>Email</span>
+              <input
+                required
+                type="email"
+                value={form.email}
+                onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
+              />
+            </label>
+            <label className="field">
+              <span>Contact number</span>
+              <input
+                required
+                value={form.phone}
+                onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))}
+              />
+            </label>
+            <label className="field">
+              <span>Position</span>
+              <input value={profile.position || "Front Desk Coordinator"} disabled />
+            </label>
+            <label className="field">
+              <span>Account status</span>
+              <input value={profile.accountStatus || "active"} disabled />
+            </label>
           </div>
-          <div className="staff-modal__actions">
-            <button type="button" className="button button--secondary" onClick={() => { setForm(profile); setIsEditing(false); }}>Cancel</button>
-            <button className="button button--primary" disabled={isSaving}>
-              <Save size={16} /> {isSaving ? "Saving…" : "Save changes"}
+          <div className="staff-heading-actions">
+            <button className="button button--primary" disabled={Boolean(busy)}>
+              <Save size={16} /> {busy === "save" ? "Saving…" : "Save Changes"}
+            </button>
+            <button type="button" className="button button--secondary" onClick={() => setPasswordOpen(true)}>
+              <KeyRound size={16} /> Change Password
             </button>
           </div>
         </form>
-      )}
+      </section>
+
+      {passwordOpen ? (
+        <StaffModal title="Change password" onClose={() => setPasswordOpen(false)}>
+          <form className="admin-form" onSubmit={changePassword}>
+            <label className="field">
+              <span>Current password</span>
+              <input
+                required
+                type="password"
+                value={passwordForm.currentPassword}
+                onChange={(event) =>
+                  setPasswordForm((current) => ({ ...current, currentPassword: event.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>New password</span>
+              <input
+                required
+                type="password"
+                minLength={8}
+                value={passwordForm.newPassword}
+                onChange={(event) =>
+                  setPasswordForm((current) => ({ ...current, newPassword: event.target.value }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Confirm new password</span>
+              <input
+                required
+                type="password"
+                minLength={8}
+                value={passwordForm.confirmPassword}
+                onChange={(event) =>
+                  setPasswordForm((current) => ({ ...current, confirmPassword: event.target.value }))
+                }
+              />
+            </label>
+            <button className="button button--primary" disabled={Boolean(busy)}>
+              {busy === "password" ? "Updating…" : "Update password"}
+            </button>
+          </form>
+        </StaffModal>
+      ) : null}
     </div>
   );
 }

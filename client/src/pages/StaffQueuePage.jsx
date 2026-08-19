@@ -1,40 +1,34 @@
 import { useCallback, useEffect, useState } from "react";
-import { Download, RefreshCw, Save } from "lucide-react";
+import { RefreshCw, RotateCcw } from "lucide-react";
 import { api } from "../api";
-import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
-import { statusLabel } from "../staffUtils";
-import {
-  StaffDataTable,
-  StaffStatusBadge,
-} from "../components/StaffUI";
+import { EmptyState, ErrorState, LoadingState } from "../components/UI";
+import { StaffStatusBadge, StaffSummaryCard } from "../components/StaffUI";
+import { useStaffUi } from "../components/StaffLayout";
+import { formatStaffDateTime, formatStaffTime } from "../staffUtils";
 
-const queueStatuses = ["checked_in", "waiting", "preparing", "in_chair", "completed", "no_show"];
-
-function waitLabel(entry) {
-  if (entry.status === "completed") return "Completed";
-  if (entry.status === "no_show") return "No show";
-  if (entry.status === "in_chair") return "Now";
-  return `${entry.waitMinutes || 0} mins`;
-}
+const QUEUE_ACTIONS = [
+  { value: "waiting", label: "Waiting" },
+  { value: "called", label: "Called" },
+  { value: "in_treatment", label: "In Treatment" },
+  { value: "completed", label: "Completed" },
+  { value: "skipped", label: "Skipped" },
+];
 
 export function StaffQueuePage() {
-  const [queueData, setQueueData] = useState(null);
-  const [draftStatuses, setDraftStatuses] = useState({});
+  const { pushToast, confirm } = useStaffUi();
+  const [queue, setQueue] = useState(null);
+  const [summary, setSummary] = useState(null);
   const [error, setError] = useState("");
-  const [savingId, setSavingId] = useState(null);
-  const [isExporting, setIsExporting] = useState(false);
+  const [busy, setBusy] = useState("");
 
   const load = useCallback(async () => {
     try {
-      const response = await api.getStaffQueue();
-      setQueueData(response);
-      setDraftStatuses((current) => {
-        const next = { ...current };
-        response.queue.forEach((entry) => {
-          if (!next[entry.id]) next[entry.id] = entry.status;
-        });
-        return next;
-      });
+      const [queueResponse, summaryResponse] = await Promise.all([
+        api.getStaffQueue(),
+        api.getStaffQueueSummary().catch(() => null),
+      ]);
+      setQueue(queueResponse.queue || []);
+      setSummary(summaryResponse);
       setError("");
     } catch (loadError) {
       setError(loadError.message);
@@ -43,139 +37,150 @@ export function StaffQueuePage() {
 
   useEffect(() => {
     load();
-    const refresh = window.setInterval(load, 25000);
-    return () => window.clearInterval(refresh);
+    const timer = window.setInterval(load, 12000);
+    return () => window.clearInterval(timer);
   }, [load]);
 
-  async function updateQueue(entry) {
-    const status = draftStatuses[entry.id] || entry.status;
-    setSavingId(entry.id);
-    setError("");
+  async function updateStatus(entry, status) {
+    if (status === "skipped") {
+      const ok = await confirm({
+        title: "Skip patient",
+        message: `Are you sure you want to remove ${entry.patientName} from the active queue?`,
+        confirmLabel: "Skip patient",
+      });
+      if (!ok) return;
+    }
+    setBusy(`${entry.id}-${status}`);
     try {
-      const response = await api.updateStaffQueue(entry.id, { status });
-      setQueueData((current) => ({
-        ...current,
-        queue: current.queue.map((item) =>
-          item.id === entry.id
-            ? {
-                ...item,
-                status: response.queueEntry.status,
-                waitMinutes: response.queueEntry.waitMinutes,
-              }
-            : item
-        ),
-      }));
-      setDraftStatuses((current) => ({ ...current, [entry.id]: response.queueEntry.status }));
+      await api.updateStaffQueue(entry.id, { status });
+      pushToast("Queue updated successfully.");
+      await load();
     } catch (updateError) {
-      setError(updateError.message);
+      pushToast(updateError.message, "error");
     } finally {
-      setSavingId(null);
+      setBusy("");
     }
   }
 
-  async function exportQueue() {
-    setIsExporting(true);
-    setError("");
+  async function resetQueue() {
+    const ok = await confirm({
+      title: "Clear live queue",
+      message: "Clear/reset the active queue for end-of-day clinic operations?",
+      confirmLabel: "Clear queue",
+    });
+    if (!ok) return;
+    setBusy("reset");
     try {
-      await api.downloadStaffExport("queue");
-    } catch (exportError) {
-      setError(exportError.message);
+      const response = await api.resetStaffQueue();
+      pushToast(response.message || "Queue cleared.");
+      await load();
+    } catch (resetError) {
+      pushToast(resetError.message, "error");
     } finally {
-      setIsExporting(false);
+      setBusy("");
     }
   }
 
-  if (error && !queueData) return <ErrorState message={error} onRetry={load} />;
-  if (!queueData) return <LoadingState label="Loading the live clinic queue…" />;
-
-  const queue = queueData.queue || [];
+  if (error && !queue) return <ErrorState message={error} onRetry={load} />;
+  if (!queue) return <LoadingState label="Loading live patient queue…" />;
 
   return (
     <div className="staff-page">
-      <SectionHeading
-        eyebrow="Clinic flow"
-        title="Queue Management"
-        detail="Live Queue Monitor"
-        action={
-          <div className="staff-heading-actions">
-            <button className="button button--secondary" onClick={load}>
-              <RefreshCw size={16} /> Refresh
-            </button>
-            <button className="button button--primary" onClick={exportQueue} disabled={isExporting}>
-              <Download size={16} /> {isExporting ? "Exporting…" : "Export Log"}
-            </button>
-          </div>
-        }
-      />
+      {error ? <p className="inline-alert inline-alert--error">{error}</p> : null}
 
-      {error && <p className="inline-alert inline-alert--error">{error}</p>}
+      <section className="staff-stat-grid">
+        <StaffSummaryCard label="Currently Waiting" value={summary?.currentlyWaiting ?? "—"} tone="amber" />
+        <StaffSummaryCard label="In Treatment" value={summary?.inTreatment ?? "—"} tone="violet" />
+        <StaffSummaryCard label="Completed" value={summary?.completed ?? "—"} tone="emerald" />
+        <StaffSummaryCard
+          label="Average Waiting Time"
+          value={`${summary?.averageWaitingTime ?? 0} min`}
+          detail="Estimated from live queue"
+          tone="purple"
+        />
+      </section>
 
       <section className="staff-panel staff-panel--table">
         <div className="staff-panel__heading">
           <div>
-            <span className="eyebrow">Live operations</span>
-            <h2>Queue Management</h2>
-            <p>Update queue progress as patients move through their appointments.</p>
+            <span className="eyebrow">Real-time synchronization</span>
+            <h2>Live Patient Queue</h2>
+            <p>Monitor queue activity and make minor adjustments. Clinical treatment controls stay with dentists.</p>
           </div>
-          <span className="staff-live-indicator"><i /> Live Queue</span>
+          <div className="staff-heading-actions">
+            <button className="button button--secondary" onClick={load} disabled={Boolean(busy)}>
+              <RefreshCw size={16} /> Refresh
+            </button>
+            <button className="button button--danger" onClick={resetQueue} disabled={Boolean(busy)}>
+              <RotateCcw size={16} /> Clear Queue
+            </button>
+          </div>
         </div>
 
         {queue.length ? (
-          <StaffDataTable>
+          <div className="staff-table-wrap">
             <table className="staff-table">
               <thead>
                 <tr>
                   <th>Queue #</th>
-                  <th>Patient Name</th>
-                  <th>Assigned Doctor</th>
-                  <th>Status</th>
-                  <th>Wait Time</th>
+                  <th>Patient</th>
+                  <th>Appointment</th>
+                  <th>Service</th>
+                  <th>Dentist</th>
+                  <th>Check-In Time</th>
+                  <th>Queue Status</th>
+                  <th>Estimated Wait</th>
                   <th>Action</th>
                 </tr>
               </thead>
               <tbody>
                 {queue.map((entry) => (
                   <tr key={entry.id}>
-                    <td data-label="Queue #"><strong>{entry.token || `#${String(entry.queueNumber).padStart(3, "0")}`}</strong></td>
-                    <td data-label="Patient Name">{entry.patientName}</td>
-                    <td data-label="Assigned Doctor">{entry.appointment.dentist}</td>
-                    <td data-label="Status">
-                      <div className="staff-status-editor">
-                        <StaffStatusBadge status={entry.status} />
+                    <td>
+                      <code>{entry.token || entry.queueNumber}</code>
+                    </td>
+                    <td>
+                      <strong>{entry.patientName}</strong>
+                    </td>
+                    <td>{formatStaffTime(String(entry.appointment?.time || "").slice(0, 5))}</td>
+                    <td>{entry.appointment?.treatment || "—"}</td>
+                    <td>{entry.appointment?.dentist || "—"}</td>
+                    <td>{formatStaffDateTime(entry.timestamp)}</td>
+                    <td>
+                      <StaffStatusBadge status={entry.status} />
+                    </td>
+                    <td>{entry.waitMinutes ?? 0} min</td>
+                    <td>
+                      <label className="staff-inline-select">
+                        <span className="sr-only">Update queue status</span>
                         <select
-                          aria-label={`Update ${entry.patientName}'s queue status`}
-                          value={draftStatuses[entry.id] || entry.status}
-                          onChange={(event) =>
-                            setDraftStatuses((current) => ({ ...current, [entry.id]: event.target.value }))
+                          value={
+                            entry.status === "preparing"
+                              ? "called"
+                              : entry.status === "in_chair" || entry.status === "dentist"
+                                ? "in_treatment"
+                                : entry.status === "no_show"
+                                  ? "skipped"
+                                  : entry.status
                           }
-                          disabled={savingId === entry.id}
+                          disabled={Boolean(busy)}
+                          onChange={(event) => updateStatus(entry, event.target.value)}
                         >
-                          {queueStatuses.map((status) => (
-                            <option key={status} value={status}>{statusLabel(status)}</option>
+                          {QUEUE_ACTIONS.map((action) => (
+                            <option key={action.value} value={action.value}>
+                              {action.label}
+                            </option>
                           ))}
                         </select>
-                      </div>
-                    </td>
-                    <td data-label="Wait Time">{waitLabel(entry)}</td>
-                    <td data-label="Action">
-                      <button
-                        className="button button--secondary button--compact"
-                        onClick={() => updateQueue(entry)}
-                        disabled={savingId === entry.id}
-                      >
-                        <Save size={15} /> {savingId === entry.id ? "Saving…" : "Update"}
-                      </button>
+                      </label>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </StaffDataTable>
+          </div>
         ) : (
-          <EmptyState
-            title="The live queue is clear"
-            detail="Patient queue entries will appear here after staff or patients complete check-in."
-          />
+          <EmptyState title="Queue is empty" detail="Checked-in patients will appear here in real time." />
         )}
       </section>
     </div>
