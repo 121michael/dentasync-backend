@@ -636,12 +636,20 @@ function createAdminPortalRouter({
       });
     } catch (error) {
       if (clinicalPatients.isMissingRelation(error)) {
-        return res.status(503).json({
-          message: "Clinical patient records are not available. Run npm run migrate:clinical-records.",
+        return res.json({
+          records: [],
+          total: 0,
+          setupRequired: true,
+          message:
+            "Clinical patient records are not available. Run npm run migrate:clinical-records, then restart the server.",
+          note: "Clinical patient records are maintained by dentists and staff. Administrators have view-only access.",
         });
       }
       console.error("Admin clinical records error:", error.message);
-      return res.status(500).json({ message: "Unable to load clinical patient records." });
+      return res.status(500).json({
+        message: "Unable to load clinical patient records.",
+        detail: error.message,
+      });
     }
   });
 

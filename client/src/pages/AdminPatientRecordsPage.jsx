@@ -84,6 +84,13 @@ export function AdminPatientRecordsPage() {
           <button className="button button--secondary button--compact">Search</button>
         </form>
 
+        {data.setupRequired || data.message ? (
+          <p className="inline-alert inline-alert--error" role="status">
+            {data.message ||
+              "Clinical tables are missing. In C:\\DentaSync-backend run: npm run migrate:clinical-records, then restart npm start."}
+          </p>
+        ) : null}
+
         {records.length ? (
           <div className="admin-table-wrap">
             <table className="admin-table">
