@@ -81,6 +81,17 @@ export function AdminSyncPage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!cameraOpen || !streamRef.current || !videoRef.current) return;
+    videoRef.current.srcObject = streamRef.current;
+    const playPromise = videoRef.current.play?.();
+    if (playPromise && typeof playPromise.catch === "function") {
+      playPromise.catch(() => {
+        /* Autoplay can be blocked briefly; muted + playsInline normally recovers. */
+      });
+    }
+  }, [cameraOpen]);
+
   function updatePatient(field, value) {
     setPayload((current) => ({
       ...current,
@@ -95,25 +106,74 @@ export function AdminSyncPage() {
     }));
   }
 
+  function cameraErrorMessage(cameraError) {
+    const name = cameraError?.name || "";
+    if (!window.isSecureContext) {
+      return "Camera requires a secure page. Open the app at http://localhost:5173 (not a LAN IP over plain HTTP).";
+    }
+    if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+      return "Camera permission was blocked. Allow camera access for this site in your browser settings, then try again.";
+    }
+    if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+      return "No camera was found on this device. Plug in a webcam or use Choose File instead.";
+    }
+    if (name === "NotReadableError" || name === "TrackStartError") {
+      return "The camera is already in use by another app. Close that app, then try again.";
+    }
+    if (name === "SecurityError") {
+      return "Browser blocked camera access on this page. Use http://localhost:5173 or HTTPS.";
+    }
+    return cameraError?.message || "Unable to open the camera. Check browser permissions.";
+  }
+
+  async function requestCameraStream() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      const error = new Error(
+        window.isSecureContext
+          ? "This browser does not support camera capture. Try Chrome or Edge, or use Choose File."
+          : "Camera requires a secure page. Open the app at http://localhost:5173 (not a LAN IP over plain HTTP)."
+      );
+      error.name = "SecurityError";
+      throw error;
+    }
+
+    const attempts = [
+      { video: { facingMode: { ideal: "environment" } }, audio: false },
+      { video: { facingMode: "user" }, audio: false },
+      { video: true, audio: false },
+    ];
+
+    let lastError = null;
+    for (const constraints of attempts) {
+      try {
+        return await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (attemptError) {
+        lastError = attemptError;
+        if (attemptError?.name === "NotAllowedError" || attemptError?.name === "PermissionDeniedError") {
+          throw attemptError;
+        }
+      }
+    }
+    throw lastError || new Error("Unable to open the camera.");
+  }
+
   async function startCamera() {
     setError("");
     setCaptureMode("camera");
     setSourceType("hard_copy_scan");
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" } },
-        audio: false,
-      });
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+      }
+      const stream = await requestCameraStream();
       streamRef.current = stream;
       setCameraOpen(true);
-      window.requestAnimationFrame(() => {
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-        }
-      });
     } catch (cameraError) {
-      setError(cameraError.message || "Unable to open the camera. Check browser permissions.");
-      pushToast("Unable to open the camera.", "error");
+      const messageText = cameraErrorMessage(cameraError);
+      setError(messageText);
+      pushToast(messageText, "error");
+      setCameraOpen(false);
     }
   }
 
@@ -121,6 +181,9 @@ export function AdminSyncPage() {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
     }
     setCameraOpen(false);
   }
