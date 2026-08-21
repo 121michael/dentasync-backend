@@ -1,29 +1,27 @@
 "use strict";
 
-require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
-const { Pool } = require("pg");
+const db = require("../db");
 
-async function main() {
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) {
-    throw new Error("DATABASE_URL is required to run migrate:staff-operations.");
-  }
-
-  const sqlPath = path.join(__dirname, "..", "migrations", "010_create_staff_operations.sql");
-  const sql = fs.readFileSync(sqlPath, "utf8");
-  const pool = new Pool({ connectionString });
+async function runMigration() {
+  const migrationPath = path.join(
+    __dirname,
+    "..",
+    "migrations",
+    "010_create_staff_operations.sql"
+  );
+  const migration = fs.readFileSync(migrationPath, "utf8");
 
   try {
-    await pool.query(sql);
-    console.log("Staff operations migration applied (billing + SMS log + RFID tag).");
+    await db.query(migration);
+    console.log("Staff operations migration completed (billing + SMS log + RFID tag).");
   } finally {
-    await pool.end();
+    await db.end();
   }
 }
 
-main().catch((error) => {
-  console.error(error.message || error);
-  process.exit(1);
+runMigration().catch((error) => {
+  console.error("Staff operations migration failed:", error.message);
+  process.exitCode = 1;
 });
