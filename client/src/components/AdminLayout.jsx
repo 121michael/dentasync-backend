@@ -11,6 +11,7 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
+  Settings,
   Shield,
   Users,
   X,
@@ -38,6 +39,7 @@ const navigation = [
   { to: "/admin/schedule", label: "Update Schedule", icon: CalendarDays },
   { to: "/admin/analytics", label: "General Analytics", icon: BarChart3 },
   { to: "/admin/ai-settings", label: "Manage AI Settings", icon: Bot },
+  { to: "/admin/settings", label: "System Settings", icon: Settings },
   { to: "/admin/sync-data", label: "Sync Data", icon: Cloud },
 ];
 
@@ -49,6 +51,7 @@ const PAGE_TITLES = {
   "/admin/schedule": "Clinic Schedule & Roster",
   "/admin/analytics": "General Operations Analytics",
   "/admin/ai-settings": "Amethyst AI Core Settings",
+  "/admin/settings": "System Settings",
   "/admin/sync-data": "Cloud Data Synchronization",
   "/admin/audit-logs": "Security Audit",
 };

@@ -234,6 +234,7 @@ function createStaffPortalRouter({
   authenticateToken,
   passwordResetService,
   notifyStaff = async () => {},
+  clinicSms = null,
 }) {
   const router = express.Router();
 
@@ -485,6 +486,18 @@ function createStaffPortalRouter({
 
       await client.query("COMMIT");
       transactionOpen = false;
+
+      if (clinicSms?.notifyQueueSms) {
+        clinicSms
+          .notifyQueueSms({
+            userId: current.user_id,
+            queueEntry: updatedResult.rows[0],
+            actorRole: "staff",
+            actorId: req.staff?.id,
+          })
+          .catch((smsError) => console.warn("Queue SMS failed:", smsError.message));
+      }
+
       return res.json({
         queueEntry: {
           id: updatedResult.rows[0].id,
@@ -736,6 +749,18 @@ function createStaffPortalRouter({
       await client.query("COMMIT");
       transactionOpen = false;
 
+      if (clinicSms?.notifyAppointmentSms) {
+        clinicSms
+          .notifyAppointmentSms({
+            userId: current.user_id,
+            appointment: result.rows[0],
+            action,
+            actorRole: "staff",
+            actorId: req.staff?.id,
+          })
+          .catch((smsError) => console.warn("Appointment SMS failed:", smsError.message));
+      }
+
       const patientResult = await db.query(
         `SELECT CONCAT_WS(' ', first_name, last_name) AS patient_name, phone AS patient_phone
          FROM users
@@ -749,6 +774,7 @@ function createStaffPortalRouter({
           patient_name: patientResult.rows[0]?.patient_name,
           patient_phone: patientResult.rows[0]?.patient_phone,
         }),
+        smsQueued: Boolean(clinicSms?.notifyAppointmentSms),
       });
     } catch (error) {
       if (transactionOpen) {
@@ -1216,6 +1242,17 @@ function createStaffPortalRouter({
       await client.query("COMMIT");
       transactionOpen = false;
 
+      if (!checkIn.alreadyCheckedIn && clinicSms?.notifyQueueSms) {
+        clinicSms
+          .notifyQueueSms({
+            userId: appointment.user_id,
+            queueEntry: checkIn.queueEntry,
+            actorRole: "staff",
+            actorId: req.staff?.id,
+          })
+          .catch((smsError) => console.warn("Staff check-in SMS failed:", smsError.message));
+      }
+
       return res.status(checkIn.alreadyCheckedIn ? 200 : 201).json({
         message: checkIn.alreadyCheckedIn
           ? "Patient is already checked in."
@@ -1502,24 +1539,28 @@ function createStaffPortalRouter({
       return res.status(400).json({ message: "Phone number and message are required." });
     }
 
-    let deliveryStatus = "pending";
+    const smsHelper = clinicSms || req.app?.locals?.clinicSms || null;
+    let deliveryStatus = "failed";
     let errorDetail = null;
-    try {
-      // Soft SMS dispatch: log intent. Live Twilio OTP already exists in server.js;
-      // clinic SMS uses the same credentials when present via optional inject.
-      if (typeof req.app?.locals?.sendClinicSms === "function") {
-        await req.app.locals.sendClinicSms(patientPhone, messageBody);
-        deliveryStatus = "sent";
-      } else if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_PHONE_NUMBER) {
-        deliveryStatus = "pending";
-        errorDetail = "Queued for SMS provider. Configure clinic SMS helper to dispatch live messages.";
-      } else {
-        deliveryStatus = "failed";
-        errorDetail = "SMS provider is not configured. Notification was logged only.";
-      }
-    } catch (smsError) {
-      deliveryStatus = "failed";
-      errorDetail = smsError.message;
+    let clinicLogId = null;
+
+    if (!smsHelper?.sendClinicSms) {
+      errorDetail = "Clinic SMS service is unavailable.";
+    } else {
+      const result = await smsHelper.sendClinicSms({
+        userId: patientUserId,
+        phone: patientPhone,
+        message: messageBody,
+        messageType,
+        appointmentId,
+        category: "general",
+        respectPreferences: false,
+        actorRole: "staff",
+        actorId: req.staff.id,
+      });
+      deliveryStatus = result.status === "sent" ? "sent" : result.status === "skipped" ? "pending" : "failed";
+      errorDetail = result.reason || null;
+      clinicLogId = result.logId || null;
     }
 
     try {
@@ -1549,6 +1590,7 @@ function createStaffPortalRouter({
               : "SMS could not be sent. Delivery was logged as failed.",
         sms: {
           id: result.rows[0].id,
+          clinicLogId,
           status: result.rows[0].delivery_status,
           phone: result.rows[0].patient_phone,
           createdAt: result.rows[0].created_at,
@@ -1557,8 +1599,12 @@ function createStaffPortalRouter({
       });
     } catch (error) {
       if (isMissingRelation(error)) {
-        return res.status(503).json({
-          message: "SMS log tables are missing. Run npm run migrate:staff-operations.",
+        return res.status(deliveryStatus === "sent" ? 201 : 202).json({
+          message:
+            deliveryStatus === "sent"
+              ? "Notification sent successfully."
+              : errorDetail || "SMS could not be fully logged.",
+          sms: { status: deliveryStatus, phone: patientPhone, errorDetail, clinicLogId },
         });
       }
       console.error("Staff SMS log error:", error.message);

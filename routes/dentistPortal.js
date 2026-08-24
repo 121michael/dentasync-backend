@@ -225,7 +225,7 @@ function requireDentistAccount(db) {
   };
 }
 
-function createDentistPortalRouter({ db, authenticateToken }) {
+function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) {
   const router = express.Router();
   router.use(authenticateToken, requireDentistAccount(db));
 
@@ -497,6 +497,17 @@ function createDentistPortalRouter({ db, authenticateToken }) {
       await client.query("COMMIT");
       transactionOpen = false;
 
+      if (clinicSms?.notifyQueueSms) {
+        clinicSms
+          .notifyQueueSms({
+            userId: current.user_id,
+            queueEntry: { ...updatedResult.rows[0], status: "dentist" },
+            actorRole: "dentist",
+            actorId: req.dentist?.id,
+          })
+          .catch((smsError) => console.warn("Dentist queue SMS failed:", smsError.message));
+      }
+
       const detail = await db.query(
         `SELECT
            queue.id,
@@ -595,6 +606,18 @@ function createDentistPortalRouter({ db, authenticateToken }) {
 
       await client.query("COMMIT");
       transactionOpen = false;
+
+      if (clinicSms?.notifyQueueSms) {
+        clinicSms
+          .notifyQueueSms({
+            userId: current.user_id,
+            queueEntry: updatedResult.rows[0],
+            actorRole: "dentist",
+            actorId: req.dentist?.id,
+          })
+          .catch((smsError) => console.warn("Dentist queue SMS failed:", smsError.message));
+      }
+
       return res.json({
         queueEntry: {
           id: updatedResult.rows[0].id,

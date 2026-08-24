@@ -211,6 +211,7 @@ function createPatientPortalRouter({
   uploadDirectory = path.join(process.cwd(), "uploads", "patient-portal"),
   notifyStaff = async () => {},
   notifyAdmin = async () => {},
+  clinicSms = null,
 }) {
   const router = express.Router();
   fs.mkdirSync(uploadDirectory, { recursive: true });
@@ -677,6 +678,17 @@ function createPatientPortalRouter({
         entityId: queueResult.rows[0].token,
       });
 
+      if (clinicSms?.notifyQueueSms) {
+        clinicSms
+          .notifyQueueSms({
+            userId,
+            queueEntry: queueResult.rows[0],
+            actorRole: "patient",
+            actorId: userId,
+          })
+          .catch((smsError) => console.warn("Patient check-in SMS failed:", smsError.message));
+      }
+
       return res.status(201).json({ queueEntry: queueResult.rows[0] });
     } catch (error) {
       if (transactionOpen) {
@@ -993,6 +1005,10 @@ function createPatientPortalRouter({
         preferences: {
           theme: preferenceResult.rows[0]?.theme || "light",
           notifyQueue: preferenceResult.rows[0]?.notify_queue || false,
+          notifySms: preferenceResult.rows[0]?.notify_sms ?? true,
+          notifyAppointmentSms: preferenceResult.rows[0]?.notify_appointment_sms ?? true,
+          notifyQueueSms: preferenceResult.rows[0]?.notify_queue_sms ?? true,
+          notifyCleaningSms: preferenceResult.rows[0]?.notify_cleaning_sms ?? true,
           twoFactorEnabled: preferenceResult.rows[0]?.two_factor_enabled || false,
         },
       });
@@ -1078,30 +1094,84 @@ function createPatientPortalRouter({
   router.put("/preferences", async (req, res) => {
     const theme = req.body?.theme === "dark" ? "dark" : "light";
     const notifyQueue = Boolean(req.body?.notifyQueue);
+    const notifySms = req.body?.notifySms === undefined ? true : Boolean(req.body.notifySms);
+    const notifyAppointmentSms =
+      req.body?.notifyAppointmentSms === undefined ? true : Boolean(req.body.notifyAppointmentSms);
+    const notifyQueueSms =
+      req.body?.notifyQueueSms === undefined ? true : Boolean(req.body.notifyQueueSms);
+    const notifyCleaningSms =
+      req.body?.notifyCleaningSms === undefined ? true : Boolean(req.body.notifyCleaningSms);
     const twoFactorEnabled = Boolean(req.body?.twoFactorEnabled);
 
     try {
       const result = await db.query(
         `INSERT INTO patient_portal_preferences (
-           user_id, theme, notify_queue, two_factor_enabled
-         ) VALUES ($1, $2, $3, $4)
+           user_id, theme, notify_queue, two_factor_enabled,
+           notify_sms, notify_appointment_sms, notify_queue_sms, notify_cleaning_sms
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          ON CONFLICT (user_id) DO UPDATE SET
            theme = EXCLUDED.theme,
            notify_queue = EXCLUDED.notify_queue,
            two_factor_enabled = EXCLUDED.two_factor_enabled,
+           notify_sms = EXCLUDED.notify_sms,
+           notify_appointment_sms = EXCLUDED.notify_appointment_sms,
+           notify_queue_sms = EXCLUDED.notify_queue_sms,
+           notify_cleaning_sms = EXCLUDED.notify_cleaning_sms,
            updated_at = CURRENT_TIMESTAMP
-         RETURNING theme, notify_queue, two_factor_enabled`,
-        [userIdFor(req), theme, notifyQueue, twoFactorEnabled]
+         RETURNING theme, notify_queue, two_factor_enabled,
+                   notify_sms, notify_appointment_sms, notify_queue_sms, notify_cleaning_sms`,
+        [
+          userIdFor(req),
+          theme,
+          notifyQueue,
+          twoFactorEnabled,
+          notifySms,
+          notifyAppointmentSms,
+          notifyQueueSms,
+          notifyCleaningSms,
+        ]
       );
       const preference = result.rows[0];
       return res.json({
         preferences: {
           theme: preference.theme,
           notifyQueue: preference.notify_queue,
+          notifySms: preference.notify_sms,
+          notifyAppointmentSms: preference.notify_appointment_sms,
+          notifyQueueSms: preference.notify_queue_sms,
+          notifyCleaningSms: preference.notify_cleaning_sms,
           twoFactorEnabled: preference.two_factor_enabled,
         },
       });
     } catch (error) {
+      if (error?.code === "42703") {
+        // Migration not applied yet — keep legacy preference write working.
+        try {
+          const fallback = await db.query(
+            `INSERT INTO patient_portal_preferences (
+               user_id, theme, notify_queue, two_factor_enabled
+             ) VALUES ($1, $2, $3, $4)
+             ON CONFLICT (user_id) DO UPDATE SET
+               theme = EXCLUDED.theme,
+               notify_queue = EXCLUDED.notify_queue,
+               two_factor_enabled = EXCLUDED.two_factor_enabled,
+               updated_at = CURRENT_TIMESTAMP
+             RETURNING theme, notify_queue, two_factor_enabled`,
+            [userIdFor(req), theme, notifyQueue, twoFactorEnabled]
+          );
+          const preference = fallback.rows[0];
+          return res.json({
+            preferences: {
+              theme: preference.theme,
+              notifyQueue: preference.notify_queue,
+              twoFactorEnabled: preference.two_factor_enabled,
+            },
+            message: "SMS preference columns are missing. Run npm run migrate:patient-sms.",
+          });
+        } catch (fallbackError) {
+          console.error("Patient preferences fallback error:", fallbackError.message);
+        }
+      }
       console.error("Patient preferences error:", error.message);
       return res.status(500).json({ message: "Unable to update portal preferences." });
     }

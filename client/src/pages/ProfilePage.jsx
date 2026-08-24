@@ -64,7 +64,15 @@ export function ProfilePage({ theme, onThemeChange }) {
   const { updateUser } = useAuth();
   const [profile, setProfile] = useState(null);
   const [form, setForm] = useState(null);
-  const [preferences, setPreferences] = useState({ theme: "light", notifyQueue: false, twoFactorEnabled: false });
+  const [preferences, setPreferences] = useState({
+    theme: "light",
+    notifyQueue: false,
+    notifySms: true,
+    notifyAppointmentSms: true,
+    notifyQueueSms: true,
+    notifyCleaningSms: true,
+    twoFactorEnabled: false,
+  });
   const [security, setSecurity] = useState(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -285,6 +293,34 @@ export function ProfilePage({ theme, onThemeChange }) {
               onChange={(event) => updatePreferences({ ...preferences, notifyQueue: event.target.checked })}
               label="Queue notifications"
               detail="Receive a reminder as your turn gets closer."
+            />
+            <Toggle
+              checked={preferences.notifySms !== false}
+              onChange={(event) => updatePreferences({ ...preferences, notifySms: event.target.checked })}
+              label="SMS notifications"
+              detail="Allow Amethyst to text your phone for clinic updates."
+            />
+            <Toggle
+              checked={preferences.notifyAppointmentSms !== false}
+              onChange={(event) =>
+                updatePreferences({ ...preferences, notifyAppointmentSms: event.target.checked })
+              }
+              label="Appointment SMS"
+              detail="Get texts when appointments are confirmed, rescheduled, or cancelled."
+            />
+            <Toggle
+              checked={preferences.notifyQueueSms !== false}
+              onChange={(event) => updatePreferences({ ...preferences, notifyQueueSms: event.target.checked })}
+              label="Queue SMS"
+              detail="Get texts for check-in and queue position updates."
+            />
+            <Toggle
+              checked={preferences.notifyCleaningSms !== false}
+              onChange={(event) =>
+                updatePreferences({ ...preferences, notifyCleaningSms: event.target.checked })
+              }
+              label="Cleaning reminder SMS"
+              detail="Get a reminder about every 4–6 months to book a cleaning."
             />
             <Toggle
               checked={preferences.twoFactorEnabled}

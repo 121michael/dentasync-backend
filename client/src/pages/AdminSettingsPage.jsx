@@ -8,6 +8,14 @@ const defaults = {
   appointments: { durationMinutes: 45, bookingLeadDays: 1, cancellationHours: 24, maxDailyAppointments: 40 },
   notifications: { emailNotifications: true, appointmentNotifications: true, systemAlerts: true },
   general: { dateFormat: "MM/DD/YYYY", timeZone: "Asia/Manila" },
+  sms: {
+    smsEnabled: true,
+    appointmentSms: true,
+    queueSms: true,
+    cleaningReminderSms: true,
+    cleaningReminderMonths: 5,
+    clinicName: "Amethyst Dental Clinic",
+  },
 };
 
 export function AdminSettingsPage() {
@@ -24,6 +32,7 @@ export function AdminSettingsPage() {
         appointments: { ...defaults.appointments, ...(response.settings.appointments || {}) },
         notifications: { ...defaults.notifications, ...(response.settings.notifications || {}) },
         general: { ...defaults.general, ...(response.settings.general || {}) },
+        sms: { ...defaults.sms, ...(response.settings.sms || {}) },
       });
       setError("");
     } catch (loadError) {
@@ -47,6 +56,7 @@ export function AdminSettingsPage() {
         appointments: { ...defaults.appointments, ...(response.settings.appointments || {}) },
         notifications: { ...defaults.notifications, ...(response.settings.notifications || {}) },
         general: { ...defaults.general, ...(response.settings.general || {}) },
+        sms: { ...defaults.sms, ...(response.settings.sms || {}) },
       });
       setSuccess(response.message || "Settings saved.");
     } catch (saveError) {
@@ -92,6 +102,97 @@ export function AdminSettingsPage() {
           <label className="admin-check"><input type="checkbox" checked={Boolean(settings.notifications.emailNotifications)} onChange={(event) => setSettings((current) => ({ ...current, notifications: { ...current.notifications, emailNotifications: event.target.checked } }))} /> Email notifications</label>
           <label className="admin-check"><input type="checkbox" checked={Boolean(settings.notifications.appointmentNotifications)} onChange={(event) => setSettings((current) => ({ ...current, notifications: { ...current.notifications, appointmentNotifications: event.target.checked } }))} /> Appointment notifications</label>
           <label className="admin-check"><input type="checkbox" checked={Boolean(settings.notifications.systemAlerts)} onChange={(event) => setSettings((current) => ({ ...current, notifications: { ...current.notifications, systemAlerts: event.target.checked } }))} /> System alerts</label>
+        </section>
+
+        <section className="admin-panel">
+          <h2>Patient SMS (Twilio)</h2>
+          <p className="muted-copy">
+            Requires TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER in the server .env file.
+          </p>
+          <label className="admin-check">
+            <input
+              type="checkbox"
+              checked={Boolean(settings.sms.smsEnabled)}
+              onChange={(event) =>
+                setSettings((current) => ({
+                  ...current,
+                  sms: { ...current.sms, smsEnabled: event.target.checked },
+                }))
+              }
+            />{" "}
+            Enable clinic SMS
+          </label>
+          <label className="admin-check">
+            <input
+              type="checkbox"
+              checked={Boolean(settings.sms.appointmentSms)}
+              onChange={(event) =>
+                setSettings((current) => ({
+                  ...current,
+                  sms: { ...current.sms, appointmentSms: event.target.checked },
+                }))
+              }
+            />{" "}
+            Appointment confirm / reschedule / cancel SMS
+          </label>
+          <label className="admin-check">
+            <input
+              type="checkbox"
+              checked={Boolean(settings.sms.queueSms)}
+              onChange={(event) =>
+                setSettings((current) => ({
+                  ...current,
+                  sms: { ...current.sms, queueSms: event.target.checked },
+                }))
+              }
+            />{" "}
+            Queue / check-in SMS
+          </label>
+          <label className="admin-check">
+            <input
+              type="checkbox"
+              checked={Boolean(settings.sms.cleaningReminderSms)}
+              onChange={(event) =>
+                setSettings((current) => ({
+                  ...current,
+                  sms: { ...current.sms, cleaningReminderSms: event.target.checked },
+                }))
+              }
+            />{" "}
+            Cleaning reminder SMS (every 4–6 months)
+          </label>
+          <div className="field-grid field-grid--two" style={{ marginTop: "0.85rem" }}>
+            <label className="field">
+              <span>Reminder interval (months)</span>
+              <input
+                type="number"
+                min="4"
+                max="6"
+                value={settings.sms.cleaningReminderMonths}
+                onChange={(event) =>
+                  setSettings((current) => ({
+                    ...current,
+                    sms: {
+                      ...current.sms,
+                      cleaningReminderMonths: Number(event.target.value),
+                    },
+                  }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>SMS clinic name</span>
+              <input
+                value={settings.sms.clinicName || ""}
+                onChange={(event) =>
+                  setSettings((current) => ({
+                    ...current,
+                    sms: { ...current.sms, clinicName: event.target.value },
+                  }))
+                }
+              />
+            </label>
+          </div>
         </section>
 
         <section className="admin-panel">

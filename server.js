@@ -172,20 +172,39 @@ const twilioClient =
     ? twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN)
     : null;
 
-async function sendSmsOtp(toPhone, otpCode) {
-  if (!twilioClient || !process.env.TWILIO_PHONE_NUMBER) {
-    console.log("⚠️ Twilio credentials missing in .env. Skipping real SMS dispatch.");
-    return;
-  }
-  let formattedPhone = toPhone.trim();
-  if (formattedPhone.startsWith("0")) {
-    formattedPhone = "+63" + formattedPhone.substring(1);
-  }
-  return twilioClient.messages.create({
-    body: `Your DentaSync verification code is: ${otpCode}. Valid for 5 minutes.`,
-    from: process.env.TWILIO_PHONE_NUMBER,
-    to: formattedPhone,
+const { createClinicSmsService } = require("./services/clinicSms");
+const { createCleaningReminderJob } = require("./services/cleaningReminders");
+
+const clinicSms = createClinicSmsService({
+  db,
+  twilioClient,
+  fromNumber: process.env.TWILIO_PHONE_NUMBER || null,
+  clinicName: process.env.CLINIC_NAME || "Amethyst Dental Clinic",
+});
+app.locals.clinicSms = clinicSms;
+app.locals.sendClinicSms = (phone, message) =>
+  clinicSms.sendClinicSms({
+    phone,
+    message,
+    messageType: "manual",
+    category: "general",
+    respectPreferences: false,
   });
+
+async function sendSmsOtp(toPhone, otpCode) {
+  const result = await clinicSms.sendClinicSms({
+    phone: toPhone,
+    message: `Your DentaSync verification code is: ${otpCode}. Valid for 5 minutes.`,
+    messageType: "otp",
+    category: "otp",
+    respectPreferences: false,
+    actorRole: "system",
+    actorId: "otp",
+  });
+  if (result.status === "failed" || result.status === "skipped") {
+    console.log("⚠️ OTP SMS not sent:", result.reason || result.status);
+  }
+  return result;
 }
 
 const otpService = createOtpService({
@@ -233,6 +252,7 @@ app.use(
     authenticateToken,
     notifyStaff: (notification) => notifyActiveStaff(db, notification),
     notifyAdmin: (notification) => notifyActiveAdmins(db, notification),
+    clinicSms,
   })
 );
 
@@ -243,6 +263,7 @@ app.use(
     authenticateToken,
     passwordResetService,
     notifyStaff: (notification) => notifyActiveStaff(db, notification),
+    clinicSms,
   })
 );
 
@@ -251,6 +272,7 @@ app.use(
   createDentistPortalRouter({
     db,
     authenticateToken,
+    clinicSms,
   })
 );
 
@@ -262,6 +284,7 @@ app.use(
     passwordResetService,
     emailDeliveryIsConfigured,
     notifyAdmin: (notification) => notifyActiveAdmins(db, notification),
+    clinicSms,
   })
 );
 
@@ -275,11 +298,14 @@ app.use(
 // 5. SERVER LISTENER (Always place at the bottom)
 // ==========================================
 const PORT = process.env.PORT || 5000;
+const cleaningReminderJob = createCleaningReminderJob({ db, clinicSms });
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`✅ DentaSync server running on http://localhost:${PORT}`);
     console.log("Mounted APIs: /api/auth, /api/patient, /api/staff, /api/dentist, /api/admin");
     console.log("If the patient dashboard returns 404, you are not running this backend.");
+    cleaningReminderJob.start();
+    console.log("Cleaning reminder SMS job scheduled (every 4–6 months based on last visit).");
   });
 }
 

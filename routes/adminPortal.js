@@ -18,7 +18,7 @@ const APPOINTMENT_ACTIONS = new Set([
   "reschedule",
 ]);
 const ACCOUNT_ROLES = new Set(["admin", "dentist", "staff", "patient"]);
-const SETTINGS_KEYS = ["clinic", "appointments", "notifications", "general"];
+const SETTINGS_KEYS = ["clinic", "appointments", "notifications", "general", "sms"];
 const ROLE_PERMISSIONS = [
   {
     role: "admin",
@@ -295,6 +295,7 @@ function createAdminPortalRouter({
   passwordResetService,
   emailDeliveryIsConfigured,
   notifyAdmin = null,
+  clinicSms = null,
 }) {
   const router = express.Router();
 
@@ -1733,6 +1734,18 @@ function createAdminPortalRouter({
       await client.query("COMMIT");
       transactionOpen = false;
 
+      if (clinicSms?.notifyAppointmentSms) {
+        clinicSms
+          .notifyAppointmentSms({
+            userId: current.user_id,
+            appointment: result.rows[0],
+            action,
+            actorRole: "admin",
+            actorId: req.admin?.id,
+          })
+          .catch((smsError) => console.warn("Admin appointment SMS failed:", smsError.message));
+      }
+
       const patientResult = await db.query(
         `SELECT
            CONCAT_WS(' ', first_name, last_name) AS patient_name,
@@ -1751,6 +1764,7 @@ function createAdminPortalRouter({
           patient_email: patientResult.rows[0]?.patient_email,
           patient_phone: patientResult.rows[0]?.patient_phone,
         }),
+        smsQueued: Boolean(clinicSms?.notifyAppointmentSms),
       });
     } catch (error) {
       if (transactionOpen) {
@@ -2017,7 +2031,7 @@ function createAdminPortalRouter({
     const updates = SETTINGS_KEYS.filter((key) => Object.prototype.hasOwnProperty.call(payload, key));
     if (!updates.length) {
       return res.status(400).json({
-        message: "Provide clinic, appointments, notifications, or general settings.",
+        message: "Provide clinic, appointments, notifications, general, or sms settings.",
       });
     }
 
