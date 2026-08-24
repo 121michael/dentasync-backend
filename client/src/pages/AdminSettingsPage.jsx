@@ -105,9 +105,9 @@ export function AdminSettingsPage() {
         </section>
 
         <section className="admin-panel">
-          <h2>Patient SMS (Twilio)</h2>
+          <h2>Patient SMS (Semaphore)</h2>
           <p className="muted-copy">
-            Requires TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER in the server .env file.
+            Requires SEMAPHORE_API_KEY in the server .env file. Optional: SEMAPHORE_SENDER_NAME (approved sender name).
           </p>
           <label className="admin-check">
             <input

@@ -2,13 +2,18 @@
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { createClinicSmsService, formatPhoneE164 } = require("../services/clinicSms");
+const { createClinicSmsService, formatPhoneE164, formatPhoneSemaphore } = require("../services/clinicSms");
 const { monthsBetween } = require("../services/cleaningReminders");
 
 test("formatPhoneE164 normalizes PH local numbers", () => {
   assert.equal(formatPhoneE164("09171234567"), "+639171234567");
   assert.equal(formatPhoneE164("639171234567"), "+639171234567");
   assert.equal(formatPhoneE164("+639171234567"), "+639171234567");
+});
+
+test("formatPhoneSemaphore uses PH format without plus", () => {
+  assert.equal(formatPhoneSemaphore("09171234567"), "639171234567");
+  assert.equal(formatPhoneSemaphore("+639171234567"), "639171234567");
 });
 
 test("appointment SMS copy covers confirm/reschedule/cancel", () => {

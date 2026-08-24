@@ -14,10 +14,21 @@ function formatPhoneE164(phone) {
   return formatted;
 }
 
+/** Semaphore accepts 09xxxxxxxxx, 63xxxxxxxxx, or 9xxxxxxxxx (no +). */
+function formatPhoneSemaphore(phone) {
+  const e164 = formatPhoneE164(phone);
+  if (!e164) return null;
+  const digits = e164.replace(/\D/g, "");
+  if (digits.startsWith("63") && digits.length >= 12) return digits;
+  if (digits.startsWith("0") && digits.length >= 11) return `63${digits.slice(1)}`;
+  if (digits.length === 10) return `63${digits}`;
+  return digits || null;
+}
+
 function createClinicSmsService({
   db,
-  twilioClient = null,
-  fromNumber = null,
+  semaphoreApiKey = null,
+  semaphoreSenderName = null,
   clinicName = "Amethyst Dental Clinic",
 }) {
   async function getSmsSettings() {
@@ -28,6 +39,7 @@ function createClinicSmsService({
       cleaningReminderSms: true,
       cleaningReminderMonths: 5,
       clinicName,
+      provider: "semaphore",
     };
     try {
       const result = await db.query(
@@ -37,6 +49,7 @@ function createClinicSmsService({
       return {
         ...defaults,
         ...value,
+        provider: "semaphore",
         cleaningReminderMonths: Number(value.cleaningReminderMonths || defaults.cleaningReminderMonths) || 5,
       };
     } catch (error) {
@@ -133,22 +146,61 @@ function createClinicSmsService({
   }
 
   async function dispatchSms(toPhone, body) {
-    if (!twilioClient || !fromNumber) {
-      const error = new Error("Twilio is not configured. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER.");
-      error.code = "TWILIO_NOT_CONFIGURED";
+    if (!semaphoreApiKey) {
+      const error = new Error(
+        "Semaphore is not configured. Set SEMAPHORE_API_KEY in .env (optional SEMAPHORE_SENDER_NAME)."
+      );
+      error.code = "SEMAPHORE_NOT_CONFIGURED";
       throw error;
     }
-    const to = formatPhoneE164(toPhone);
-    if (!to) {
+
+    const number = formatPhoneSemaphore(toPhone);
+    if (!number) {
       const error = new Error("Patient phone number is missing or invalid.");
       error.code = "INVALID_PHONE";
       throw error;
     }
-    return twilioClient.messages.create({
-      body,
-      from: fromNumber,
-      to,
+
+    // Semaphore silently ignores messages that start with "TEST".
+    const safeBody = /^\s*test\b/i.test(body) ? `Amethyst notice: ${body.trim()}` : body;
+
+    const payload = new URLSearchParams();
+    payload.set("apikey", semaphoreApiKey);
+    payload.set("number", number);
+    payload.set("message", safeBody.slice(0, 480));
+    if (semaphoreSenderName) {
+      payload.set("sendername", semaphoreSenderName);
+    }
+
+    const response = await fetch("https://api.semaphore.co/api/v4/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: payload.toString(),
     });
+
+    const text = await response.text();
+    let data = null;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = { raw: text };
+    }
+
+    if (!response.ok) {
+      const detail =
+        (Array.isArray(data) && data[0]?.message) ||
+        data?.message ||
+        data?.raw ||
+        `Semaphore HTTP ${response.status}`;
+      const error = new Error(String(detail));
+      error.code = "SEMAPHORE_HTTP_ERROR";
+      error.details = data;
+      throw error;
+    }
+
+    return data;
   }
 
   async function sendClinicSms({
@@ -160,7 +212,7 @@ function createClinicSmsService({
     queueEntryId = null,
     actorRole = null,
     actorId = null,
-    category = "general", // appointment | queue | cleaning | general | otp
+    category = "general",
     respectPreferences = true,
   }) {
     const settings = await getSmsSettings();
@@ -221,7 +273,7 @@ function createClinicSmsService({
       await dispatchSms(targetPhone, body);
       const logId = await writeLog({
         patientUserId: userId || patient?.id,
-        patientPhone: formatPhoneE164(targetPhone),
+        patientPhone: formatPhoneSemaphore(targetPhone),
         appointmentId,
         queueEntryId,
         messageType,
@@ -230,11 +282,11 @@ function createClinicSmsService({
         actorRole,
         actorId,
       });
-      return { status: "sent", logId, phone: formatPhoneE164(targetPhone) };
+      return { status: "sent", logId, phone: formatPhoneSemaphore(targetPhone) };
     } catch (error) {
       const logId = await writeLog({
         patientUserId: userId || patient?.id,
-        patientPhone: formatPhoneE164(targetPhone),
+        patientPhone: formatPhoneSemaphore(targetPhone),
         appointmentId,
         queueEntryId,
         messageType,
@@ -250,7 +302,7 @@ function createClinicSmsService({
 
   function appointmentMessage(type, { serviceName, date, time, clinic }) {
     const when = `${date} at ${String(time || "").slice(0, 5)}`;
-    const place = clinic || settingsClinicFallback();
+    const place = clinic || clinicName;
     if (type === "confirmed") {
       return `${place}: Your ${serviceName} appointment is confirmed for ${when}.`;
     }
@@ -264,10 +316,6 @@ function createClinicSmsService({
       return `${place}: Your ${serviceName} appointment request for ${when} could not be approved. Please choose another time.`;
     }
     return `${place}: Your appointment was updated (${when}).`;
-  }
-
-  function settingsClinicFallback() {
-    return clinicName;
   }
 
   function queueMessage({ token, position, status, waitMinutes, clinic }) {
@@ -351,6 +399,7 @@ function createClinicSmsService({
     notifyAppointmentSms,
     notifyQueueSms,
     formatPhoneE164,
+    formatPhoneSemaphore,
     appointmentMessage,
     queueMessage,
   };
@@ -359,4 +408,5 @@ function createClinicSmsService({
 module.exports = {
   createClinicSmsService,
   formatPhoneE164,
+  formatPhoneSemaphore,
 };

@@ -3,7 +3,6 @@ const express = require("express");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const nodemailer = require("nodemailer");
-const twilio = require("twilio");
 const db = require("./db");
 const { createAuthRouter } = require("./routes/auth");
 const { createPatientPortalRouter } = require("./routes/patientPortal");
@@ -167,18 +166,13 @@ async function sendPasswordResetEmail({ to, token, expiresAt, recipientName }) {
   });
 }
 
-const twilioClient =
-  process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN
-    ? twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN)
-    : null;
-
 const { createClinicSmsService } = require("./services/clinicSms");
 const { createCleaningReminderJob } = require("./services/cleaningReminders");
 
 const clinicSms = createClinicSmsService({
   db,
-  twilioClient,
-  fromNumber: process.env.TWILIO_PHONE_NUMBER || null,
+  semaphoreApiKey: process.env.SEMAPHORE_API_KEY || null,
+  semaphoreSenderName: process.env.SEMAPHORE_SENDER_NAME || null,
   clinicName: process.env.CLINIC_NAME || "Amethyst Dental Clinic",
 });
 app.locals.clinicSms = clinicSms;
