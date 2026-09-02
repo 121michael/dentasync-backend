@@ -90,6 +90,8 @@ function createInMemoryOtpStore({ users, now }) {
               expiresAt: new Date(createdAt.getTime() + ttlSeconds * 1000),
               usedAt: null,
               invalidatedAt: null,
+              failedAttempts: 0,
+              lockedUntil: null,
             };
             requests.set(requestId, request);
             return request;
@@ -111,6 +113,7 @@ function createInMemoryOtpStore({ users, now }) {
     },
 
     async consume({ requestId, otpHash }) {
+      const { MAX_FAILED_ATTEMPTS, LOCKOUT_SECONDS } = require("../repositories/postgresOtpStore");
       const request = requests.get(requestId);
       if (!request) {
         return { status: "not_found" };
@@ -126,6 +129,24 @@ function createInMemoryOtpStore({ users, now }) {
         return { status: "inactive", user, ...timestamps };
       }
 
+      if (request.lockedUntil && request.lockedUntil.getTime() > now().getTime()) {
+        return {
+          status: "locked",
+          user,
+          ...timestamps,
+          lockedUntil: request.lockedUntil,
+          retryAfterSeconds: Math.ceil(
+            (request.lockedUntil.getTime() - now().getTime()) / 1000
+          ),
+          attemptsRemaining: 0,
+        };
+      }
+
+      if (request.failedAttempts > 0 && request.lockedUntil) {
+        request.failedAttempts = 0;
+        request.lockedUntil = null;
+      }
+
       if (!(request.expiresAt instanceof Date) || Number.isNaN(request.expiresAt.getTime())) {
         request.invalidatedAt = now();
         return { status: "invalid_expiration", user, ...timestamps };
@@ -137,10 +158,29 @@ function createInMemoryOtpStore({ users, now }) {
       }
 
       if (!hashesMatch(request.otpHash, otpHash)) {
-        return { status: "mismatch", user, ...timestamps };
+        request.failedAttempts = Number(request.failedAttempts || 0) + 1;
+        if (request.failedAttempts >= MAX_FAILED_ATTEMPTS) {
+          request.lockedUntil = new Date(now().getTime() + LOCKOUT_SECONDS * 1000);
+          return {
+            status: "locked",
+            user,
+            ...timestamps,
+            lockedUntil: request.lockedUntil,
+            retryAfterSeconds: LOCKOUT_SECONDS,
+            attemptsRemaining: 0,
+          };
+        }
+        return {
+          status: "mismatch",
+          user,
+          ...timestamps,
+          attemptsRemaining: Math.max(0, MAX_FAILED_ATTEMPTS - request.failedAttempts),
+        };
       }
 
       request.usedAt = now();
+      request.failedAttempts = 0;
+      request.lockedUntil = null;
       const storedUser = users.find(
         (candidate) => String(candidate.id) === String(request.userId)
       );
@@ -321,6 +361,42 @@ test("duplicate verification submissions consume a correct OTP exactly once", as
 
   assert.equal(results.filter((result) => result.status === "verified").length, 1);
   assert.equal(results.filter((result) => result.status === "inactive").length, 1);
+});
+
+test("three wrong OTP attempts lock verification for five minutes", async () => {
+  const fixture = createFixture({ codeGenerator: () => "483920" });
+  const request = await fixture.service.issueOtp(fixture.user);
+
+  const first = await fixture.service.verifyOtp({
+    requestId: request.requestId,
+    otp: "000001",
+  });
+  const second = await fixture.service.verifyOtp({
+    requestId: request.requestId,
+    otp: "000002",
+  });
+  const third = await fixture.service.verifyOtp({
+    requestId: request.requestId,
+    otp: "000003",
+  });
+  const whileLocked = await fixture.service.verifyOtp({
+    requestId: request.requestId,
+    otp: "483920",
+  });
+
+  assert.equal(first.status, "mismatch");
+  assert.equal(first.attemptsRemaining, 2);
+  assert.equal(second.status, "mismatch");
+  assert.equal(second.attemptsRemaining, 1);
+  assert.equal(third.status, "locked");
+  assert.equal(whileLocked.status, "locked");
+
+  fixture.advance(4 * 60 * 1000 + 50 * 1000);
+  const afterWait = await fixture.service.verifyOtp({
+    requestId: request.requestId,
+    otp: "483920",
+  });
+  assert.equal(afterWait.status, "verified");
 });
 
 test("a verified patient cannot receive a new OTP during a resend race", async () => {

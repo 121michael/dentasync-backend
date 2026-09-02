@@ -3,6 +3,8 @@
 const crypto = require("crypto");
 
 const OTP_REQUESTS_TABLE = "otp_verification_requests";
+const MAX_FAILED_ATTEMPTS = 3;
+const LOCKOUT_SECONDS = 5 * 60;
 
 function hashesMatch(left, right) {
   if (typeof left !== "string" || typeof right !== "string") {
@@ -160,7 +162,17 @@ function createPostgresOtpStore(pool) {
            expires_at,
            used_at,
            invalidated_at,
-           expires_at <= CURRENT_TIMESTAMP AS expired
+           COALESCE(failed_attempts, 0) AS failed_attempts,
+           locked_until,
+           expires_at <= CURRENT_TIMESTAMP AS expired,
+           CASE
+             WHEN locked_until IS NULL THEN FALSE
+             ELSE locked_until > CURRENT_TIMESTAMP
+           END AS is_locked,
+           CASE
+             WHEN locked_until IS NULL OR locked_until <= CURRENT_TIMESTAMP THEN 0
+             ELSE CEIL(EXTRACT(EPOCH FROM (locked_until - CURRENT_TIMESTAMP)))
+           END AS retry_after_seconds
          FROM ${OTP_REQUESTS_TABLE}
          WHERE request_id = $1
          FOR UPDATE`,
@@ -184,6 +196,32 @@ function createPostgresOtpStore(pool) {
         await client.query("ROLLBACK");
         transactionOpen = false;
         return { status: "inactive", user: auditUser, ...auditTimestamps };
+      }
+
+      if (record.is_locked) {
+        await client.query("ROLLBACK");
+        transactionOpen = false;
+        return {
+          status: "locked",
+          user: auditUser,
+          ...auditTimestamps,
+          lockedUntil: record.locked_until,
+          retryAfterSeconds: Number(record.retry_after_seconds) || LOCKOUT_SECONDS,
+          attemptsRemaining: 0,
+        };
+      }
+
+      // Previous lockout ended — clear the counter before this new attempt.
+      if (Number(record.failed_attempts) > 0 && record.locked_until) {
+        await client.query(
+          `UPDATE ${OTP_REQUESTS_TABLE}
+           SET failed_attempts = 0,
+               locked_until = NULL
+           WHERE request_id = $1`,
+          [requestId]
+        );
+        record.failed_attempts = 0;
+        record.locked_until = null;
       }
 
       if (!isValidTimestamp(record.expires_at)) {
@@ -211,14 +249,55 @@ function createPostgresOtpStore(pool) {
       }
 
       if (!hashesMatch(record.otp_hash, otpHash)) {
-        await client.query("ROLLBACK");
+        const nextAttempts = Number(record.failed_attempts || 0) + 1;
+        const shouldLock = nextAttempts >= MAX_FAILED_ATTEMPTS;
+
+        if (shouldLock) {
+          const locked = await client.query(
+            `UPDATE ${OTP_REQUESTS_TABLE}
+             SET failed_attempts = $2,
+                 locked_until = CURRENT_TIMESTAMP + ($3::integer * INTERVAL '1 second')
+             WHERE request_id = $1
+             RETURNING locked_until,
+                       CEIL(EXTRACT(EPOCH FROM (
+                         locked_until - CURRENT_TIMESTAMP
+                       ))) AS retry_after_seconds`,
+            [requestId, nextAttempts, LOCKOUT_SECONDS]
+          );
+          await client.query("COMMIT");
+          transactionOpen = false;
+          return {
+            status: "locked",
+            user: auditUser,
+            ...auditTimestamps,
+            lockedUntil: locked.rows[0]?.locked_until,
+            retryAfterSeconds:
+              Number(locked.rows[0]?.retry_after_seconds) || LOCKOUT_SECONDS,
+            attemptsRemaining: 0,
+          };
+        }
+
+        await client.query(
+          `UPDATE ${OTP_REQUESTS_TABLE}
+           SET failed_attempts = $2
+           WHERE request_id = $1`,
+          [requestId, nextAttempts]
+        );
+        await client.query("COMMIT");
         transactionOpen = false;
-        return { status: "mismatch", user: auditUser, ...auditTimestamps };
+        return {
+          status: "mismatch",
+          user: auditUser,
+          ...auditTimestamps,
+          attemptsRemaining: Math.max(0, MAX_FAILED_ATTEMPTS - nextAttempts),
+        };
       }
 
       const consumeResult = await client.query(
         `UPDATE ${OTP_REQUESTS_TABLE}
-         SET used_at = CURRENT_TIMESTAMP
+         SET used_at = CURRENT_TIMESTAMP,
+             failed_attempts = 0,
+             locked_until = NULL
          WHERE request_id = $1
            AND used_at IS NULL
            AND invalidated_at IS NULL
@@ -285,6 +364,8 @@ function createPostgresOtpStore(pool) {
 }
 
 module.exports = {
+  MAX_FAILED_ATTEMPTS,
+  LOCKOUT_SECONDS,
   createPostgresOtpStore,
   hashesMatch,
 };

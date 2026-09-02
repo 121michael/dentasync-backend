@@ -358,6 +358,31 @@ function createAuthRouter({
       }
 
       const result = await otpService.verifyOtp({ requestId, otp });
+      if (result.status === "locked") {
+        const minutes = Math.max(
+          1,
+          Math.ceil((Number(result.retryAfterSeconds) || 300) / 60)
+        );
+        return res.status(429).json({
+          message: `Too many incorrect codes. Please wait ${minutes} minute${
+            minutes === 1 ? "" : "s"
+          } and try again.`,
+          retryAfterSeconds: Number(result.retryAfterSeconds) || 300,
+          attemptsRemaining: 0,
+        });
+      }
+      if (result.status === "mismatch") {
+        const remaining = Number(result.attemptsRemaining);
+        return res.status(400).json({
+          message:
+            Number.isFinite(remaining) && remaining > 0
+              ? `Incorrect code. You have ${remaining} attempt${
+                  remaining === 1 ? "" : "s"
+                } left.`
+              : "Invalid or expired OTP code.",
+          attemptsRemaining: Number.isFinite(remaining) ? remaining : undefined,
+        });
+      }
       if (result.status !== "verified") {
         return res.status(400).json({ message: "Invalid or expired OTP code." });
       }
