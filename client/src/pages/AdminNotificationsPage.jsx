@@ -3,25 +3,38 @@ import { Bell, CheckCheck, Info, RefreshCw } from "lucide-react";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
 import { formatAdminDateTime } from "../adminUtils";
+import { notifyNotificationsChanged } from "../notificationEvents";
 
 export function AdminNotificationsPage() {
   const [notifications, setNotifications] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async ({ markSeen = false } = {}) => {
     try {
       const response = await api.getAdminNotifications();
-      setNotifications(response.notifications);
+      const items = response.notifications || [];
+      setNotifications(items);
       setError("");
+
+      if (markSeen) {
+        const unread = items.filter((item) => !item.read);
+        if (unread.length) {
+          await api.markAllAdminNotificationsRead();
+          setNotifications((current) =>
+            (current || []).map((item) => ({ ...item, read: true }))
+          );
+        }
+        notifyNotificationsChanged({ source: "admin", unread: 0 });
+      }
     } catch (loadError) {
       setError(loadError.message);
     }
   }, []);
 
   useEffect(() => {
-    load();
-    const timer = window.setInterval(load, 30000);
+    load({ markSeen: true });
+    const timer = window.setInterval(() => load({ markSeen: false }), 30000);
     return () => window.clearInterval(timer);
   }, [load]);
 
@@ -30,6 +43,7 @@ export function AdminNotificationsPage() {
     try {
       await api.markAllAdminNotificationsRead();
       setNotifications((current) => current.map((item) => ({ ...item, read: true })));
+      notifyNotificationsChanged({ source: "admin", unread: 0 });
     } catch (markError) {
       setError(markError.message);
     } finally {
@@ -40,13 +54,20 @@ export function AdminNotificationsPage() {
   async function markOne(id) {
     try {
       await api.markAdminNotificationRead(id);
-      setNotifications((current) => current.map((item) => (item.id === id ? { ...item, read: true } : item)));
+      setNotifications((current) => {
+        const next = current.map((item) => (item.id === id ? { ...item, read: true } : item));
+        notifyNotificationsChanged({
+          source: "admin",
+          unread: next.filter((item) => !item.read).length,
+        });
+        return next;
+      });
     } catch (markError) {
       setError(markError.message);
     }
   }
 
-  if (error && !notifications) return <ErrorState message={error} onRetry={load} />;
+  if (error && !notifications) return <ErrorState message={error} onRetry={() => load({ markSeen: true })} />;
   if (!notifications) return <LoadingState label="Loading admin notifications…" />;
 
   const unread = notifications.filter((item) => !item.read).length;
@@ -59,8 +80,12 @@ export function AdminNotificationsPage() {
         detail={`${unread} unread ${unread === 1 ? "alert" : "alerts"}`}
         action={
           <div className="admin-heading-actions">
-            <button className="button button--secondary" onClick={load}><RefreshCw size={16} /> Refresh</button>
-            <button className="button button--primary" onClick={markAll} disabled={!unread || busy}><CheckCheck size={16} /> Mark All as Read</button>
+            <button className="button button--secondary" onClick={() => load({ markSeen: false })}>
+              <RefreshCw size={16} /> Refresh
+            </button>
+            <button className="button button--primary" onClick={markAll} disabled={!unread || busy}>
+              <CheckCheck size={16} /> Mark All as Read
+            </button>
           </div>
         }
       />
@@ -77,13 +102,19 @@ export function AdminNotificationsPage() {
                 <small>{formatAdminDateTime(notification.createdAt)}</small>
               </div>
               {!notification.read ? (
-                <button className="button button--secondary button--compact" onClick={() => markOne(notification.id)}>Mark read</button>
+                <button className="button button--secondary button--compact" onClick={() => markOne(notification.id)}>
+                  Mark read
+                </button>
               ) : null}
             </article>
           ))}
         </section>
       ) : (
-        <EmptyState title="You’re all caught up" detail="Clinic alerts and account activity will appear here." action={<span className="empty-state__icon"><Bell size={22} /></span>} />
+        <EmptyState
+          title="No notifications yet"
+          detail="Clinic alerts and appointment requests will appear here."
+          action={<span className="empty-state__icon"><Bell size={22} /></span>}
+        />
       )}
     </div>
   );

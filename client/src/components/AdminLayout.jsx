@@ -232,14 +232,13 @@ export function AdminLayout() {
             </div>
             <div className="admin-header__actions">
               <NavLink
-                to="/admin/dashboard"
+                to="/admin/notifications"
                 className="icon-button"
                 aria-label={
                   hasUnread
                     ? `Notifications, ${alerts.unreadNotifications} unread`
                     : "Notifications"
                 }
-                title="Unread admin alerts appear on the dashboard cards"
               >
                 <Bell size={19} />
                 {hasUnread || alerts.pendingAppointments > 0 ? (

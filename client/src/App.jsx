@@ -33,6 +33,7 @@ import { AdminAiSettingsPage } from "./pages/AdminAiSettingsPage";
 import { AdminSettingsPage } from "./pages/AdminSettingsPage";
 import { AdminSyncPage } from "./pages/AdminSyncPage";
 import { AdminAuditPage } from "./pages/AdminAuditPage";
+import { AdminNotificationsPage } from "./pages/AdminNotificationsPage";
 import { DentistDashboardPage } from "./pages/DentistDashboardPage";
 import { DentistQueuePage } from "./pages/DentistQueuePage";
 import { DentistAppointmentsPage } from "./pages/DentistAppointmentsPage";
@@ -164,7 +165,7 @@ function PortalRoutes() {
           <Route path="/admin/appointments" element={<Navigate to="/admin/schedule" replace />} />
           <Route path="/admin/security" element={<Navigate to="/admin/audit-logs" replace />} />
           <Route path="/admin/sync" element={<Navigate to="/admin/sync-data" replace />} />
-          <Route path="/admin/notifications" element={<Navigate to="/admin/dashboard" replace />} />
+          <Route path="/admin/notifications" element={<AdminNotificationsPage />} />
           <Route path="/admin/profile" element={<Navigate to="/admin/dashboard" replace />} />
         </Route>
         <Route element={<DentistPortal />}>
