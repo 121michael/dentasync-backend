@@ -325,7 +325,7 @@ function createAuthRouter({
   });
 
   // --- 3. VERIFY THE CURRENT OTP REQUEST ---
-  router.post("/verify-otp", otpRateLimiter, async (req, res) => {
+  router.post("/verify-otp", otpVerifyRateLimiter, async (req, res) => {
     const { requestId: submittedRequestId, phone, otp } = req.body || {};
 
     if (!normalizeOtp(otp)) {
