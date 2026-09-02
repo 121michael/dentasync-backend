@@ -9,6 +9,8 @@ import { formatDentistDateTime } from "../dentistUtils";
 export function DentistDashboardPage() {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -25,10 +27,27 @@ export function DentistDashboardPage() {
     return () => window.clearInterval(timer);
   }, [load]);
 
+  async function markPatientFinished() {
+    if (!data?.nextPatient || data.nextPatient.status !== "in_chair") return;
+    setBusy(true);
+    setError("");
+    setSuccess("");
+    try {
+      await api.updateDentistQueue(data.nextPatient.id, { status: "completed" });
+      setSuccess(`${data.nextPatient.patientName} marked as finished.`);
+      await load();
+    } catch (finishError) {
+      setError(finishError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (error && !data) return <ErrorState message={error} onRetry={load} />;
   if (!data) return <LoadingState label="Loading clinical overview…" />;
 
   const next = data.nextPatient;
+  const inChair = next?.status === "in_chair";
 
   return (
     <div className="dentist-page">
@@ -44,6 +63,7 @@ export function DentistDashboardPage() {
       />
 
       {error ? <p className="inline-alert inline-alert--error">{error}</p> : null}
+      {success ? <p className="inline-alert inline-alert--success">{success}</p> : null}
 
       <section className="dentist-stat-grid">
         <DentistSummaryCard
@@ -68,7 +88,9 @@ export function DentistDashboardPage() {
 
       <section className="dentist-next-card">
         <div>
-          <span className="eyebrow eyebrow--light">Next up · Important</span>
+          <span className="eyebrow eyebrow--light">
+            {inChair ? "In chair · Active visit" : "Next up · Important"}
+          </span>
           {next ? (
             <>
               <h2>{next.patientName}</h2>
@@ -81,9 +103,21 @@ export function DentistDashboardPage() {
             </>
           )}
         </div>
-        <Link className="button button--light" to="/dentist/queue">
-          Go to Queue
-        </Link>
+        <div className="dentist-heading-actions">
+          {inChair ? (
+            <button
+              type="button"
+              className="button button--light"
+              onClick={markPatientFinished}
+              disabled={busy}
+            >
+              {busy ? "Saving…" : "Patient is finished"}
+            </button>
+          ) : null}
+          <Link className="button button--light" to="/dentist/queue">
+            Go to Queue
+          </Link>
+        </div>
       </section>
     </div>
   );
