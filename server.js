@@ -15,24 +15,29 @@ const { createOtpService } = require("./services/otpService");
 const { createPasswordResetService } = require("./services/passwordResetService");
 const { notifyActiveStaff } = require("./services/staffNotifications");
 const { notifyActiveAdmins } = require("./services/adminNotifications");
+const {
+  resolveAppSecrets,
+  createCorsOptions,
+  applySecurityHeaders,
+} = require("./lib/securityConfig");
 
 const app = express();
-const JWT_SECRET = process.env.JWT_SECRET || "your_super_secret_key_here";
-const OTP_SECRET =
-  process.env.OTP_SECRET ||
-  process.env.JWT_SECRET ||
-  (process.env.NODE_ENV === "production" ? null : "development-only-otp-secret");
-const PASSWORD_RESET_SECRET =
-  process.env.PASSWORD_RESET_SECRET ||
-  OTP_SECRET ||
-  (process.env.NODE_ENV === "production" ? null : "development-only-password-reset-secret");
+const { jwtSecret: JWT_SECRET, otpSecret: OTP_SECRET, passwordResetSecret: PASSWORD_RESET_SECRET } =
+  resolveAppSecrets(process.env);
 
-if (!OTP_SECRET || !PASSWORD_RESET_SECRET) {
-  throw new Error("OTP_SECRET and PASSWORD_RESET_SECRET must be configured in production.");
+if (process.env.TRUST_PROXY === "true" || process.env.NODE_ENV === "production") {
+  app.set("trust proxy", 1);
 }
 
-app.use(cors());
-app.use(express.json());
+const corsOptions = createCorsOptions(process.env);
+app.use(
+  cors({
+    origin: corsOptions.origin,
+    credentials: corsOptions.credentials,
+  })
+);
+app.use(applySecurityHeaders);
+app.use(express.json({ limit: "1mb" }));
 
 // ==========================================
 // REQUEST LOGGER MIDDLEWARE

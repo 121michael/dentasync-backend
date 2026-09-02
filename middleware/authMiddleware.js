@@ -1,7 +1,8 @@
 const jwt = require('jsonwebtoken');
 const pool = require('../db'); // Your PostgreSQL pg pool instance
+const { resolveAppSecrets } = require('../lib/securityConfig');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your_fallback_jwt_secret';
+const { jwtSecret: JWT_SECRET } = resolveAppSecrets(process.env);
 
 // Verify JWT Token & Load Authenticated User
 const authenticateToken = async (req, res, next) => {
@@ -52,4 +53,4 @@ const authorizeRoles = (...allowedRoles) => {
   };
 };
 
-module.exports = { authenticateToken, authorizeRoles, JWT_SECRET }; 
+module.exports = { authenticateToken, authorizeRoles, JWT_SECRET };

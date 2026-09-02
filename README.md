@@ -12,6 +12,24 @@ Set `OTP_SECRET` to a high-entropy server secret in production. It is used to
 HMAC verification codes before storing them. `EMAIL_USER` and `EMAIL_PASS` must
 also be configured for Gmail delivery.
 
+## Production security checklist
+
+```env
+NODE_ENV=production
+JWT_SECRET=replace-with-a-long-random-secret
+OTP_SECRET=replace-with-a-different-long-random-secret
+PASSWORD_RESET_SECRET=replace-with-another-long-random-secret
+FRONTEND_URL=https://your-portal.example
+# Optional extra browser origins (comma-separated):
+# CORS_ORIGINS=https://your-portal.example,https://admin.example
+TRUST_PROXY=true
+SEMAPHORE_API_KEY=your_semaphore_api_key
+```
+
+In production the API refuses weak/missing JWT/OTP/reset secrets, restricts CORS
+to `FRONTEND_URL` / `CORS_ORIGINS`, sends basic browser security headers, and
+rate-limits login, registration, OTP, and forgot-password endpoints.
+
 ```bash
 npm start
 ```
@@ -79,10 +97,9 @@ EMAIL_PASSWORD=your-smtp-password
 
 `POST /api/auth/forgot-password` accepts a valid email address for active,
 verified Admin, Dentist, Staff, and Patient accounts. It is rate-limited to
-five requests per IP address per 15 minutes. Per the current product
-requirement, it returns `404` with an email-not-found message for unregistered
-or unavailable accounts. This is less resistant to account-enumeration attacks
-than a generic reset response.
+five requests per IP address per 15 minutes. Unknown or unavailable emails
+receive the same generic `202` response as successful requests to reduce
+account-enumeration risk.
 
 For a matching account, it sends a 30-minute, one-time reset link using the
 form `https://your-portal.example/reset-password/<secure-token>`.

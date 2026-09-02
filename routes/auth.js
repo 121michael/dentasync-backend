@@ -59,6 +59,9 @@ function normalizePhone(value) {
   return digits;
 }
 
+const MIN_PASSWORD_LENGTH = 10;
+const BCRYPT_COST = 12;
+
 function createAuthRouter({
   db,
   otpService,
@@ -67,6 +70,33 @@ function createAuthRouter({
   jwtSecret,
 }) {
   const router = express.Router();
+  const authAbuseLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 20,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+    message: {
+      message: "Too many attempts. Please wait 15 minutes and try again.",
+    },
+  });
+  const loginRateLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 15,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+    message: {
+      message: "Too many login attempts. Please wait 15 minutes and try again.",
+    },
+  });
+  const otpRateLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 10,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+    message: {
+      message: "Too many verification attempts. Please wait 15 minutes and try again.",
+    },
+  });
   const forgotPasswordRateLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     limit: 5,
@@ -103,7 +133,7 @@ function createAuthRouter({
   }
 
   // --- 1. PATIENT REGISTRATION AND FIRST OTP ---
-  router.post("/register", async (req, res) => {
+  router.post("/register", authAbuseLimiter, async (req, res) => {
     const { firstName, lastName, fullName, email, phone, password, role } = req.body;
     const normalizedEmail = normalizeEmail(email);
     const normalizedPhone = normalizePhone(phone);
@@ -112,6 +142,12 @@ function createAuthRouter({
     if (!normalizedEmail || !normalizedPhone || !password) {
       return res.status(400).json({
         message: "Email, phone number, and password are required.",
+      });
+    }
+
+    if (typeof password !== "string" || password.length < MIN_PASSWORD_LENGTH) {
+      return res.status(400).json({
+        message: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`,
       });
     }
 
@@ -136,7 +172,7 @@ function createAuthRouter({
         });
       }
 
-      const hashedPassword = await bcrypt.hash(password, 10);
+      const hashedPassword = await bcrypt.hash(password, BCRYPT_COST);
       const userResult = await db.query(
         `INSERT INTO users
            (first_name, last_name, email, phone, password_hash, role, is_verified, status)
@@ -181,7 +217,7 @@ function createAuthRouter({
   });
 
   // --- 2. RESEND OTP FOR THE SAME UNVERIFIED PATIENT ---
-  router.post("/send-otp", async (req, res) => {
+  router.post("/send-otp", otpRateLimiter, async (req, res) => {
     const normalizedEmail = normalizeEmail(req.body?.email);
     const normalizedPhone = normalizePhone(req.body?.phone);
 
@@ -234,7 +270,7 @@ function createAuthRouter({
   });
 
   // --- 3. VERIFY THE CURRENT OTP REQUEST ---
-  router.post("/verify-otp", async (req, res) => {
+  router.post("/verify-otp", otpRateLimiter, async (req, res) => {
     const { requestId: submittedRequestId, phone, otp } = req.body || {};
 
     if (!normalizeOtp(otp)) {
@@ -301,7 +337,7 @@ function createAuthRouter({
   });
 
   // --- 4. PATIENT LOGIN ---
-  router.post("/login", async (req, res) => {
+  router.post("/login", loginRateLimiter, async (req, res) => {
     const { identifier, email, password } = req.body;
     const rawIdentifier = String(identifier || email || "").trim();
     const loginInput = rawIdentifier.includes("@")
@@ -424,19 +460,16 @@ function createAuthRouter({
       );
       const user = userResult.rows[0];
 
-      if (!user) {
-        return res.status(404).json({
-          message: "Email address not found. Please check your email and try again.",
-        });
-      }
-
-      try {
-        await passwordResetService.issuePasswordReset(user);
-      } catch (error) {
-        console.error("Password reset email delivery failed:", error.message);
-        return res.status(503).json({
-          message: "Unable to send the reset email. Please try again later.",
-        });
+      // Always return the same response to avoid email enumeration.
+      if (user) {
+        try {
+          await passwordResetService.issuePasswordReset(user);
+        } catch (error) {
+          console.error("Password reset email delivery failed:", error.message);
+          return res.status(503).json({
+            message: "Unable to send the reset email. Please try again later.",
+          });
+        }
       }
 
       return res.status(202).json(acceptedResponse);
@@ -465,7 +498,7 @@ function createAuthRouter({
     }
 
     try {
-      const passwordHash = await bcrypt.hash(submittedPassword, 12);
+      const passwordHash = await bcrypt.hash(submittedPassword, BCRYPT_COST);
       const result = await passwordResetService.resetPassword({
         token,
         passwordHash,

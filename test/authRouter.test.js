@@ -222,8 +222,11 @@ test("forgot-password accepts active verified accounts across all supported role
   ]);
 
   assert.ok(responses.slice(0, 4).every((response) => response.status === 202));
-  assert.equal(responses[4].status, 404);
-  assert.match((await responses[4].json()).message, /email address not found/i);
+  assert.equal(responses[4].status, 202);
+  assert.match(
+    (await responses[4].json()).message,
+    /if a verified amethyst dental account matches that email/i
+  );
   assert.deepEqual(issuedFor.sort(), [
     "admin@example.test",
     "dentist@example.test",
@@ -272,7 +275,7 @@ test("forgot-password validates malformed emails and throttles repeated requests
       })
     );
   }
-  assert.ok(responses.every((response) => response.status === 404));
+  assert.ok(responses.every((response) => response.status === 202));
 
   const throttled = await fetch(`${server.baseUrl}/api/auth/forgot-password`, {
     method: "POST",
