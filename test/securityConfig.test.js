@@ -61,6 +61,22 @@ test("CORS allowlist uses FRONTEND_URL and CORS_ORIGINS", () => {
     ["https://a.example", "https://b.example"]
   );
 
+  assert.deepEqual(
+    parseAllowedOrigins({
+      NODE_ENV: "production",
+      FRONTEND_URL: "https://clinic.example/reset-password",
+    }),
+    ["https://clinic.example"]
+  );
+
+  assert.deepEqual(
+    parseAllowedOrigins({
+      NODE_ENV: "production",
+      FRONTEND_URL: "https://clinic.example/",
+    }),
+    ["https://clinic.example"]
+  );
+
   const options = createCorsOptions({
     NODE_ENV: "production",
     FRONTEND_URL: "https://clinic.example",
@@ -76,4 +92,12 @@ test("CORS allowlist uses FRONTEND_URL and CORS_ORIGINS", () => {
     allowed = value;
   });
   assert.equal(allowed, false);
+
+  assert.throws(
+    () =>
+      createCorsOptions({
+        NODE_ENV: "production",
+      }),
+    /FRONTEND_URL|CORS_ORIGINS/
+  );
 });

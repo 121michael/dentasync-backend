@@ -28,7 +28,8 @@ const authenticateToken = async (req, res, next) => {
 
     const user = userQuery.rows[0];
 
-    if (user.status !== 'active') {
+    const status = String(user.status || 'active').toLowerCase();
+    if (['inactive', 'disabled', 'suspended', 'rejected'].includes(status)) {
       return res.status(403).json({ 
         message: 'Your account has been disabled or suspended. Please contact the administrator.' 
       });
