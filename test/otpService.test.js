@@ -195,7 +195,7 @@ function createInMemoryOtpStore({ users, now }) {
   };
 }
 
-function createFixture({ codeGenerator, start = "2026-08-17T12:00:00.000Z" } = {}) {
+function createFixture({ codeGenerator, start = "2026-08-17T12:00:00.000Z", ttlSeconds } = {}) {
   let currentTime = new Date(start);
   const now = () => new Date(currentTime);
   const users = [
@@ -215,6 +215,7 @@ function createFixture({ codeGenerator, start = "2026-08-17T12:00:00.000Z" } = {
     store,
     otpSecret: "test-only-otp-secret",
     codeGenerator,
+    ttlSeconds,
     logger: { info: (message) => auditLogs.push(message) },
     deliverOtp: async (message) => {
       deliveries.push(message);
@@ -364,7 +365,10 @@ test("duplicate verification submissions consume a correct OTP exactly once", as
 });
 
 test("three wrong OTP attempts lock verification for five minutes", async () => {
-  const fixture = createFixture({ codeGenerator: () => "483920" });
+  const fixture = createFixture({
+    codeGenerator: () => "483920",
+    ttlSeconds: 15 * 60,
+  });
   const request = await fixture.service.issueOtp(fixture.user);
 
   const first = await fixture.service.verifyOtp({
@@ -391,7 +395,7 @@ test("three wrong OTP attempts lock verification for five minutes", async () => 
   assert.equal(third.status, "locked");
   assert.equal(whileLocked.status, "locked");
 
-  fixture.advance(4 * 60 * 1000 + 50 * 1000);
+  fixture.advance(5 * 60 * 1000);
   const afterWait = await fixture.service.verifyOtp({
     requestId: request.requestId,
     otp: "483920",
