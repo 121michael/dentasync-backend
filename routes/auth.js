@@ -88,11 +88,22 @@ function createAuthRouter({
       message: "Too many login attempts. Please wait 15 minutes and try again.",
     },
   });
-  const otpRateLimiter = rateLimit({
+  const otpSendRateLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    limit: 10,
+    limit: 8,
     standardHeaders: "draft-8",
     legacyHeaders: false,
+    message: {
+      message: "Too many verification code requests. Please wait 15 minutes and try again.",
+    },
+  });
+  const otpVerifyRateLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 30,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+    // Successful verifies should not burn the budget for typos / retries.
+    skipSuccessfulRequests: true,
     message: {
       message: "Too many verification attempts. Please wait 15 minutes and try again.",
     },
@@ -261,7 +272,7 @@ function createAuthRouter({
   });
 
   // --- 2. RESEND OTP FOR THE SAME UNVERIFIED PATIENT ---
-  router.post("/send-otp", otpRateLimiter, async (req, res) => {
+  router.post("/send-otp", otpSendRateLimiter, async (req, res) => {
     const normalizedEmail = normalizeEmail(req.body?.email);
     const normalizedPhone = normalizePhone(req.body?.phone);
 
