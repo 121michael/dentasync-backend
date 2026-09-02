@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../useAuth";
+import { api } from "../api";
 import { staffInitials } from "../staffUtils";
 import { StaffConfirmModal, StaffToastStack } from "./StaffUI";
 
@@ -50,20 +51,26 @@ const PAGE_TITLES = {
   "/staff/profile": "Professional Profile",
 };
 
-function StaffNavigation({ onNavigate }) {
+function StaffNavigation({ onNavigate, alerts }) {
   return (
     <nav className="staff-nav" aria-label="Staff dashboard navigation">
-      {navigation.map(({ to, label, icon: Icon }) => (
-        <NavLink
-          key={to}
-          to={to}
-          onClick={onNavigate}
-          className={({ isActive }) => `staff-nav__link ${isActive ? "is-active" : ""}`}
-        >
-          <Icon size={18} aria-hidden="true" />
-          <span>{label}</span>
-        </NavLink>
-      ))}
+      {navigation.map(({ to, label, icon: Icon }) => {
+        const showDot =
+          (to === "/staff/appointments" && alerts.pendingAppointments > 0) ||
+          (to === "/staff/notifications" && alerts.unreadNotifications > 0);
+        return (
+          <NavLink
+            key={to}
+            to={to}
+            onClick={onNavigate}
+            className={({ isActive }) => `staff-nav__link ${isActive ? "is-active" : ""}`}
+          >
+            <Icon size={18} aria-hidden="true" />
+            <span>{label}</span>
+            {showDot ? <span className="nav-alert-dot" aria-hidden="true" /> : null}
+          </NavLink>
+        );
+      })}
     </nav>
   );
 }
@@ -76,11 +83,33 @@ export function StaffLayout() {
   const [toasts, setToasts] = useState([]);
   const [confirmState, setConfirmState] = useState(null);
   const [now, setNow] = useState(() => new Date());
+  const [alerts, setAlerts] = useState({
+    unreadNotifications: 0,
+    pendingAppointments: 0,
+  });
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 30000);
     return () => window.clearInterval(timer);
   }, []);
+
+  const refreshAlerts = useCallback(async () => {
+    try {
+      const dashboard = await api.getStaffDashboard();
+      setAlerts({
+        unreadNotifications: Number(dashboard.metrics?.unreadNotifications || 0),
+        pendingAppointments: Number(dashboard.metrics?.pendingRequests || 0),
+      });
+    } catch {
+      // Keep the last known badge state if the poll fails briefly.
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshAlerts();
+    const timer = window.setInterval(refreshAlerts, 20000);
+    return () => window.clearInterval(timer);
+  }, [refreshAlerts, location.pathname]);
 
   const date = new Intl.DateTimeFormat("en-US", {
     weekday: "long",
@@ -127,6 +156,7 @@ export function StaffLayout() {
     setIsMobileMenuOpen(false);
   }
 
+  const hasUnread = alerts.unreadNotifications > 0;
   const uiValue = useMemo(() => ({ pushToast, confirm, pageTitle }), [pushToast, confirm, pageTitle]);
 
   return (
@@ -146,7 +176,7 @@ export function StaffLayout() {
             </button>
           </div>
 
-          <StaffNavigation onNavigate={closeMenu} />
+          <StaffNavigation onNavigate={closeMenu} alerts={alerts} />
 
           <div className="staff-sidebar__footer">
             <div className="staff-user-summary">
@@ -184,8 +214,17 @@ export function StaffLayout() {
             </div>
             <div className="staff-header__actions">
               <span className="staff-header__role">Front Desk</span>
-              <NavLink to="/staff/notifications" className="icon-button" aria-label="Open notifications">
+              <NavLink
+                to="/staff/notifications"
+                className="icon-button"
+                aria-label={
+                  hasUnread
+                    ? `Open notifications, ${alerts.unreadNotifications} unread`
+                    : "Open notifications"
+                }
+              >
                 <Bell size={19} />
+                {hasUnread ? <span className="alert-dot" aria-hidden="true" /> : null}
               </NavLink>
             </div>
           </header>

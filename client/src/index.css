@@ -224,6 +224,44 @@ strong {
   border-color: var(--amethyst-300);
 }
 
+.icon-button {
+  position: relative;
+}
+
+.alert-dot {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #d94848;
+  box-shadow: 0 0 0 2px var(--surface-solid, #fff);
+  pointer-events: none;
+}
+
+.nav-link-with-dot,
+.portal-nav__link,
+.staff-nav__link,
+.admin-nav__link {
+  position: relative;
+}
+
+.nav-alert-dot {
+  margin-left: auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #d94848;
+  flex: 0 0 auto;
+}
+
+.portal-nav__link .nav-alert-dot,
+.staff-nav__link .nav-alert-dot,
+.admin-nav__link .nav-alert-dot {
+  margin-left: auto;
+}
+
 .avatar-button {
   color: white;
   background: linear-gradient(135deg, #8d5ec7, #4d286f);

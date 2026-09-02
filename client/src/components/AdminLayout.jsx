@@ -3,6 +3,7 @@ import {
   Activity,
   Archive,
   BarChart3,
+  Bell,
   Bot,
   CalendarDays,
   Cloud,
@@ -67,6 +68,11 @@ export function AdminLayout() {
     coreInfrastructureOnline: true,
     activeOperationsTerminals: 0,
   });
+  const [alerts, setAlerts] = useState({
+    pendingAccounts: 0,
+    pendingAppointments: 0,
+    unreadNotifications: 0,
+  });
 
   const date = new Intl.DateTimeFormat("en-US", {
     weekday: "long",
@@ -104,8 +110,21 @@ export function AdminLayout() {
     let active = true;
     async function loadStatus() {
       try {
-        const status = await api.getAdminStatus();
-        if (active) setSystemStatus(status);
+        const [status, dashboard, notifications] = await Promise.all([
+          api.getAdminStatus(),
+          api.getAdminDashboard().catch(() => null),
+          api.getAdminNotifications().catch(() => null),
+        ]);
+        if (!active) return;
+        setSystemStatus(status);
+        const unread = Array.isArray(notifications?.notifications)
+          ? notifications.notifications.filter((item) => !item.read).length
+          : 0;
+        setAlerts({
+          pendingAccounts: Number(dashboard?.metrics?.pendingAccountApprovals || 0),
+          pendingAppointments: Number(dashboard?.metrics?.pendingRequests || 0),
+          unreadNotifications: unread,
+        });
       } catch {
         if (active) {
           setSystemStatus({
@@ -116,12 +135,12 @@ export function AdminLayout() {
       }
     }
     loadStatus();
-    const timer = window.setInterval(loadStatus, 30000);
+    const timer = window.setInterval(loadStatus, 20000);
     return () => {
       active = false;
       window.clearInterval(timer);
     };
-  }, []);
+  }, [location.pathname]);
 
   function handleLogout() {
     logout();
@@ -138,6 +157,7 @@ export function AdminLayout() {
     }
   }
 
+  const hasUnread = alerts.unreadNotifications > 0;
   const uiValue = useMemo(
     () => ({ pushToast, confirm, systemStatus, pageTitle }),
     [pushToast, confirm, systemStatus, pageTitle]
@@ -159,17 +179,23 @@ export function AdminLayout() {
           </div>
 
           <nav className="admin-nav" aria-label="Admin dashboard navigation">
-            {navigation.map(({ to, label, icon: Icon }) => (
-              <NavLink
-                key={to}
-                to={to}
-                onClick={() => setIsOpen(false)}
-                className={({ isActive }) => `admin-nav__link ${isActive ? "is-active" : ""}`}
-              >
-                <Icon size={18} aria-hidden="true" />
-                <span>{label}</span>
-              </NavLink>
-            ))}
+            {navigation.map(({ to, label, icon: Icon }) => {
+              const showDot =
+                (to === "/admin/users" && alerts.pendingAccounts > 0) ||
+                (to === "/admin/schedule" && alerts.pendingAppointments > 0);
+              return (
+                <NavLink
+                  key={to}
+                  to={to}
+                  onClick={() => setIsOpen(false)}
+                  className={({ isActive }) => `admin-nav__link ${isActive ? "is-active" : ""}`}
+                >
+                  <Icon size={18} aria-hidden="true" />
+                  <span>{label}</span>
+                  {showDot ? <span className="nav-alert-dot" aria-hidden="true" /> : null}
+                </NavLink>
+              );
+            })}
           </nav>
 
           <div className="admin-sidebar__footer">
@@ -202,6 +228,21 @@ export function AdminLayout() {
               <p>{date}</p>
             </div>
             <div className="admin-header__actions">
+              <NavLink
+                to="/admin/dashboard"
+                className="icon-button"
+                aria-label={
+                  hasUnread
+                    ? `Notifications, ${alerts.unreadNotifications} unread`
+                    : "Notifications"
+                }
+                title="Unread admin alerts appear on the dashboard cards"
+              >
+                <Bell size={19} />
+                {hasUnread || alerts.pendingAppointments > 0 ? (
+                  <span className="alert-dot" aria-hidden="true" />
+                ) : null}
+              </NavLink>
               <button className="button button--primary button--compact" onClick={runSecurityAudit}>
                 <Shield size={15} /> Run Security Audit
               </button>

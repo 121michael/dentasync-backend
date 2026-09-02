@@ -11,8 +11,10 @@ import {
   UserRound,
   UsersRound,
 } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import { BrandMark } from "./BrandMark";
 import { useAuth } from "../useAuth";
+import { api } from "../api";
 
 const navigation = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -20,7 +22,7 @@ const navigation = [
   { to: "/queue", label: "Queue Status", icon: UsersRound },
   { to: "/records", label: "Treatment History", icon: ClipboardList },
   { to: "/profile", label: "My Profile", icon: UserRound },
-  { to: "/notifications", label: "Notifications", icon: Bell },
+  { to: "/notifications", label: "Notifications", icon: Bell, alertKey: "unread" },
 ];
 
 function initials(user) {
@@ -30,6 +32,7 @@ function initials(user) {
 export function PortalLayout({ theme, onToggleTheme }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const [unreadCount, setUnreadCount] = useState(0);
   const date = new Intl.DateTimeFormat("en-US", {
     weekday: "long",
     month: "long",
@@ -37,17 +40,34 @@ export function PortalLayout({ theme, onToggleTheme }) {
     year: "numeric",
   }).format(new Date());
 
+  const refreshAlerts = useCallback(async () => {
+    try {
+      const dashboard = await api.getDashboard();
+      setUnreadCount(Number(dashboard.unreadNotifications || 0));
+    } catch {
+      // Keep the last known badge state if the poll fails briefly.
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshAlerts();
+    const timer = window.setInterval(refreshAlerts, 20000);
+    return () => window.clearInterval(timer);
+  }, [refreshAlerts]);
+
   function handleLogout() {
     logout();
     navigate("/login", { replace: true });
   }
+
+  const hasUnread = unreadCount > 0;
 
   return (
     <div className="portal-shell">
       <aside className="portal-sidebar">
         <BrandMark />
         <nav className="portal-nav" aria-label="Patient portal navigation">
-          {navigation.map(({ to, label, icon: Icon }) => (
+          {navigation.map(({ to, label, icon: Icon, alertKey }) => (
             <NavLink
               key={to}
               to={to}
@@ -55,6 +75,9 @@ export function PortalLayout({ theme, onToggleTheme }) {
             >
               <Icon size={19} aria-hidden="true" />
               <span>{label}</span>
+              {alertKey === "unread" && hasUnread ? (
+                <span className="nav-alert-dot" aria-label={`${unreadCount} unread notifications`} />
+              ) : null}
             </NavLink>
           ))}
         </nav>
@@ -84,8 +107,13 @@ export function PortalLayout({ theme, onToggleTheme }) {
             >
               {theme === "dark" ? <Sun size={19} /> : <Moon size={19} />}
             </button>
-            <NavLink to="/notifications" className="icon-button notification-button" aria-label="Notifications">
+            <NavLink
+              to="/notifications"
+              className="icon-button notification-button"
+              aria-label={hasUnread ? `Notifications, ${unreadCount} unread` : "Notifications"}
+            >
               <Bell size={19} />
+              {hasUnread ? <span className="alert-dot" aria-hidden="true" /> : null}
             </NavLink>
             <NavLink to="/profile" className="avatar-button" aria-label="Open patient profile">
               {initials(user)}
