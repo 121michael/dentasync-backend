@@ -130,7 +130,19 @@ function isIsoDate(value) {
 }
 
 function isTime(value) {
-  return typeof value === "string" && /^\d{2}:\d{2}$/.test(value);
+  if (typeof value !== "string") {
+    return false;
+  }
+  const normalized = normalizeTime(value);
+  return Boolean(normalized) && /^\d{2}:\d{2}$/.test(normalized);
+}
+
+function localTodayIso() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function isPastDate(value) {
@@ -138,8 +150,7 @@ function isPastDate(value) {
     return true;
   }
 
-  const today = new Date().toISOString().slice(0, 10);
-  return value < today;
+  return value < localTodayIso();
 }
 
 function resultCount(row, key) {
@@ -410,11 +421,19 @@ function createPatientPortalRouter({
 
     const service = SERVICES.find((item) => item.id === serviceId);
     const normalizedCoverage = coverageType === "hmo" ? "hmo" : coverageType === "self_pay" ? "self_pay" : null;
+    const normalizedAppointmentTime = normalizeTime(appointmentTime);
 
-    if (!service || !isIsoDate(appointmentDate) || !isTime(appointmentTime) || !normalizedCoverage) {
-      return res.status(400).json({
-        message: "Please select a treatment, date, time, and coverage option.",
-      });
+    if (!service) {
+      return res.status(400).json({ message: "Please select a treatment." });
+    }
+    if (!isIsoDate(appointmentDate)) {
+      return res.status(400).json({ message: "Please choose a valid appointment date." });
+    }
+    if (!normalizedAppointmentTime) {
+      return res.status(400).json({ message: "Please choose an appointment time." });
+    }
+    if (!normalizedCoverage) {
+      return res.status(400).json({ message: "Please choose a coverage option." });
     }
 
     if (isPastDate(appointmentDate)) {
@@ -459,7 +478,7 @@ function createPatientPortalRouter({
                AND appointment_time = $3
                AND status <> 'cancelled'
              LIMIT 1`,
-            [candidate.id, appointmentDate, appointmentTime]
+            [candidate.id, appointmentDate, normalizedAppointmentTime]
           );
           if (conflict.rows.length === 0) {
             dentist = candidate;
@@ -481,7 +500,7 @@ function createPatientPortalRouter({
            AND appointment_time = $3
            AND status <> 'cancelled'
          LIMIT 1`,
-        [dentist.id, appointmentDate, appointmentTime]
+        [dentist.id, appointmentDate, normalizedAppointmentTime]
       );
       if (conflict.rows.length > 0) {
         return res.status(409).json({ message: "That time was just booked. Please choose another available slot." });
@@ -503,7 +522,7 @@ function createPatientPortalRouter({
           dentist.id,
           dentist.name,
           appointmentDate,
-          appointmentTime,
+          normalizedAppointmentTime,
           normalizedCoverage,
           normalizedCoverage === "hmo" ? normalizedProvider : null,
           normalizedCoverage === "hmo" ? normalizedMemberNumber : null,
