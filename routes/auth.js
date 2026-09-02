@@ -162,33 +162,77 @@ function createAuthRouter({
       lastName || (fullName ? fullName.split(" ").slice(1).join(" ") : "");
     try {
       const existingUser = await db.query(
-        "SELECT id FROM users WHERE LOWER(email) = $1 OR phone = $2",
+        `SELECT id, role, email, phone, is_verified, COALESCE(is_archived, FALSE) AS is_archived
+         FROM users
+         WHERE LOWER(email) = $1 OR phone = $2`,
         [normalizedEmail, normalizedPhone]
       );
 
-      if (existingUser.rows.length > 0) {
+      const activeConflict = existingUser.rows.find((row) => !row.is_archived);
+      if (activeConflict) {
         return res.status(409).json({
           message: "Email or mobile number is already registered.",
         });
       }
 
-      const hashedPassword = await bcrypt.hash(password, BCRYPT_COST);
-      const userResult = await db.query(
-        `INSERT INTO users
-           (first_name, last_name, email, phone, password_hash, role, is_verified, status)
-         VALUES ($1, $2, $3, $4, $5, 'patient', FALSE, 'Pending')
-         RETURNING id, first_name, last_name, email, phone, role, status, is_verified`,
-        [
-          computedFirstName,
-          computedLastName,
-          normalizedEmail,
-          normalizedPhone,
-          hashedPassword,
-        ]
+      const archivedPatient = existingUser.rows.find(
+        (row) =>
+          row.is_archived && String(row.role || "").toLowerCase() === "patient"
       );
 
+      const hashedPassword = await bcrypt.hash(password, BCRYPT_COST);
+      let userRow;
+
+      if (archivedPatient) {
+        // Soft-deleted patients keep email/phone; reclaim the row on re-register.
+        const restored = await db.query(
+          `UPDATE users
+           SET first_name = $1,
+               last_name = $2,
+               email = $3,
+               phone = $4,
+               password_hash = $5,
+               role = 'patient',
+               is_verified = FALSE,
+               status = 'Pending',
+               is_archived = FALSE,
+               archived_at = NULL,
+               archived_by = NULL
+           WHERE id = $6
+           RETURNING id, first_name, last_name, email, phone, role, status, is_verified`,
+          [
+            computedFirstName,
+            computedLastName,
+            normalizedEmail,
+            normalizedPhone,
+            hashedPassword,
+            archivedPatient.id,
+          ]
+        );
+        userRow = restored.rows[0];
+      } else if (existingUser.rows.length > 0) {
+        return res.status(409).json({
+          message: "Email or mobile number is already registered.",
+        });
+      } else {
+        const userResult = await db.query(
+          `INSERT INTO users
+             (first_name, last_name, email, phone, password_hash, role, is_verified, status)
+           VALUES ($1, $2, $3, $4, $5, 'patient', FALSE, 'Pending')
+           RETURNING id, first_name, last_name, email, phone, role, status, is_verified`,
+          [
+            computedFirstName,
+            computedLastName,
+            normalizedEmail,
+            normalizedPhone,
+            hashedPassword,
+          ]
+        );
+        userRow = userResult.rows[0];
+      }
+
       try {
-        const request = await otpService.issueOtp(userResult.rows[0]);
+        const request = await otpService.issueOtp(userRow);
         return res.status(201).json({
           message: "Registration started. A verification code was sent to your email.",
           requiresOtp: true,

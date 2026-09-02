@@ -164,6 +164,88 @@ test("verification rejects an OTP sent as a number because leading zeros would b
   assert.equal(serviceCalled, false);
 });
 
+test("register reclaims an archived patient email/phone instead of blocking signup", async (t) => {
+  const queries = [];
+  let issuedFor;
+  const app = express();
+  app.use(express.json());
+  app.use(
+    "/api/auth",
+    createAuthRouter({
+      db: {
+        async query(sql, params) {
+          queries.push({ sql, params });
+          if (/FROM users/i.test(sql) && /is_archived/i.test(sql)) {
+            return {
+              rows: [
+                {
+                  id: 99,
+                  role: "patient",
+                  email: "returning@example.test",
+                  phone: "639171234567",
+                  is_verified: true,
+                  is_archived: true,
+                },
+              ],
+            };
+          }
+          if (/UPDATE users/i.test(sql)) {
+            return {
+              rows: [
+                {
+                  id: 99,
+                  first_name: "Returning",
+                  last_name: "Patient",
+                  email: "returning@example.test",
+                  phone: "639171234567",
+                  role: "patient",
+                  status: "Pending",
+                  is_verified: false,
+                },
+              ],
+            };
+          }
+          return { rows: [] };
+        },
+      },
+      otpService: {
+        async issueOtp(user) {
+          issuedFor = user;
+          return {
+            requestId: REQUEST_ID,
+            expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+          };
+        },
+      },
+      authenticateToken: (_req, _res, next) => next(),
+      jwtSecret: "test-jwt-secret",
+    })
+  );
+
+  const server = await startServer(app);
+  t.after(server.close);
+
+  const response = await fetch(`${server.baseUrl}/api/auth/register`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      firstName: "Returning",
+      lastName: "Patient",
+      email: "returning@example.test",
+      phone: "09171234567",
+      password: "SecurePass123",
+    }),
+  });
+  const body = await response.json();
+
+  assert.equal(response.status, 201);
+  assert.equal(body.requiresOtp, true);
+  assert.equal(body.requestId, REQUEST_ID);
+  assert.equal(issuedFor.id, 99);
+  assert.ok(queries.some((entry) => /UPDATE users/i.test(entry.sql)));
+  assert.ok(!queries.some((entry) => /INSERT INTO users/i.test(entry.sql)));
+});
+
 test("forgot-password accepts active verified accounts across all supported roles", async (t) => {
   const issuedFor = [];
   const accounts = {
