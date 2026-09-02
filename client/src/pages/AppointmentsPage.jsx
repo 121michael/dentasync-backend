@@ -65,14 +65,6 @@ function displayTime(value) {
   }).format(new Date(2026, 0, 1, Number(hours), Number(minutes)));
 }
 
-function currency(value) {
-  return new Intl.NumberFormat("en-PH", {
-    style: "currency",
-    currency: "PHP",
-    maximumFractionDigits: 0,
-  }).format(value || 0);
-}
-
 export function AppointmentsPage() {
   const [catalog, setCatalog] = useState(null);
   const [appointments, setAppointments] = useState([]);
@@ -312,7 +304,7 @@ export function AppointmentsPage() {
                 />
                 <span>
                   <strong>No, I’ll pay out of pocket</strong>
-                  <small>Your estimated cost is shown in the confirmation panel.</small>
+                  <small>Pay at the clinic after your visit.</small>
                 </span>
               </label>
             </div>
@@ -382,17 +374,13 @@ export function AppointmentsPage() {
             <span>Coverage</span>
             <strong>{form.coverageType === "hmo" ? "HMO coverage" : "Out of pocket"}</strong>
           </div>
-          <div className="booking-summary__cost">
-            <span>Estimated cost</span>
-            <strong>{selectedService ? currency(selectedService.estimatedCost) : "—"}</strong>
-          </div>
           <button
             className="button button--primary button--wide"
             disabled={isBusy || !form.serviceId || !form.dentistId || !form.appointmentTime}
           >
             {isBusy ? "Submitting your request…" : "Request appointment"} <ChevronRight size={18} />
           </button>
-          <p>Final treatment recommendations and costs are confirmed by your dental team.</p>
+          <p>Final treatment recommendations are confirmed by your dental team.</p>
         </aside>
       </form>
 
