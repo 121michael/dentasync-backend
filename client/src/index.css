@@ -1391,11 +1391,8 @@ strong {
 
 .booking-summary h2 { font-size: 1.15rem; letter-spacing: -0.04em; }
 .booking-summary__line { display: grid; gap: 0.22rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--border); }
-.booking-summary__line span,
-.booking-summary__cost span { color: var(--text-muted); font-size: 0.65rem; font-weight: 650; }
+.booking-summary__line span { color: var(--text-muted); font-size: 0.65rem; font-weight: 650; }
 .booking-summary__line strong { font-size: 0.76rem; }
-.booking-summary__cost { display: flex; align-items: center; justify-content: space-between; padding-top: 0.2rem; }
-.booking-summary__cost strong { color: var(--amethyst-700); font-size: 1.2rem; letter-spacing: -0.04em; }
 .booking-summary > p { color: var(--text-muted); font-size: 0.64rem; line-height: 1.5; }
 
 .appointment-history {
