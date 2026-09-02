@@ -5,6 +5,7 @@ import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { StaffModal, StaffStatusBadge } from "../components/StaffUI";
 import { useStaffUi } from "../components/StaffLayout";
 import { formatStaffDateTime } from "../staffUtils";
+import { notifyNotificationsChanged } from "../notificationEvents";
 
 export function StaffNotificationsPage() {
   const { pushToast } = useStaffUi();
@@ -19,19 +20,31 @@ export function StaffNotificationsPage() {
     patientUserId: "",
   });
 
-  const load = useCallback(async () => {
+  const load = useCallback(async ({ markSeen = false } = {}) => {
     try {
       const response = await api.getStaffNotifications();
-      setNotifications(response.notifications || []);
+      const items = response.notifications || [];
+      setNotifications(items);
       setError("");
+
+      if (markSeen) {
+        const unread = items.filter((item) => !item.read);
+        if (unread.length) {
+          await api.markAllStaffNotificationsRead();
+          setNotifications((current) =>
+            (current || []).map((notification) => ({ ...notification, read: true }))
+          );
+        }
+        notifyNotificationsChanged({ source: "staff", unread: 0 });
+      }
     } catch (loadError) {
       setError(loadError.message);
     }
   }, []);
 
   useEffect(() => {
-    load();
-    const timer = window.setInterval(load, 20000);
+    load({ markSeen: true });
+    const timer = window.setInterval(() => load({ markSeen: false }), 20000);
     return () => window.clearInterval(timer);
   }, [load]);
 
@@ -39,7 +52,8 @@ export function StaffNotificationsPage() {
     setBusy(`read-${notificationId}`);
     try {
       await api.markStaffNotificationRead(notificationId);
-      await load();
+      await load({ markSeen: false });
+      notifyNotificationsChanged({ source: "staff" });
     } catch (markError) {
       pushToast(markError.message, "error");
     } finally {
@@ -52,7 +66,8 @@ export function StaffNotificationsPage() {
     try {
       await api.markAllStaffNotificationsRead();
       pushToast("All notifications marked as read.");
-      await load();
+      await load({ markSeen: false });
+      notifyNotificationsChanged({ source: "staff", unread: 0 });
     } catch (markError) {
       pushToast(markError.message, "error");
     } finally {

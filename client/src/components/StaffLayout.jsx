@@ -18,6 +18,7 @@ import { useAuth } from "../useAuth";
 import { api } from "../api";
 import { staffInitials } from "../staffUtils";
 import { StaffConfirmModal, StaffToastStack } from "./StaffUI";
+import { onNotificationsChanged } from "../notificationEvents";
 
 const StaffUiContext = createContext(null);
 
@@ -108,7 +109,17 @@ export function StaffLayout() {
   useEffect(() => {
     refreshAlerts();
     const timer = window.setInterval(refreshAlerts, 20000);
-    return () => window.clearInterval(timer);
+    const stopListening = onNotificationsChanged((detail) => {
+      if (detail?.source === "staff" && detail.unread === 0) {
+        setAlerts((current) => ({ ...current, unreadNotifications: 0 }));
+        return;
+      }
+      refreshAlerts();
+    });
+    return () => {
+      window.clearInterval(timer);
+      stopListening();
+    };
   }, [refreshAlerts, location.pathname]);
 
   const date = new Intl.DateTimeFormat("en-US", {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Bell, CheckCheck, CalendarDays, Info, UsersRound } from "lucide-react";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
+import { notifyNotificationsChanged } from "../notificationEvents";
 
 const icons = {
   appointment: CalendarDays,
@@ -19,28 +20,45 @@ export function NotificationsPage() {
   const [notifications, setNotifications] = useState(null);
   const [error, setError] = useState("");
 
-  const load = useCallback(async () => {
+  const load = useCallback(async ({ markSeen = false } = {}) => {
     setError("");
     try {
       const response = await api.getNotifications();
-      setNotifications(response.notifications);
+      const items = response.notifications || [];
+      setNotifications(items);
+
+      if (markSeen) {
+        const unread = items.filter((item) => !item.read);
+        if (unread.length) {
+          await Promise.all(
+            unread.map((item) => api.markNotificationRead(item.id).catch(() => null))
+          );
+          setNotifications((current) =>
+            (current || []).map((notification) => ({ ...notification, read: true }))
+          );
+        }
+        notifyNotificationsChanged({ source: "patient", unread: 0 });
+      }
     } catch (loadError) {
       setError(loadError.message);
     }
   }, []);
 
   useEffect(() => {
-    load();
+    load({ markSeen: true });
   }, [load]);
 
   async function markRead(notificationId) {
     try {
       await api.markNotificationRead(notificationId);
-      setNotifications((current) =>
-        current.map((notification) =>
+      setNotifications((current) => {
+        const next = current.map((notification) =>
           notification.id === notificationId ? { ...notification, read: true } : notification
-        )
-      );
+        );
+        const unread = next.filter((item) => !item.read).length;
+        notifyNotificationsChanged({ source: "patient", unread });
+        return next;
+      });
     } catch (markError) {
       setError(markError.message);
     }

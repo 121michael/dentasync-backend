@@ -15,6 +15,7 @@ import { useCallback, useEffect, useState } from "react";
 import { BrandMark } from "./BrandMark";
 import { useAuth } from "../useAuth";
 import { api } from "../api";
+import { onNotificationsChanged } from "../notificationEvents";
 
 const navigation = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -52,7 +53,24 @@ export function PortalLayout({ theme, onToggleTheme }) {
   useEffect(() => {
     refreshAlerts();
     const timer = window.setInterval(refreshAlerts, 20000);
-    return () => window.clearInterval(timer);
+    const stopListening = onNotificationsChanged((detail) => {
+      if (detail?.source === "patient" && typeof detail.unread === "number") {
+        setUnreadCount(detail.unread);
+        return;
+      }
+      refreshAlerts();
+    });
+    return () => {
+      window.clearInterval(timer);
+      stopListening();
+    };
+  }, [refreshAlerts]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const onFocus = () => refreshAlerts();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, [refreshAlerts]);
 
   function handleLogout() {

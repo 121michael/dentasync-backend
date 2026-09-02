@@ -21,6 +21,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { useAuth } from "../useAuth";
 import { api } from "../api";
 import { AdminConfirmModal, AdminToastStack } from "./AdminUI";
+import { onNotificationsChanged } from "../notificationEvents";
 
 const AdminUiContext = createContext(null);
 
@@ -136,9 +137,11 @@ export function AdminLayout() {
     }
     loadStatus();
     const timer = window.setInterval(loadStatus, 20000);
+    const stopListening = onNotificationsChanged(() => loadStatus());
     return () => {
       active = false;
       window.clearInterval(timer);
+      stopListening();
     };
   }, [location.pathname]);
 
