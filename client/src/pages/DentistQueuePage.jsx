@@ -57,7 +57,7 @@ export function DentistQueuePage() {
     setSuccess("");
     try {
       await api.updateDentistQueue(pendingComplete.id, { status: "completed" });
-      setSuccess(`${pendingComplete.patientName} marked as complete.`);
+      setSuccess(`${pendingComplete.patientName} marked as finished.`);
       setPendingComplete(null);
       await load();
     } catch (completeError) {
@@ -153,13 +153,13 @@ export function DentistQueuePage() {
                     <td><DentistStatusBadge status={entry.status} /></td>
                     <td>
                       <div className="dentist-row-actions">
-                        {entry.status !== "completed" && entry.status !== "no_show" ? (
+                        {entry.status === "in_chair" ? (
                           <button
                             className="button button--primary button--compact"
                             disabled={Boolean(busy)}
                             onClick={() => setPendingComplete(entry)}
                           >
-                            Complete
+                            {busy === `complete-${entry.id}` ? "Saving…" : "Patient is finished"}
                           </button>
                         ) : null}
                         {entry.status === "in_chair" ? (
@@ -169,6 +169,17 @@ export function DentistQueuePage() {
                             onClick={() => setWaiting(entry)}
                           >
                             Return to Waiting
+                          </button>
+                        ) : null}
+                        {entry.status !== "completed" &&
+                        entry.status !== "no_show" &&
+                        entry.status !== "in_chair" ? (
+                          <button
+                            className="button button--secondary button--compact"
+                            disabled={Boolean(busy)}
+                            onClick={() => setPendingComplete(entry)}
+                          >
+                            Patient is finished
                           </button>
                         ) : null}
                       </div>
@@ -187,16 +198,17 @@ export function DentistQueuePage() {
       </section>
 
       {pendingComplete ? (
-        <DentistModal title="Complete Treatment?" onClose={() => setPendingComplete(null)}>
+        <DentistModal title="Patient is finished?" onClose={() => setPendingComplete(null)}>
           <p className="dentist-confirm-copy">
-            Mark {pendingComplete.patientName}&apos;s {pendingComplete.procedure} as completed?
+            Mark {pendingComplete.patientName}&apos;s {pendingComplete.procedure} as finished and
+            move them out of your active queue?
           </p>
           <div className="dentist-modal__actions">
             <button type="button" className="button button--secondary" onClick={() => setPendingComplete(null)}>
               Cancel
             </button>
             <button type="button" className="button button--primary" onClick={completePatient} disabled={Boolean(busy)}>
-              Complete
+              {busy.startsWith("complete-") ? "Saving…" : "Patient is finished"}
             </button>
           </div>
         </DentistModal>

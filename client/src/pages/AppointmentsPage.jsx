@@ -74,7 +74,6 @@ export function AppointmentsPage() {
   const [timePeriod, setTimePeriod] = useState("Morning");
   const [form, setForm] = useState({
     serviceId: "",
-    dentistId: "",
     appointmentDate: tomorrow(),
     appointmentTime: "",
     coverageType: "self_pay",
@@ -106,10 +105,6 @@ export function AppointmentsPage() {
     () => catalog?.services.find((service) => service.id === form.serviceId),
     [catalog, form.serviceId]
   );
-  const selectedDentist = useMemo(
-    () => catalog?.dentists.find((dentist) => dentist.id === form.dentistId),
-    [catalog, form.dentistId]
-  );
 
   function updateForm(event) {
     setForm((current) => ({ ...current, [event.target.name]: event.target.value }));
@@ -134,7 +129,6 @@ export function AppointmentsPage() {
       setForm((current) => ({
         ...current,
         serviceId: "",
-        dentistId: "",
         appointmentTime: "",
         hmoProvider: "",
         hmoMemberNumber: "",
@@ -223,17 +217,6 @@ export function AppointmentsPage() {
               <CalendarDays className="card-heading__icon" size={21} />
             </div>
             <div className="schedule-fields">
-              <label className="field">
-                <span>Preferred dentist</span>
-                <select name="dentistId" value={form.dentistId} onChange={updateForm} required>
-                  <option value="">Choose your dentist</option>
-                  {catalog.dentists.map((dentist) => (
-                    <option key={dentist.id} value={dentist.id}>
-                      {dentist.name} — {dentist.specialty}
-                    </option>
-                  ))}
-                </select>
-              </label>
               <label className="field">
                 <span>Preferred date</span>
                 <input
@@ -359,10 +342,6 @@ export function AppointmentsPage() {
             <strong>{selectedService?.name || "Select a treatment"}</strong>
           </div>
           <div className="booking-summary__line">
-            <span>Dentist</span>
-            <strong>{selectedDentist?.name || "Choose a dentist"}</strong>
-          </div>
-          <div className="booking-summary__line">
             <span>Date</span>
             <strong>{form.appointmentDate ? displayDate(form.appointmentDate) : "Choose a date"}</strong>
           </div>
@@ -376,7 +355,7 @@ export function AppointmentsPage() {
           </div>
           <button
             className="button button--primary button--wide"
-            disabled={isBusy || !form.serviceId || !form.dentistId || !form.appointmentTime}
+            disabled={isBusy || !form.serviceId || !form.appointmentTime}
           >
             {isBusy ? "Submitting your request…" : "Request appointment"} <ChevronRight size={18} />
           </button>

@@ -409,11 +409,12 @@ function createPatientPortalRouter({
     } = req.body || {};
 
     const service = SERVICES.find((item) => item.id === serviceId);
-    const dentist = DENTISTS.find((item) => item.id === dentistId);
     const normalizedCoverage = coverageType === "hmo" ? "hmo" : coverageType === "self_pay" ? "self_pay" : null;
 
-    if (!service || !dentist || !isIsoDate(appointmentDate) || !isTime(appointmentTime) || !normalizedCoverage) {
-      return res.status(400).json({ message: "Please select a treatment, dentist, date, time, and coverage option." });
+    if (!service || !isIsoDate(appointmentDate) || !isTime(appointmentTime) || !normalizedCoverage) {
+      return res.status(400).json({
+        message: "Please select a treatment, date, time, and coverage option.",
+      });
     }
 
     if (isPastDate(appointmentDate)) {
@@ -439,6 +440,37 @@ function createPatientPortalRouter({
         if (documentResult.rows.length === 0) {
           return res.status(400).json({ message: "The HMO authorization document is not available." });
         }
+      }
+
+      // Patients no longer pick a preferred dentist; assign the first available
+      // clinician for the requested slot (falls back to the first catalog dentist).
+      let dentist =
+        dentistId && DENTISTS.find((item) => item.id === dentistId)
+          ? DENTISTS.find((item) => item.id === dentistId)
+          : null;
+
+      if (!dentist) {
+        for (const candidate of DENTISTS) {
+          const conflict = await db.query(
+            `SELECT id
+             FROM patient_portal_appointments
+             WHERE dentist_id = $1
+               AND appointment_date = $2
+               AND appointment_time = $3
+               AND status <> 'cancelled'
+             LIMIT 1`,
+            [candidate.id, appointmentDate, appointmentTime]
+          );
+          if (conflict.rows.length === 0) {
+            dentist = candidate;
+            break;
+          }
+        }
+        dentist = dentist || DENTISTS[0];
+      }
+
+      if (!dentist) {
+        return res.status(503).json({ message: "No dentists are available for booking right now." });
       }
 
       const conflict = await db.query(

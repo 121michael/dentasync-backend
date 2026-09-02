@@ -246,7 +246,7 @@ export function StaffAppointmentsPage() {
             <p><small>Date</small><strong>{formatStaffDate(detail.date)}</strong></p>
             <p><small>Time</small><strong>{formatStaffTime(String(detail.time || "").slice(0, 5))}</strong></p>
             <p><small>Service</small><strong>{detail.service || detail.treatment}</strong></p>
-            <p><small>Preferred dentist</small><strong>{detail.dentist}</strong></p>
+            <p><small>Dentist</small><strong>{detail.dentist}</strong></p>
             <p><small>HMO status</small><strong>{detail.coverageType || "—"}</strong></p>
             <p><small>HMO provider</small><strong>{detail.hmoProvider || "—"}</strong></p>
             <p><small>HMO ID</small><strong>{detail.hmoMemberNumber || "—"}</strong></p>
