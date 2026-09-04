@@ -422,10 +422,19 @@ export function AppointmentsPage() {
           <div className="appointment-list">
             {appointments.map((appointment) => (
               <article className="appointment-row" key={appointment.id}>
-                <span className={`status-pill status-pill--${appointment.status}`}>{appointment.status.replaceAll("_", " ")}</span>
+            <span className={`status-pill status-pill--${appointment.status}`}>
+                  {appointment.status.replaceAll("_", " ")}
+                </span>
                 <div>
                   <strong>{appointment.treatment}</strong>
-                  <small>{appointment.dentist} · {appointment.location}</small>
+                  <small>
+                    {appointment.dentist} · {appointment.location}
+                    {appointment.coverageType === "hmo"
+                      ? ` · HMO: ${String(
+                          appointment.hmoVerificationStatus || "pending_verification"
+                        ).replaceAll("_", " ")}`
+                      : ""}
+                  </small>
                 </div>
                 <div>
                   <strong>{displayDate(appointment.date)}</strong>

@@ -1,11 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import {
-  Download,
-  FileImage,
-  FileText,
-  LockKeyhole,
-  Upload,
-} from "lucide-react";
+import { Download, FileImage, FileText, LockKeyhole } from "lucide-react";
+import { Link } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
 
@@ -39,8 +34,6 @@ export function RecordsPage() {
   const [recordsData, setRecordsData] = useState(null);
   const [xrays, setXrays] = useState([]);
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
-  const [uploading, setUploading] = useState(false);
 
   const load = useCallback(async () => {
     setError("");
@@ -76,24 +69,6 @@ export function RecordsPage() {
     }
   }
 
-  async function uploadXray(event) {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    setUploading(true);
-    setError("");
-    setSuccess("");
-    try {
-      const response = await api.uploadXray(file);
-      setSuccess(response.message || "X-ray uploaded successfully.");
-      await load();
-    } catch (uploadError) {
-      setError(uploadError.message);
-    } finally {
-      setUploading(false);
-    }
-  }
-
   if (error && !recordsData) return <ErrorState message={error} onRetry={load} />;
   if (!recordsData) return <LoadingState label="Opening your secure treatment archive" />;
 
@@ -102,49 +77,43 @@ export function RecordsPage() {
       <SectionHeading
         eyebrow="Your private archive"
         title="Treatment history"
-        detail="Secure access to your dental treatment records and documents."
+        detail="Completed appointments and clinician-shared records for your authenticated account only."
       />
 
       {error && <p className="inline-alert inline-alert--error">{error}</p>}
-      {success && <p className="inline-alert inline-alert--success">{success}</p>}
 
       <section className="records-summary-grid">
         <RecordSummary label="Total visits" value={recordsData.summary.totalVisits} tone="purple" />
-        <RecordSummary label="Completed treatments" value={recordsData.summary.completedTreatments} tone="emerald" />
         <RecordSummary
-          label="X-rays available"
+          label="Completed treatments"
+          value={recordsData.summary.completedTreatments}
+          tone="emerald"
+        />
+        <RecordSummary
+          label="Images on file"
           value={Math.max(recordsData.summary.xRaysAvailable || 0, xrays.length)}
           tone="violet"
         />
-        <RecordSummary label="Active treatment plans" value={recordsData.summary.activeTreatmentPlans} tone="amber" />
+        <RecordSummary
+          label="Active treatment plans"
+          value={recordsData.summary.activeTreatmentPlans}
+          tone="amber"
+        />
       </section>
 
-      <section className="glass-card booking-section xray-upload-section">
+      <section className="glass-card booking-section">
         <div className="card-heading">
           <div>
             <span className="eyebrow">Imaging</span>
-            <h2>X-ray uploads</h2>
+            <h2>Images shared via AI Assistant</h2>
           </div>
           <FileImage className="card-heading__icon" size={21} />
         </div>
         <p className="muted-copy">
-          Upload dental X-rays for your care team. Any automated analysis is preliminary only and is not a
-          clinical diagnosis.
+          Upload dental photos or X-rays from the{" "}
+          <Link to="/assistant">AI Assistant</Link> using the + attachment button. Preliminary AI notes
+          are not a diagnosis.
         </p>
-        <label className="file-drop">
-          <Upload size={21} />
-          <span>
-            <strong>{uploading ? "Uploading…" : "Upload X-ray image"}</strong>
-            <small>JPG, PNG, or PDF — securely stored in your records</small>
-          </span>
-          <input
-            type="file"
-            accept=".pdf,image/jpeg,image/png,image/webp"
-            disabled={uploading}
-            onChange={uploadXray}
-          />
-        </label>
-
         {xrays.length ? (
           <div className="xray-list">
             {xrays.map((xray) => (
@@ -153,20 +122,21 @@ export function RecordsPage() {
                   <FileImage size={18} />
                 </span>
                 <div>
-                  <strong>{xray.name || xray.fileName || "X-ray image"}</strong>
+                  <strong>{xray.name || xray.fileName || "Dental image"}</strong>
                   <small>
                     {displayDate(xray.uploadedAt || xray.createdAt || xray.date)}
                     {xray.size ? ` · ${formatSize(xray.size)}` : ""}
                   </small>
-                  <span className={`status-pill status-pill--${String(xray.analysis?.status || xray.status || "unavailable").replaceAll("_", "-")}`}>
-                    {String(xray.analysis?.status || xray.status || "unavailable").replaceAll("_", " ")}
+                  <span
+                    className={`status-pill status-pill--${String(
+                      xray.analysis?.status || xray.status || "unavailable"
+                    ).replaceAll("_", "-")}`}
+                  >
+                    {String(xray.analysis?.status || xray.status || "unavailable").replaceAll(
+                      "_",
+                      " "
+                    )}
                   </span>
-                  {xray.analysis?.summary || xray.summary ? (
-                    <p className="muted-copy">{xray.analysis?.summary || xray.summary}</p>
-                  ) : null}
-                  {xray.analysis?.confidence != null ? (
-                    <small>Confidence: {xray.analysis.confidence}%</small>
-                  ) : null}
                   <p className="xray-disclaimer">
                     {xray.analysis?.disclaimer ||
                       xray.disclaimer ||
@@ -177,7 +147,7 @@ export function RecordsPage() {
             ))}
           </div>
         ) : (
-          <p className="muted-copy">No X-rays uploaded yet.</p>
+          <p className="muted-copy">No images on file yet. Open AI Assistant and use + to attach one.</p>
         )}
       </section>
 
@@ -199,15 +169,21 @@ export function RecordsPage() {
                     <div className="record-entry__heading">
                       <div>
                         <h3>{record.treatment}</h3>
-                        <p>{record.dentist || "Amethyst Dental care team"} · {record.clinic || "Amethyst Dental"}</p>
+                        <p>
+                          {record.dentist || "Amethyst Dental care team"} ·{" "}
+                          {record.clinic || "Amethyst Dental"}
+                          {record.source === "appointment" ? " · From completed appointment" : ""}
+                        </p>
                       </div>
-                      <span className={`status-pill status-pill--${record.status}`}>{record.status.replaceAll("_", " ")}</span>
+                      <span className={`status-pill status-pill--${record.status}`}>
+                        {String(record.status || "").replaceAll("_", " ")}
+                      </span>
                     </div>
                     <div className="record-entry__meta">
                       <span>{record.coverage || "Coverage not recorded"}</span>
-                      {record.notes && <span>{record.notes}</span>}
+                      {record.notes ? <span>{record.notes}</span> : null}
                     </div>
-                    {record.documents.length > 0 && (
+                    {record.documents?.length > 0 ? (
                       <div className="record-entry__documents">
                         {record.documents.map((document) => (
                           <button
@@ -215,21 +191,25 @@ export function RecordsPage() {
                             onClick={() => downloadDocument(record.id, document)}
                             className="document-chip"
                           >
-                            {document.mimeType.startsWith("image") ? <FileImage size={15} /> : <FileText size={15} />}
+                            {document.mimeType?.startsWith("image") ? (
+                              <FileImage size={15} />
+                            ) : (
+                              <FileText size={15} />
+                            )}
                             {document.name}
                             <Download size={14} />
                           </button>
                         ))}
                       </div>
-                    )}
+                    ) : null}
                   </div>
                 </article>
               ))}
             </div>
           ) : (
             <EmptyState
-              title="Your treatment archive is ready"
-              detail="Completed visits and clinician-shared records will appear here securely."
+              title="No completed treatments yet"
+              detail="Completed appointments for your account will appear here. Cancelled visits are excluded."
             />
           )}
         </article>
@@ -240,6 +220,7 @@ export function RecordsPage() {
               <span className="eyebrow">Secure files</span>
               <h2>Documents</h2>
             </div>
+            <LockKeyhole size={18} />
           </div>
           {recordsData.documents.length ? (
             <div className="document-list">
@@ -248,31 +229,26 @@ export function RecordsPage() {
                   className="document-row"
                   key={document.id}
                   onClick={() => downloadPortalDocument(document)}
-                  title={`Download ${document.name}`}
                 >
                   <span className="document-row__icon">
-                    {document.mimeType.startsWith("image") ? <FileImage size={18} /> : <FileText size={18} />}
+                    {document.mimeType?.startsWith("image") ? (
+                      <FileImage size={16} />
+                    ) : (
+                      <FileText size={16} />
+                    )}
                   </span>
-                  <div>
+                  <span>
                     <strong>{document.name}</strong>
-                    <small>{document.type.replaceAll("_", " ")} · {formatSize(document.size)}</small>
-                  </div>
-                  <Download size={16} />
+                    <small>{displayDate(document.createdAt)}</small>
+                  </span>
+                  <Download size={15} />
                 </button>
               ))}
             </div>
           ) : (
-            <p className="muted-copy">Files shared by your clinical team will appear here.</p>
+            <p className="muted-copy">No standalone documents yet.</p>
           )}
         </aside>
-      </section>
-
-      <section className="privacy-banner">
-        <LockKeyhole size={20} />
-        <div>
-          <strong>Your medical records are securely stored.</strong>
-          <span>They are accessible only through your authorized patient account.</span>
-        </div>
       </section>
     </div>
   );

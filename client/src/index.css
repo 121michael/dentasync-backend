@@ -1057,7 +1057,7 @@ strong {
 
 .dashboard-lower-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(340px, 0.9fr);
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 0.9rem;
 }
 
@@ -3653,6 +3653,30 @@ strong {
   align-items: end;
 }
 .assistant-composer__field { flex: 1; margin: 0; }
+.assistant-attach-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  min-width: 48px;
+  justify-content: center;
+  font-weight: 800;
+}
+.assistant-attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0 0 0.65rem;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--violet-wash);
+  font-size: 0.78rem;
+}
+.assistant-attachment-label {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--text-muted);
+}
 
 /* —— X-ray uploads —— */
 .xray-upload-section { margin-bottom: 1.25rem; }

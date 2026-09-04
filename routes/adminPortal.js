@@ -2682,13 +2682,13 @@ function createAdminPortalRouter({
     }
   });
 
-  const RFID_ALLOWED_ROLES = new Set(["patient", "staff", "dentist", "admin"]);
+  const RFID_ALLOWED_ROLES = new Set(["patient"]);
 
   router.get("/rfid", async (req, res) => {
     const search = stringValue(req.query.search, 120);
     const params = [];
     const clauses = [
-      "LOWER(role) IN ('patient', 'staff', 'dentist', 'admin')",
+      "LOWER(role) = 'patient'",
       "COALESCE(is_archived, FALSE) = FALSE",
     ];
 
@@ -2764,7 +2764,7 @@ function createAdminPortalRouter({
       }
       if (!RFID_ALLOWED_ROLES.has(String(target.role || "").toLowerCase())) {
         return res.status(400).json({
-          message: "RFID tags can only be assigned to patient, staff, dentist, or admin accounts.",
+          message: "RFID tags can only be assigned to patient accounts.",
         });
       }
 
@@ -2830,12 +2830,12 @@ function createAdminPortalRouter({
          SET rfid_tag = NULL
          WHERE id::text = $1
            AND COALESCE(is_archived, FALSE) = FALSE
-           AND LOWER(role) IN ('patient', 'staff', 'dentist', 'admin')
+           AND LOWER(role) = 'patient'
          RETURNING id, first_name, last_name, email, phone, role, status, rfid_tag, created_at`,
         [userId]
       );
       if (!result.rows.length) {
-        return res.status(404).json({ message: "User not found." });
+        return res.status(404).json({ message: "Patient RFID assignment not found." });
       }
 
       await writeAdminAudit(db, {

@@ -124,7 +124,9 @@ export function DashboardPage() {
             <Sparkles size={26} />
           </div>
           <div className="next-visit-card__content">
-            <span className="eyebrow eyebrow--light">Your next visit is confirmed</span>
+            <span className="eyebrow eyebrow--light">
+              Your next visit · {String(appointment.status || "pending").replaceAll("_", " ")}
+            </span>
             <h2>{appointment.treatment}</h2>
             <div className="next-visit-card__details">
               <span>
@@ -247,6 +249,7 @@ export function DashboardPage() {
             {[
               { label: "Book appointment", detail: "Choose a treatment and time", icon: CalendarDays, to: "/appointments" },
               { label: "Track live queue", detail: "See your place in line", icon: UsersRound, to: "/queue" },
+              { label: "AI Assistant", detail: "Ask questions or attach an X-ray", icon: Sparkles, to: "/assistant" },
               { label: "View records", detail: "Review your care archive", icon: FileText, to: "/records" },
               { label: "Contact clinic", detail: "Get help from our care team", icon: ClipboardList, to: "/support" },
             ].map(({ label, detail, icon: Icon, to }) => (
@@ -261,6 +264,52 @@ export function DashboardPage() {
                 <ArrowRight size={16} />
               </button>
             ))}
+          </div>
+        </article>
+
+        <article className="glass-card">
+          <div className="card-heading">
+            <div>
+              <span className="eyebrow">Updates</span>
+              <h2>Notifications & SMS</h2>
+            </div>
+          </div>
+          <p className="muted-copy">
+            Unread notifications: <strong>{dashboard.unreadNotifications ?? 0}</strong>
+            {" · "}
+            SMS alerts:{" "}
+            <strong>
+              {dashboard.smsPreferences?.notifySms === false ? "Opted out" : "Enabled"}
+            </strong>
+          </p>
+          {(dashboard.recentNotifications || []).length ? (
+            <div className="appointment-list">
+              {dashboard.recentNotifications.slice(0, 4).map((notification) => (
+                <article className="appointment-row" key={notification.id}>
+                  <span
+                    className={`status-pill status-pill--${
+                      notification.readAt ? "completed" : "pending"
+                    }`}
+                  >
+                    {notification.readAt ? "Read" : "New"}
+                  </span>
+                  <div>
+                    <strong>{notification.title}</strong>
+                    <small>{notification.body}</small>
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="muted-copy">No notifications yet.</p>
+          )}
+          <div className="staff-heading-actions" style={{ marginTop: "0.85rem" }}>
+            <button className="button button--secondary button--compact" onClick={() => navigate("/notifications")}>
+              Open notifications
+            </button>
+            <button className="button button--secondary button--compact" onClick={() => navigate("/profile")}>
+              Manage SMS preferences
+            </button>
           </div>
         </article>
       </section>

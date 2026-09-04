@@ -3,12 +3,28 @@ import { Trash2, UserPlus, Users } from "lucide-react";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
 
+const ELIGIBILITY_OPTIONS = [
+  { value: "toddler", label: "Toddler (under 3)" },
+  { value: "child_under_12", label: "Child under 12" },
+  { value: "pwd", label: "Person with disability (PWD) needing account help" },
+  { value: "senior", label: "Senior needing account help" },
+  { value: "other_authorized", label: "Other authorized patient unable to manage an account" },
+];
+
+function eligibilityLabel(value) {
+  return ELIGIBILITY_OPTIONS.find((option) => option.value === value)?.label || value || "Dependent";
+}
+
 export function FamilyPage() {
   const [dependents, setDependents] = useState(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [busy, setBusy] = useState(false);
-  const [form, setForm] = useState({ email: "", phone: "" });
+  const [form, setForm] = useState({
+    email: "",
+    phone: "",
+    eligibilityCategory: "child_under_12",
+  });
 
   const load = useCallback(async () => {
     setError("");
@@ -33,9 +49,10 @@ export function FamilyPage() {
       const response = await api.addDependent({
         email: form.email.trim(),
         phone: form.phone.trim(),
+        eligibilityCategory: form.eligibilityCategory,
       });
-      setSuccess(response.message || "Dependent linked successfully.");
-      setForm({ email: "", phone: "" });
+      setSuccess(response.message || "Authorized dependent linked successfully.");
+      setForm({ email: "", phone: "", eligibilityCategory: "child_under_12" });
       await load();
     } catch (addError) {
       setError(addError.message);
@@ -46,7 +63,7 @@ export function FamilyPage() {
 
   async function removeDependent(dependent) {
     const label = dependent.fullName || dependent.name || dependent.email || "this dependent";
-    if (!window.confirm(`Remove ${label} from your family list?`)) return;
+    if (!window.confirm(`Remove ${label} from your authorized dependents list?`)) return;
     setBusy(true);
     setError("");
     setSuccess("");
@@ -62,14 +79,14 @@ export function FamilyPage() {
   }
 
   if (error && !dependents) return <ErrorState message={error} onRetry={load} />;
-  if (!dependents) return <LoadingState label="Loading family accounts" />;
+  if (!dependents) return <LoadingState label="Loading authorized dependents" />;
 
   return (
     <div className="family-page">
       <SectionHeading
-        eyebrow="Family care"
+        eyebrow="Authorized care management"
         title="Family & dependents"
-        detail="Link existing patient accounts so you can help manage appointments for dependents."
+        detail="Link eligible patients who cannot independently create or manage a DentaSync account — such as toddlers, children under 12, eligible PWDs, and seniors needing assistance. Being a relative alone is not enough."
       />
 
       {error ? <p className="inline-alert inline-alert--error">{error}</p> : null}
@@ -79,17 +96,34 @@ export function FamilyPage() {
         <div className="card-heading">
           <div>
             <span className="eyebrow">Add dependent</span>
-            <h2>Link an existing patient</h2>
+            <h2>Authorize an eligible patient</h2>
           </div>
           <UserPlus className="card-heading__icon" size={21} />
         </div>
         <p className="muted-copy">
-          Use the email and phone number already registered on the dependent&apos;s patient account.
+          The dependent must already have a patient account. You become their authorized account manager
+          for booking and permitted records only.
         </p>
         <form className="admin-form" onSubmit={addDependent}>
+          <label className="field">
+            <span>Eligibility reason</span>
+            <select
+              required
+              value={form.eligibilityCategory}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, eligibilityCategory: event.target.value }))
+              }
+            >
+              {ELIGIBILITY_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
           <div className="field-row">
             <label className="field">
-              <span>Email</span>
+              <span>Dependent email</span>
               <input
                 type="email"
                 required
@@ -99,7 +133,7 @@ export function FamilyPage() {
               />
             </label>
             <label className="field">
-              <span>Phone</span>
+              <span>Dependent phone</span>
               <input
                 required
                 value={form.phone}
@@ -109,7 +143,7 @@ export function FamilyPage() {
             </label>
           </div>
           <button className="button button--primary" disabled={busy}>
-            {busy ? "Linking…" : "Add dependent"}
+            {busy ? "Linking…" : "Add authorized dependent"}
           </button>
         </form>
       </section>
@@ -118,7 +152,7 @@ export function FamilyPage() {
         <div className="card-heading">
           <div>
             <span className="eyebrow">Linked accounts</span>
-            <h2>Your dependents</h2>
+            <h2>Your authorized dependents</h2>
           </div>
           <Users className="card-heading__icon" size={21} />
         </div>
@@ -128,7 +162,7 @@ export function FamilyPage() {
             {dependents.map((dependent) => (
               <article className="appointment-row" key={dependent.id || dependent.dependentUserId}>
                 <span className="status-pill status-pill--confirmed">
-                  {dependent.relationship || "dependent"}
+                  {eligibilityLabel(dependent.eligibilityCategory || dependent.relationship)}
                 </span>
                 <div>
                   <strong>{dependent.fullName || dependent.name || "Patient"}</strong>
@@ -151,8 +185,8 @@ export function FamilyPage() {
           </div>
         ) : (
           <EmptyState
-            title="No dependents linked yet"
-            detail="Add a dependent with their registered email and phone to get started."
+            title="No authorized dependents yet"
+            detail="Add an eligible patient who cannot manage their own account using their registered email and phone."
           />
         )}
       </section>

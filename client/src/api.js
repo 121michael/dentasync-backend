@@ -84,8 +84,19 @@ export const api = {
     request("/public/queue-display", { authenticated: false }),
   checkIn: (appointmentId) =>
     request("/patient/queue/check-in", { method: "POST", body: { appointmentId } }),
-  askClinicAssistant: (body) =>
-    request("/patient/assistant/chat", { method: "POST", body }),
+  askClinicAssistant: ({ message, question, image } = {}) => {
+    if (image) {
+      const body = new FormData();
+      body.append("message", message || question || "");
+      body.append("question", question || message || "");
+      body.append("image", image);
+      return request("/patient/assistant/chat", { method: "POST", body });
+    }
+    return request("/patient/assistant/chat", {
+      method: "POST",
+      body: { message, question },
+    });
+  },
   getXrays: () => request("/patient/xrays"),
   uploadXray: (file) => {
     const body = new FormData();

@@ -9,6 +9,7 @@ const multer = require("multer");
 const { linkClinicalRecordsToUser } = require("../services/clinicalPatients");
 const { estimateWaitMinutesForPosition } = require("../services/waitTime");
 const { answerWithOptionalGemini } = require("../services/clinicAssistant");
+const { analyzeDentalImageBuffer, DISCLAIMER: IMAGE_ANALYSIS_DISCLAIMER } = require("../services/dentalImageAnalysis");
 
 const SERVICES = [
   {
@@ -104,7 +105,31 @@ const ALLOWED_UPLOAD_TYPES = new Set([
   "application/pdf",
   "image/jpeg",
   "image/png",
+  "image/webp",
 ]);
+
+const DEPENDENT_ELIGIBILITY = new Set([
+  "toddler",
+  "child_under_12",
+  "pwd",
+  "senior",
+  "other_authorized",
+]);
+
+function ageFromIsoDate(value) {
+  if (!isIsoDate(value) && !(value instanceof Date)) {
+    return null;
+  }
+  const dob = value instanceof Date ? value : new Date(`${value}T00:00:00`);
+  if (Number.isNaN(dob.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - dob.getFullYear();
+  const monthDiff = today.getMonth() - dob.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) {
+    age -= 1;
+  }
+  return age >= 0 ? age : null;
+}
 
 function requirePatient(req, res, next) {
   if ((req.user?.role || "").toLowerCase() !== "patient") {
@@ -300,6 +325,8 @@ function createPatientPortalRouter({
         queueResult,
         profileResult,
         notificationResult,
+        recentNotificationResult,
+        preferenceResult,
       ] = await Promise.all([
         db.query(
           `SELECT id, first_name, last_name, email, phone, is_verified
@@ -349,6 +376,28 @@ function createPatientPortalRouter({
            WHERE user_id = $1`,
           [userId]
         ),
+        db.query(
+          `SELECT id, type, title, body, read_at, created_at
+           FROM patient_portal_notifications
+           WHERE user_id = $1
+           ORDER BY created_at DESC
+           LIMIT 5`,
+          [userId]
+        ),
+        db.query(
+          `SELECT COALESCE(notify_sms, TRUE) AS notify_sms,
+                  COALESCE(notify_appointment_sms, TRUE) AS notify_appointment_sms,
+                  COALESCE(notify_queue_sms, TRUE) AS notify_queue_sms
+           FROM patient_portal_notification_preferences
+           WHERE user_id = $1
+           LIMIT 1`,
+          [userId]
+        ).catch((error) => {
+          if (error?.code === "42P01" || error?.code === "42703") {
+            return { rows: [] };
+          }
+          throw error;
+        }),
       ]);
 
       if (userResult.rows.length === 0) {
@@ -359,6 +408,7 @@ function createPatientPortalRouter({
       const profile = profileResult.rows[0] || {};
       const queue = queueResult.rows[0] || null;
       const counts = appointmentCountResult.rows[0];
+      const smsPrefs = preferenceResult.rows[0] || {};
 
       return res.json({
         patient: {
@@ -392,6 +442,19 @@ function createPatientPortalRouter({
             }
           : null,
         unreadNotifications: resultCount(notificationResult.rows[0], "unread_count"),
+        recentNotifications: recentNotificationResult.rows.map((row) => ({
+          id: row.id,
+          type: row.type,
+          title: row.title,
+          body: row.body,
+          readAt: row.read_at,
+          createdAt: row.created_at,
+        })),
+        smsPreferences: {
+          notifySms: smsPrefs.notify_sms !== false,
+          notifyAppointmentSms: smsPrefs.notify_appointment_sms !== false,
+          notifyQueueSms: smsPrefs.notify_queue_sms !== false,
+        },
       });
     } catch (error) {
       console.error("Patient dashboard error:", error.message);
@@ -973,7 +1036,8 @@ function createPatientPortalRouter({
         }
       }
 
-      const [recordsResult, documentsResult, summaryResult, clinicalResult] = await Promise.all([
+      const [recordsResult, documentsResult, summaryResult, clinicalResult, appointmentResult] =
+        await Promise.all([
         db.query(
           `SELECT *
            FROM patient_portal_treatment_records
@@ -1020,6 +1084,16 @@ function createPatientPortalRouter({
           }
           throw error;
         }),
+        db.query(
+          `SELECT
+             id, service_name, dentist_name, clinic_location, coverage_type,
+             appointment_date, appointment_time, status, notes
+           FROM patient_portal_appointments
+           WHERE user_id = $1
+             AND status = 'completed'
+           ORDER BY appointment_date DESC, appointment_time DESC`,
+          [userId]
+        ),
       ]);
 
       const documents = documentsResult.rows.map((document) => ({
@@ -1056,12 +1130,28 @@ function createPatientPortalRouter({
         source: "clinical",
         documents: [],
       }));
+      const appointmentRecords = appointmentResult.rows.map((appointment) => ({
+        id: `appointment-${appointment.id}`,
+        date: appointment.appointment_date,
+        treatment: appointment.service_name,
+        dentist: appointment.dentist_name,
+        clinic: appointment.clinic_location || "Amethyst Dental",
+        coverage: appointment.coverage_type || null,
+        status: "completed",
+        notes: appointment.notes || "",
+        source: "appointment",
+        appointmentId: appointment.id,
+        appointmentTime: appointment.appointment_time,
+        documents: [],
+      }));
 
-      const records = [...portalRecords, ...clinicalRecords].sort((left, right) => {
-        const leftDate = String(left.date || "");
-        const rightDate = String(right.date || "");
-        return rightDate.localeCompare(leftDate);
-      });
+      const records = [...portalRecords, ...clinicalRecords, ...appointmentRecords].sort(
+        (left, right) => {
+          const leftDate = String(left.date || "");
+          const rightDate = String(right.date || "");
+          return rightDate.localeCompare(leftDate);
+        }
+      );
 
       const clinicalCompleted = clinicalRecords.filter((record) => record.status === "completed").length;
       const clinicalActive = clinicalRecords.filter((record) =>
@@ -1070,8 +1160,12 @@ function createPatientPortalRouter({
 
       return res.json({
         summary: {
-          totalVisits: resultCount(summary, "total_visits") + clinicalRecords.length,
-          completedTreatments: resultCount(summary, "completed_treatments") + clinicalCompleted,
+          totalVisits:
+            resultCount(summary, "total_visits") + clinicalRecords.length + appointmentRecords.length,
+          completedTreatments:
+            resultCount(summary, "completed_treatments") +
+            clinicalCompleted +
+            appointmentRecords.length,
           xRaysAvailable: documents.filter((document) => document.type === "xray").length,
           activeTreatmentPlans: resultCount(summary, "active_treatment_plans") + clinicalActive,
         },
@@ -1178,20 +1272,113 @@ function createPatientPortalRouter({
     }
   });
 
-  router.post("/assistant/chat", async (req, res) => {
-    const question = stringValue(req.body?.question || req.body?.message, 2000);
-    if (!question) {
-      return res.status(400).json({ message: "Please provide a question for the clinic assistant." });
+  router.post("/assistant/chat", upload.single("image"), async (req, res) => {
+    const userId = userIdFor(req);
+    const question =
+      stringValue(req.body?.question || req.body?.message, 2000) ||
+      (req.file ? "Please review this dental image." : null);
+
+    if (!question && !req.file) {
+      return res.status(400).json({
+        message: "Provide a question or attach a dental photo/X-ray with the + button.",
+      });
     }
 
     try {
-      const response = await answerWithOptionalGemini(question, SERVICES);
+      if (!req.file) {
+        const response = await answerWithOptionalGemini(question, SERVICES);
+        return res.json({
+          answer: response.answer,
+          source: response.source,
+          model: response.model,
+          analysis: null,
+        });
+      }
+
+      const documentId = crypto.randomUUID();
+      await db.query(
+        `INSERT INTO patient_portal_documents (
+           id, user_id, document_type, original_name, stored_name, mime_type, byte_size
+         ) VALUES ($1, $2, 'xray', $3, $4, $5, $6)`,
+        [
+          documentId,
+          userId,
+          req.file.originalname,
+          req.file.filename,
+          req.file.mimetype,
+          req.file.size,
+        ]
+      );
+
+      const fileBuffer = fs.readFileSync(req.file.path);
+      const analysis = await analyzeDentalImageBuffer({
+        buffer: fileBuffer,
+        mimeType: req.file.mimetype,
+        fileName: req.file.originalname,
+        question,
+      });
+
+      try {
+        await db.query(
+          `INSERT INTO patient_xray_analyses (
+             document_id, user_id, status, summary, findings_json, confidence, disclaimer
+           ) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)`,
+          [
+            documentId,
+            userId,
+            analysis.status || "unavailable",
+            analysis.summary || null,
+            JSON.stringify(analysis.findings || {}),
+            analysis.confidence,
+            analysis.disclaimer || IMAGE_ANALYSIS_DISCLAIMER,
+          ]
+        );
+      } catch (analysisStoreError) {
+        if (analysisStoreError?.code !== "42P01") {
+          console.warn("Unable to store x-ray analysis row:", analysisStoreError.message);
+        }
+      }
+
+      await notifyClinicStaff({
+        type: "document",
+        title: "AI Assistant image upload",
+        body: `A patient shared a dental image in AI Assistant: ${req.file.originalname}.`,
+        entityType: "document",
+        entityId: documentId,
+      });
+
+      const answerParts = [
+        analysis.summary ||
+          "Your dental image was saved for your care team. Preliminary automated analysis is unavailable.",
+      ];
+      if (analysis.possibleToothNumber) {
+        answerParts.unshift(
+          `Possible finding: tooth ${analysis.possibleToothNumber}${
+            analysis.possibleSurface ? `, likely ${analysis.possibleSurface} surface` : ""
+          }.`
+        );
+      }
+      if (!String(analysis.summary || "").includes("preliminary")) {
+        answerParts.push(IMAGE_ANALYSIS_DISCLAIMER);
+      }
+
       return res.json({
-        answer: response.answer,
-        source: response.source,
-        model: response.model,
+        answer: answerParts.filter(Boolean).join("\n\n"),
+        source: analysis.model || "image-analysis",
+        model: analysis.model || "none",
+        analysis: {
+          status: analysis.status,
+          documentId,
+          fileName: req.file.originalname,
+          possibleToothNumber: analysis.possibleToothNumber,
+          possibleSurface: analysis.possibleSurface,
+          disclaimer: analysis.disclaimer || IMAGE_ANALYSIS_DISCLAIMER,
+        },
       });
     } catch (error) {
+      if (req.file?.path) {
+        fs.unlink(req.file.path, () => {});
+      }
       console.error("Clinic assistant error:", error.message);
       return res.status(500).json({ message: "Unable to answer right now." });
     }
@@ -1311,6 +1498,7 @@ function createPatientPortalRouter({
            link.id,
            link.relationship,
            link.created_at,
+           link.eligibility_category,
            dependent.id AS dependent_user_id,
            dependent.first_name,
            dependent.last_name,
@@ -1321,11 +1509,32 @@ function createPatientPortalRouter({
          WHERE link.guardian_user_id = $1
          ORDER BY link.created_at DESC`,
         [guardianUserId]
-      );
+      ).catch(async (error) => {
+        if (error?.code === "42703") {
+          return db.query(
+            `SELECT
+               link.id,
+               link.relationship,
+               link.created_at,
+               dependent.id AS dependent_user_id,
+               dependent.first_name,
+               dependent.last_name,
+               dependent.email,
+               dependent.phone
+             FROM patient_portal_dependents AS link
+             JOIN users AS dependent ON dependent.id::text = link.dependent_user_id
+             WHERE link.guardian_user_id = $1
+             ORDER BY link.created_at DESC`,
+            [guardianUserId]
+          );
+        }
+        throw error;
+      });
       return res.json({
         dependents: result.rows.map((row) => ({
           id: row.id,
           relationship: row.relationship,
+          eligibilityCategory: row.eligibility_category || row.relationship || null,
           createdAt: row.created_at,
           dependentUserId: row.dependent_user_id,
           firstName: row.first_name || "",
@@ -1352,9 +1561,19 @@ function createPatientPortalRouter({
       req.body?.dependentUserId || req.body?.userId || req.body?.dependentId,
       120
     );
-    const relationship = stringValue(req.body?.relationship, 80) || "dependent";
+    const eligibilityCategory =
+      stringValue(req.body?.eligibilityCategory || req.body?.relationship, 80)?.toLowerCase() ||
+      null;
+    const relationship = eligibilityCategory || "dependent";
     const email = normalizeEmail(req.body?.email);
     const phone = normalizePhone(req.body?.phone);
+
+    if (!eligibilityCategory || !DEPENDENT_ELIGIBILITY.has(eligibilityCategory)) {
+      return res.status(400).json({
+        message:
+          "Select an eligibility reason: toddler, child under 12, PWD, senior, or other authorized patient who cannot manage their own account.",
+      });
+    }
 
     try {
       if (!dependentUserId) {
@@ -1404,20 +1623,68 @@ function createPatientPortalRouter({
         return res.status(404).json({ message: "Dependent must be an existing patient account." });
       }
 
-      const result = await db.query(
-        `INSERT INTO patient_portal_dependents (
-           guardian_user_id, dependent_user_id, relationship
-         ) VALUES ($1, $2, $3)
-         RETURNING id, guardian_user_id, dependent_user_id, relationship, created_at`,
-        [guardianUserId, dependentUserId, relationship]
-      );
+      // Age-gated categories require a recorded birth date under 12 (or under 3 for toddler).
+      if (eligibilityCategory === "toddler" || eligibilityCategory === "child_under_12") {
+        const dobResult = await db.query(
+          `SELECT birth_date
+           FROM patient_portal_profiles
+           WHERE user_id = $1
+           LIMIT 1`,
+          [dependentUserId]
+        ).catch((error) => {
+          if (error?.code === "42P01" || error?.code === "42703") {
+            return { rows: [] };
+          }
+          throw error;
+        });
+        const birthDate = normalizeIsoDate(dobResult.rows[0]?.birth_date);
+        const age = ageFromIsoDate(birthDate);
+        if (age == null) {
+          return res.status(400).json({
+            message:
+              "Child/toddler dependents need a birth date on their patient profile before they can be linked.",
+          });
+        }
+        if (eligibilityCategory === "toddler" && age >= 3) {
+          return res.status(400).json({
+            message: "Toddler eligibility applies to dependents under 3 years old.",
+          });
+        }
+        if (eligibilityCategory === "child_under_12" && age >= 12) {
+          return res.status(400).json({
+            message: "Child under 12 eligibility requires the dependent to be under 12 years old.",
+          });
+        }
+      }
+
+      let result;
+      try {
+        result = await db.query(
+          `INSERT INTO patient_portal_dependents (
+             guardian_user_id, dependent_user_id, relationship, eligibility_category
+           ) VALUES ($1, $2, $3, $4)
+           RETURNING id, guardian_user_id, dependent_user_id, relationship, eligibility_category, created_at`,
+          [guardianUserId, dependentUserId, relationship, eligibilityCategory]
+        );
+      } catch (columnError) {
+        if (columnError?.code !== "42703") throw columnError;
+        result = await db.query(
+          `INSERT INTO patient_portal_dependents (
+             guardian_user_id, dependent_user_id, relationship
+           ) VALUES ($1, $2, $3)
+           RETURNING id, guardian_user_id, dependent_user_id, relationship, created_at`,
+          [guardianUserId, dependentUserId, relationship]
+        );
+      }
 
       const dependent = dependentResult.rows[0];
       return res.status(201).json({
-        message: "Dependent linked successfully.",
+        message: "Authorized dependent linked successfully.",
         dependent: {
           id: result.rows[0].id,
           relationship: result.rows[0].relationship,
+          eligibilityCategory:
+            result.rows[0].eligibility_category || eligibilityCategory || result.rows[0].relationship,
           createdAt: result.rows[0].created_at,
           dependentUserId: dependent.id,
           firstName: dependent.first_name || "",

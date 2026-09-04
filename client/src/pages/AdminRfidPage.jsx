@@ -83,8 +83,8 @@ export function AdminRfidPage() {
         <div className="admin-panel__heading">
           <div>
             <span className="eyebrow">Access credentials</span>
-            <h2>RFID Tag Assignments</h2>
-            <p>Search clinic users and assign or clear RFID tags used for staff check-in.</p>
+            <h2>Patient RFID Tag Assignments</h2>
+            <p>Assign or clear RFID tags for patient check-in only. Staff RFID assignment is not managed here.</p>
           </div>
           <button className="button button--secondary" onClick={load}>
             <RefreshCw size={16} /> Refresh
@@ -114,8 +114,8 @@ export function AdminRfidPage() {
             <table className="admin-table">
               <thead>
                 <tr>
-                  <th>User</th>
-                  <th>Role</th>
+                  <th>Patient</th>
+                  <th>Account</th>
                   <th>Current RFID</th>
                   <th>Assign / update</th>
                   <th>Actions</th>
@@ -128,10 +128,10 @@ export function AdminRfidPage() {
                   return (
                     <tr key={userId}>
                       <td>
-                        <strong>{user.fullName || user.name || "User"}</strong>
+                        <strong>{user.fullName || user.name || "Patient"}</strong>
                         <small>{user.email || user.phone || userId}</small>
                       </td>
-                      <td>{user.role || "—"}</td>
+                      <td>Patient</td>
                       <td>
                         {current ? <code>{current}</code> : <span className="muted-copy">Unassigned</span>}
                       </td>
@@ -181,7 +181,7 @@ export function AdminRfidPage() {
             </table>
           </div>
         ) : (
-          <EmptyState title="No users found" detail="Try another search term." />
+          <EmptyState title="No patients found" detail="Try another search for a patient account." />
         )}
       </section>
     </div>
