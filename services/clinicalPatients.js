@@ -158,6 +158,10 @@ async function getClinicalRecord(db, recordId) {
       status: row.status,
       treatmentDate: row.treatment_date,
       notes: row.notes || "",
+      durationMinutes: row.duration_minutes != null ? Number(row.duration_minutes) : null,
+      toothNumber: row.tooth_number || null,
+      diagnosisNotes: row.diagnosis_notes || null,
+      procedureDetails: row.procedure_details || null,
       createdAt: row.created_at,
     })),
   };
@@ -332,25 +336,64 @@ async function addClinicalTreatment(db, recordId, input, actor = {}) {
     throw error;
   }
 
-  const result = await db.query(
-    `INSERT INTO clinic_patient_treatments (
-       clinical_record_id, treatment, dentist_name, clinic_location, coverage_status,
-       status, treatment_date, notes, created_by, created_by_role
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-     RETURNING *`,
-    [
-      recordId,
-      treatment,
-      stringValue(input.dentistName, 160),
-      stringValue(input.clinicLocation, 160) || "Amethyst Dental Clinic",
-      stringValue(input.coverageStatus, 80),
-      stringValue(input.status, 40) || "completed",
-      treatmentDate,
-      stringValue(input.notes, 2000),
-      actor.id ? String(actor.id) : null,
-      actor.role || null,
-    ]
-  );
+  const durationMinutes =
+    Number.isFinite(Number(input.durationMinutes)) && Number(input.durationMinutes) > 0
+      ? Math.round(Number(input.durationMinutes))
+      : null;
+  const toothNumber = stringValue(input.toothNumber, 20);
+  const diagnosisNotes = stringValue(input.diagnosisNotes, 2000);
+  const procedureDetails = stringValue(input.procedureDetails, 2000);
+
+  let result;
+  try {
+    result = await db.query(
+      `INSERT INTO clinic_patient_treatments (
+         clinical_record_id, treatment, dentist_name, clinic_location, coverage_status,
+         status, treatment_date, notes, duration_minutes, tooth_number, diagnosis_notes,
+         procedure_details, created_by, created_by_role
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+       RETURNING *`,
+      [
+        recordId,
+        treatment,
+        stringValue(input.dentistName, 160),
+        stringValue(input.clinicLocation, 160) || "Amethyst Dental Clinic",
+        stringValue(input.coverageStatus, 80),
+        stringValue(input.status, 40) || "completed",
+        treatmentDate,
+        stringValue(input.notes, 2000),
+        durationMinutes,
+        toothNumber,
+        diagnosisNotes,
+        procedureDetails,
+        actor.id ? String(actor.id) : null,
+        actor.role || null,
+      ]
+    );
+  } catch (error) {
+    if (error?.code !== "42703") {
+      throw error;
+    }
+    result = await db.query(
+      `INSERT INTO clinic_patient_treatments (
+         clinical_record_id, treatment, dentist_name, clinic_location, coverage_status,
+         status, treatment_date, notes, created_by, created_by_role
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       RETURNING *`,
+      [
+        recordId,
+        treatment,
+        stringValue(input.dentistName, 160),
+        stringValue(input.clinicLocation, 160) || "Amethyst Dental Clinic",
+        stringValue(input.coverageStatus, 80),
+        stringValue(input.status, 40) || "completed",
+        treatmentDate,
+        stringValue(input.notes, 2000),
+        actor.id ? String(actor.id) : null,
+        actor.role || null,
+      ]
+    );
+  }
 
   await db.query(
     `UPDATE clinic_patient_records

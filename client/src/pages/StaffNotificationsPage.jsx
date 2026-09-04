@@ -75,6 +75,19 @@ export function StaffNotificationsPage() {
     }
   }
 
+  async function setActionStatus(notificationId, actionStatus) {
+    setBusy(`action-${notificationId}-${actionStatus}`);
+    try {
+      await api.updateStaffNotificationAction(notificationId, { actionStatus, status: actionStatus });
+      pushToast(`Action marked ${actionStatus.replaceAll("_", " ")}.`);
+      await load({ markSeen: false });
+    } catch (actionError) {
+      pushToast(actionError.message, "error");
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function sendSms(event) {
     event.preventDefault();
     setBusy("sms");
@@ -127,10 +140,30 @@ export function StaffNotificationsPage() {
                 <div>
                   <div className="staff-notification-card__meta">
                     <StaffStatusBadge status={notification.type || "system"} />
+                    <StaffStatusBadge
+                      status={notification.actionStatus || notification.action_status || "pending"}
+                    />
                     <small>{formatStaffDateTime(notification.createdAt)}</small>
                   </div>
                   <h3>{notification.title}</h3>
                   <p>{notification.body}</p>
+                  <div className="staff-row-actions" style={{ marginTop: "0.75rem" }}>
+                    {["pending", "in_progress", "completed"].map((status) => (
+                      <button
+                        key={status}
+                        type="button"
+                        className={`button button--compact ${
+                          (notification.actionStatus || notification.action_status || "pending") === status
+                            ? "button--primary"
+                            : "button--secondary"
+                        }`}
+                        disabled={Boolean(busy)}
+                        onClick={() => setActionStatus(notification.id, status)}
+                      >
+                        {status.replaceAll("_", " ")}
+                      </button>
+                    ))}
+                  </div>
                 </div>
                 {!notification.read ? (
                   <button

@@ -20,6 +20,13 @@ const QUEUE_STATUS_MAP = {
 };
 const APPOINTMENT_ACTIONS = new Set(["approve", "confirm", "deny", "cancel", "reschedule"]);
 const PAYMENT_STATUSES = new Set(["pending", "partially_paid", "paid", "cancelled"]);
+const HMO_VERIFICATION_STATUSES = new Set([
+  "pending_verification",
+  "verified",
+  "rejected",
+  "not_applicable",
+]);
+const NOTIFICATION_ACTION_STATUSES = new Set(["pending", "in_progress", "completed"]);
 
 function stringValue(value, maxLength = 500) {
   if (typeof value !== "string") {
@@ -122,6 +129,9 @@ function mapAppointment(row) {
     coverageType: row.coverage_type || null,
     hmoProvider: row.hmo_provider || null,
     hmoMemberNumber: row.hmo_member_number || null,
+    hmoCompanyName: row.hmo_company_name || null,
+    hmoBirthDate: row.hmo_birth_date || null,
+    hmoVerificationStatus: row.hmo_verification_status || "not_applicable",
     estimatedCost: row.estimated_cost != null ? Number(row.estimated_cost) : null,
     createdAt: row.created_at,
   };
@@ -792,6 +802,80 @@ function createStaffPortalRouter({
     }
   });
 
+  router.patch("/appointments/:id/hmo-verification", async (req, res) => {
+    const appointmentId = numericId(req.params.id);
+    const status = stringValue(req.body?.status, 40)?.toLowerCase();
+
+    if (!appointmentId || !HMO_VERIFICATION_STATUSES.has(status)) {
+      return res.status(400).json({
+        message:
+          "Provide a valid HMO verification status: pending_verification, verified, rejected, or not_applicable.",
+      });
+    }
+
+    try {
+      const result = await db.query(
+        `UPDATE patient_portal_appointments
+         SET hmo_verification_status = $1,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2
+         RETURNING *`,
+        [status, appointmentId]
+      );
+      if (!result.rows.length) {
+        return res.status(404).json({ message: "Appointment not found." });
+      }
+
+      const patientResult = await db.query(
+        `SELECT CONCAT_WS(' ', first_name, last_name) AS patient_name,
+                phone AS patient_phone,
+                email AS patient_email
+         FROM users
+         WHERE id::text = $1
+         LIMIT 1`,
+        [String(result.rows[0].user_id)]
+      );
+
+      if (result.rows[0].user_id) {
+        const title =
+          status === "verified"
+            ? "HMO coverage verified"
+            : status === "rejected"
+              ? "HMO coverage needs attention"
+              : "HMO verification updated";
+        const body =
+          status === "verified"
+            ? "Clinic staff verified your HMO details for this appointment."
+            : status === "rejected"
+              ? "Clinic staff could not verify your HMO details. Please contact the front desk."
+              : `Your HMO verification status is now ${status.replaceAll("_", " ")}.`;
+        await notifyPatient(db, {
+          userId: result.rows[0].user_id,
+          type: "appointment",
+          title,
+          body,
+        }).catch(() => {});
+      }
+
+      return res.json({
+        appointment: mapAppointment({
+          ...result.rows[0],
+          patient_name: patientResult.rows[0]?.patient_name,
+          patient_phone: patientResult.rows[0]?.patient_phone,
+          patient_email: patientResult.rows[0]?.patient_email,
+        }),
+      });
+    } catch (error) {
+      if (isMissingRelation(error)) {
+        return res.status(503).json({
+          message: "HMO verification fields are not available. Run npm run migrate:paper-gaps.",
+        });
+      }
+      console.error("Staff HMO verification error:", error.message);
+      return res.status(500).json({ message: "Unable to update HMO verification." });
+    }
+  });
+
   router.get("/dentist-availability", async (_req, res) => {
     try {
       const result = await db.query(
@@ -996,7 +1080,7 @@ function createStaffPortalRouter({
   router.get("/notifications", async (req, res) => {
     try {
       const result = await db.query(
-        `SELECT id, type, title, body, entity_type, entity_id, read_at, created_at
+        `SELECT id, type, title, body, entity_type, entity_id, action_status, read_at, created_at
          FROM staff_portal_notifications
          WHERE user_id = $1
          ORDER BY created_at DESC
@@ -1011,11 +1095,39 @@ function createStaffPortalRouter({
           body: notification.body,
           entityType: notification.entity_type,
           entityId: notification.entity_id,
+          actionStatus: notification.action_status || "pending",
           read: Boolean(notification.read_at),
           createdAt: notification.created_at,
         })),
       });
     } catch (error) {
+      if (isMissingRelation(error)) {
+        try {
+          const fallback = await db.query(
+            `SELECT id, type, title, body, entity_type, entity_id, read_at, created_at
+             FROM staff_portal_notifications
+             WHERE user_id = $1
+             ORDER BY created_at DESC
+             LIMIT 100`,
+            [String(req.staff.id)]
+          );
+          return res.json({
+            notifications: fallback.rows.map((notification) => ({
+              id: notification.id,
+              type: notification.type,
+              title: notification.title,
+              body: notification.body,
+              entityType: notification.entity_type,
+              entityId: notification.entity_id,
+              actionStatus: "pending",
+              read: Boolean(notification.read_at),
+              createdAt: notification.created_at,
+            })),
+          });
+        } catch (fallbackError) {
+          console.error("Staff notifications fallback error:", fallbackError.message);
+        }
+      }
       console.error("Staff notifications error:", error.message);
       return res.status(500).json({ message: "Unable to load notifications." });
     }
@@ -1057,6 +1169,58 @@ function createStaffPortalRouter({
     } catch (error) {
       console.error("Staff notification update error:", error.message);
       return res.status(500).json({ message: "Unable to update the notification." });
+    }
+  });
+
+  router.patch("/notifications/:id/action", async (req, res) => {
+    const notificationId = numericId(req.params.id);
+    const actionStatus = stringValue(req.body?.actionStatus, 40)?.toLowerCase();
+
+    if (!notificationId || !NOTIFICATION_ACTION_STATUSES.has(actionStatus)) {
+      return res.status(400).json({
+        message: "Provide a valid actionStatus: pending, in_progress, or completed.",
+      });
+    }
+
+    try {
+      const result = await db.query(
+        `UPDATE staff_portal_notifications
+         SET action_status = $1,
+             read_at = CASE
+               WHEN $1 = 'completed' THEN COALESCE(read_at, CURRENT_TIMESTAMP)
+               ELSE read_at
+             END
+         WHERE id = $2
+           AND user_id = $3
+         RETURNING id, type, title, body, entity_type, entity_id, action_status, read_at, created_at`,
+        [actionStatus, notificationId, String(req.staff.id)]
+      );
+      if (!result.rows.length) {
+        return res.status(404).json({ message: "Notification not found." });
+      }
+
+      const notification = result.rows[0];
+      return res.json({
+        notification: {
+          id: notification.id,
+          type: notification.type,
+          title: notification.title,
+          body: notification.body,
+          entityType: notification.entity_type,
+          entityId: notification.entity_id,
+          actionStatus: notification.action_status || actionStatus,
+          read: Boolean(notification.read_at),
+          createdAt: notification.created_at,
+        },
+      });
+    } catch (error) {
+      if (isMissingRelation(error)) {
+        return res.status(503).json({
+          message: "Notification action status is not available. Run npm run migrate:paper-gaps.",
+        });
+      }
+      console.error("Staff notification action error:", error.message);
+      return res.status(500).json({ message: "Unable to update notification action status." });
     }
   });
 

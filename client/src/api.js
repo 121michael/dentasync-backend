@@ -80,8 +80,22 @@ export const api = {
   cancelAppointment: (appointmentId) =>
     request(`/patient/appointments/${appointmentId}/cancel`, { method: "PATCH" }),
   getQueue: () => request("/patient/queue"),
+  getPublicQueueDisplay: () =>
+    request("/public/queue-display", { authenticated: false }),
   checkIn: (appointmentId) =>
     request("/patient/queue/check-in", { method: "POST", body: { appointmentId } }),
+  askClinicAssistant: (body) =>
+    request("/patient/assistant/chat", { method: "POST", body }),
+  getXrays: () => request("/patient/xrays"),
+  uploadXray: (file) => {
+    const body = new FormData();
+    body.append("xray", file);
+    return request("/patient/uploads/xray", { method: "POST", body });
+  },
+  getDependents: () => request("/patient/dependents"),
+  addDependent: (body) => request("/patient/dependents", { method: "POST", body }),
+  removeDependent: (dependentId) =>
+    request(`/patient/dependents/${dependentId}`, { method: "DELETE" }),
   updateQueueNotifications: (notifyWhenNear) =>
     request("/patient/queue/notifications", {
       method: "PATCH",
@@ -146,7 +160,11 @@ export const api = {
     request(`/staff/notifications/${notificationId}/read`, { method: "PATCH" }),
   markAllStaffNotificationsRead: () =>
     request("/staff/notifications/read-all", { method: "PATCH" }),
+  updateStaffNotificationAction: (notificationId, body) =>
+    request(`/staff/notifications/${notificationId}/action`, { method: "PATCH", body }),
   sendStaffSms: (body) => request("/staff/notifications/sms", { method: "POST", body }),
+  verifyStaffAppointmentHmo: (appointmentId, body) =>
+    request(`/staff/appointments/${appointmentId}/hmo-verification`, { method: "PATCH", body }),
   getStaffProfile: () => request("/staff/profile"),
   updateStaffProfile: (body) => request("/staff/profile", { method: "PUT", body }),
   updateStaffPassword: (body) => request("/staff/profile/password", { method: "POST", body }),
@@ -182,6 +200,13 @@ export const api = {
   getAdminPatient: (id) => request(`/admin/patients/${id}`),
   updateDentistPatient: (id, body) => request(`/dentist/patients/${id}`, { method: "PATCH", body }),
   deleteDentistPatient: (id) => request(`/dentist/patients/${id}`, { method: "DELETE" }),
+  getDentistDentalChart: (patientId) => request(`/dentist/patients/${patientId}/dental-chart`),
+  upsertDentistDentalChart: (patientId, body) =>
+    request(`/dentist/patients/${patientId}/dental-chart`, { method: "PUT", body }),
+  addDentistTreatment: (patientId, body) =>
+    request(`/dentist/patients/${patientId}/treatments`, { method: "POST", body }),
+  setDentistProcedureDuration: (queueEntryId, body) =>
+    request(`/dentist/queue/${queueEntryId}/duration`, { method: "PATCH", body }),
   getAdminStaff: (params = {}) => {
     const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value || value === 0));
     return request(`/admin/staff${search.size ? `?${search}` : ""}`);
@@ -262,6 +287,10 @@ export const api = {
   getAdminNotifications: () => request("/admin/notifications"),
   markAdminNotificationRead: (id) => request(`/admin/notifications/${id}/read`, { method: "PATCH" }),
   markAllAdminNotificationsRead: () => request("/admin/notifications/read-all", { method: "PATCH" }),
+  listAdminRfidAssignments: (search = "") =>
+    request(`/admin/rfid${search ? `?search=${encodeURIComponent(search)}` : ""}`),
+  assignAdminRfid: (body) => request("/admin/rfid", { method: "PUT", body }),
+  clearAdminRfid: (userId) => request(`/admin/rfid/${encodeURIComponent(userId)}`, { method: "DELETE" }),
   getAdminProfile: () => request("/admin/profile"),
   updateAdminProfile: (body) => request("/admin/profile", { method: "PUT", body }),
   updateAdminPassword: (body) => request("/admin/password", { method: "PUT", body }),

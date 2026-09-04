@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   Bell,
+  Bot,
   CalendarDays,
   CircleHelp,
   ClipboardList,
@@ -9,6 +10,7 @@ import {
   Moon,
   Sun,
   UserRound,
+  Users,
   UsersRound,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -22,6 +24,8 @@ const navigation = [
   { to: "/appointments", label: "Appointments", icon: CalendarDays },
   { to: "/queue", label: "Queue Status", icon: UsersRound },
   { to: "/records", label: "Treatment History", icon: ClipboardList },
+  { to: "/assistant", label: "AI Assistant", icon: Bot },
+  { to: "/family", label: "Family", icon: Users },
   { to: "/profile", label: "My Profile", icon: UserRound },
   { to: "/notifications", label: "Notifications", icon: Bell, alertKey: "unread" },
 ];

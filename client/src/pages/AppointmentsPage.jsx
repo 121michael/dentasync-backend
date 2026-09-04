@@ -82,6 +82,8 @@ export function AppointmentsPage() {
     coverageType: "self_pay",
     hmoProvider: "",
     hmoMemberNumber: "",
+    hmoCompanyName: "",
+    hmoBirthDate: "",
     notes: "",
   });
   const [authorizationFile, setAuthorizationFile] = useState(null);
@@ -135,6 +137,8 @@ export function AppointmentsPage() {
         appointmentTime: "",
         hmoProvider: "",
         hmoMemberNumber: "",
+        hmoCompanyName: "",
+        hmoBirthDate: "",
         notes: "",
       }));
       setAuthorizationFile(null);
@@ -305,6 +309,22 @@ export function AppointmentsPage() {
                   <label className="field">
                     <span>Member number</span>
                     <input name="hmoMemberNumber" value={form.hmoMemberNumber} onChange={updateForm} required />
+                  </label>
+                </div>
+                <div className="field-row">
+                  <label className="field">
+                    <span>Company name</span>
+                    <input name="hmoCompanyName" value={form.hmoCompanyName} onChange={updateForm} required />
+                  </label>
+                  <label className="field">
+                    <span>Birth date</span>
+                    <input
+                      type="date"
+                      name="hmoBirthDate"
+                      value={form.hmoBirthDate}
+                      onChange={updateForm}
+                      required
+                    />
                   </label>
                 </div>
                 <label className="file-drop">

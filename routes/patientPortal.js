@@ -7,6 +7,8 @@ const bcrypt = require("bcrypt");
 const express = require("express");
 const multer = require("multer");
 const { linkClinicalRecordsToUser } = require("../services/clinicalPatients");
+const { estimateWaitMinutesForPosition } = require("../services/waitTime");
+const { answerWithOptionalGemini } = require("../services/clinicAssistant");
 
 const SERVICES = [
   {
@@ -210,6 +212,9 @@ function mapAppointment(appointment) {
     location: appointment.clinic_location,
     coverage: appointment.coverage_type,
     hmoProvider: appointment.hmo_provider,
+    hmoCompanyName: appointment.hmo_company_name || null,
+    hmoBirthDate: normalizeIsoDate(appointment.hmo_birth_date),
+    hmoVerificationStatus: appointment.hmo_verification_status || "not_applicable",
     estimatedCost: Number(appointment.estimated_cost),
     status: appointment.status,
     notes: appointment.notes,
@@ -415,6 +420,8 @@ function createPatientPortalRouter({
       coverageType,
       hmoProvider,
       hmoMemberNumber,
+      hmoCompanyName,
+      hmoBirthDate,
       authorizationDocumentId,
       notes,
     } = req.body || {};
@@ -442,9 +449,14 @@ function createPatientPortalRouter({
 
     const normalizedProvider = stringValue(hmoProvider, 120);
     const normalizedMemberNumber = stringValue(hmoMemberNumber, 120);
+    const normalizedCompanyName = stringValue(hmoCompanyName, 160);
+    const normalizedBirthDate = isIsoDate(hmoBirthDate) ? hmoBirthDate : null;
     if (normalizedCoverage === "hmo" && (!normalizedProvider || !normalizedMemberNumber)) {
       return res.status(400).json({ message: "HMO provider and member number are required for HMO coverage." });
     }
+
+    const hmoVerificationStatus =
+      normalizedCoverage === "hmo" ? "pending_verification" : "not_applicable";
 
     try {
       if (authorizationDocumentId) {
@@ -510,9 +522,10 @@ function createPatientPortalRouter({
         `INSERT INTO patient_portal_appointments (
            user_id, service_id, service_name, dentist_id, dentist_name,
            appointment_date, appointment_time, coverage_type, hmo_provider,
-           hmo_member_number, authorization_document_id, estimated_cost, notes, status
+           hmo_member_number, hmo_company_name, hmo_birth_date, hmo_verification_status,
+           authorization_document_id, estimated_cost, notes, status
          ) VALUES (
-           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'pending'
+           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'pending'
          )
          RETURNING *`,
         [
@@ -526,6 +539,9 @@ function createPatientPortalRouter({
           normalizedCoverage,
           normalizedCoverage === "hmo" ? normalizedProvider : null,
           normalizedCoverage === "hmo" ? normalizedMemberNumber : null,
+          normalizedCoverage === "hmo" ? normalizedCompanyName : null,
+          normalizedCoverage === "hmo" ? normalizedBirthDate : null,
+          hmoVerificationStatus,
           authorizationDocumentId || null,
           service.estimatedCost,
           stringValue(notes, 1200),
@@ -704,7 +720,22 @@ function createPatientPortalRouter({
       );
       const position = Number(positionResult.rows[0].next_position);
       const token = `A-${String(position + 100).padStart(3, "0")}`;
-      const estimatedWaitMinutes = Math.max(0, (position - 1) * 12);
+
+      const aheadResult = await client.query(
+        `SELECT appointment.service_id, appointment.service_name
+         FROM patient_portal_queue_entries AS queue
+         LEFT JOIN patient_portal_appointments AS appointment
+           ON appointment.id = queue.appointment_id
+         WHERE DATE(queue.checked_in_at) = CURRENT_DATE
+           AND queue.status NOT IN ('completed', 'no_show')
+           AND queue.position < $1
+         ORDER BY queue.position ASC`,
+        [position]
+      );
+      const estimatedWaitMinutes = await estimateWaitMinutesForPosition(client, {
+        position,
+        aheadEntries: aheadResult.rows,
+      });
 
       const queueResult = await client.query(
         `INSERT INTO patient_portal_queue_entries (
@@ -1021,6 +1052,268 @@ function createPatientPortalRouter({
       fs.unlink(req.file.path, () => {});
       console.error("HMO upload error:", error.message);
       return res.status(500).json({ message: "Unable to save the authorization document." });
+    }
+  });
+
+  router.post("/assistant/chat", async (req, res) => {
+    const question = stringValue(req.body?.question || req.body?.message, 2000);
+    if (!question) {
+      return res.status(400).json({ message: "Please provide a question for the clinic assistant." });
+    }
+
+    try {
+      const response = await answerWithOptionalGemini(question, SERVICES);
+      return res.json({
+        answer: response.answer,
+        source: response.source,
+        model: response.model,
+      });
+    } catch (error) {
+      console.error("Clinic assistant error:", error.message);
+      return res.status(500).json({ message: "Unable to answer right now." });
+    }
+  });
+
+  router.post("/uploads/xray", upload.single("xray"), async (req, res) => {
+    if (!req.file) {
+      return res.status(400).json({ message: "Choose a PDF, JPG, or PNG x-ray file." });
+    }
+
+    try {
+      const documentId = crypto.randomUUID();
+      await db.query(
+        `INSERT INTO patient_portal_documents (
+           id, user_id, document_type, original_name, stored_name, mime_type, byte_size
+         ) VALUES ($1, $2, 'xray', $3, $4, $5, $6)`,
+        [
+          documentId,
+          userIdFor(req),
+          req.file.originalname,
+          req.file.filename,
+          req.file.mimetype,
+          req.file.size,
+        ]
+      );
+      await notifyClinicStaff({
+        type: "document",
+        title: "X-ray upload",
+        body: `A patient uploaded an x-ray: ${req.file.originalname}.`,
+        entityType: "document",
+        entityId: documentId,
+      });
+      return res.status(201).json({
+        document: {
+          id: documentId,
+          name: req.file.originalname,
+          size: req.file.size,
+          documentType: "xray",
+        },
+      });
+    } catch (error) {
+      fs.unlink(req.file.path, () => {});
+      console.error("X-ray upload error:", error.message);
+      return res.status(500).json({ message: "Unable to save the x-ray document." });
+    }
+  });
+
+  router.get("/xrays", async (req, res) => {
+    const userId = userIdFor(req);
+    try {
+      const [documentsResult, analysesResult] = await Promise.all([
+        db.query(
+          `SELECT id, original_name, mime_type, byte_size, created_at
+           FROM patient_portal_documents
+           WHERE user_id = $1
+             AND document_type = 'xray'
+           ORDER BY created_at DESC`,
+          [userId]
+        ),
+        db.query(
+          `SELECT id, document_id, status, summary, findings_json, confidence, disclaimer, created_at, updated_at
+           FROM patient_xray_analyses
+           WHERE user_id = $1
+           ORDER BY created_at DESC`,
+          [userId]
+        ).catch((error) => {
+          if (error?.code === "42P01") {
+            return { rows: [] };
+          }
+          throw error;
+        }),
+      ]);
+
+      const analysesByDocument = new Map(
+        analysesResult.rows.map((row) => [String(row.document_id), row])
+      );
+
+      return res.json({
+        xrays: documentsResult.rows.map((document) => {
+          const analysis = analysesByDocument.get(String(document.id));
+          return {
+            id: document.id,
+            name: document.original_name,
+            mimeType: document.mime_type,
+            size: document.byte_size,
+            uploadedAt: document.created_at,
+            analysis: analysis
+              ? {
+                  id: analysis.id,
+                  status: analysis.status,
+                  summary: analysis.summary,
+                  findings: analysis.findings_json,
+                  confidence: analysis.confidence != null ? Number(analysis.confidence) : null,
+                  disclaimer: analysis.disclaimer,
+                  createdAt: analysis.created_at,
+                  updatedAt: analysis.updated_at,
+                }
+              : {
+                  status: "unavailable",
+                  disclaimer:
+                    "Preliminary / supplementary information only. Not a clinical diagnosis.",
+                },
+          };
+        }),
+      });
+    } catch (error) {
+      console.error("Patient x-rays error:", error.message);
+      return res.status(500).json({ message: "Unable to load x-ray documents." });
+    }
+  });
+
+  router.get("/dependents", async (req, res) => {
+    const guardianUserId = userIdFor(req);
+    try {
+      const result = await db.query(
+        `SELECT
+           link.id,
+           link.relationship,
+           link.created_at,
+           dependent.id AS dependent_user_id,
+           dependent.first_name,
+           dependent.last_name,
+           dependent.email,
+           dependent.phone
+         FROM patient_portal_dependents AS link
+         JOIN users AS dependent ON dependent.id::text = link.dependent_user_id
+         WHERE link.guardian_user_id = $1
+         ORDER BY link.created_at DESC`,
+        [guardianUserId]
+      );
+      return res.json({
+        dependents: result.rows.map((row) => ({
+          id: row.id,
+          relationship: row.relationship,
+          createdAt: row.created_at,
+          dependentUserId: row.dependent_user_id,
+          firstName: row.first_name || "",
+          lastName: row.last_name || "",
+          fullName: `${row.first_name || ""} ${row.last_name || ""}`.trim(),
+          email: row.email || "",
+          phone: row.phone || "",
+        })),
+      });
+    } catch (error) {
+      if (error?.code === "42P01") {
+        return res.status(503).json({
+          message: "Dependents are not available. Run npm run migrate:paper-gaps.",
+        });
+      }
+      console.error("Patient dependents list error:", error.message);
+      return res.status(500).json({ message: "Unable to load dependents." });
+    }
+  });
+
+  router.post("/dependents", async (req, res) => {
+    const guardianUserId = userIdFor(req);
+    const dependentUserId = stringValue(
+      req.body?.dependentUserId || req.body?.userId || req.body?.dependentId,
+      120
+    );
+    const relationship = stringValue(req.body?.relationship, 80) || "dependent";
+
+    if (!dependentUserId) {
+      return res.status(400).json({ message: "Provide an existing patient user ID to link." });
+    }
+    if (dependentUserId === guardianUserId) {
+      return res.status(400).json({ message: "You cannot link yourself as a dependent." });
+    }
+
+    try {
+      const dependentResult = await db.query(
+        `SELECT id, first_name, last_name, email, phone
+         FROM users
+         WHERE id::text = $1
+           AND LOWER(role) = 'patient'
+           AND COALESCE(is_archived, FALSE) = FALSE
+         LIMIT 1`,
+        [dependentUserId]
+      );
+      if (!dependentResult.rows.length) {
+        return res.status(404).json({ message: "Dependent must be an existing patient account." });
+      }
+
+      const result = await db.query(
+        `INSERT INTO patient_portal_dependents (
+           guardian_user_id, dependent_user_id, relationship
+         ) VALUES ($1, $2, $3)
+         RETURNING id, guardian_user_id, dependent_user_id, relationship, created_at`,
+        [guardianUserId, dependentUserId, relationship]
+      );
+
+      const dependent = dependentResult.rows[0];
+      return res.status(201).json({
+        dependent: {
+          id: result.rows[0].id,
+          relationship: result.rows[0].relationship,
+          createdAt: result.rows[0].created_at,
+          dependentUserId: dependent.id,
+          firstName: dependent.first_name || "",
+          lastName: dependent.last_name || "",
+          fullName: `${dependent.first_name || ""} ${dependent.last_name || ""}`.trim(),
+          email: dependent.email || "",
+          phone: dependent.phone || "",
+        },
+      });
+    } catch (error) {
+      if (error?.code === "42P01") {
+        return res.status(503).json({
+          message: "Dependents are not available. Run npm run migrate:paper-gaps.",
+        });
+      }
+      if (error?.code === "23505") {
+        return res.status(409).json({ message: "That dependent is already linked." });
+      }
+      console.error("Patient dependent create error:", error.message);
+      return res.status(500).json({ message: "Unable to link the dependent." });
+    }
+  });
+
+  router.delete("/dependents/:id", async (req, res) => {
+    const linkId = Number.parseInt(req.params.id, 10);
+    if (!Number.isSafeInteger(linkId) || linkId <= 0) {
+      return res.status(400).json({ message: "A valid dependent link ID is required." });
+    }
+
+    try {
+      const result = await db.query(
+        `DELETE FROM patient_portal_dependents
+         WHERE id = $1
+           AND guardian_user_id = $2
+         RETURNING id`,
+        [linkId, userIdFor(req)]
+      );
+      if (!result.rows.length) {
+        return res.status(404).json({ message: "Dependent link not found." });
+      }
+      return res.json({ message: "Dependent unlinked.", id: result.rows[0].id });
+    } catch (error) {
+      if (error?.code === "42P01") {
+        return res.status(503).json({
+          message: "Dependents are not available. Run npm run migrate:paper-gaps.",
+        });
+      }
+      console.error("Patient dependent delete error:", error.message);
+      return res.status(500).json({ message: "Unable to unlink the dependent." });
     }
   });
 

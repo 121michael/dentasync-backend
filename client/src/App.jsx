@@ -8,10 +8,13 @@ import { AdminLayout } from "./components/AdminLayout";
 import { DentistLayout } from "./components/DentistLayout";
 import { AppointmentsPage } from "./pages/AppointmentsPage";
 import { AuthPage } from "./pages/AuthPage";
+import { ClinicAssistantPage } from "./pages/ClinicAssistantPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { FamilyPage } from "./pages/FamilyPage";
 import { NotificationsPage } from "./pages/NotificationsPage";
 import { PasswordResetPage } from "./pages/PasswordResetPage";
 import { ProfilePage } from "./pages/ProfilePage";
+import { QueueDisplayPage } from "./pages/QueueDisplayPage";
 import { QueuePage } from "./pages/QueuePage";
 import { RecordsPage } from "./pages/RecordsPage";
 import { StaffAppointmentsPage } from "./pages/StaffAppointmentsPage";
@@ -27,6 +30,7 @@ import { AdminDashboardPage } from "./pages/AdminDashboardPage";
 import { AdminManageUsersPage } from "./pages/AdminManageUsersPage";
 import { AdminArchivedPage } from "./pages/AdminArchivedPage";
 import { AdminPatientRecordsPage } from "./pages/AdminPatientRecordsPage";
+import { AdminRfidPage } from "./pages/AdminRfidPage";
 import { AdminSchedulePage } from "./pages/AdminSchedulePage";
 import { AdminAnalyticsPage } from "./pages/AdminAnalyticsPage";
 import { AdminAiSettingsPage } from "./pages/AdminAiSettingsPage";
@@ -116,6 +120,7 @@ function PortalRoutes() {
 
   return (
     <Routes>
+      <Route path="/queue-display" element={<QueueDisplayPage />} />
       <Route element={<PublicOnly />}>
         <Route path="/login" element={<AuthPage />} />
         <Route path="/register" element={<AuthPage />} />
@@ -130,6 +135,8 @@ function PortalRoutes() {
           <Route path="/appointments" element={<AppointmentsPage />} />
           <Route path="/queue" element={<QueuePage />} />
           <Route path="/records" element={<RecordsPage />} />
+          <Route path="/assistant" element={<ClinicAssistantPage />} />
+          <Route path="/family" element={<FamilyPage />} />
           <Route path="/profile" element={<ProfilePage theme={theme} onThemeChange={setTheme} />} />
           <Route path="/notifications" element={<NotificationsPage />} />
           <Route path="/support" element={<SupportPage />} />
@@ -153,6 +160,7 @@ function PortalRoutes() {
           <Route path="/admin/users" element={<AdminManageUsersPage />} />
           <Route path="/admin/archived-records" element={<AdminArchivedPage />} />
           <Route path="/admin/patient-records" element={<AdminPatientRecordsPage />} />
+          <Route path="/admin/rfid" element={<AdminRfidPage />} />
           <Route path="/admin/schedule" element={<AdminSchedulePage />} />
           <Route path="/admin/analytics" element={<AdminAnalyticsPage />} />
           <Route path="/admin/ai-settings" element={<AdminAiSettingsPage />} />

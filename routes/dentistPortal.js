@@ -4,6 +4,10 @@ const crypto = require("crypto");
 const bcrypt = require("bcrypt");
 const express = require("express");
 const clinicalPatients = require("../services/clinicalPatients");
+const {
+  estimateWaitMinutesForPosition,
+  getServiceDurationMinutes,
+} = require("../services/waitTime");
 
 const QUEUE_STATUS_MAP = {
   checked_in: "checked_in",
@@ -638,6 +642,193 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
     }
   });
 
+  async function recomputeWaitsBehind(client, afterPosition) {
+    const waitingResult = await client.query(
+      `SELECT
+         queue.id,
+         queue.position,
+         appointment.service_id,
+         appointment.service_name
+       FROM patient_portal_queue_entries AS queue
+       LEFT JOIN patient_portal_appointments AS appointment
+         ON appointment.id = queue.appointment_id
+       WHERE DATE(queue.checked_in_at) = CURRENT_DATE
+         AND queue.status IN ('checked_in', 'waiting', 'preparing')
+         AND queue.position > $1
+       ORDER BY queue.position ASC`,
+      [afterPosition]
+    );
+
+    for (const entry of waitingResult.rows) {
+      const aheadResult = await client.query(
+        `SELECT appointment.service_id, appointment.service_name
+         FROM patient_portal_queue_entries AS queue
+         LEFT JOIN patient_portal_appointments AS appointment
+           ON appointment.id = queue.appointment_id
+         WHERE DATE(queue.checked_in_at) = CURRENT_DATE
+           AND queue.status NOT IN ('completed', 'no_show')
+           AND queue.position < $1
+         ORDER BY queue.position ASC`,
+        [entry.position]
+      );
+      const waitMinutes = await estimateWaitMinutesForPosition(client, {
+        position: entry.position,
+        aheadEntries: aheadResult.rows,
+      });
+      await client.query(
+        `UPDATE patient_portal_queue_entries
+         SET estimated_wait_minutes = $1,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2`,
+        [waitMinutes, entry.id]
+      );
+    }
+  }
+
+  router.patch("/queue/:id/duration", async (req, res) => {
+    const queueId = numericId(req.params.id);
+    const durationMinutes = Number.parseInt(req.body?.durationMinutes, 10);
+
+    if (!queueId || !Number.isSafeInteger(durationMinutes) || durationMinutes <= 0) {
+      return res.status(400).json({ message: "Provide a positive durationMinutes value." });
+    }
+
+    const client = await db.connect();
+    let transactionOpen = false;
+    try {
+      await client.query("BEGIN");
+      transactionOpen = true;
+
+      const current = await assertQueueBelongsToDentist(client, queueId, req.dentist);
+      if (!current) {
+        await client.query("ROLLBACK");
+        transactionOpen = false;
+        return res.status(404).json({ message: "Queue entry not found for this dentist." });
+      }
+
+      const appointmentResult = await client.query(
+        `SELECT id, service_id, service_name, user_id
+         FROM patient_portal_appointments
+         WHERE id = $1
+         LIMIT 1`,
+        [current.appointment_id]
+      );
+      const appointment = appointmentResult.rows[0] || null;
+
+      if (appointment?.service_id || appointment?.service_name) {
+        await client.query(
+          `INSERT INTO clinic_service_durations (service_id, service_name, default_duration_minutes, updated_at)
+           VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+           ON CONFLICT (service_id) DO UPDATE SET
+             service_name = EXCLUDED.service_name,
+             default_duration_minutes = EXCLUDED.default_duration_minutes,
+             updated_at = CURRENT_TIMESTAMP`,
+          [
+            appointment.service_id || `custom-${appointment.id}`,
+            appointment.service_name || "Dental visit",
+            durationMinutes,
+          ]
+        ).catch((error) => {
+          if (error?.code !== "42P01") throw error;
+        });
+      }
+
+      await client.query(
+        `UPDATE patient_portal_queue_entries
+         SET estimated_wait_minutes = $1,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2`,
+        [durationMinutes, queueId]
+      );
+
+      if (appointment?.user_id) {
+        const clinical = await client.query(
+          `SELECT id
+           FROM clinic_patient_records
+           WHERE linked_user_id = $1
+             AND COALESCE(is_archived, FALSE) = FALSE
+           ORDER BY updated_at DESC
+           LIMIT 1`,
+          [String(appointment.user_id)]
+        ).catch((error) => {
+          if (error?.code === "42P01") return { rows: [] };
+          throw error;
+        });
+
+        if (clinical.rows[0]) {
+          const todayTreatment = await client.query(
+            `UPDATE clinic_patient_treatments
+             SET duration_minutes = $1
+             WHERE id = (
+               SELECT id
+               FROM clinic_patient_treatments
+               WHERE clinical_record_id = $2
+                 AND treatment_date = CURRENT_DATE
+               ORDER BY id DESC
+               LIMIT 1
+             )
+             RETURNING id`,
+            [durationMinutes, clinical.rows[0].id]
+          ).catch((error) => {
+            if (error?.code === "42703" || error?.code === "42P01") return { rows: [] };
+            throw error;
+          });
+
+          if (!todayTreatment.rows.length) {
+            await clinicalPatients
+              .addClinicalTreatment(
+                client,
+                clinical.rows[0].id,
+                {
+                  treatment: appointment.service_name || "Dental visit",
+                  dentistName: `Dr. ${`${req.dentist.first_name || ""} ${req.dentist.last_name || ""}`.trim()}`.trim(),
+                  treatmentDate: new Date().toISOString().slice(0, 10),
+                  status: "in_progress",
+                  durationMinutes,
+                },
+                { id: req.dentist.id, role: "dentist" }
+              )
+              .catch(() => {});
+          }
+        }
+      }
+
+      await recomputeWaitsBehind(client, current.position);
+      await client.query("COMMIT");
+      transactionOpen = false;
+
+      const refreshed = await db.query(
+        `SELECT id, token, position, status, estimated_wait_minutes
+         FROM patient_portal_queue_entries
+         WHERE id = $1`,
+        [queueId]
+      );
+
+      return res.json({
+        message: "Procedure duration saved and queue waits recomputed.",
+        queueEntry: {
+          id: refreshed.rows[0].id,
+          token: refreshed.rows[0].token,
+          sequence: refreshed.rows[0].position,
+          status: displayQueueStatus(refreshed.rows[0].status),
+          waitMinutes: Number(refreshed.rows[0].estimated_wait_minutes || 0),
+          durationMinutes,
+        },
+        serviceDurationMinutes: appointment
+          ? await getServiceDurationMinutes(db, appointment.service_id, appointment.service_name)
+          : durationMinutes,
+      });
+    } catch (error) {
+      if (transactionOpen) {
+        await client.query("ROLLBACK");
+      }
+      console.error("Dentist queue duration error:", error.message);
+      return res.status(500).json({ message: "Unable to update procedure duration." });
+    } finally {
+      client.release();
+    }
+  });
+
   router.get("/appointments", async (req, res) => {
     const scope = dentistScopeClause("appointment", req.dentist);
     try {
@@ -830,6 +1021,10 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
           date: row.treatmentDate,
           status: row.status,
           notes: row.notes || "",
+          durationMinutes: row.durationMinutes,
+          toothNumber: row.toothNumber,
+          diagnosisNotes: row.diagnosisNotes,
+          procedureDetails: row.procedureDetails,
         })),
       });
     } catch (error) {
@@ -840,6 +1035,222 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
       }
       console.error("Dentist patient detail error:", error.message);
       return res.status(500).json({ message: "Unable to load the patient record." });
+    }
+  });
+
+  router.get("/patients/:id/dental-chart", async (req, res) => {
+    const recordId = Number.parseInt(req.params.id, 10);
+    if (!Number.isSafeInteger(recordId) || recordId <= 0) {
+      return res.status(400).json({ message: "A valid patient record ID is required." });
+    }
+
+    try {
+      const record = await db.query(
+        `SELECT id FROM clinic_patient_records
+         WHERE id = $1 AND COALESCE(is_archived, FALSE) = FALSE
+         LIMIT 1`,
+        [recordId]
+      );
+      if (!record.rows.length) {
+        return res.status(404).json({ message: "Patient record not found." });
+      }
+
+      const result = await db.query(
+        `SELECT id, tooth_number, condition_label, notes, created_by, created_by_role, created_at, updated_at
+         FROM clinic_dental_chart_entries
+         WHERE clinical_record_id = $1
+         ORDER BY tooth_number ASC`,
+        [recordId]
+      );
+
+      return res.json({
+        patientId: recordId,
+        entries: result.rows.map((row) => ({
+          id: row.id,
+          toothNumber: row.tooth_number,
+          conditionLabel: row.condition_label,
+          notes: row.notes || "",
+          createdBy: row.created_by,
+          createdByRole: row.created_by_role,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+        })),
+      });
+    } catch (error) {
+      if (clinicalPatients.isMissingRelation(error) || error?.code === "42P01") {
+        return res.status(503).json({
+          message: "Dental chart is not available. Run npm run migrate:paper-gaps.",
+        });
+      }
+      console.error("Dentist dental chart load error:", error.message);
+      return res.status(500).json({ message: "Unable to load the dental chart." });
+    }
+  });
+
+  router.put("/patients/:id/dental-chart", async (req, res) => {
+    const recordId = Number.parseInt(req.params.id, 10);
+    if (!Number.isSafeInteger(recordId) || recordId <= 0) {
+      return res.status(400).json({ message: "A valid patient record ID is required." });
+    }
+
+    const entries = Array.isArray(req.body?.entries) ? req.body.entries : null;
+    const singleTooth = stringValue(req.body?.toothNumber, 20);
+    const singleCondition = stringValue(req.body?.conditionLabel || req.body?.condition, 120);
+
+    if (!entries && !(singleTooth && singleCondition)) {
+      return res.status(400).json({
+        message: "Provide entries[] or toothNumber with conditionLabel.",
+      });
+    }
+
+    const normalizedEntries = entries
+      ? entries
+          .map((entry) => ({
+            toothNumber: stringValue(entry?.toothNumber || entry?.tooth, 20),
+            conditionLabel: stringValue(entry?.conditionLabel || entry?.condition, 120),
+            notes: stringValue(entry?.notes, 2000),
+          }))
+          .filter((entry) => entry.toothNumber && entry.conditionLabel)
+      : [
+          {
+            toothNumber: singleTooth,
+            conditionLabel: singleCondition,
+            notes: stringValue(req.body?.notes, 2000),
+          },
+        ];
+
+    if (!normalizedEntries.length) {
+      return res.status(400).json({ message: "At least one valid chart entry is required." });
+    }
+
+    const client = await db.connect();
+    let transactionOpen = false;
+    try {
+      await client.query("BEGIN");
+      transactionOpen = true;
+
+      const record = await client.query(
+        `SELECT id FROM clinic_patient_records
+         WHERE id = $1 AND COALESCE(is_archived, FALSE) = FALSE
+         LIMIT 1
+         FOR UPDATE`,
+        [recordId]
+      );
+      if (!record.rows.length) {
+        await client.query("ROLLBACK");
+        transactionOpen = false;
+        return res.status(404).json({ message: "Patient record not found." });
+      }
+
+      const saved = [];
+      for (const entry of normalizedEntries) {
+        const result = await client.query(
+          `INSERT INTO clinic_dental_chart_entries (
+             clinical_record_id, tooth_number, condition_label, notes, created_by, created_by_role
+           ) VALUES ($1, $2, $3, $4, $5, 'dentist')
+           ON CONFLICT (clinical_record_id, tooth_number) DO UPDATE SET
+             condition_label = EXCLUDED.condition_label,
+             notes = EXCLUDED.notes,
+             updated_at = CURRENT_TIMESTAMP
+           RETURNING id, tooth_number, condition_label, notes, created_by, created_by_role, created_at, updated_at`,
+          [
+            recordId,
+            entry.toothNumber,
+            entry.conditionLabel,
+            entry.notes,
+            String(req.dentist.id),
+          ]
+        );
+        saved.push(result.rows[0]);
+      }
+
+      await client.query("COMMIT");
+      transactionOpen = false;
+
+      return res.json({
+        patientId: recordId,
+        entries: saved.map((row) => ({
+          id: row.id,
+          toothNumber: row.tooth_number,
+          conditionLabel: row.condition_label,
+          notes: row.notes || "",
+          createdBy: row.created_by,
+          createdByRole: row.created_by_role,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+        })),
+      });
+    } catch (error) {
+      if (transactionOpen) {
+        await client.query("ROLLBACK");
+      }
+      if (clinicalPatients.isMissingRelation(error) || error?.code === "42P01") {
+        return res.status(503).json({
+          message: "Dental chart is not available. Run npm run migrate:paper-gaps.",
+        });
+      }
+      console.error("Dentist dental chart save error:", error.message);
+      return res.status(500).json({ message: "Unable to save the dental chart." });
+    } finally {
+      client.release();
+    }
+  });
+
+  router.post("/patients/:id/treatments", async (req, res) => {
+    const recordId = Number.parseInt(req.params.id, 10);
+    if (!Number.isSafeInteger(recordId) || recordId <= 0) {
+      return res.status(400).json({ message: "A valid patient record ID is required." });
+    }
+
+    try {
+      const dentistName =
+        stringValue(req.body?.dentistName, 160) ||
+        `Dr. ${`${req.dentist.first_name || ""} ${req.dentist.last_name || ""}`.trim()}`.trim();
+
+      const row = await clinicalPatients.addClinicalTreatment(
+        db,
+        recordId,
+        {
+          treatment: req.body?.treatment,
+          procedureDetails: req.body?.procedureDetails,
+          diagnosisNotes: req.body?.diagnosisNotes,
+          durationMinutes: req.body?.durationMinutes,
+          toothNumber: req.body?.toothNumber,
+          treatmentDate: req.body?.treatmentDate,
+          status: req.body?.status,
+          notes: req.body?.notes,
+          dentistName,
+          clinicLocation: req.body?.clinicLocation,
+          coverageStatus: req.body?.coverageStatus,
+        },
+        { id: req.dentist.id, role: "dentist" }
+      );
+
+      return res.status(201).json({
+        treatment: {
+          id: row.id,
+          name: row.treatment,
+          dentist: row.dentist_name,
+          date: row.treatment_date,
+          status: row.status,
+          notes: row.notes || "",
+          durationMinutes: row.duration_minutes != null ? Number(row.duration_minutes) : null,
+          toothNumber: row.tooth_number || null,
+          diagnosisNotes: row.diagnosis_notes || null,
+          procedureDetails: row.procedure_details || null,
+        },
+      });
+    } catch (error) {
+      if (error.status) {
+        return res.status(error.status).json({ message: error.message });
+      }
+      if (clinicalPatients.isMissingRelation(error)) {
+        return res.status(503).json({
+          message: "Clinical patient records are not available. Run npm run migrate:clinical-records.",
+        });
+      }
+      console.error("Dentist treatment create error:", error.message);
+      return res.status(500).json({ message: "Unable to save the treatment." });
     }
   });
 

@@ -4,19 +4,24 @@ import {
   FileImage,
   FileText,
   LockKeyhole,
+  Upload,
 } from "lucide-react";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
 
 function displayDate(value) {
+  if (!value) return "—";
+  const date = new Date(value.includes?.("T") ? value : `${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return "—";
   return new Intl.DateTimeFormat("en-US", {
     month: "long",
     day: "numeric",
     year: "numeric",
-  }).format(new Date(`${value}T00:00:00`));
+  }).format(date);
 }
 
 function formatSize(size) {
+  if (size == null) return "";
   if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
@@ -32,12 +37,20 @@ function RecordSummary({ label, value, tone }) {
 
 export function RecordsPage() {
   const [recordsData, setRecordsData] = useState(null);
+  const [xrays, setXrays] = useState([]);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [uploading, setUploading] = useState(false);
 
   const load = useCallback(async () => {
     setError("");
     try {
-      setRecordsData(await api.getRecords());
+      const [recordsResponse, xrayResponse] = await Promise.all([
+        api.getRecords(),
+        api.getXrays().catch(() => ({ xrays: [] })),
+      ]);
+      setRecordsData(recordsResponse);
+      setXrays(xrayResponse.xrays || xrayResponse.items || []);
     } catch (loadError) {
       setError(loadError.message);
     }
@@ -63,6 +76,24 @@ export function RecordsPage() {
     }
   }
 
+  async function uploadXray(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setUploading(true);
+    setError("");
+    setSuccess("");
+    try {
+      const response = await api.uploadXray(file);
+      setSuccess(response.message || "X-ray uploaded successfully.");
+      await load();
+    } catch (uploadError) {
+      setError(uploadError.message);
+    } finally {
+      setUploading(false);
+    }
+  }
+
   if (error && !recordsData) return <ErrorState message={error} onRetry={load} />;
   if (!recordsData) return <LoadingState label="Opening your secure treatment archive" />;
 
@@ -75,12 +106,73 @@ export function RecordsPage() {
       />
 
       {error && <p className="inline-alert inline-alert--error">{error}</p>}
+      {success && <p className="inline-alert inline-alert--success">{success}</p>}
 
       <section className="records-summary-grid">
         <RecordSummary label="Total visits" value={recordsData.summary.totalVisits} tone="purple" />
         <RecordSummary label="Completed treatments" value={recordsData.summary.completedTreatments} tone="emerald" />
-        <RecordSummary label="X-rays available" value={recordsData.summary.xRaysAvailable} tone="violet" />
+        <RecordSummary
+          label="X-rays available"
+          value={Math.max(recordsData.summary.xRaysAvailable || 0, xrays.length)}
+          tone="violet"
+        />
         <RecordSummary label="Active treatment plans" value={recordsData.summary.activeTreatmentPlans} tone="amber" />
+      </section>
+
+      <section className="glass-card booking-section xray-upload-section">
+        <div className="card-heading">
+          <div>
+            <span className="eyebrow">Imaging</span>
+            <h2>X-ray uploads</h2>
+          </div>
+          <FileImage className="card-heading__icon" size={21} />
+        </div>
+        <p className="muted-copy">
+          Upload dental X-rays for your care team. Any automated analysis is preliminary only and is not a
+          clinical diagnosis.
+        </p>
+        <label className="file-drop">
+          <Upload size={21} />
+          <span>
+            <strong>{uploading ? "Uploading…" : "Upload X-ray image"}</strong>
+            <small>JPG, PNG, or PDF — securely stored in your records</small>
+          </span>
+          <input
+            type="file"
+            accept=".pdf,image/jpeg,image/png,image/webp"
+            disabled={uploading}
+            onChange={uploadXray}
+          />
+        </label>
+
+        {xrays.length ? (
+          <div className="xray-list">
+            {xrays.map((xray) => (
+              <article className="xray-row" key={xray.id || xray.documentId}>
+                <span className="document-row__icon">
+                  <FileImage size={18} />
+                </span>
+                <div>
+                  <strong>{xray.name || xray.fileName || "X-ray image"}</strong>
+                  <small>
+                    {displayDate(xray.uploadedAt || xray.createdAt || xray.date)}
+                    {xray.size ? ` · ${formatSize(xray.size)}` : ""}
+                  </small>
+                  <span className={`status-pill status-pill--${String(xray.status || "unavailable").replaceAll("_", "-")}`}>
+                    {String(xray.status || "unavailable").replaceAll("_", " ")}
+                  </span>
+                  {xray.summary ? <p className="muted-copy">{xray.summary}</p> : null}
+                  <p className="xray-disclaimer">
+                    {xray.disclaimer ||
+                      "Preliminary / supplementary information only. Not a clinical diagnosis."}
+                  </p>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="muted-copy">No X-rays uploaded yet.</p>
+        )}
       </section>
 
       <section className="records-layout">

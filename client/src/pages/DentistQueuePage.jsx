@@ -18,6 +18,7 @@ export function DentistQueuePage() {
   const [success, setSuccess] = useState("");
   const [busy, setBusy] = useState("");
   const [pendingComplete, setPendingComplete] = useState(null);
+  const [durationMinutes, setDurationMinutes] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -50,15 +51,32 @@ export function DentistQueuePage() {
     }
   }
 
+  function openComplete(entry) {
+    setPendingComplete(entry);
+    setDurationMinutes(
+      entry.durationMinutes || entry.duration_minutes || entry.procedureDurationMinutes || ""
+    );
+  }
+
   async function completePatient() {
     if (!pendingComplete) return;
     setBusy(`complete-${pendingComplete.id}`);
     setError("");
     setSuccess("");
     try {
-      await api.updateDentistQueue(pendingComplete.id, { status: "completed" });
+      const minutes = Number(durationMinutes);
+      if (pendingComplete.status === "in_chair" && Number.isFinite(minutes) && minutes > 0) {
+        await api.setDentistProcedureDuration(pendingComplete.id, {
+          durationMinutes: minutes,
+        });
+      }
+      await api.updateDentistQueue(pendingComplete.id, {
+        status: "completed",
+        ...(Number.isFinite(minutes) && minutes > 0 ? { durationMinutes: minutes } : {}),
+      });
       setSuccess(`${pendingComplete.patientName} marked as finished.`);
       setPendingComplete(null);
+      setDurationMinutes("");
       await load();
     } catch (completeError) {
       setError(completeError.message);
@@ -157,7 +175,7 @@ export function DentistQueuePage() {
                           <button
                             className="button button--primary button--compact"
                             disabled={Boolean(busy)}
-                            onClick={() => setPendingComplete(entry)}
+                            onClick={() => openComplete(entry)}
                           >
                             {busy === `complete-${entry.id}` ? "Saving…" : "Patient is finished"}
                           </button>
@@ -177,7 +195,7 @@ export function DentistQueuePage() {
                           <button
                             className="button button--secondary button--compact"
                             disabled={Boolean(busy)}
-                            onClick={() => setPendingComplete(entry)}
+                            onClick={() => openComplete(entry)}
                           >
                             Patient is finished
                           </button>
@@ -203,6 +221,18 @@ export function DentistQueuePage() {
             Mark {pendingComplete.patientName}&apos;s {pendingComplete.procedure} as finished and
             move them out of your active queue?
           </p>
+          {pendingComplete.status === "in_chair" ? (
+            <label className="field" style={{ marginBottom: "1rem" }}>
+              <span>Procedure duration (minutes)</span>
+              <input
+                type="number"
+                min="1"
+                value={durationMinutes}
+                onChange={(event) => setDurationMinutes(event.target.value)}
+                placeholder="e.g. 45"
+              />
+            </label>
+          ) : null}
           <div className="dentist-modal__actions">
             <button type="button" className="button button--secondary" onClick={() => setPendingComplete(null)}>
               Cancel

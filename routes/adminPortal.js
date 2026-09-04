@@ -2682,6 +2682,202 @@ function createAdminPortalRouter({
     }
   });
 
+  const RFID_ALLOWED_ROLES = new Set(["patient", "staff", "dentist", "admin"]);
+
+  router.get("/rfid", async (req, res) => {
+    const search = stringValue(req.query.search, 120);
+    const params = [];
+    const clauses = [
+      "LOWER(role) IN ('patient', 'staff', 'dentist', 'admin')",
+      "COALESCE(is_archived, FALSE) = FALSE",
+    ];
+
+    if (search) {
+      params.push(`%${search}%`);
+      clauses.push(`(
+        first_name ILIKE $${params.length}
+        OR last_name ILIKE $${params.length}
+        OR email ILIKE $${params.length}
+        OR phone ILIKE $${params.length}
+        OR id::text ILIKE $${params.length}
+        OR COALESCE(rfid_tag, '') ILIKE $${params.length}
+      )`);
+    }
+
+    try {
+      const result = await db.query(
+        `SELECT id, first_name, last_name, email, phone, role, status, rfid_tag, created_at
+         FROM users
+         WHERE ${clauses.join(" AND ")}
+         ORDER BY
+           CASE WHEN rfid_tag IS NULL OR BTRIM(rfid_tag) = '' THEN 1 ELSE 0 END,
+           last_name ASC NULLS LAST,
+           first_name ASC NULLS LAST
+         LIMIT 200`,
+        params
+      );
+      return res.json({
+        assignments: result.rows.map((row) => ({
+          userId: row.id,
+          firstName: row.first_name || "",
+          lastName: row.last_name || "",
+          fullName: `${row.first_name || ""} ${row.last_name || ""}`.trim(),
+          email: row.email || "",
+          phone: row.phone || "",
+          role: row.role,
+          status: row.status,
+          rfidTag: row.rfid_tag || null,
+          createdAt: row.created_at,
+        })),
+      });
+    } catch (error) {
+      if (isMissingRelation(error)) {
+        return res.status(503).json({
+          message: "RFID tags are not available. Run npm run migrate:staff-operations.",
+        });
+      }
+      console.error("Admin RFID list error:", error.message);
+      return res.status(500).json({ message: "Unable to load RFID assignments." });
+    }
+  });
+
+  router.put("/rfid", async (req, res) => {
+    const userId = stringValue(req.body?.userId, 120);
+    const rfidTag = stringValue(req.body?.rfidTag || req.body?.rfid_tag, 120);
+
+    if (!userId || !rfidTag) {
+      return res.status(400).json({ message: "userId and rfidTag are required." });
+    }
+
+    try {
+      const targetResult = await db.query(
+        `SELECT id, first_name, last_name, email, phone, role, status, rfid_tag
+         FROM users
+         WHERE id::text = $1
+           AND COALESCE(is_archived, FALSE) = FALSE
+         LIMIT 1`,
+        [userId]
+      );
+      const target = targetResult.rows[0];
+      if (!target) {
+        return res.status(404).json({ message: "User not found." });
+      }
+      if (!RFID_ALLOWED_ROLES.has(String(target.role || "").toLowerCase())) {
+        return res.status(400).json({
+          message: "RFID tags can only be assigned to patient, staff, dentist, or admin accounts.",
+        });
+      }
+
+      const result = await db.query(
+        `UPDATE users
+         SET rfid_tag = $1
+         WHERE id::text = $2
+         RETURNING id, first_name, last_name, email, phone, role, status, rfid_tag, created_at`,
+        [rfidTag, userId]
+      );
+
+      await writeAdminAudit(db, {
+        actorId: req.admin.id,
+        actorName: `${req.admin.first_name || ""} ${req.admin.last_name || ""}`.trim(),
+        actorRole: "admin",
+        action: "assign_rfid",
+        targetType: "user",
+        targetId: userId,
+        targetLabel: result.rows[0].email || userId,
+        result: "success",
+        detail: `Assigned RFID tag ${rfidTag}.`,
+        ipAddress: req.ip,
+      });
+
+      const row = result.rows[0];
+      return res.json({
+        assignment: {
+          userId: row.id,
+          firstName: row.first_name || "",
+          lastName: row.last_name || "",
+          fullName: `${row.first_name || ""} ${row.last_name || ""}`.trim(),
+          email: row.email || "",
+          phone: row.phone || "",
+          role: row.role,
+          status: row.status,
+          rfidTag: row.rfid_tag || null,
+          createdAt: row.created_at,
+        },
+      });
+    } catch (error) {
+      if (error?.code === "23505") {
+        return res.status(409).json({ message: "That RFID tag is already assigned to another user." });
+      }
+      if (isMissingRelation(error)) {
+        return res.status(503).json({
+          message: "RFID tags are not available. Run npm run migrate:staff-operations.",
+        });
+      }
+      console.error("Admin RFID assign error:", error.message);
+      return res.status(500).json({ message: "Unable to assign RFID tag." });
+    }
+  });
+
+  router.delete("/rfid/:userId", async (req, res) => {
+    const userId = stringValue(req.params.userId, 120);
+    if (!userId) {
+      return res.status(400).json({ message: "A valid user ID is required." });
+    }
+
+    try {
+      const result = await db.query(
+        `UPDATE users
+         SET rfid_tag = NULL
+         WHERE id::text = $1
+           AND COALESCE(is_archived, FALSE) = FALSE
+           AND LOWER(role) IN ('patient', 'staff', 'dentist', 'admin')
+         RETURNING id, first_name, last_name, email, phone, role, status, rfid_tag, created_at`,
+        [userId]
+      );
+      if (!result.rows.length) {
+        return res.status(404).json({ message: "User not found." });
+      }
+
+      await writeAdminAudit(db, {
+        actorId: req.admin.id,
+        actorName: `${req.admin.first_name || ""} ${req.admin.last_name || ""}`.trim(),
+        actorRole: "admin",
+        action: "clear_rfid",
+        targetType: "user",
+        targetId: userId,
+        targetLabel: result.rows[0].email || userId,
+        result: "success",
+        detail: "Cleared RFID tag assignment.",
+        ipAddress: req.ip,
+      });
+
+      const row = result.rows[0];
+      return res.json({
+        message: "RFID tag cleared.",
+        assignment: {
+          userId: row.id,
+          firstName: row.first_name || "",
+          lastName: row.last_name || "",
+          fullName: `${row.first_name || ""} ${row.last_name || ""}`.trim(),
+          email: row.email || "",
+          phone: row.phone || "",
+          role: row.role,
+          status: row.status,
+          rfidTag: null,
+          createdAt: row.created_at,
+        },
+      });
+    } catch (error) {
+      if (isMissingRelation(error)) {
+        return res.status(503).json({
+          message: "RFID tags are not available. Run npm run migrate:staff-operations.",
+        });
+      }
+      console.error("Admin RFID clear error:", error.message);
+      return res.status(500).json({ message: "Unable to clear RFID tag." });
+    }
+  });
+
   return router;
 }
 

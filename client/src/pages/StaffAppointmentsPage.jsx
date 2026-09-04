@@ -98,6 +98,26 @@ export function StaffAppointmentsPage() {
     }
   }
 
+  async function verifyHmo(appointment, status) {
+    setBusy(`hmo-${status}-${appointment.id}`);
+    try {
+      const response = await api.verifyStaffAppointmentHmo(appointment.id, {
+        status,
+        hmoVerificationStatus: status,
+      });
+      pushToast(response.message || `HMO marked as ${status.replaceAll("_", " ")}.`);
+      if (detail?.id === appointment.id) {
+        const refreshed = await api.getStaffAppointment(appointment.id);
+        setDetail(refreshed.appointment);
+      }
+      await load();
+    } catch (verifyError) {
+      pushToast(verifyError.message, "error");
+    } finally {
+      setBusy("");
+    }
+  }
+
   function openReschedule(appointment) {
     setRescheduleTarget(appointment);
     setRescheduleForm({
@@ -182,9 +202,16 @@ export function StaffAppointmentsPage() {
                     <td>{appointment.service || appointment.treatment}</td>
                     <td>{appointment.dentist}</td>
                     <td>
-                      {appointment.coverageType === "hmo"
-                        ? appointment.hmoProvider || "HMO"
-                        : appointment.coverageType || "Self-pay"}
+                      {appointment.coverageType === "hmo" ? (
+                        <>
+                          <strong>{appointment.hmoProvider || "HMO"}</strong>
+                          <small>
+                            {(appointment.hmoVerificationStatus || "pending").replaceAll("_", " ")}
+                          </small>
+                        </>
+                      ) : (
+                        appointment.coverageType || "Self-pay"
+                      )}
                     </td>
                     <td>
                       <StaffStatusBadge status={appointment.status} />
@@ -250,11 +277,48 @@ export function StaffAppointmentsPage() {
             <p><small>HMO status</small><strong>{detail.coverageType || "—"}</strong></p>
             <p><small>HMO provider</small><strong>{detail.hmoProvider || "—"}</strong></p>
             <p><small>HMO ID</small><strong>{detail.hmoMemberNumber || "—"}</strong></p>
-            <p><small>Company</small><strong>{detail.companyName || "—"}</strong></p>
-            <p><small>Birth date</small><strong>{detail.birthDate ? formatStaffDate(detail.birthDate) : "—"}</strong></p>
+            <p>
+              <small>Company</small>
+              <strong>{detail.hmoCompanyName || detail.companyName || "—"}</strong>
+            </p>
+            <p>
+              <small>Birth date</small>
+              <strong>
+                {detail.hmoBirthDate || detail.birthDate
+                  ? formatStaffDate(detail.hmoBirthDate || detail.birthDate)
+                  : "—"}
+              </strong>
+            </p>
+            <p>
+              <small>HMO verification</small>
+              <strong>
+                {(detail.hmoVerificationStatus || (detail.coverageType === "hmo" ? "pending" : "not_applicable")).replaceAll(
+                  "_",
+                  " "
+                )}
+              </strong>
+            </p>
           </div>
           {detail.notes ? <p className="staff-detail-copy">{detail.notes}</p> : null}
           <div className="staff-heading-actions">
+            {detail.coverageType === "hmo" ? (
+              <>
+                <button
+                  className="button button--primary"
+                  onClick={() => verifyHmo(detail, "verified")}
+                  disabled={Boolean(busy)}
+                >
+                  Verify HMO
+                </button>
+                <button
+                  className="button button--danger"
+                  onClick={() => verifyHmo(detail, "rejected")}
+                  disabled={Boolean(busy)}
+                >
+                  Reject HMO
+                </button>
+              </>
+            ) : null}
             {detail.status === "pending" ? (
               <button className="button button--primary" onClick={() => runAction(detail, "confirm")} disabled={Boolean(busy)}>
                 Confirm

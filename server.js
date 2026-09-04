@@ -229,6 +229,67 @@ app.get("/", async (req, res) => {
   }
 });
 
+// Public waiting-room board (no private medical details).
+app.get("/api/public/queue-display", async (_req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT
+         queue.token,
+         queue.position,
+         queue.status,
+         queue.estimated_wait_minutes,
+         appointment.service_name,
+         appointment.dentist_name
+       FROM patient_portal_queue_entries AS queue
+       LEFT JOIN patient_portal_appointments AS appointment
+         ON appointment.id = queue.appointment_id
+       WHERE DATE(queue.checked_in_at) = CURRENT_DATE
+         AND queue.status <> 'completed'
+       ORDER BY
+         CASE queue.status
+           WHEN 'dentist' THEN 0
+           WHEN 'preparing' THEN 1
+           WHEN 'waiting' THEN 2
+           ELSE 3
+         END,
+         queue.position ASC
+       LIMIT 40`
+    );
+
+    const rows = result.rows.map((row) => ({
+      token: row.token,
+      position: row.position,
+      status: row.status === "dentist" ? "in_chair" : row.status,
+      estimatedWaitMinutes: Number(row.estimated_wait_minutes || 0),
+      procedure: row.service_name || "Dental visit",
+      dentist: row.dentist_name || "Clinic team",
+    }));
+
+    const nowServing = rows.find((row) => row.status === "in_chair") || rows[0] || null;
+    const upNext = rows.filter((row) => row.token !== nowServing?.token).slice(0, 8);
+
+    return res.json({
+      clinicName: process.env.CLINIC_NAME || "Amethyst Dental Clinic",
+      updatedAt: new Date().toISOString(),
+      nowServing,
+      upNext,
+      queue: rows,
+    });
+  } catch (error) {
+    if (error?.code === "42P01") {
+      return res.json({
+        clinicName: process.env.CLINIC_NAME || "Amethyst Dental Clinic",
+        updatedAt: new Date().toISOString(),
+        nowServing: null,
+        upNext: [],
+        queue: [],
+      });
+    }
+    console.error("Queue display error:", error.message);
+    return res.status(500).json({ message: "Unable to load the queue display." });
+  }
+});
+
 // ==========================================
 // 2. AUTHENTICATION & USER MANAGEMENT
 // ==========================================

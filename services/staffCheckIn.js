@@ -1,5 +1,7 @@
 "use strict";
 
+const { estimateWaitMinutesForPosition } = require("./waitTime");
+
 function stringValue(value, maxLength = 500) {
   if (typeof value !== "string" && typeof value !== "number") {
     return null;
@@ -150,7 +152,22 @@ async function performStaffCheckIn(client, { appointment, staff, notifyClinicSta
   );
   const position = Number(positionResult.rows[0].next_position);
   const token = `A-${String(position + 100).padStart(3, "0")}`;
-  const estimatedWaitMinutes = Math.max(0, (position - 1) * 12);
+
+  const aheadResult = await client.query(
+    `SELECT appointment.service_id, appointment.service_name
+     FROM patient_portal_queue_entries AS queue
+     LEFT JOIN patient_portal_appointments AS appointment
+       ON appointment.id = queue.appointment_id
+     WHERE DATE(queue.checked_in_at) = CURRENT_DATE
+       AND queue.status NOT IN ('completed', 'no_show')
+       AND queue.position < $1
+     ORDER BY queue.position ASC`,
+    [position]
+  );
+  const estimatedWaitMinutes = await estimateWaitMinutesForPosition(client, {
+    position,
+    aheadEntries: aheadResult.rows,
+  });
 
   const queueResult = await client.query(
     `INSERT INTO patient_portal_queue_entries (
