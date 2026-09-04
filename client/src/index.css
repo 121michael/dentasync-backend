@@ -3677,68 +3677,202 @@ strong {
 
 /* —— Dental chart —— */
 .dentist-modal--wide {
-  width: min(100%, 860px);
+  width: min(100%, 1100px);
+  max-height: min(92vh, 980px);
+  overflow: auto;
 }
-.dental-chart {
-  margin: 0.35rem 0 1.15rem;
-  padding: 0.95rem;
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  background: var(--violet-wash);
+
+.fdi-chart-shell {
+  margin: 0.5rem 0 1.25rem;
 }
-.dental-chart__grid {
+.fdi-chart-layout {
   display: grid;
-  gap: 0.7rem;
-  margin: 0.75rem 0 1rem;
+  grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.9fr);
+  gap: 1rem;
+  align-items: start;
 }
-.dental-chart__arch-label {
-  display: block;
-  margin-bottom: 0.35rem;
+.fdi-chart-canvas {
+  padding: 1rem 1rem 0.85rem;
+}
+.fdi-chart-canvas__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: flex-start;
+  margin-bottom: 0.65rem;
+}
+.fdi-chart-canvas__head h2 {
+  margin: 0.15rem 0 0.25rem;
+}
+.fdi-chart-count {
   color: var(--text-muted);
-  font-size: 0.68rem;
+  white-space: nowrap;
+}
+.fdi-chart-scroll {
+  width: 100%;
+  overflow-x: auto;
+  padding-bottom: 0.35rem;
+}
+.fdi-chart-svg {
+  display: block;
+  width: min(100%, 720px);
+  height: auto;
+  margin: 0 auto;
+  user-select: none;
+}
+.fdi-arch-label {
+  fill: #6d28d9;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  opacity: 0.85;
+}
+.fdi-tooth {
+  cursor: pointer;
+  outline: none;
+}
+.fdi-tooth__shape {
+  fill: #f8f5ff;
+  stroke: #7c3aed;
+  stroke-width: 1.6;
+  transition: fill 0.15s ease, stroke 0.15s ease, filter 0.15s ease;
+}
+.fdi-tooth__number {
+  fill: #4c1d95;
+  font-size: 11px;
+  font-weight: 800;
+  pointer-events: none;
+}
+.fdi-tooth__dot {
+  fill: #7c3aed;
+  stroke: #fff;
+  stroke-width: 1;
+}
+.fdi-tooth:hover .fdi-tooth__shape,
+.fdi-tooth:focus-visible .fdi-tooth__shape {
+  filter: drop-shadow(0 0 6px rgba(124, 58, 237, 0.35));
+  stroke-width: 2.2;
+}
+.fdi-tooth.is-selected .fdi-tooth__shape {
+  stroke: #4c1d95;
+  stroke-width: 2.6;
+  filter: drop-shadow(0 0 8px rgba(76, 29, 149, 0.45));
+}
+.fdi-tooth--healthy .fdi-tooth__shape { fill: #eefbf5; stroke: #0f9f6e; }
+.fdi-tooth--decay .fdi-tooth__shape,
+.fdi-tooth--fractured .fdi-tooth__shape,
+.fdi-tooth--needs_attention .fdi-tooth__shape { fill: #fff4e8; stroke: #c2410c; }
+.fdi-tooth--treated .fdi-tooth__shape { fill: #eaf3ff; stroke: #2563eb; }
+.fdi-tooth--under_treatment .fdi-tooth__shape { fill: #f3e8ff; stroke: #7c3aed; }
+.fdi-tooth--missing .fdi-tooth__shape {
+  fill: #ece8f1;
+  stroke: #8b8198;
+  stroke-dasharray: 3 2;
+}
+.fdi-tooth--missing .fdi-tooth__number {
+  fill: #8b8198;
+  text-decoration: line-through;
+}
+.fdi-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.55rem;
+}
+.fdi-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.28rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+.fdi-legend__item::before {
+  content: "";
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 999px;
+  border: 1.5px solid currentColor;
+}
+.fdi-legend__item--healthy { color: #0f9f6e; }
+.fdi-legend__item--healthy::before { background: #eefbf5; }
+.fdi-legend__item--decay { color: #c2410c; }
+.fdi-legend__item--decay::before { background: #fff4e8; }
+.fdi-legend__item--treated { color: #2563eb; }
+.fdi-legend__item--treated::before { background: #eaf3ff; }
+.fdi-legend__item--under_treatment { color: #7c3aed; }
+.fdi-legend__item--under_treatment::before { background: #f3e8ff; }
+.fdi-legend__item--missing { color: #8b8198; }
+.fdi-legend__item--missing::before { background: #ece8f1; }
+
+.fdi-panel {
+  padding: 1rem;
+  position: sticky;
+  top: 0.5rem;
+}
+.fdi-panel__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: flex-start;
+  margin-bottom: 0.85rem;
+}
+.fdi-panel__head h3 {
+  margin: 0.15rem 0 0;
+}
+.fdi-fieldset {
+  margin: 0 0 0.85rem;
+  padding: 0.7rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fff;
+}
+.fdi-fieldset legend {
+  padding: 0 0.35rem;
+  color: var(--text-muted);
+  font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
-.dental-chart__row {
+.fdi-check-grid {
   display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
-  gap: 0.35rem;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
 }
-.dental-chart__tooth {
-  aspect-ratio: 1;
-  border: 1px solid var(--amethyst-300);
+.fdi-check {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.45rem;
   border-radius: 10px;
-  color: var(--amethyst-800);
-  background: #fff;
-  font-size: 0.72rem;
-  font-weight: 750;
+  border: 1px solid transparent;
+  font-size: 0.84rem;
   cursor: pointer;
-  transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
 }
-.dental-chart__tooth:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 8px 16px rgba(91, 42, 134, 0.12);
+.fdi-check.is-checked {
+  border-color: rgba(124, 58, 237, 0.28);
+  background: var(--violet-wash);
 }
-.dental-chart__tooth.is-selected {
-  outline: 2px solid var(--amethyst-600);
-  outline-offset: 1px;
+.fdi-meta {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0.35rem 0 0.85rem;
+  color: var(--text-muted);
 }
-.dental-chart__tooth--healthy { background: #e8f8f1; color: var(--emerald); }
-.dental-chart__tooth--caries,
-.dental-chart__tooth--fracture { background: var(--danger-wash); color: var(--danger); }
-.dental-chart__tooth--filled,
-.dental-chart__tooth--crown { background: #eaf3ff; color: #3974ad; }
-.dental-chart__tooth--missing { background: #ece8f1; color: var(--text-muted); text-decoration: line-through; }
-.dental-chart__tooth--root_canal { background: #f3e8ff; color: var(--amethyst-700); }
-.dental-chart__tooth--watch { background: var(--amber-wash); color: var(--amber); }
-.dental-chart__editor,
+.fdi-panel__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.55rem;
+}
+
 .dentist-treatment-form {
   display: grid;
   gap: 0.75rem;
-  margin-top: 0.75rem;
-}
-.dentist-treatment-form {
   margin: 0 0 1rem;
   padding: 0.95rem;
   border: 1px solid var(--border);
@@ -3746,8 +3880,18 @@ strong {
   background: var(--surface);
 }
 
+@media (max-width: 960px) {
+  .fdi-chart-layout {
+    grid-template-columns: 1fr;
+  }
+  .fdi-panel {
+    position: static;
+  }
+  .dentist-modal--wide {
+    width: min(100%, 96vw);
+  }
+}
+
 @media (max-width: 760px) {
-  .dental-chart__row { gap: 0.25rem; }
-  .dental-chart__tooth { font-size: 0.62rem; border-radius: 8px; }
   .assistant-composer { flex-direction: column; align-items: stretch; }
 }

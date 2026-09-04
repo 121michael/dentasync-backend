@@ -1147,25 +1147,56 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
       }
 
       const result = await db.query(
-        `SELECT id, tooth_number, condition_label, notes, created_by, created_by_role, created_at, updated_at
+        `SELECT
+           id, tooth_number, condition_label, notes, created_by, created_by_role,
+           created_at, updated_at,
+           COALESCE(tooth_status, 'healthy') AS tooth_status,
+           COALESCE(conditions_json, '[]'::jsonb) AS conditions_json,
+           COALESCE(treatments_json, '[]'::jsonb) AS treatments_json,
+           updated_by
          FROM clinic_dental_chart_entries
          WHERE clinical_record_id = $1
          ORDER BY tooth_number ASC`,
         [recordId]
-      );
+      ).catch(async (error) => {
+        if (error?.code === "42703") {
+          // Enrichment columns not migrated yet — fall back to base chart columns.
+          return db.query(
+            `SELECT id, tooth_number, condition_label, notes, created_by, created_by_role, created_at, updated_at
+             FROM clinic_dental_chart_entries
+             WHERE clinical_record_id = $1
+             ORDER BY tooth_number ASC`,
+            [recordId]
+          );
+        }
+        throw error;
+      });
 
       return res.json({
         patientId: recordId,
-        entries: result.rows.map((row) => ({
-          id: row.id,
-          toothNumber: row.tooth_number,
-          conditionLabel: row.condition_label,
-          notes: row.notes || "",
-          createdBy: row.created_by,
-          createdByRole: row.created_by_role,
-          createdAt: row.created_at,
-          updatedAt: row.updated_at,
-        })),
+        entries: result.rows.map((row) => {
+          const conditions = Array.isArray(row.conditions_json)
+            ? row.conditions_json
+            : row.condition_label
+              ? [row.condition_label]
+              : [];
+          const treatments = Array.isArray(row.treatments_json) ? row.treatments_json : [];
+          return {
+            id: row.id,
+            toothNumber: row.tooth_number,
+            conditionLabel: row.condition_label,
+            conditions,
+            condition: conditions,
+            treatments,
+            status: row.tooth_status || "healthy",
+            notes: row.notes || "",
+            createdBy: row.created_by,
+            createdByRole: row.created_by_role,
+            updatedBy: row.updated_by || row.created_by || null,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+          };
+        }),
       });
     } catch (error) {
       if (clinicalPatients.isMissingRelation(error) || error?.code === "42P01") {
@@ -1187,28 +1218,62 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
     const entries = Array.isArray(req.body?.entries) ? req.body.entries : null;
     const singleTooth = stringValue(req.body?.toothNumber, 20);
     const singleCondition = stringValue(req.body?.conditionLabel || req.body?.condition, 120);
+    const bodyConditions = Array.isArray(req.body?.conditions)
+      ? req.body.conditions
+      : Array.isArray(req.body?.condition)
+        ? req.body.condition
+        : null;
+    const bodyTreatments = Array.isArray(req.body?.treatments)
+      ? req.body.treatments
+      : Array.isArray(req.body?.treatment)
+        ? req.body.treatment
+        : [];
+    const bodyStatus = stringValue(req.body?.status || req.body?.toothStatus, 40) || "healthy";
 
-    if (!entries && !(singleTooth && singleCondition)) {
+    if (!entries && !singleTooth) {
       return res.status(400).json({
-        message: "Provide entries[] or toothNumber with conditionLabel.",
+        message: "Provide entries[] or toothNumber with chart fields.",
       });
     }
 
+    function normalizeEntry(entry) {
+      const toothNumber = stringValue(entry?.toothNumber || entry?.tooth, 20);
+      const conditions = Array.isArray(entry?.conditions)
+        ? entry.conditions.map((item) => stringValue(String(item), 80)).filter(Boolean)
+        : Array.isArray(entry?.condition)
+          ? entry.condition.map((item) => stringValue(String(item), 80)).filter(Boolean)
+          : stringValue(entry?.conditionLabel || entry?.condition, 120)
+            ? [stringValue(entry?.conditionLabel || entry?.condition, 120)]
+            : ["healthy"];
+      const treatments = Array.isArray(entry?.treatments)
+        ? entry.treatments.map((item) => stringValue(String(item), 80)).filter(Boolean)
+        : Array.isArray(entry?.treatment)
+          ? entry.treatment.map((item) => stringValue(String(item), 80)).filter(Boolean)
+          : [];
+      const status = stringValue(entry?.status || entry?.toothStatus, 40) || "healthy";
+      const conditionLabel = conditions[0] || "healthy";
+      return {
+        toothNumber,
+        conditionLabel,
+        conditions,
+        treatments,
+        status,
+        notes: stringValue(entry?.notes, 2000),
+      };
+    }
+
     const normalizedEntries = entries
-      ? entries
-          .map((entry) => ({
-            toothNumber: stringValue(entry?.toothNumber || entry?.tooth, 20),
-            conditionLabel: stringValue(entry?.conditionLabel || entry?.condition, 120),
-            notes: stringValue(entry?.notes, 2000),
-          }))
-          .filter((entry) => entry.toothNumber && entry.conditionLabel)
+      ? entries.map(normalizeEntry).filter((entry) => entry.toothNumber)
       : [
-          {
+          normalizeEntry({
             toothNumber: singleTooth,
-            conditionLabel: singleCondition,
-            notes: stringValue(req.body?.notes, 2000),
-          },
-        ];
+            conditionLabel: singleCondition || (bodyConditions && bodyConditions[0]) || bodyStatus,
+            conditions: bodyConditions,
+            treatments: bodyTreatments,
+            status: bodyStatus,
+            notes: req.body?.notes,
+          }),
+        ].filter((entry) => entry.toothNumber);
 
     if (!normalizedEntries.length) {
       return res.status(400).json({ message: "At least one valid chart entry is required." });
@@ -1233,43 +1298,84 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
         return res.status(404).json({ message: "Patient record not found." });
       }
 
+      const dentistId = String(req.dentist.id);
       const saved = [];
       for (const entry of normalizedEntries) {
-        const result = await client.query(
-          `INSERT INTO clinic_dental_chart_entries (
-             clinical_record_id, tooth_number, condition_label, notes, created_by, created_by_role
-           ) VALUES ($1, $2, $3, $4, $5, 'dentist')
-           ON CONFLICT (clinical_record_id, tooth_number) DO UPDATE SET
-             condition_label = EXCLUDED.condition_label,
-             notes = EXCLUDED.notes,
-             updated_at = CURRENT_TIMESTAMP
-           RETURNING id, tooth_number, condition_label, notes, created_by, created_by_role, created_at, updated_at`,
-          [
-            recordId,
-            entry.toothNumber,
-            entry.conditionLabel,
-            entry.notes,
-            String(req.dentist.id),
-          ]
-        );
-        saved.push(result.rows[0]);
+        let result;
+        try {
+          result = await client.query(
+            `INSERT INTO clinic_dental_chart_entries (
+               clinical_record_id, tooth_number, condition_label, notes,
+               created_by, created_by_role, tooth_status, conditions_json, treatments_json, updated_by
+             ) VALUES ($1, $2, $3, $4, $5, 'dentist', $6, $7::jsonb, $8::jsonb, $5)
+             ON CONFLICT (clinical_record_id, tooth_number) DO UPDATE SET
+               condition_label = EXCLUDED.condition_label,
+               notes = EXCLUDED.notes,
+               tooth_status = EXCLUDED.tooth_status,
+               conditions_json = EXCLUDED.conditions_json,
+               treatments_json = EXCLUDED.treatments_json,
+               updated_by = EXCLUDED.updated_by,
+               updated_at = CURRENT_TIMESTAMP
+             RETURNING
+               id, tooth_number, condition_label, notes, created_by, created_by_role,
+               created_at, updated_at, tooth_status, conditions_json, treatments_json, updated_by`,
+            [
+              recordId,
+              entry.toothNumber,
+              entry.conditionLabel,
+              entry.notes,
+              dentistId,
+              entry.status,
+              JSON.stringify(entry.conditions),
+              JSON.stringify(entry.treatments),
+            ]
+          );
+        } catch (columnError) {
+          if (columnError?.code !== "42703") throw columnError;
+          result = await client.query(
+            `INSERT INTO clinic_dental_chart_entries (
+               clinical_record_id, tooth_number, condition_label, notes, created_by, created_by_role
+             ) VALUES ($1, $2, $3, $4, $5, 'dentist')
+             ON CONFLICT (clinical_record_id, tooth_number) DO UPDATE SET
+               condition_label = EXCLUDED.condition_label,
+               notes = EXCLUDED.notes,
+               updated_at = CURRENT_TIMESTAMP
+             RETURNING id, tooth_number, condition_label, notes, created_by, created_by_role, created_at, updated_at`,
+            [recordId, entry.toothNumber, entry.conditionLabel, entry.notes, dentistId]
+          );
+        }
+        saved.push({ ...result.rows[0], _entry: entry });
       }
 
       await client.query("COMMIT");
       transactionOpen = false;
 
       return res.json({
+        message: "Dental chart updated successfully.",
         patientId: recordId,
-        entries: saved.map((row) => ({
-          id: row.id,
-          toothNumber: row.tooth_number,
-          conditionLabel: row.condition_label,
-          notes: row.notes || "",
-          createdBy: row.created_by,
-          createdByRole: row.created_by_role,
-          createdAt: row.created_at,
-          updatedAt: row.updated_at,
-        })),
+        entries: saved.map((row) => {
+          const conditions = Array.isArray(row.conditions_json)
+            ? row.conditions_json
+            : row._entry?.conditions || (row.condition_label ? [row.condition_label] : []);
+          const treatments = Array.isArray(row.treatments_json)
+            ? row.treatments_json
+            : row._entry?.treatments || [];
+          return {
+            id: row.id,
+            toothNumber: row.tooth_number,
+            conditionLabel: row.condition_label,
+            conditions,
+            condition: conditions,
+            treatments,
+            status: row.tooth_status || row._entry?.status || "healthy",
+            notes: row.notes || "",
+            createdBy: row.created_by,
+            createdByRole: row.created_by_role,
+            updatedBy: row.updated_by || row.created_by || null,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+          };
+        }),
       });
     } catch (error) {
       if (transactionOpen) {
@@ -1284,6 +1390,39 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
       return res.status(500).json({ message: "Unable to save the dental chart." });
     } finally {
       client.release();
+    }
+  });
+
+  router.delete("/patients/:id/dental-chart/:toothNumber", async (req, res) => {
+    const recordId = Number.parseInt(req.params.id, 10);
+    const toothNumber = stringValue(req.params.toothNumber, 20);
+    if (!Number.isSafeInteger(recordId) || recordId <= 0 || !toothNumber) {
+      return res.status(400).json({ message: "A valid patient record ID and tooth number are required." });
+    }
+
+    try {
+      const result = await db.query(
+        `DELETE FROM clinic_dental_chart_entries
+         WHERE clinical_record_id = $1
+           AND tooth_number = $2
+         RETURNING id, tooth_number`,
+        [recordId, toothNumber]
+      );
+      if (!result.rows.length) {
+        return res.status(404).json({ message: "Chart entry not found for that tooth." });
+      }
+      return res.json({
+        message: `Tooth ${toothNumber} chart entry removed.`,
+        toothNumber: result.rows[0].tooth_number,
+      });
+    } catch (error) {
+      if (clinicalPatients.isMissingRelation(error) || error?.code === "42P01") {
+        return res.status(503).json({
+          message: "Dental chart is not available. Run npm run migrate:paper-gaps.",
+        });
+      }
+      console.error("Dentist dental chart delete error:", error.message);
+      return res.status(500).json({ message: "Unable to remove the dental chart entry." });
     }
   });
 

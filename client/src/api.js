@@ -206,6 +206,10 @@ export const api = {
   getDentistDentalChart: (patientId) => request(`/dentist/patients/${patientId}/dental-chart`),
   upsertDentistDentalChart: (patientId, body) =>
     request(`/dentist/patients/${patientId}/dental-chart`, { method: "PUT", body }),
+  deleteDentistDentalChartTooth: (patientId, toothNumber) =>
+    request(`/dentist/patients/${patientId}/dental-chart/${encodeURIComponent(toothNumber)}`, {
+      method: "DELETE",
+    }),
   addDentistTreatment: (patientId, body) =>
     request(`/dentist/patients/${patientId}/treatments`, { method: "POST", body }),
   setDentistProcedureDuration: (queueEntryId, body) =>
