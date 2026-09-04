@@ -120,6 +120,20 @@ export function StaffPatientsPage() {
     }
   }
 
+  async function verifyPatient(patient, status = "verified") {
+    setBusy(`verify-${patient.id}`);
+    try {
+      const response = await api.verifyStaffPatient(patient.id, { status });
+      pushToast(response.message || "Patient verification updated.");
+      setDetail(response.patient);
+      await load();
+    } catch (verifyError) {
+      pushToast(verifyError.message, "error");
+    } finally {
+      setBusy("");
+    }
+  }
+
   if (error && !patients) return <ErrorState message={error} onRetry={load} />;
   if (!patients) return <LoadingState label="Loading patient records…" />;
 
@@ -135,7 +149,7 @@ export function StaffPatientsPage() {
             <p>Maintain patient information and assist with registration. Permanent system deletion remains admin-only.</p>
           </div>
           <button className="button button--primary" onClick={openCreate}>
-            <Plus size={16} /> Add New Patient
+            <Plus size={16} /> Register Patient
           </button>
         </div>
 
@@ -186,7 +200,9 @@ export function StaffPatientsPage() {
                     <td>{patient.lastVisit ? formatStaffDate(patient.lastVisit) : "—"}</td>
                     <td>—</td>
                     <td>
-                      <StaffStatusBadge status={patient.accountStatus || "clinical_record"} />
+                      <StaffStatusBadge
+                        status={patient.staffVerificationStatus || patient.accountStatus || "clinical_record"}
+                      />
                     </td>
                     <td>
                       <div className="staff-row-actions">
@@ -245,6 +261,12 @@ export function StaffPatientsPage() {
             <p><small>Gender</small><strong>{detail.gender || detail.profile?.gender || "—"}</strong></p>
             <p><small>Birth date</small><strong>{detail.dateOfBirth || detail.profile?.date_of_birth || "—"}</strong></p>
             <p><small>Status</small><strong>{detail.accountStatus}</strong></p>
+            <p>
+              <small>Verification</small>
+              <strong>
+                <StaffStatusBadge status={detail.staffVerificationStatus || "pending"} />
+              </strong>
+            </p>
           </div>
           <h3 className="admin-subheading">Treatment history</h3>
           <div className="admin-history-list">
@@ -264,6 +286,24 @@ export function StaffPatientsPage() {
             )}
           </div>
           <div className="staff-heading-actions">
+            {detail.staffVerificationStatus !== "verified" ? (
+              <button
+                className="button button--primary"
+                onClick={() => verifyPatient(detail, "verified")}
+                disabled={Boolean(busy)}
+              >
+                Verify Patient
+              </button>
+            ) : null}
+            {detail.staffVerificationStatus !== "rejected" ? (
+              <button
+                className="button button--secondary"
+                onClick={() => verifyPatient(detail, "rejected")}
+                disabled={Boolean(busy)}
+              >
+                Reject verification
+              </button>
+            ) : null}
             <button className="button button--secondary" onClick={() => openEdit(detail)}>
               Edit information
             </button>

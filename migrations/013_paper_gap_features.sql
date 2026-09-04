@@ -72,6 +72,12 @@ CREATE TABLE IF NOT EXISTS patient_portal_dependents (
 CREATE INDEX IF NOT EXISTS patient_portal_dependents_guardian_idx
   ON patient_portal_dependents (guardian_user_id);
 
+-- Staff identity verification for clinical patient records
+ALTER TABLE clinic_patient_records
+  ADD COLUMN IF NOT EXISTS staff_verification_status TEXT NOT NULL DEFAULT 'pending',
+  ADD COLUMN IF NOT EXISTS staff_verified_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS staff_verified_by TEXT;
+
 -- Optional X-ray analysis results (populated only when real analysis is configured)
 CREATE TABLE IF NOT EXISTS patient_xray_analyses (
   id BIGSERIAL PRIMARY KEY,

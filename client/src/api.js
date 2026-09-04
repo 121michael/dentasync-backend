@@ -147,6 +147,8 @@ export const api = {
   getStaffPatient: (patientId) => request(`/staff/patients/${patientId}`),
   updateStaffPatient: (patientId, body) =>
     request(`/staff/patients/${patientId}`, { method: "PATCH", body }),
+  verifyStaffPatient: (patientId, body) =>
+    request(`/staff/patients/${patientId}/verification`, { method: "PATCH", body }),
   deleteStaffPatient: (patientId) =>
     request(`/staff/patients/${patientId}`, { method: "DELETE" }),
   getStaffBilling: (search = "") =>
@@ -181,6 +183,7 @@ export const api = {
     request(`/dentist/patients${search ? `?search=${encodeURIComponent(search)}` : ""}`),
   createDentistPatient: (body) => request("/dentist/patients", { method: "POST", body }),
   getDentistPatient: (patientId) => request(`/dentist/patients/${patientId}`),
+  getDentistPatientXrays: (patientId) => request(`/dentist/patients/${patientId}/xrays`),
   getDentistProfile: () => request("/dentist/profile"),
   updateDentistProfile: (body) => request("/dentist/profile", { method: "PUT", body }),
   getAdminDashboard: () => request("/admin/dashboard"),

@@ -98,6 +98,36 @@ export function DentistQueuePage() {
     }
   }
 
+  async function startTreatment(entry) {
+    setBusy(`start-${entry.id}`);
+    setError("");
+    setSuccess("");
+    try {
+      await api.updateDentistQueue(entry.id, { status: "in_treatment" });
+      setSuccess(`${entry.patientName} moved to in treatment.`);
+      setTab("ongoing");
+      await load();
+    } catch (startError) {
+      setError(startError.message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function markCalled(entry) {
+    setBusy(`call-${entry.id}`);
+    setError("");
+    try {
+      await api.updateDentistQueue(entry.id, { status: "called" });
+      setSuccess(`${entry.patientName} marked as called.`);
+      await load();
+    } catch (callError) {
+      setError(callError.message);
+    } finally {
+      setBusy("");
+    }
+  }
+
   if (error && !data) return <ErrorState message={error} onRetry={load} />;
   if (!data) return <LoadingState label="Loading live patient treatment queue…" />;
 
@@ -189,9 +219,44 @@ export function DentistQueuePage() {
                             Return to Waiting
                           </button>
                         ) : null}
+                        {entry.status === "called" ? (
+                          <button
+                            className="button button--primary button--compact"
+                            disabled={Boolean(busy)}
+                            onClick={() => startTreatment(entry)}
+                          >
+                            Start treatment
+                          </button>
+                        ) : null}
                         {entry.status !== "completed" &&
                         entry.status !== "no_show" &&
-                        entry.status !== "in_chair" ? (
+                        entry.status !== "in_chair" &&
+                        entry.status !== "called" ? (
+                          <>
+                            <button
+                              className="button button--secondary button--compact"
+                              disabled={Boolean(busy)}
+                              onClick={() => markCalled(entry)}
+                            >
+                              Call patient
+                            </button>
+                            <button
+                              className="button button--primary button--compact"
+                              disabled={Boolean(busy)}
+                              onClick={() => startTreatment(entry)}
+                            >
+                              Start treatment
+                            </button>
+                            <button
+                              className="button button--secondary button--compact"
+                              disabled={Boolean(busy)}
+                              onClick={() => openComplete(entry)}
+                            >
+                              Patient is finished
+                            </button>
+                          </>
+                        ) : null}
+                        {entry.status === "called" ? (
                           <button
                             className="button button--secondary button--compact"
                             disabled={Boolean(busy)}

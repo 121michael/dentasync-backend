@@ -86,26 +86,28 @@ export function FamilyPage() {
         <p className="muted-copy">
           Use the email and phone number already registered on the dependent&apos;s patient account.
         </p>
-        <form className="field-row" onSubmit={addDependent}>
-          <label className="field">
-            <span>Email</span>
-            <input
-              type="email"
-              required
-              value={form.email}
-              onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
-              placeholder="dependent@email.com"
-            />
-          </label>
-          <label className="field">
-            <span>Phone</span>
-            <input
-              required
-              value={form.phone}
-              onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))}
-              placeholder="09xxxxxxxxx"
-            />
-          </label>
+        <form className="admin-form" onSubmit={addDependent}>
+          <div className="field-row">
+            <label className="field">
+              <span>Email</span>
+              <input
+                type="email"
+                required
+                value={form.email}
+                onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
+                placeholder="dependent@email.com"
+              />
+            </label>
+            <label className="field">
+              <span>Phone</span>
+              <input
+                required
+                value={form.phone}
+                onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))}
+                placeholder="09xxxxxxxxx"
+              />
+            </label>
+          </div>
           <button className="button button--primary" disabled={busy}>
             {busy ? "Linking…" : "Add dependent"}
           </button>

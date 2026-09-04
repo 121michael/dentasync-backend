@@ -920,7 +920,8 @@ function createStaffPortalRouter({
           gender: record.gender,
           lastVisit: record.lastTreatmentDate,
           accountStatus: record.linkedUserId ? "linked_account" : "clinical_record",
-          isVerified: Boolean(record.linkedUserId),
+          isVerified: record.staffVerificationStatus === "verified",
+          staffVerificationStatus: record.staffVerificationStatus || "pending",
           isClinicalRecord: true,
         })),
       });
@@ -1010,6 +1011,56 @@ function createStaffPortalRouter({
     }
   });
 
+  router.patch("/patients/:id/verification", async (req, res) => {
+    const recordId = Number.parseInt(req.params.id, 10);
+    if (!Number.isSafeInteger(recordId) || recordId <= 0) {
+      return res.status(400).json({ message: "A valid patient record ID is required." });
+    }
+
+    const status =
+      clinicalPatients.stringValue(req.body?.status || req.body?.verificationStatus, 40) ||
+      "verified";
+
+    try {
+      const record = await clinicalPatients.verifyClinicalRecordIdentity(db, recordId, status, {
+        id: req.staff.id,
+        role: "staff",
+      });
+
+      try {
+        await notifyStaff({
+          type: "patient",
+          title: "Patient identity verification updated",
+          body: `${record.fullName} verification is now ${record.staffVerificationStatus}.`,
+          entityType: "clinical_patient",
+          entityId: record.id,
+        });
+      } catch (notifyError) {
+        console.warn("Staff verification notification skipped:", notifyError.message);
+      }
+
+      return res.json({
+        message: `Patient verification marked as ${record.staffVerificationStatus}.`,
+        patient: {
+          ...record,
+          patientName: record.fullName,
+          accountStatus: record.linkedUserId ? "linked_account" : "clinical_record",
+          isVerified: record.staffVerificationStatus === "verified",
+          isClinicalRecord: true,
+        },
+      });
+    } catch (error) {
+      if (clinicalPatients.isMissingRelation(error)) {
+        return res.status(503).json({
+          message: "Clinical patient records are not available. Run npm run migrate:clinical-records.",
+        });
+      }
+      return res.status(error.status || 500).json({
+        message: error.status ? error.message : "Unable to update patient verification.",
+      });
+    }
+  });
+
   router.delete("/patients/:id", async (req, res) => {
     const recordId = Number.parseInt(req.params.id, 10);
     if (!Number.isSafeInteger(recordId) || recordId <= 0) {
@@ -1048,6 +1099,9 @@ function createStaffPortalRouter({
           patientName: detail.record.fullName,
           accountStatus: detail.record.linkedUserId ? "linked_account" : "clinical_record",
           isClinicalRecord: true,
+          isVerified: detail.record.staffVerificationStatus === "verified",
+          staffVerificationStatus: detail.record.staffVerificationStatus || "pending",
+          staffVerifiedAt: detail.record.staffVerifiedAt || null,
           createdAt: detail.record.createdAt,
           profile: {
             date_of_birth: detail.record.dateOfBirth,

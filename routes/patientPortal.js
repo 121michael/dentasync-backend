@@ -127,6 +127,22 @@ function stringValue(value, maxLength = 500) {
   return normalized ? normalized.slice(0, maxLength) : null;
 }
 
+function normalizeEmail(value) {
+  const email = stringValue(value, 254)?.toLowerCase();
+  return email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null;
+}
+
+function normalizePhone(value) {
+  if (typeof value !== "string" && typeof value !== "number") {
+    return null;
+  }
+  const digits = String(value).replace(/\D/g, "");
+  if (!digits) {
+    return null;
+  }
+  return /^0\d{10}$/.test(digits) ? `63${digits.slice(1)}` : digits;
+}
+
 function isIsoDate(value) {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
@@ -388,30 +404,55 @@ function createPatientPortalRouter({
     const status = stringValue(req.query.status, 32);
     const params = [userId];
     let statusClause = "";
+    let fallbackStatusClause = "";
 
     if (status && ["pending", "confirmed", "checked_in", "completed", "cancelled"].includes(status)) {
       params.push(status);
-      statusClause = ` AND status = $${params.length}`;
+      statusClause = ` AND appointments.status = $${params.length}`;
+      fallbackStatusClause = ` AND status = $${params.length}`;
     }
 
     try {
       const result = await db.query(
-        `SELECT *
-         FROM patient_portal_appointments
-         WHERE user_id = $1${statusClause}
-         ORDER BY appointment_date DESC, appointment_time DESC`,
+        `SELECT appointments.*
+         FROM patient_portal_appointments AS appointments
+         WHERE (
+           appointments.user_id = $1
+           OR appointments.user_id IN (
+             SELECT dependent_user_id
+             FROM patient_portal_dependents
+             WHERE guardian_user_id = $1
+           )
+         )${statusClause}
+         ORDER BY appointments.appointment_date DESC, appointments.appointment_time DESC`,
         params
       );
 
       return res.json({ appointments: result.rows.map(mapAppointment) });
     } catch (error) {
+      if (error?.code === "42P01") {
+        // Dependents table missing — fall back to self-only appointments.
+        try {
+          const fallback = await db.query(
+            `SELECT *
+             FROM patient_portal_appointments
+             WHERE user_id = $1${fallbackStatusClause}
+             ORDER BY appointment_date DESC, appointment_time DESC`,
+            params
+          );
+          return res.json({ appointments: fallback.rows.map(mapAppointment) });
+        } catch (fallbackError) {
+          console.error("Patient appointments error:", fallbackError.message);
+          return res.status(500).json({ message: "Unable to load appointments." });
+        }
+      }
       console.error("Patient appointments error:", error.message);
       return res.status(500).json({ message: "Unable to load appointments." });
     }
   });
 
   router.post("/appointments", async (req, res) => {
-    const userId = userIdFor(req);
+    const actorUserId = userIdFor(req);
     const {
       serviceId,
       dentistId,
@@ -424,7 +465,13 @@ function createPatientPortalRouter({
       hmoBirthDate,
       authorizationDocumentId,
       notes,
+      forPatientUserId,
+      dependentUserId,
     } = req.body || {};
+
+    let userId = actorUserId;
+    const bookingFor =
+      stringValue(forPatientUserId || dependentUserId, 120) || actorUserId;
 
     const service = SERVICES.find((item) => item.id === serviceId);
     const normalizedCoverage = coverageType === "hmo" ? "hmo" : coverageType === "self_pay" ? "self_pay" : null;
@@ -459,6 +506,30 @@ function createPatientPortalRouter({
       normalizedCoverage === "hmo" ? "pending_verification" : "not_applicable";
 
     try {
+      if (bookingFor !== actorUserId) {
+        const link = await db.query(
+          `SELECT id
+           FROM patient_portal_dependents
+           WHERE guardian_user_id = $1
+             AND dependent_user_id = $2
+           LIMIT 1`,
+          [actorUserId, bookingFor]
+        ).catch((error) => {
+          if (error?.code === "42P01") {
+            const missing = new Error("Dependents are not available. Run npm run migrate:paper-gaps.");
+            missing.status = 503;
+            throw missing;
+          }
+          throw error;
+        });
+        if (!link.rows.length) {
+          return res.status(403).json({
+            message: "You can only book for dependents linked to your account.",
+          });
+        }
+        userId = bookingFor;
+      }
+
       if (authorizationDocumentId) {
         const documentResult = await db.query(
           `SELECT id
@@ -466,7 +537,7 @@ function createPatientPortalRouter({
            WHERE id = $1
              AND user_id = $2
              AND document_type = 'hmo_authorization'`,
-          [authorizationDocumentId, userId]
+          [authorizationDocumentId, actorUserId]
         );
         if (documentResult.rows.length === 0) {
           return res.status(400).json({ message: "The HMO authorization document is not available." });
@@ -518,6 +589,14 @@ function createPatientPortalRouter({
         return res.status(409).json({ message: "That time was just booked. Please choose another available slot." });
       }
 
+      const bookingNote =
+        userId !== actorUserId
+          ? [stringValue(notes, 1100), `(Booked by guardian account ${actorUserId})`]
+              .filter(Boolean)
+              .join(" ")
+              .slice(0, 1200)
+          : stringValue(notes, 1200);
+
       const result = await db.query(
         `INSERT INTO patient_portal_appointments (
            user_id, service_id, service_name, dentist_id, dentist_name,
@@ -544,7 +623,7 @@ function createPatientPortalRouter({
           hmoVerificationStatus,
           authorizationDocumentId || null,
           service.estimatedCost,
-          stringValue(notes, 1200),
+          bookingNote,
         ]
       );
 
@@ -556,6 +635,16 @@ function createPatientPortalRouter({
           `${service.name} with ${dentist.name} on ${appointmentDate} at ${appointmentTime} is waiting for clinic confirmation.`,
         ]
       );
+      if (userId !== actorUserId) {
+        await db.query(
+          `INSERT INTO patient_portal_notifications (user_id, type, title, body)
+           VALUES ($1, 'appointment', 'Dependent appointment submitted', $2)`,
+          [
+            actorUserId,
+            `You booked ${service.name} for a linked dependent on ${appointmentDate} at ${appointmentTime}.`,
+          ]
+        );
+      }
       await notifyClinicStaff({
         type: "appointment",
         title: "New Appointment Request",
@@ -572,10 +661,16 @@ function createPatientPortalRouter({
       });
 
       return res.status(201).json({
-        message: "Your appointment request was submitted for clinic confirmation.",
+        message:
+          userId !== actorUserId
+            ? "Dependent appointment request was submitted for clinic confirmation."
+            : "Your appointment request was submitted for clinic confirmation.",
         appointment: mapAppointment(result.rows[0]),
       });
     } catch (error) {
+      if (error.status) {
+        return res.status(error.status).json({ message: error.message });
+      }
       if (error.code === "23505") {
         return res.status(409).json({ message: "That time was just booked. Please choose another available slot." });
       }
@@ -585,15 +680,23 @@ function createPatientPortalRouter({
   });
 
   router.patch("/appointments/:id/cancel", async (req, res) => {
+    const actorUserId = userIdFor(req);
     try {
       const result = await db.query(
-        `UPDATE patient_portal_appointments
+        `UPDATE patient_portal_appointments AS appointments
          SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
-         WHERE id = $1
-           AND user_id = $2
-           AND status IN ('pending', 'confirmed')
+         WHERE appointments.id = $1
+           AND appointments.status IN ('pending', 'confirmed')
+           AND (
+             appointments.user_id = $2
+             OR appointments.user_id IN (
+               SELECT dependent_user_id
+               FROM patient_portal_dependents
+               WHERE guardian_user_id = $2
+             )
+           )
          RETURNING *`,
-        [req.params.id, userIdFor(req)]
+        [req.params.id, actorUserId]
       );
 
       if (result.rows.length === 0) {
@@ -609,6 +712,26 @@ function createPatientPortalRouter({
       });
       return res.json({ appointment: mapAppointment(result.rows[0]) });
     } catch (error) {
+      if (error?.code === "42P01") {
+        try {
+          const fallback = await db.query(
+            `UPDATE patient_portal_appointments
+             SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
+             WHERE id = $1
+               AND user_id = $2
+               AND status IN ('pending', 'confirmed')
+             RETURNING *`,
+            [req.params.id, actorUserId]
+          );
+          if (!fallback.rows.length) {
+            return res.status(404).json({ message: "A cancellable appointment was not found." });
+          }
+          return res.json({ appointment: mapAppointment(fallback.rows[0]) });
+        } catch (fallbackError) {
+          console.error("Cancel appointment error:", fallbackError.message);
+          return res.status(500).json({ message: "Unable to cancel the appointment." });
+        }
+      }
       console.error("Cancel appointment error:", error.message);
       return res.status(500).json({ message: "Unable to cancel the appointment." });
     }
@@ -1225,20 +1348,49 @@ function createPatientPortalRouter({
 
   router.post("/dependents", async (req, res) => {
     const guardianUserId = userIdFor(req);
-    const dependentUserId = stringValue(
+    let dependentUserId = stringValue(
       req.body?.dependentUserId || req.body?.userId || req.body?.dependentId,
       120
     );
     const relationship = stringValue(req.body?.relationship, 80) || "dependent";
-
-    if (!dependentUserId) {
-      return res.status(400).json({ message: "Provide an existing patient user ID to link." });
-    }
-    if (dependentUserId === guardianUserId) {
-      return res.status(400).json({ message: "You cannot link yourself as a dependent." });
-    }
+    const email = normalizeEmail(req.body?.email);
+    const phone = normalizePhone(req.body?.phone);
 
     try {
+      if (!dependentUserId) {
+        if (!email || !phone) {
+          return res.status(400).json({
+            message: "Provide the dependent's registered email and phone, or their patient user ID.",
+          });
+        }
+
+        const lookup = await db.query(
+          `SELECT id, first_name, last_name, email, phone
+           FROM users
+           WHERE LOWER(role) = 'patient'
+             AND COALESCE(is_archived, FALSE) = FALSE
+             AND LOWER(email) = $1
+             AND (
+               phone = $2
+               OR REPLACE(COALESCE(phone, ''), '+', '') = $2
+               OR RIGHT(REGEXP_REPLACE(COALESCE(phone, ''), '\\D', '', 'g'), 10) =
+                  RIGHT(REGEXP_REPLACE($2, '\\D', '', 'g'), 10)
+             )
+           LIMIT 1`,
+          [email, phone]
+        );
+        if (!lookup.rows.length) {
+          return res.status(404).json({
+            message: "No matching patient account found for that email and phone.",
+          });
+        }
+        dependentUserId = String(lookup.rows[0].id);
+      }
+
+      if (dependentUserId === guardianUserId) {
+        return res.status(400).json({ message: "You cannot link yourself as a dependent." });
+      }
+
       const dependentResult = await db.query(
         `SELECT id, first_name, last_name, email, phone
          FROM users
@@ -1262,6 +1414,7 @@ function createPatientPortalRouter({
 
       const dependent = dependentResult.rows[0];
       return res.status(201).json({
+        message: "Dependent linked successfully.",
         dependent: {
           id: result.rows[0].id,
           relationship: result.rows[0].relationship,

@@ -13,6 +13,8 @@ const QUEUE_STATUS_MAP = {
   checked_in: "checked_in",
   waiting: "waiting",
   preparing: "preparing",
+  called: "preparing",
+  in_treatment: "dentist",
   in_chair: "dentist",
   dentist: "dentist",
   completed: "completed",
@@ -61,7 +63,9 @@ function count(row, key = "count") {
 }
 
 function displayQueueStatus(status) {
-  return status === "dentist" ? "in_chair" : status;
+  if (status === "dentist") return "in_chair";
+  if (status === "preparing") return "called";
+  return status;
 }
 
 function ageFromDob(value) {
@@ -1035,6 +1039,93 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
       }
       console.error("Dentist patient detail error:", error.message);
       return res.status(500).json({ message: "Unable to load the patient record." });
+    }
+  });
+
+  router.get("/patients/:id/xrays", async (req, res) => {
+    const recordId = Number.parseInt(req.params.id, 10);
+    if (!Number.isSafeInteger(recordId) || recordId <= 0) {
+      return res.status(400).json({ message: "A valid patient record ID is required." });
+    }
+
+    try {
+      const detail = await clinicalPatients.getClinicalRecord(db, recordId);
+      if (!detail || detail.record.archived) {
+        return res.status(404).json({ message: "Patient record not found." });
+      }
+
+      const linkedUserId = detail.record.linkedUserId;
+      if (!linkedUserId) {
+        return res.json({
+          xrays: [],
+          message: "No linked patient portal account — X-ray uploads appear after the patient registers.",
+        });
+      }
+
+      const [documentsResult, analysesResult] = await Promise.all([
+        db.query(
+          `SELECT id, original_name, mime_type, byte_size, created_at
+           FROM patient_portal_documents
+           WHERE user_id = $1
+             AND document_type = 'xray'
+           ORDER BY created_at DESC`,
+          [String(linkedUserId)]
+        ),
+        db.query(
+          `SELECT id, document_id, status, summary, findings_json, confidence, disclaimer, created_at, updated_at
+           FROM patient_xray_analyses
+           WHERE user_id = $1
+           ORDER BY created_at DESC`,
+          [String(linkedUserId)]
+        ).catch((error) => {
+          if (error?.code === "42P01") {
+            return { rows: [] };
+          }
+          throw error;
+        }),
+      ]);
+
+      const analysesByDocument = new Map(
+        analysesResult.rows.map((row) => [String(row.document_id), row])
+      );
+
+      return res.json({
+        xrays: documentsResult.rows.map((document) => {
+          const analysis = analysesByDocument.get(String(document.id));
+          return {
+            id: document.id,
+            name: document.original_name,
+            mimeType: document.mime_type,
+            size: document.byte_size,
+            uploadedAt: document.created_at,
+            analysis: analysis
+              ? {
+                  id: analysis.id,
+                  status: analysis.status,
+                  summary: analysis.summary,
+                  findings: analysis.findings_json,
+                  confidence:
+                    analysis.confidence != null ? Number(analysis.confidence) : null,
+                  disclaimer: analysis.disclaimer,
+                  createdAt: analysis.created_at,
+                  updatedAt: analysis.updated_at,
+                }
+              : {
+                  status: "unavailable",
+                  disclaimer:
+                    "Preliminary / supplementary information only. Not a clinical diagnosis.",
+                },
+          };
+        }),
+      });
+    } catch (error) {
+      if (clinicalPatients.isMissingRelation(error)) {
+        return res.status(503).json({
+          message: "Clinical patient records are not available. Run npm run migrate:clinical-records.",
+        });
+      }
+      console.error("Dentist patient x-rays error:", error.message);
+      return res.status(500).json({ message: "Unable to load patient X-rays." });
     }
   });
 

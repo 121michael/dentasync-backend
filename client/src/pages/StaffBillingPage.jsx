@@ -154,6 +154,7 @@ export function StaffBillingPage() {
             <table className="staff-table">
               <thead>
                 <tr>
+                  <th>Transaction ID</th>
                   <th>Invoice ID</th>
                   <th>Patient</th>
                   <th>Appointment</th>
@@ -161,13 +162,16 @@ export function StaffBillingPage() {
                   <th>Amount</th>
                   <th>Payment Status</th>
                   <th>Date</th>
-                  <th>Staff</th>
+                  <th>Processed By</th>
                   <th>Action</th>
                 </tr>
               </thead>
               <tbody>
                 {invoices.map((invoice) => (
                   <tr key={invoice.id}>
+                    <td>
+                      <code>TXN-{invoice.id}</code>
+                    </td>
                     <td>
                       <code>{invoice.invoiceCode}</code>
                     </td>

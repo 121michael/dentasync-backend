@@ -54,6 +54,9 @@ function mapClinicalRecord(row, extras = {}) {
     address: row.address || "",
     notes: row.notes || "",
     linkedUserId: row.linked_user_id || null,
+    staffVerificationStatus: row.staff_verification_status || "pending",
+    staffVerifiedAt: row.staff_verified_at || null,
+    staffVerifiedBy: row.staff_verified_by || null,
     createdBy: row.created_by || null,
     createdByRole: row.created_by_role || null,
     updatedBy: row.updated_by || null,
@@ -405,6 +408,37 @@ async function addClinicalTreatment(db, recordId, input, actor = {}) {
   return result.rows[0];
 }
 
+async function verifyClinicalRecordIdentity(db, recordId, status, actor = {}) {
+  const allowed = new Set(["pending", "verified", "rejected"]);
+  const normalized = stringValue(status, 40)?.toLowerCase();
+  if (!allowed.has(normalized)) {
+    const error = new Error("Verification status must be pending, verified, or rejected.");
+    error.status = 400;
+    throw error;
+  }
+
+  const result = await db.query(
+    `UPDATE clinic_patient_records
+     SET staff_verification_status = $1,
+         staff_verified_at = CASE WHEN $1 = 'verified' THEN CURRENT_TIMESTAMP ELSE NULL END,
+         staff_verified_by = CASE WHEN $1 = 'verified' THEN $2 ELSE NULL END,
+         updated_at = CURRENT_TIMESTAMP,
+         updated_by = $2
+     WHERE id = $3
+       AND COALESCE(is_archived, FALSE) = FALSE
+     RETURNING *`,
+    [normalized, actor.id ? String(actor.id) : null, recordId]
+  );
+
+  if (!result.rows.length) {
+    const error = new Error("Patient record not found.");
+    error.status = 404;
+    throw error;
+  }
+
+  return mapClinicalRecord(result.rows[0]);
+}
+
 async function linkClinicalRecordsToUser(db, user) {
   if (!db || !user?.id) {
     return 0;
@@ -449,6 +483,7 @@ module.exports = {
   updateClinicalRecord,
   archiveClinicalRecord,
   addClinicalTreatment,
+  verifyClinicalRecordIdentity,
   linkClinicalRecordsToUser,
   mapClinicalRecord,
   isMissingRelation,

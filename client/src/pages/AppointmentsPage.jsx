@@ -71,6 +71,7 @@ function displayTime(value) {
 export function AppointmentsPage() {
   const [catalog, setCatalog] = useState(null);
   const [appointments, setAppointments] = useState([]);
+  const [dependents, setDependents] = useState([]);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [isBusy, setIsBusy] = useState(false);
@@ -85,18 +86,21 @@ export function AppointmentsPage() {
     hmoCompanyName: "",
     hmoBirthDate: "",
     notes: "",
+    forPatientUserId: "",
   });
   const [authorizationFile, setAuthorizationFile] = useState(null);
 
   const load = useCallback(async () => {
     setError("");
     try {
-      const [catalogResponse, appointmentResponse] = await Promise.all([
+      const [catalogResponse, appointmentResponse, dependentsResponse] = await Promise.all([
         api.getCatalog(),
         api.getAppointments(),
+        api.getDependents().catch(() => ({ dependents: [] })),
       ]);
       setCatalog(catalogResponse);
       setAppointments(appointmentResponse.appointments);
+      setDependents(dependentsResponse.dependents || dependentsResponse.items || []);
     } catch (loadError) {
       setError(loadError.message);
     }
@@ -128,6 +132,7 @@ export function AppointmentsPage() {
       }
       const response = await api.createAppointment({
         ...form,
+        forPatientUserId: form.forPatientUserId || undefined,
         authorizationDocumentId,
       });
       setSuccess(`${response.appointment.treatment} was submitted for ${displayDate(response.appointment.date)}.`);
@@ -223,6 +228,26 @@ export function AppointmentsPage() {
               </div>
               <CalendarDays className="card-heading__icon" size={21} />
             </div>
+            {dependents.length ? (
+              <label className="field" style={{ marginBottom: "1rem" }}>
+                <span>Book for</span>
+                <select
+                  name="forPatientUserId"
+                  value={form.forPatientUserId}
+                  onChange={updateForm}
+                >
+                  <option value="">Myself</option>
+                  {dependents.map((dependent) => (
+                    <option
+                      key={dependent.id || dependent.dependentUserId}
+                      value={dependent.dependentUserId}
+                    >
+                      {dependent.fullName || dependent.name || "Dependent"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             <div className="schedule-fields">
               <label className="field">
                 <span>Preferred date</span>

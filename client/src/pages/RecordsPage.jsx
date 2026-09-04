@@ -158,12 +158,18 @@ export function RecordsPage() {
                     {displayDate(xray.uploadedAt || xray.createdAt || xray.date)}
                     {xray.size ? ` · ${formatSize(xray.size)}` : ""}
                   </small>
-                  <span className={`status-pill status-pill--${String(xray.status || "unavailable").replaceAll("_", "-")}`}>
-                    {String(xray.status || "unavailable").replaceAll("_", " ")}
+                  <span className={`status-pill status-pill--${String(xray.analysis?.status || xray.status || "unavailable").replaceAll("_", "-")}`}>
+                    {String(xray.analysis?.status || xray.status || "unavailable").replaceAll("_", " ")}
                   </span>
-                  {xray.summary ? <p className="muted-copy">{xray.summary}</p> : null}
+                  {xray.analysis?.summary || xray.summary ? (
+                    <p className="muted-copy">{xray.analysis?.summary || xray.summary}</p>
+                  ) : null}
+                  {xray.analysis?.confidence != null ? (
+                    <small>Confidence: {xray.analysis.confidence}%</small>
+                  ) : null}
                   <p className="xray-disclaimer">
-                    {xray.disclaimer ||
+                    {xray.analysis?.disclaimer ||
+                      xray.disclaimer ||
                       "Preliminary / supplementary information only. Not a clinical diagnosis."}
                   </p>
                 </div>
