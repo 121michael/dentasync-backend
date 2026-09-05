@@ -122,7 +122,7 @@ export function toothPositions(
   teeth,
   { cx, cy, rx, ry, invert = false, labelPad = 42, viewWidth = 860, viewHeight = 680 }
 ) {
-  const contactGap = 1.2;
+  const contactGap = 3.2;
   const edgePad = 18;
   const items = teeth.map((tooth) => {
     const type = toothTypeFromFdi(tooth);
