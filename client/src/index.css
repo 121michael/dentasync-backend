@@ -3734,13 +3734,12 @@ strong {
 }
 .fdi-chart-scroll {
   width: 100%;
-  overflow: visible;
-  padding-bottom: 0.2rem;
+  overflow-x: auto;
+  padding-bottom: 0.35rem;
 }
 .fdi-chart-svg {
   display: block;
-  width: 100%;
-  max-width: 820px;
+  width: min(100%, 860px);
   height: auto;
   margin: 0 auto;
   user-select: none;

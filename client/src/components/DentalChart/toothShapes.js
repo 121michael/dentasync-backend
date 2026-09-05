@@ -12,15 +12,15 @@ export function toothTypeFromFdi(toothNumber) {
   return "molar";
 }
 
-/** Compact scales — continuous row with tiny embrasures; sized to fit the card. */
+/** Compact scales — continuous row with tiny embrasures; slightly reduced for fit. */
 export function toothScale(toothNumber) {
   const type = toothTypeFromFdi(toothNumber);
   const digit = Number(String(toothNumber).slice(-1));
-  if (type === "molar") return digit === 8 ? 1.02 : digit === 7 ? 1.12 : 1.16;
-  if (type === "premolar") return digit === 4 ? 0.98 : 0.94;
-  if (type === "canine") return 1.0;
-  if (type === "lateral_incisor") return 0.88;
-  return 0.98;
+  if (type === "molar") return digit === 8 ? 1.12 : digit === 7 ? 1.22 : 1.26;
+  if (type === "premolar") return digit === 4 ? 1.06 : 1.02;
+  if (type === "canine") return 1.08;
+  if (type === "lateral_incisor") return 0.94;
+  return 1.05;
 }
 
 /**
@@ -120,18 +120,18 @@ export const TOOTH_SHAPES = {
  */
 export function toothPositions(
   teeth,
-  { cx, cy, rx, ry, invert = false, labelPad = 34, viewWidth = 860, viewHeight = 600 }
+  { cx, cy, rx, ry, invert = false, labelPad = 42, viewWidth = 860, viewHeight = 680 }
 ) {
-  const contactGap = 1.8;
+  const contactGap = 1.2;
   const edgePad = 18;
   const items = teeth.map((tooth) => {
     const type = toothTypeFromFdi(tooth);
     const scale = toothScale(tooth);
     const shape = TOOTH_SHAPES[type];
-    const halfWidth = shape.hit.rx * scale * 0.84;
-    // Pull anteriors slightly toward the arch center for a natural front group.
+    const halfWidth = shape.hit.rx * scale * 0.86;
+    // Mild anterior inset — keep the familiar arch shape.
     const radiusScale =
-      type === "molar" ? 1.0 : type === "premolar" ? 0.985 : type === "canine" ? 0.955 : 0.9;
+      type === "molar" ? 1.0 : type === "premolar" ? 0.99 : type === "canine" ? 0.97 : 0.94;
     return { tooth, type, scale, halfWidth, radiusScale };
   });
 
@@ -166,8 +166,6 @@ export function toothPositions(
     return ts;
   }
 
-  // Pack once to measure span, then re-pack from a centered start (no post-shift —
-  // shifting t after radius-aware packing would break right-side contacts).
   const probe = packFrom(items[0].halfWidth / (rx * Math.PI));
   const span = probe[probe.length - 1] - probe[0];
   const startT = Math.max(0.02, (1 - span) / 2);
@@ -179,7 +177,7 @@ export function toothPositions(
     const localRx = rx * item.radiusScale;
     const localRy = ry * item.radiusScale;
 
-    const typePad = item.type === "molar" ? 14 : item.type === "premolar" ? 11 : 9;
+    const typePad = item.type === "molar" ? 16 : item.type === "premolar" ? 12 : 10;
     const pad = labelPad + typePad;
     let labelX = cx + (localRx + pad) * Math.cos(angle);
     let labelY = cy + (localRy + pad) * Math.sin(angle);

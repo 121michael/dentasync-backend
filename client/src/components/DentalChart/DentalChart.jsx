@@ -16,11 +16,11 @@ import {
 } from "./dentalChartData";
 import { gumArchStrokePath } from "./mouthShapes";
 
-const VIEW = { width: 860, height: 600 };
+const VIEW = { width: 860, height: 680 };
 
-// Compact horseshoe — fills the card width, tight upper/lower split, safe FDI margins.
-const UPPER_ARCH = { cx: VIEW.width / 2, cy: 238, rx: 252, ry: 92 };
-const LOWER_ARCH = { cx: VIEW.width / 2, cy: 372, rx: 252, ry: 92 };
+// Same mouth placement as before — only slightly tighter.
+const UPPER_ARCH = { cx: VIEW.width / 2, cy: 208, rx: 228, ry: 138 };
+const LOWER_ARCH = { cx: VIEW.width / 2, cy: 462, rx: 228, ry: 138 };
 
 export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
   const [chart, setChart] = useState(null);
@@ -65,7 +65,7 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
       toothPositions(UPPER_TEETH, {
         ...UPPER_ARCH,
         invert: false,
-        labelPad: 34,
+        labelPad: 42,
         viewWidth: VIEW.width,
         viewHeight: VIEW.height,
       }),
@@ -77,7 +77,7 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
       toothPositions(LOWER_TEETH, {
         ...LOWER_ARCH,
         invert: true,
-        labelPad: 34,
+        labelPad: 42,
         viewWidth: VIEW.width,
         viewHeight: VIEW.height,
       }),
@@ -261,7 +261,7 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
                   d={gumArchStrokePath({ ...UPPER_ARCH, invert: false })}
                   fill="none"
                   stroke="rgba(230, 115, 105, 0.55)"
-                  strokeWidth="36"
+                  strokeWidth="42"
                   strokeLinecap="round"
                   filter="url(#fdiGumBlur)"
                 />
@@ -269,16 +269,16 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
                   d={gumArchStrokePath({ ...LOWER_ARCH, invert: true })}
                   fill="none"
                   stroke="rgba(230, 115, 105, 0.55)"
-                  strokeWidth="36"
+                  strokeWidth="42"
                   strokeLinecap="round"
                   filter="url(#fdiGumBlur)"
                 />
               </g>
 
-              <text className="fdi-arch-label" x={VIEW.width / 2} y={242} textAnchor="middle">
+              <text className="fdi-arch-label" x={VIEW.width / 2} y={212} textAnchor="middle">
                 UPPER
               </text>
-              <text className="fdi-arch-label" x={VIEW.width / 2} y={368} textAnchor="middle">
+              <text className="fdi-arch-label" x={VIEW.width / 2} y={458} textAnchor="middle">
                 LOWER
               </text>
 
