@@ -3739,7 +3739,7 @@ strong {
 }
 .fdi-chart-svg {
   display: block;
-  width: min(100%, 1040px);
+  width: min(100%, 980px);
   height: auto;
   margin: 0 auto;
   user-select: none;
@@ -3748,11 +3748,12 @@ strong {
   pointer-events: none;
 }
 .fdi-arch-label {
-  fill: #6d28d9;
-  font-size: 17px;
-  font-weight: 800;
-  letter-spacing: 0.16em;
-  opacity: 0.62;
+  fill: #1f1f1f;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  opacity: 0.92;
   pointer-events: none;
 }
 .fdi-tooth {
@@ -3823,18 +3824,19 @@ strong {
   stroke-width: 1.4;
 }
 .fdi-tooth__number {
-  fill: #4c1d95;
+  fill: #222222;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 700;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   pointer-events: none;
   paint-order: stroke;
-  stroke: rgba(255, 250, 245, 0.95);
-  stroke-width: 4px;
+  stroke: rgba(255, 255, 255, 0.95);
+  stroke-width: 3.5px;
 }
 .fdi-tooth__selection {
-  fill: rgba(109, 40, 217, 0.05);
-  stroke: rgba(109, 40, 217, 0.55);
-  stroke-width: 1.55;
+  fill: rgba(37, 99, 235, 0.04);
+  stroke: rgba(37, 99, 235, 0.55);
+  stroke-width: 1.5;
   stroke-dasharray: none;
   opacity: 1;
   pointer-events: none;
@@ -3861,8 +3863,8 @@ strong {
   stroke-width: 1.85;
 }
 .fdi-tooth.is-selected .fdi-tooth__shape {
-  stroke: rgba(109, 40, 217, 0.7);
-  stroke-width: 1.75;
+  stroke: rgba(37, 99, 235, 0.65);
+  stroke-width: 1.7;
 }
 /* Keep ivory body; status is marker-based, not flat recolor */
 .fdi-tooth--needs_attention .fdi-tooth__shape,
