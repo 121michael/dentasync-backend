@@ -14,12 +14,12 @@ import {
   toothPositions,
   TREATMENT_OPTIONS,
 } from "./dentalChartData";
-import { gumGlowPath } from "./mouthShapes";
+import { gumArchStrokePath } from "./mouthShapes";
 
-const VIEW = { width: 980, height: 780 };
+const VIEW = { width: 920, height: 760 };
 
-const UPPER_ARCH = { cx: VIEW.width / 2, cy: 235, rx: 300, ry: 128 };
-const LOWER_ARCH = { cx: VIEW.width / 2, cy: 555, rx: 300, ry: 128 };
+const UPPER_ARCH = { cx: VIEW.width / 2, cy: 225, rx: 310, ry: 135 };
+const LOWER_ARCH = { cx: VIEW.width / 2, cy: 545, rx: 310, ry: 135 };
 
 export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
   const [chart, setChart] = useState(null);
@@ -64,7 +64,7 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
       toothPositions(UPPER_TEETH, {
         ...UPPER_ARCH,
         invert: false,
-        labelPad: 62,
+        labelPad: 52,
       }),
     []
   );
@@ -74,7 +74,7 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
       toothPositions(LOWER_TEETH, {
         ...LOWER_ARCH,
         invert: true,
-        labelPad: 62,
+        labelPad: 52,
       }),
     []
   );
@@ -220,70 +220,60 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
               aria-label="Interactive FDI dental chart with upper and lower arches"
             >
               <defs>
-                <radialGradient id="fdiGumGlow" cx="50%" cy="50%" r="55%">
-                  <stop offset="0%" stopColor="rgba(232, 120, 110, 0.55)" />
-                  <stop offset="45%" stopColor="rgba(236, 150, 140, 0.28)" />
-                  <stop offset="100%" stopColor="rgba(255, 220, 210, 0)" />
-                </radialGradient>
-                <linearGradient id="fdiToothIvory" x1="0.18" y1="0.05" x2="0.88" y2="0.95">
-                  <stop offset="0%" stopColor="#fffefb" />
-                  <stop offset="32%" stopColor="#f7f0e4" />
-                  <stop offset="68%" stopColor="#eadfc8" />
-                  <stop offset="100%" stopColor="#d8c7a6" />
+                <linearGradient id="fdiToothIvory" x1="0.2" y1="0.05" x2="0.85" y2="0.95">
+                  <stop offset="0%" stopColor="#fffcf6" />
+                  <stop offset="35%" stopColor="#f5ecdc" />
+                  <stop offset="75%" stopColor="#e6d7bc" />
+                  <stop offset="100%" stopColor="#d4c19e" />
                 </linearGradient>
-                <radialGradient id="fdiToothCusp" cx="38%" cy="32%" r="68%">
-                  <stop offset="0%" stopColor="rgba(255,255,255,0.7)" />
-                  <stop offset="50%" stopColor="rgba(255,248,235,0.2)" />
+                <radialGradient id="fdiToothCusp" cx="40%" cy="35%" r="65%">
+                  <stop offset="0%" stopColor="rgba(255,255,255,0.75)" />
+                  <stop offset="55%" stopColor="rgba(255,248,235,0.18)" />
                   <stop offset="100%" stopColor="rgba(220,200,160,0)" />
                 </radialGradient>
-                <linearGradient id="fdiToothHighlight" x1="0" y1="0" x2="0.3" y2="1">
-                  <stop offset="0%" stopColor="rgba(255,255,255,0.5)" />
-                  <stop offset="40%" stopColor="rgba(255,255,255,0.1)" />
+                <linearGradient id="fdiToothHighlight" x1="0" y1="0" x2="0.25" y2="1">
+                  <stop offset="0%" stopColor="rgba(255,255,255,0.55)" />
+                  <stop offset="45%" stopColor="rgba(255,255,255,0.08)" />
                   <stop offset="100%" stopColor="rgba(255,255,255,0)" />
                 </linearGradient>
                 <linearGradient id="fdiToothShade" x1="0.5" y1="0" x2="0.5" y2="1">
-                  <stop offset="0%" stopColor="rgba(180,150,110,0.05)" />
-                  <stop offset="100%" stopColor="rgba(150,120,85,0.16)" />
+                  <stop offset="0%" stopColor="rgba(170,140,100,0.04)" />
+                  <stop offset="100%" stopColor="rgba(140,110,75,0.14)" />
                 </linearGradient>
-                <filter id="fdiGumBlur" x="-35%" y="-35%" width="170%" height="170%">
-                  <feGaussianBlur stdDeviation="7" />
+                <filter id="fdiGumBlur" x="-50%" y="-50%" width="200%" height="200%">
+                  <feGaussianBlur stdDeviation="9" />
                 </filter>
-                <filter id="fdiSoftShadow" x="-30%" y="-30%" width="160%" height="160%">
-                  <feDropShadow dx="0.3" dy="0.6" stdDeviation="0.55" floodColor="#8b5a4a" floodOpacity="0.16" />
+                <filter id="fdiSoftShadow" x="-25%" y="-25%" width="150%" height="150%">
+                  <feDropShadow dx="0.2" dy="0.45" stdDeviation="0.45" floodColor="#8b5a4a" floodOpacity="0.14" />
                 </filter>
               </defs>
 
-              {/* Clean clinical white page */}
-              <rect x="0" y="0" width={VIEW.width} height={VIEW.height} fill="#ffffff" rx="18" />
+              <rect x="0" y="0" width={VIEW.width} height={VIEW.height} fill="#ffffff" />
 
-              {/* Soft pink gum glow — reference style (halo under teeth only) */}
+              {/* Soft pink gum halo along the full arch (reference style) */}
               <g className="fdi-mouth" aria-hidden="true">
                 <path
-                  d={gumGlowPath({
-                    ...UPPER_ARCH,
-                    invert: false,
-                    thickness: 34,
-                  })}
-                  fill="url(#fdiGumGlow)"
+                  d={gumArchStrokePath({ ...UPPER_ARCH, invert: false })}
+                  fill="none"
+                  stroke="rgba(230, 115, 105, 0.55)"
+                  strokeWidth="52"
+                  strokeLinecap="round"
                   filter="url(#fdiGumBlur)"
-                  opacity="0.85"
                 />
                 <path
-                  d={gumGlowPath({
-                    ...LOWER_ARCH,
-                    invert: true,
-                    thickness: 34,
-                  })}
-                  fill="url(#fdiGumGlow)"
+                  d={gumArchStrokePath({ ...LOWER_ARCH, invert: true })}
+                  fill="none"
+                  stroke="rgba(230, 115, 105, 0.55)"
+                  strokeWidth="52"
+                  strokeLinecap="round"
                   filter="url(#fdiGumBlur)"
-                  opacity="0.85"
                 />
               </g>
 
-              <text className="fdi-arch-label" x={VIEW.width / 2} y={238} textAnchor="middle">
+              <text className="fdi-arch-label" x={VIEW.width / 2} y={228} textAnchor="middle">
                 UPPER
               </text>
-              <text className="fdi-arch-label" x={VIEW.width / 2} y={558} textAnchor="middle">
+              <text className="fdi-arch-label" x={VIEW.width / 2} y={548} textAnchor="middle">
                 LOWER
               </text>
 
