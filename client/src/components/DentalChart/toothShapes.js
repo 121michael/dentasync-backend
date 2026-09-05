@@ -16,11 +16,12 @@ export function toothTypeFromFdi(toothNumber) {
 export function toothScale(toothNumber) {
   const type = toothTypeFromFdi(toothNumber);
   const digit = Number(String(toothNumber).slice(-1));
-  if (type === "molar") return digit === 8 ? 0.92 : digit === 7 ? 1.0 : 1.05;
-  if (type === "premolar") return digit === 4 ? 0.88 : 0.84;
-  if (type === "canine") return 0.9;
-  if (type === "lateral_incisor") return 0.78;
-  return 0.88;
+  // Sized so 16 crowns fill the arch with near-contacts (reference density).
+  if (type === "molar") return digit === 8 ? 1.28 : digit === 7 ? 1.38 : 1.42;
+  if (type === "premolar") return digit === 4 ? 1.2 : 1.15;
+  if (type === "canine") return 1.22;
+  if (type === "lateral_incisor") return 1.05;
+  return 1.18;
 }
 
 /**
@@ -119,30 +120,26 @@ export const TOOTH_SHAPES = {
  * Place teeth on a horseshoe with width-aware packing (near-contacts like the reference).
  */
 export function toothPositions(teeth, { cx, cy, rx, ry, invert = false, labelPad = 48 }) {
-  const contactGap = 1.8;
+  const contactGap = 2.2;
   const items = teeth.map((tooth) => {
     const type = toothTypeFromFdi(tooth);
     const scale = toothScale(tooth);
     const shape = TOOTH_SHAPES[type];
     // Mesial–distal half-width along the arch (local X after rotation).
-    const halfWidth = shape.hit.rx * scale * 0.92;
+    const halfWidth = shape.hit.rx * scale * 0.95;
     return { tooth, type, scale, halfWidth };
   });
 
-  const spans = items.map((item, index) => {
-    if (index === 0) return item.halfWidth;
-    return items[index - 1].halfWidth + item.halfWidth + contactGap;
-  });
-  const total = spans.reduce((sum, value) => sum + value, 0) + items[items.length - 1].halfWidth;
+  const totalWidth =
+    items.reduce((sum, item) => sum + item.halfWidth * 2, 0) + contactGap * Math.max(0, items.length - 1);
 
   let cursor = 0;
   return items.map((item, index) => {
-    cursor += index === 0 ? item.halfWidth : spans[index];
-    const t = cursor / total;
-    // Slight ease keeps midline a touch denser without opening big anterior gaps.
-    const eased = t < 0.5 ? Math.pow(t * 2, 0.98) / 2 : 1 - Math.pow((1 - t) * 2, 0.98) / 2;
+    cursor += item.halfWidth;
+    const t = cursor / totalWidth;
+    cursor += item.halfWidth + (index < items.length - 1 ? contactGap : 0);
 
-    const angle = invert ? Math.PI - eased * Math.PI : Math.PI + eased * Math.PI;
+    const angle = invert ? Math.PI - t * Math.PI : Math.PI + t * Math.PI;
     const x = cx + rx * Math.cos(angle);
     const y = cy + ry * Math.sin(angle);
     const rotate = (angle * 180) / Math.PI + 90;

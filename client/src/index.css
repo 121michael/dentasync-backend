@@ -3739,7 +3739,7 @@ strong {
 }
 .fdi-chart-svg {
   display: block;
-  width: min(100%, 920px);
+  width: min(100%, 900px);
   height: auto;
   margin: 0 auto;
   user-select: none;
