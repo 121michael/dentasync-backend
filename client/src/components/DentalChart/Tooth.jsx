@@ -37,9 +37,10 @@ export function Tooth({
   const type = toothTypeFromFdi(toothNumber);
   const shape = TOOTH_SHAPES[type] || TOOTH_SHAPES.premolar;
   const missing = status === "missing";
+  const hit = shape.hit || { rx: 18, ry: 26 };
 
   return (
-    <g className={`fdi-tooth fdi-tooth--${status} ${selected ? "is-selected" : ""}`}>
+    <g className={`fdi-tooth fdi-tooth--${status} fdi-tooth--${type} ${selected ? "is-selected" : ""}`}>
       <g
         transform={`translate(${x}, ${y}) rotate(${rotate}) scale(${scale})`}
         role="button"
@@ -60,57 +61,90 @@ export function Tooth({
       >
         <title>{title}</title>
 
+        {/* Invisible hit area — keeps larger crowns easy to click */}
+        <ellipse className="fdi-tooth__hit" cx="0" cy="0" rx={hit.rx} ry={hit.ry} />
+
         {missing ? (
           <>
             <ellipse
               className="fdi-tooth__missing-slot"
               cx="0"
               cy="0"
-              rx="11"
-              ry="15"
+              rx={hit.rx * 0.72}
+              ry={hit.ry * 0.72}
               fill="none"
-              strokeDasharray="3 3"
+              strokeDasharray="4 3.5"
             />
             <path
               className="fdi-tooth__missing-mark"
-              d="M -5 -5 L 5 5 M 5 -5 L -5 5"
+              d="M -7 -7 L 7 7 M 7 -7 L -7 7"
               fill="none"
-              strokeWidth="1.4"
+              strokeWidth="1.6"
               strokeLinecap="round"
             />
           </>
         ) : (
           <>
-            {/* Soft contact shadow */}
-            <ellipse className="fdi-tooth__shadow" cx="1.2" cy="2.2" rx="10" ry="14" />
-
-            <path className="fdi-tooth__shape" d={shape.outline} />
-            <path className="fdi-tooth__highlight" d={shape.outline} />
-            <path
-              className="fdi-tooth__detail"
-              d={shape.detail}
-              fill="none"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+            {/* Soft contact shadow under the crown */}
+            <ellipse
+              className="fdi-tooth__shadow"
+              cx="1.8"
+              cy="3.2"
+              rx={hit.rx * 0.78}
+              ry={hit.ry * 0.72}
             />
+
+            {/* Ivory crown body */}
+            <path className="fdi-tooth__shape" d={shape.outline} />
+
+            {/* Soft inner shade for thickness / enamel rim */}
+            {shape.shade ? <path className="fdi-tooth__shade" d={shape.shade} /> : null}
+
+            {/* Raised cusp mounds */}
+            {(shape.cusps || []).map((cusp, index) => (
+              <ellipse
+                key={`cusp-${index}`}
+                className="fdi-tooth__cusp"
+                cx={cusp.cx}
+                cy={cusp.cy}
+                rx={cusp.rx}
+                ry={cusp.ry}
+              />
+            ))}
+
+            {/* Occlusal grooves / fissures */}
+            {shape.grooves ? (
+              <path
+                className="fdi-tooth__detail"
+                d={shape.grooves}
+                fill="none"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            ) : null}
+
+            {/* Specular gloss wash */}
+            <path className="fdi-tooth__highlight" d={shape.outline} />
 
             {/* Status markers — keep ivory body visible */}
             {status === "needs_attention" || status === "fractured" ? (
-              <circle className="fdi-tooth__marker fdi-tooth__marker--attention" cx="7" cy="-12" r="3.2" />
+              <circle className="fdi-tooth__marker fdi-tooth__marker--attention" cx="11" cy="-18" r="4" />
             ) : null}
             {status === "treated" ? (
-              <circle className="fdi-tooth__marker fdi-tooth__marker--treated" cx="7" cy="-12" r="3.2" />
+              <circle className="fdi-tooth__marker fdi-tooth__marker--treated" cx="11" cy="-18" r="4" />
             ) : null}
             {status === "under_treatment" ? (
-              <circle className="fdi-tooth__marker fdi-tooth__marker--under" cx="7" cy="-12" r="3.2" />
+              <circle className="fdi-tooth__marker fdi-tooth__marker--under" cx="11" cy="-18" r="4" />
             ) : null}
             {record?.treatments?.length ? (
-              <circle className="fdi-tooth__marker fdi-tooth__marker--note" cx="-7.5" cy="-12" r="2.4" />
+              <circle className="fdi-tooth__marker fdi-tooth__marker--note" cx="-11" cy="-18" r="3.1" />
             ) : null}
           </>
         )}
 
-        {selected ? <ellipse className="fdi-tooth__selection" cx="0" cy="0" rx="13" ry="17.5" /> : null}
+        {selected ? (
+          <ellipse className="fdi-tooth__selection" cx="0" cy="0" rx={hit.rx * 1.05} ry={hit.ry * 1.05} />
+        ) : null}
       </g>
 
       {/* FDI number stays upright around the arch */}

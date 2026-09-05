@@ -3739,14 +3739,14 @@ strong {
 }
 .fdi-chart-svg {
   display: block;
-  width: min(100%, 760px);
+  width: min(100%, 920px);
   height: auto;
   margin: 0 auto;
   user-select: none;
 }
 .fdi-arch-label {
   fill: #6d28d9;
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 800;
   letter-spacing: 0.16em;
   opacity: 0.78;
@@ -3755,47 +3755,75 @@ strong {
 .fdi-tooth {
   outline: none;
 }
+.fdi-tooth__hit {
+  fill: transparent;
+  pointer-events: all;
+}
 .fdi-tooth__shadow {
-  fill: rgba(110, 70, 55, 0.12);
+  fill: rgba(110, 70, 55, 0.16);
   pointer-events: none;
 }
 .fdi-tooth__shape {
   fill: url(#fdiToothIvory);
-  stroke: #c4b39a;
-  stroke-width: 1.15;
+  stroke: #b9a48a;
+  stroke-width: 1.55;
   filter: url(#fdiSoftShadow);
   transition: filter 0.15s ease, stroke 0.15s ease;
+}
+.fdi-tooth__shade {
+  fill: url(#fdiToothShade);
+  stroke: none;
+  pointer-events: none;
+  opacity: 0.55;
+}
+.fdi-tooth__cusp {
+  fill: url(#fdiToothCusp);
+  stroke: rgba(200, 175, 140, 0.28);
+  stroke-width: 0.55;
+  pointer-events: none;
 }
 .fdi-tooth__highlight {
   fill: url(#fdiToothHighlight);
   stroke: none;
   pointer-events: none;
-  opacity: 0.85;
+  opacity: 0.9;
+  mix-blend-mode: soft-light;
 }
 .fdi-tooth__detail {
-  stroke: rgba(150, 125, 95, 0.38);
-  stroke-width: 0.95;
+  stroke: rgba(130, 105, 75, 0.42);
+  stroke-width: 1.15;
   pointer-events: none;
+}
+.fdi-tooth--molar .fdi-tooth__detail {
+  stroke-width: 1.25;
+  stroke: rgba(120, 95, 68, 0.48);
+}
+.fdi-tooth--canine .fdi-tooth__detail {
+  stroke-width: 1.2;
+}
+.fdi-tooth--central_incisor .fdi-tooth__shape,
+.fdi-tooth--lateral_incisor .fdi-tooth__shape {
+  stroke-width: 1.4;
 }
 .fdi-tooth__number {
   fill: #4c1d95;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 800;
   pointer-events: none;
   paint-order: stroke;
-  stroke: rgba(255, 250, 245, 0.9);
-  stroke-width: 3px;
+  stroke: rgba(255, 250, 245, 0.92);
+  stroke-width: 3.5px;
 }
 .fdi-tooth__selection {
   fill: none;
   stroke: #6d28d9;
-  stroke-width: 1.8;
-  opacity: 0.9;
+  stroke-width: 2.1;
+  opacity: 0.92;
   pointer-events: none;
 }
 .fdi-tooth__marker {
   stroke: #fff;
-  stroke-width: 1;
+  stroke-width: 1.15;
   pointer-events: none;
 }
 .fdi-tooth__marker--attention { fill: #ea580c; }
@@ -3804,7 +3832,7 @@ strong {
 .fdi-tooth__marker--note { fill: #6d28d9; }
 .fdi-tooth__missing-slot {
   stroke: #a89ba8;
-  stroke-width: 1.4;
+  stroke-width: 1.6;
 }
 .fdi-tooth__missing-mark {
   stroke: #a89ba8;
@@ -3812,11 +3840,11 @@ strong {
 .fdi-tooth:hover .fdi-tooth__shape,
 .fdi-tooth:focus-visible .fdi-tooth__shape {
   stroke: #8b7355;
-  stroke-width: 1.45;
+  stroke-width: 1.85;
 }
 .fdi-tooth.is-selected .fdi-tooth__shape {
   stroke: #6d28d9;
-  stroke-width: 1.7;
+  stroke-width: 2.05;
 }
 /* Keep ivory body; status is marker-based, not flat recolor */
 .fdi-tooth--needs_attention .fdi-tooth__shape,
