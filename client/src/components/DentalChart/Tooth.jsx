@@ -61,7 +61,6 @@ export function Tooth({
       >
         <title>{title}</title>
 
-        {/* Invisible hit area — keeps larger crowns easy to click */}
         <ellipse className="fdi-tooth__hit" cx="0" cy="0" rx={hit.rx} ry={hit.ry} />
 
         {missing ? (
@@ -85,7 +84,6 @@ export function Tooth({
           </>
         ) : (
           <>
-            {/* Soft contact shadow under the crown */}
             <ellipse
               className="fdi-tooth__shadow"
               cx="1.8"
@@ -94,13 +92,10 @@ export function Tooth({
               ry={hit.ry * 0.72}
             />
 
-            {/* Ivory crown body */}
             <path className="fdi-tooth__shape" d={shape.outline} />
 
-            {/* Soft inner shade for thickness / enamel rim */}
             {shape.shade ? <path className="fdi-tooth__shade" d={shape.shade} /> : null}
 
-            {/* Raised cusp mounds */}
             {(shape.cusps || []).map((cusp, index) => (
               <ellipse
                 key={`cusp-${index}`}
@@ -112,7 +107,6 @@ export function Tooth({
               />
             ))}
 
-            {/* Occlusal grooves / fissures */}
             {shape.grooves ? (
               <path
                 className="fdi-tooth__detail"
@@ -123,10 +117,22 @@ export function Tooth({
               />
             ) : null}
 
-            {/* Specular gloss wash */}
+            {shape.secondary ? (
+              <path
+                className="fdi-tooth__detail-secondary"
+                d={shape.secondary}
+                fill="none"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            ) : null}
+
+            {(shape.pits || []).map((pit, index) => (
+              <circle key={`pit-${index}`} className="fdi-tooth__pit" cx={pit.cx} cy={pit.cy} r={pit.r} />
+            ))}
+
             <path className="fdi-tooth__highlight" d={shape.outline} />
 
-            {/* Status markers — keep ivory body visible */}
             {status === "needs_attention" || status === "fractured" ? (
               <circle className="fdi-tooth__marker fdi-tooth__marker--attention" cx="11" cy="-18" r="4" />
             ) : null}
@@ -143,11 +149,10 @@ export function Tooth({
         )}
 
         {selected ? (
-          <ellipse className="fdi-tooth__selection" cx="0" cy="0" rx={hit.rx * 1.05} ry={hit.ry * 1.05} />
+          <ellipse className="fdi-tooth__selection" cx="0" cy="0" rx={hit.rx * 1.08} ry={hit.ry * 1.08} />
         ) : null}
       </g>
 
-      {/* FDI number stays upright around the arch */}
       <text
         className="fdi-tooth__number"
         x={labelX}
