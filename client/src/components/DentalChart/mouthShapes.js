@@ -27,9 +27,10 @@ export function gumGlowPath({
 
   return [
     `M ${leftOuter.x} ${leftOuter.y}`,
-    `A ${outerRx} ${outerRy} 0 1 ${outerSweep} ${rightOuter.x} ${rightOuter.y}`,
+    // large-arc=0: short horseshoe through top (upper) / bottom (lower)
+    `A ${outerRx} ${outerRy} 0 0 ${outerSweep} ${rightOuter.x} ${rightOuter.y}`,
     `L ${rightInner.x} ${rightInner.y}`,
-    `A ${innerRx} ${innerRy} 0 1 ${innerSweep} ${leftInner.x} ${leftInner.y}`,
+    `A ${innerRx} ${innerRy} 0 0 ${innerSweep} ${leftInner.x} ${leftInner.y}`,
     "Z",
   ].join(" ");
 }
