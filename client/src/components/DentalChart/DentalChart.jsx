@@ -59,11 +59,11 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
     () =>
       toothPositions(UPPER_TEETH, {
         cx: VIEW.width / 2,
-        cy: 230,
-        rx: 330,
-        ry: 148,
+        cy: 235,
+        rx: 305,
+        ry: 138,
         invert: false,
-        labelPad: 48,
+        labelPad: 52,
       }),
     []
   );
@@ -72,11 +72,11 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
     () =>
       toothPositions(LOWER_TEETH, {
         cx: VIEW.width / 2,
-        cy: 520,
-        rx: 330,
-        ry: 148,
+        cy: 515,
+        rx: 305,
+        ry: 138,
         invert: true,
-        labelPad: 48,
+        labelPad: 52,
       }),
     []
   );
@@ -268,8 +268,8 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
               {/* Upper gingival field */}
               <ellipse
                 cx={VIEW.width / 2}
-                cy={230}
-                rx={370}
+                cy={235}
+                rx={360}
                 ry={175}
                 fill="url(#fdiGingivaUpper)"
                 opacity="0.95"
@@ -277,8 +277,8 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
               {/* Lower gingival field */}
               <ellipse
                 cx={VIEW.width / 2}
-                cy={520}
-                rx={370}
+                cy={515}
+                rx={360}
                 ry={175}
                 fill="url(#fdiGingivaLower)"
                 opacity="0.95"
@@ -287,17 +287,17 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
               <ellipse
                 cx={VIEW.width / 2}
                 cy={375}
-                rx={200}
-                ry={110}
+                rx={185}
+                ry={100}
                 fill="url(#fdiOralCavity)"
                 stroke="rgba(196, 120, 110, 0.28)"
                 strokeWidth="1.5"
               />
 
-              <text className="fdi-arch-label" x={VIEW.width / 2} y={236} textAnchor="middle">
+              <text className="fdi-arch-label" x={VIEW.width / 2} y={240} textAnchor="middle">
                 UPPER
               </text>
-              <text className="fdi-arch-label" x={VIEW.width / 2} y={526} textAnchor="middle">
+              <text className="fdi-arch-label" x={VIEW.width / 2} y={520} textAnchor="middle">
                 LOWER
               </text>
 
