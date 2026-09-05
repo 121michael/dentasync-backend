@@ -128,8 +128,8 @@ export function toothPositions(
     const type = toothTypeFromFdi(tooth);
     const scale = toothScale(tooth);
     const shape = TOOTH_SHAPES[type];
-    // Use near-full crown width so contactGap maps to visible separation.
-    const halfWidth = shape.hit.rx * scale * 0.98;
+    // Slightly over full hit width so contactGap reads as a real embrasure.
+    const halfWidth = shape.hit.rx * scale * 1.02;
     // Mild anterior inset — keep the familiar arch shape.
     const radiusScale =
       type === "molar" ? 1.0 : type === "premolar" ? 0.99 : type === "canine" ? 0.97 : 0.94;
