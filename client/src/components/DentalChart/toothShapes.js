@@ -12,15 +12,15 @@ export function toothTypeFromFdi(toothNumber) {
   return "molar";
 }
 
-/** Compact scales — continuous row with tiny embrasures; slightly reduced for fit. */
+/** Compact scales — continuous row with tiny embrasures; sized to fit the card. */
 export function toothScale(toothNumber) {
   const type = toothTypeFromFdi(toothNumber);
   const digit = Number(String(toothNumber).slice(-1));
-  if (type === "molar") return digit === 8 ? 1.12 : digit === 7 ? 1.22 : 1.26;
-  if (type === "premolar") return digit === 4 ? 1.06 : 1.02;
-  if (type === "canine") return 1.08;
-  if (type === "lateral_incisor") return 0.94;
-  return 1.05;
+  if (type === "molar") return digit === 8 ? 1.02 : digit === 7 ? 1.12 : 1.16;
+  if (type === "premolar") return digit === 4 ? 0.98 : 0.94;
+  if (type === "canine") return 1.0;
+  if (type === "lateral_incisor") return 0.88;
+  return 0.98;
 }
 
 /**
@@ -116,36 +116,75 @@ export const TOOTH_SHAPES = {
 };
 
 /**
- * Place teeth on a horseshoe with width-aware packing (near-contacts like the reference).
+ * Place teeth on a horseshoe with width-aware chord packing (near-contacts, no overlap).
  */
-export function toothPositions(teeth, { cx, cy, rx, ry, invert = false, labelPad = 44 }) {
-  const contactGap = 0.9;
+export function toothPositions(
+  teeth,
+  { cx, cy, rx, ry, invert = false, labelPad = 36, viewWidth = 860, viewHeight = 700 }
+) {
+  const contactGap = 1.8;
+  const edgePad = 18;
   const items = teeth.map((tooth) => {
     const type = toothTypeFromFdi(tooth);
     const scale = toothScale(tooth);
     const shape = TOOTH_SHAPES[type];
-    // Use outline-ish width (slightly under hit box) for tighter visual contacts.
-    const halfWidth = shape.hit.rx * scale * 0.86;
-    return { tooth, type, scale, halfWidth };
+    const halfWidth = shape.hit.rx * scale * 0.84;
+    // Pull anteriors slightly toward the arch center for a natural front group.
+    const radiusScale =
+      type === "molar" ? 1.0 : type === "premolar" ? 0.985 : type === "canine" ? 0.955 : 0.9;
+    return { tooth, type, scale, halfWidth, radiusScale };
   });
 
-  const totalWidth =
-    items.reduce((sum, item) => sum + item.halfWidth * 2, 0) + contactGap * Math.max(0, items.length - 1);
-
-  let cursor = 0;
-  return items.map((item, index) => {
-    cursor += item.halfWidth;
-    const t = cursor / totalWidth;
-    cursor += item.halfWidth + (index < items.length - 1 ? contactGap : 0);
-
+  function pointAt(t, radiusScale) {
     const angle = invert ? Math.PI - t * Math.PI : Math.PI + t * Math.PI;
-    const x = cx + rx * Math.cos(angle);
-    const y = cy + ry * Math.sin(angle);
-    const rotate = (angle * 180) / Math.PI + 90;
+    return {
+      angle,
+      x: cx + rx * radiusScale * Math.cos(angle),
+      y: cy + ry * radiusScale * Math.sin(angle),
+    };
+  }
 
-    // Keep FDI numbers just outside enamel — clear of crowns, inside the card.
-    const typePad = item.type === "molar" ? 16 : item.type === "premolar" ? 12 : 10;
+  function packFrom(startT) {
+    const ts = new Array(items.length).fill(0);
+    ts[0] = startT;
+    for (let i = 1; i < items.length; i += 1) {
+      const prev = items[i - 1];
+      const curr = items[i];
+      const target = prev.halfWidth + curr.halfWidth + contactGap;
+      let lo = ts[i - 1];
+      let hi = Math.min(1.15, ts[i - 1] + 0.4);
+      const prevPt = pointAt(ts[i - 1], prev.radiusScale);
+      for (let iter = 0; iter < 20; iter += 1) {
+        const mid = (lo + hi) / 2;
+        const pt = pointAt(mid, curr.radiusScale);
+        const dist = Math.hypot(pt.x - prevPt.x, pt.y - prevPt.y);
+        if (dist < target) lo = mid;
+        else hi = mid;
+      }
+      ts[i] = (lo + hi) / 2;
+    }
+    return ts;
+  }
+
+  // Pack once to measure span, then re-pack from a centered start (no post-shift —
+  // shifting t after radius-aware packing would break right-side contacts).
+  const probe = packFrom(items[0].halfWidth / (rx * Math.PI));
+  const span = probe[probe.length - 1] - probe[0];
+  const startT = Math.max(0.02, (1 - span) / 2);
+  const ts = packFrom(startT);
+
+  return items.map((item, index) => {
+    const { angle, x, y } = pointAt(ts[index], item.radiusScale);
+    const rotate = (angle * 180) / Math.PI + 90;
+    const localRx = rx * item.radiusScale;
+    const localRy = ry * item.radiusScale;
+
+    const typePad = item.type === "molar" ? 14 : item.type === "premolar" ? 11 : 9;
     const pad = labelPad + typePad;
+    let labelX = cx + (localRx + pad) * Math.cos(angle);
+    let labelY = cy + (localRy + pad) * Math.sin(angle);
+    labelX = Math.min(viewWidth - edgePad, Math.max(edgePad, labelX));
+    labelY = Math.min(viewHeight - edgePad, Math.max(edgePad, labelY));
 
     return {
       tooth: item.tooth,
@@ -153,8 +192,8 @@ export function toothPositions(teeth, { cx, cy, rx, ry, invert = false, labelPad
       y,
       rotate,
       angle,
-      labelX: cx + (rx + pad) * Math.cos(angle),
-      labelY: cy + (ry + pad) * Math.sin(angle),
+      labelX,
+      labelY,
       type: item.type,
       scale: item.scale,
     };

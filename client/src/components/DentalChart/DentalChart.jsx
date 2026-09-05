@@ -16,11 +16,11 @@ import {
 } from "./dentalChartData";
 import { gumArchStrokePath } from "./mouthShapes";
 
-const VIEW = { width: 860, height: 660 };
+const VIEW = { width: 860, height: 700 };
 
-// Compact horseshoe — less vertical whitespace, still clear upper/lower split.
-const UPPER_ARCH = { cx: VIEW.width / 2, cy: 200, rx: 235, ry: 145 };
-const LOWER_ARCH = { cx: VIEW.width / 2, cy: 470, rx: 235, ry: 145 };
+// Compact horseshoe — arches closer together, room for FDI numbers inside the card.
+const UPPER_ARCH = { cx: VIEW.width / 2, cy: 248, rx: 218, ry: 118 };
+const LOWER_ARCH = { cx: VIEW.width / 2, cy: 462, rx: 218, ry: 118 };
 
 export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
   const [chart, setChart] = useState(null);
@@ -65,7 +65,9 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
       toothPositions(UPPER_TEETH, {
         ...UPPER_ARCH,
         invert: false,
-        labelPad: 44,
+        labelPad: 36,
+        viewWidth: VIEW.width,
+        viewHeight: VIEW.height,
       }),
     []
   );
@@ -75,7 +77,9 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
       toothPositions(LOWER_TEETH, {
         ...LOWER_ARCH,
         invert: true,
-        labelPad: 44,
+        labelPad: 36,
+        viewWidth: VIEW.width,
+        viewHeight: VIEW.height,
       }),
     []
   );
@@ -271,10 +275,10 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
                 />
               </g>
 
-              <text className="fdi-arch-label" x={VIEW.width / 2} y={205} textAnchor="middle">
+              <text className="fdi-arch-label" x={VIEW.width / 2} y={252} textAnchor="middle">
                 UPPER
               </text>
-              <text className="fdi-arch-label" x={VIEW.width / 2} y={475} textAnchor="middle">
+              <text className="fdi-arch-label" x={VIEW.width / 2} y={458} textAnchor="middle">
                 LOWER
               </text>
 
