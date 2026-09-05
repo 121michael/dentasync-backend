@@ -16,11 +16,11 @@ import {
 } from "./dentalChartData";
 import { gumArchStrokePath } from "./mouthShapes";
 
-const VIEW = { width: 900, height: 740 };
+const VIEW = { width: 900, height: 760 };
 
-// Arch sized so width-packed crowns fill it tightly like the reference.
-const UPPER_ARCH = { cx: VIEW.width / 2, cy: 220, rx: 270, ry: 145 };
-const LOWER_ARCH = { cx: VIEW.width / 2, cy: 530, rx: 270, ry: 145 };
+// Near-circular horseshoe so chord spacing matches crown widths evenly.
+const UPPER_ARCH = { cx: VIEW.width / 2, cy: 235, rx: 255, ry: 175 };
+const LOWER_ARCH = { cx: VIEW.width / 2, cy: 535, rx: 255, ry: 175 };
 
 export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
   const [chart, setChart] = useState(null);
@@ -271,10 +271,10 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
                 />
               </g>
 
-              <text className="fdi-arch-label" x={VIEW.width / 2} y={222} textAnchor="middle">
+              <text className="fdi-arch-label" x={VIEW.width / 2} y={238} textAnchor="middle">
                 UPPER
               </text>
-              <text className="fdi-arch-label" x={VIEW.width / 2} y={532} textAnchor="middle">
+              <text className="fdi-arch-label" x={VIEW.width / 2} y={538} textAnchor="middle">
                 LOWER
               </text>
 

@@ -120,13 +120,13 @@ export const TOOTH_SHAPES = {
  * Place teeth on a horseshoe with width-aware packing (near-contacts like the reference).
  */
 export function toothPositions(teeth, { cx, cy, rx, ry, invert = false, labelPad = 48 }) {
-  const contactGap = 2.2;
+  const contactGap = 1.2;
   const items = teeth.map((tooth) => {
     const type = toothTypeFromFdi(tooth);
     const scale = toothScale(tooth);
     const shape = TOOTH_SHAPES[type];
-    // Mesial–distal half-width along the arch (local X after rotation).
-    const halfWidth = shape.hit.rx * scale * 0.95;
+    // Use outline-ish width (slightly under hit box) for tighter visual contacts.
+    const halfWidth = shape.hit.rx * scale * 0.88;
     return { tooth, type, scale, halfWidth };
   });
 
