@@ -16,11 +16,11 @@ import {
 } from "./dentalChartData";
 import { gumArchStrokePath } from "./mouthShapes";
 
-const VIEW = { width: 860, height: 620 };
+const VIEW = { width: 860, height: 600 };
 
-// Compact horseshoe — minimal center gap, safe label margins.
-const UPPER_ARCH = { cx: VIEW.width / 2, cy: 235, rx: 214, ry: 100 };
-const LOWER_ARCH = { cx: VIEW.width / 2, cy: 395, rx: 214, ry: 100 };
+// Compact horseshoe — fills the card width, tight upper/lower split, safe FDI margins.
+const UPPER_ARCH = { cx: VIEW.width / 2, cy: 238, rx: 252, ry: 92 };
+const LOWER_ARCH = { cx: VIEW.width / 2, cy: 372, rx: 252, ry: 92 };
 
 export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
   const [chart, setChart] = useState(null);
@@ -261,7 +261,7 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
                   d={gumArchStrokePath({ ...UPPER_ARCH, invert: false })}
                   fill="none"
                   stroke="rgba(230, 115, 105, 0.55)"
-                  strokeWidth="38"
+                  strokeWidth="36"
                   strokeLinecap="round"
                   filter="url(#fdiGumBlur)"
                 />
@@ -269,16 +269,16 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
                   d={gumArchStrokePath({ ...LOWER_ARCH, invert: true })}
                   fill="none"
                   stroke="rgba(230, 115, 105, 0.55)"
-                  strokeWidth="38"
+                  strokeWidth="36"
                   strokeLinecap="round"
                   filter="url(#fdiGumBlur)"
                 />
               </g>
 
-              <text className="fdi-arch-label" x={VIEW.width / 2} y={240} textAnchor="middle">
+              <text className="fdi-arch-label" x={VIEW.width / 2} y={242} textAnchor="middle">
                 UPPER
               </text>
-              <text className="fdi-arch-label" x={VIEW.width / 2} y={390} textAnchor="middle">
+              <text className="fdi-arch-label" x={VIEW.width / 2} y={368} textAnchor="middle">
                 LOWER
               </text>
 
