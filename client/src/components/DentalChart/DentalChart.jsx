@@ -16,11 +16,11 @@ import {
 } from "./dentalChartData";
 import { gumArchStrokePath } from "./mouthShapes";
 
-const VIEW = { width: 860, height: 700 };
+const VIEW = { width: 860, height: 640 };
 
 // Compact horseshoe — arches closer together, room for FDI numbers inside the card.
-const UPPER_ARCH = { cx: VIEW.width / 2, cy: 248, rx: 218, ry: 118 };
-const LOWER_ARCH = { cx: VIEW.width / 2, cy: 462, rx: 218, ry: 118 };
+const UPPER_ARCH = { cx: VIEW.width / 2, cy: 232, rx: 216, ry: 112 };
+const LOWER_ARCH = { cx: VIEW.width / 2, cy: 418, rx: 216, ry: 112 };
 
 export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
   const [chart, setChart] = useState(null);
@@ -261,7 +261,7 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
                   d={gumArchStrokePath({ ...UPPER_ARCH, invert: false })}
                   fill="none"
                   stroke="rgba(230, 115, 105, 0.55)"
-                  strokeWidth="42"
+                  strokeWidth="38"
                   strokeLinecap="round"
                   filter="url(#fdiGumBlur)"
                 />
@@ -269,16 +269,16 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
                   d={gumArchStrokePath({ ...LOWER_ARCH, invert: true })}
                   fill="none"
                   stroke="rgba(230, 115, 105, 0.55)"
-                  strokeWidth="42"
+                  strokeWidth="38"
                   strokeLinecap="round"
                   filter="url(#fdiGumBlur)"
                 />
               </g>
 
-              <text className="fdi-arch-label" x={VIEW.width / 2} y={252} textAnchor="middle">
+              <text className="fdi-arch-label" x={VIEW.width / 2} y={236} textAnchor="middle">
                 UPPER
               </text>
-              <text className="fdi-arch-label" x={VIEW.width / 2} y={458} textAnchor="middle">
+              <text className="fdi-arch-label" x={VIEW.width / 2} y={414} textAnchor="middle">
                 LOWER
               </text>
 
