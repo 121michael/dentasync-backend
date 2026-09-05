@@ -120,7 +120,7 @@ export const TOOTH_SHAPES = {
  */
 export function toothPositions(
   teeth,
-  { cx, cy, rx, ry, invert = false, labelPad = 36, viewWidth = 860, viewHeight = 640 }
+  { cx, cy, rx, ry, invert = false, labelPad = 34, viewWidth = 860, viewHeight = 620 }
 ) {
   const contactGap = 1.8;
   const edgePad = 18;
