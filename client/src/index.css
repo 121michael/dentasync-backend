@@ -3739,63 +3739,98 @@ strong {
 }
 .fdi-chart-svg {
   display: block;
-  width: min(100%, 720px);
+  width: min(100%, 760px);
   height: auto;
   margin: 0 auto;
   user-select: none;
 }
 .fdi-arch-label {
   fill: #6d28d9;
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 800;
-  letter-spacing: 0.14em;
-  opacity: 0.85;
+  letter-spacing: 0.16em;
+  opacity: 0.78;
+  pointer-events: none;
 }
 .fdi-tooth {
-  cursor: pointer;
   outline: none;
 }
+.fdi-tooth__shadow {
+  fill: rgba(110, 70, 55, 0.12);
+  pointer-events: none;
+}
 .fdi-tooth__shape {
-  fill: #f8f5ff;
-  stroke: #7c3aed;
-  stroke-width: 1.6;
-  transition: fill 0.15s ease, stroke 0.15s ease, filter 0.15s ease;
+  fill: url(#fdiToothIvory);
+  stroke: #c4b39a;
+  stroke-width: 1.15;
+  filter: url(#fdiSoftShadow);
+  transition: filter 0.15s ease, stroke 0.15s ease;
+}
+.fdi-tooth__highlight {
+  fill: url(#fdiToothHighlight);
+  stroke: none;
+  pointer-events: none;
+  opacity: 0.85;
+}
+.fdi-tooth__detail {
+  stroke: rgba(150, 125, 95, 0.38);
+  stroke-width: 0.95;
+  pointer-events: none;
 }
 .fdi-tooth__number {
   fill: #4c1d95;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   pointer-events: none;
+  paint-order: stroke;
+  stroke: rgba(255, 250, 245, 0.9);
+  stroke-width: 3px;
 }
-.fdi-tooth__dot {
-  fill: #7c3aed;
+.fdi-tooth__selection {
+  fill: none;
+  stroke: #6d28d9;
+  stroke-width: 1.8;
+  opacity: 0.9;
+  pointer-events: none;
+}
+.fdi-tooth__marker {
   stroke: #fff;
   stroke-width: 1;
+  pointer-events: none;
+}
+.fdi-tooth__marker--attention { fill: #ea580c; }
+.fdi-tooth__marker--treated { fill: #2563eb; }
+.fdi-tooth__marker--under { fill: #7c3aed; }
+.fdi-tooth__marker--note { fill: #6d28d9; }
+.fdi-tooth__missing-slot {
+  stroke: #a89ba8;
+  stroke-width: 1.4;
+}
+.fdi-tooth__missing-mark {
+  stroke: #a89ba8;
 }
 .fdi-tooth:hover .fdi-tooth__shape,
 .fdi-tooth:focus-visible .fdi-tooth__shape {
-  filter: drop-shadow(0 0 6px rgba(124, 58, 237, 0.35));
-  stroke-width: 2.2;
+  stroke: #8b7355;
+  stroke-width: 1.45;
 }
 .fdi-tooth.is-selected .fdi-tooth__shape {
-  stroke: #4c1d95;
-  stroke-width: 2.6;
-  filter: drop-shadow(0 0 8px rgba(76, 29, 149, 0.45));
+  stroke: #6d28d9;
+  stroke-width: 1.7;
 }
-.fdi-tooth--healthy .fdi-tooth__shape { fill: #eefbf5; stroke: #0f9f6e; }
-.fdi-tooth--decay .fdi-tooth__shape,
-.fdi-tooth--fractured .fdi-tooth__shape,
-.fdi-tooth--needs_attention .fdi-tooth__shape { fill: #fff4e8; stroke: #c2410c; }
-.fdi-tooth--treated .fdi-tooth__shape { fill: #eaf3ff; stroke: #2563eb; }
-.fdi-tooth--under_treatment .fdi-tooth__shape { fill: #f3e8ff; stroke: #7c3aed; }
-.fdi-tooth--missing .fdi-tooth__shape {
-  fill: #ece8f1;
-  stroke: #8b8198;
-  stroke-dasharray: 3 2;
+/* Keep ivory body; status is marker-based, not flat recolor */
+.fdi-tooth--needs_attention .fdi-tooth__shape,
+.fdi-tooth--fractured .fdi-tooth__shape {
+  stroke: #c2410c;
+}
+.fdi-tooth--treated .fdi-tooth__shape {
+  stroke: #3b82f6;
+}
+.fdi-tooth--under_treatment .fdi-tooth__shape {
+  stroke: #7c3aed;
 }
 .fdi-tooth--missing .fdi-tooth__number {
   fill: #8b8198;
-  text-decoration: line-through;
 }
 .fdi-legend {
   display: flex;

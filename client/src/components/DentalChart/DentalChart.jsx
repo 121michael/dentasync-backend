@@ -15,7 +15,7 @@ import {
   TREATMENT_OPTIONS,
 } from "./dentalChartData";
 
-const VIEW = { width: 720, height: 560 };
+const VIEW = { width: 760, height: 620 };
 
 export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
   const [chart, setChart] = useState(null);
@@ -59,10 +59,11 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
     () =>
       toothPositions(UPPER_TEETH, {
         cx: VIEW.width / 2,
-        cy: 168,
-        rx: 250,
-        ry: 108,
+        cy: 195,
+        rx: 268,
+        ry: 118,
         invert: false,
+        labelPad: 38,
       }),
     []
   );
@@ -71,10 +72,11 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
     () =>
       toothPositions(LOWER_TEETH, {
         cx: VIEW.width / 2,
-        cy: 400,
-        rx: 250,
-        ry: 108,
+        cy: 430,
+        rx: 268,
+        ry: 118,
         invert: true,
+        labelPad: 38,
       }),
     []
   );
@@ -220,35 +222,71 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
               aria-label="Interactive FDI dental chart with upper and lower arches"
             >
               <defs>
-                <linearGradient id="fdiArchWash" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="rgba(124, 58, 237, 0.08)" />
-                  <stop offset="100%" stopColor="rgba(124, 58, 237, 0.02)" />
+                <radialGradient id="fdiGingivaUpper" cx="50%" cy="62%" r="68%">
+                  <stop offset="0%" stopColor="#fff8f7" />
+                  <stop offset="55%" stopColor="#f7d4d0" />
+                  <stop offset="100%" stopColor="#e8a8a0" />
+                </radialGradient>
+                <radialGradient id="fdiGingivaLower" cx="50%" cy="38%" r="68%">
+                  <stop offset="0%" stopColor="#fff8f7" />
+                  <stop offset="55%" stopColor="#f7d4d0" />
+                  <stop offset="100%" stopColor="#e8a8a0" />
+                </radialGradient>
+                <radialGradient id="fdiOralCavity" cx="50%" cy="50%" r="55%">
+                  <stop offset="0%" stopColor="#ffffff" />
+                  <stop offset="70%" stopColor="#fff5f3" />
+                  <stop offset="100%" stopColor="#f3cfc9" />
+                </radialGradient>
+                <linearGradient id="fdiToothIvory" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stopColor="#fffdf8" />
+                  <stop offset="45%" stopColor="#f7f0e4" />
+                  <stop offset="100%" stopColor="#e8dcc8" />
                 </linearGradient>
+                <linearGradient id="fdiToothHighlight" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="rgba(255,255,255,0.55)" />
+                  <stop offset="55%" stopColor="rgba(255,255,255,0)" />
+                </linearGradient>
+                <filter id="fdiSoftShadow" x="-40%" y="-40%" width="180%" height="180%">
+                  <feDropShadow dx="0.6" dy="1.2" stdDeviation="1.1" floodColor="#8b5a4a" floodOpacity="0.22" />
+                </filter>
               </defs>
 
+              {/* Soft page wash */}
+              <rect x="0" y="0" width={VIEW.width} height={VIEW.height} fill="#fbf7f4" rx="18" />
+
+              {/* Upper gingival field */}
               <ellipse
                 cx={VIEW.width / 2}
-                cy={168}
-                rx={280}
-                ry={130}
-                fill="url(#fdiArchWash)"
-                stroke="rgba(109, 40, 217, 0.18)"
-                strokeWidth="2"
+                cy={195}
+                rx={300}
+                ry={145}
+                fill="url(#fdiGingivaUpper)"
+                opacity="0.95"
               />
+              {/* Lower gingival field */}
               <ellipse
                 cx={VIEW.width / 2}
-                cy={400}
-                rx={280}
-                ry={130}
-                fill="url(#fdiArchWash)"
-                stroke="rgba(109, 40, 217, 0.18)"
-                strokeWidth="2"
+                cy={430}
+                rx={300}
+                ry={145}
+                fill="url(#fdiGingivaLower)"
+                opacity="0.95"
+              />
+              {/* Shared oral cavity / open center */}
+              <ellipse
+                cx={VIEW.width / 2}
+                cy={312}
+                rx={168}
+                ry={92}
+                fill="url(#fdiOralCavity)"
+                stroke="rgba(196, 120, 110, 0.28)"
+                strokeWidth="1.5"
               />
 
-              <text className="fdi-arch-label" x={VIEW.width / 2} y={168} textAnchor="middle">
+              <text className="fdi-arch-label" x={VIEW.width / 2} y={198} textAnchor="middle">
                 UPPER
               </text>
-              <text className="fdi-arch-label" x={VIEW.width / 2} y={400} textAnchor="middle">
+              <text className="fdi-arch-label" x={VIEW.width / 2} y={434} textAnchor="middle">
                 LOWER
               </text>
 
@@ -262,7 +300,9 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
                   x={position.x}
                   y={position.y}
                   rotate={position.rotate}
-                  labelOffset={-28}
+                  labelX={position.labelX}
+                  labelY={position.labelY}
+                  scale={position.scale}
                 />
               ))}
 
@@ -276,7 +316,9 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
                   x={position.x}
                   y={position.y}
                   rotate={position.rotate}
-                  labelOffset={28}
+                  labelX={position.labelX}
+                  labelY={position.labelY}
+                  scale={position.scale}
                 />
               ))}
             </svg>

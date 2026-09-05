@@ -102,20 +102,5 @@ export function labelFor(value, options) {
   return options.find((option) => option.value === value)?.label || value;
 }
 
-/**
- * Place teeth along an elliptical arch.
- * Upper = ∩ (opening toward midline), Lower = ∪ (opening toward midline).
- */
-export function toothPositions(teeth, { cx, cy, rx, ry, invert = false }) {
-  const count = teeth.length;
-  return teeth.map((tooth, index) => {
-    const t = count === 1 ? 0.5 : index / (count - 1);
-    // Upper: 180° → 0° through top (90°). Lower: 180° → 360° through bottom (270°).
-    const angle = invert ? Math.PI + t * Math.PI : Math.PI - t * Math.PI;
-    const x = cx + rx * Math.cos(angle);
-    const y = cy + ry * Math.sin(angle);
-    // Point crowns away from arch centerline.
-    const rotate = invert ? (angle * 180) / Math.PI - 90 : (angle * 180) / Math.PI + 90;
-    return { tooth, x, y, rotate, angle };
-  });
-}
+export { toothPositions, toothTypeFromFdi, toothScale } from "./toothShapes";
+
