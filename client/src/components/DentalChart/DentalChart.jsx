@@ -245,8 +245,8 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
                   <stop offset="0%" stopColor="rgba(180,150,110,0.05)" />
                   <stop offset="100%" stopColor="rgba(150,120,85,0.16)" />
                 </linearGradient>
-                <filter id="fdiGumBlur" x="-40%" y="-40%" width="180%" height="180%">
-                  <feGaussianBlur stdDeviation="10" />
+                <filter id="fdiGumBlur" x="-35%" y="-35%" width="170%" height="170%">
+                  <feGaussianBlur stdDeviation="7" />
                 </filter>
                 <filter id="fdiSoftShadow" x="-30%" y="-30%" width="160%" height="160%">
                   <feDropShadow dx="0.3" dy="0.6" stdDeviation="0.55" floodColor="#8b5a4a" floodOpacity="0.16" />
@@ -262,21 +262,21 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
                   d={gumGlowPath({
                     ...UPPER_ARCH,
                     invert: false,
-                    thickness: 42,
+                    thickness: 34,
                   })}
                   fill="url(#fdiGumGlow)"
                   filter="url(#fdiGumBlur)"
-                  opacity="0.9"
+                  opacity="0.85"
                 />
                 <path
                   d={gumGlowPath({
                     ...LOWER_ARCH,
                     invert: true,
-                    thickness: 42,
+                    thickness: 34,
                   })}
                   fill="url(#fdiGumGlow)"
                   filter="url(#fdiGumBlur)"
-                  opacity="0.9"
+                  opacity="0.85"
                 />
               </g>
 

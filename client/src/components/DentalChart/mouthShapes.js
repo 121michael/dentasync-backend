@@ -20,8 +20,10 @@ export function gumGlowPath({
   const rightInner = polar(cx, cy, innerRx, innerRy, invert ? open : -open);
   const leftInner = polar(cx, cy, innerRx, innerRy, Math.PI + (invert ? -open : open));
 
-  const outerSweep = invert ? 1 : 0;
-  const innerSweep = invert ? 0 : 1;
+  // In SVG (y-down): sweep-flag 1 = clockwise on screen.
+  // Upper (∩): clockwise through TOP. Lower (∪): counter-clockwise through BOTTOM.
+  const outerSweep = invert ? 0 : 1;
+  const innerSweep = invert ? 1 : 0;
 
   return [
     `M ${leftOuter.x} ${leftOuter.y}`,
