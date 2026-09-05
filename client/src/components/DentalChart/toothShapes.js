@@ -15,11 +15,11 @@ export function toothTypeFromFdi(toothNumber) {
 export function toothScale(toothNumber) {
   const type = toothTypeFromFdi(toothNumber);
   const digit = Number(String(toothNumber).slice(-1));
-  if (type === "molar") return digit === 8 ? 1.32 : digit === 7 ? 1.44 : 1.48;
-  if (type === "premolar") return digit === 4 ? 1.22 : 1.18;
-  if (type === "canine") return 1.26;
-  if (type === "lateral_incisor") return 1.1;
-  return 1.22;
+  if (type === "molar") return digit === 8 ? 1.22 : digit === 7 ? 1.34 : 1.38;
+  if (type === "premolar") return digit === 4 ? 1.16 : 1.12;
+  if (type === "canine") return 1.22;
+  if (type === "lateral_incisor") return 1.08;
+  return 1.18;
 }
 
 /**
@@ -145,8 +145,8 @@ export function toothPositions(teeth, { cx, cy, rx, ry, invert = false, labelPad
     const scale = toothScale(tooth);
     const type = toothTypeFromFdi(tooth);
     // Extra radial pad for larger crowns so FDI numbers clear the enamel edge.
-    const typePad = type === "molar" ? 22 : type === "premolar" ? 14 : type === "canine" ? 10 : 8;
-    const pad = labelPad + typePad + (scale - 1) * 22;
+    const typePad = type === "molar" ? 26 : type === "premolar" ? 18 : type === "canine" ? 12 : 10;
+    const pad = labelPad + typePad + (scale - 1) * 24;
 
     const labelRx = rx + pad;
     const labelRy = ry + pad;

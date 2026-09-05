@@ -14,8 +14,12 @@ import {
   toothPositions,
   TREATMENT_OPTIONS,
 } from "./dentalChartData";
+import { horseshoeBandPath, palatePath, tonguePath, vestibulePath } from "./mouthShapes";
 
-const VIEW = { width: 1020, height: 840 };
+const VIEW = { width: 1040, height: 840 };
+
+const UPPER_ARCH = { cx: VIEW.width / 2, cy: 255, rx: 312, ry: 138 };
+const LOWER_ARCH = { cx: VIEW.width / 2, cy: 590, rx: 312, ry: 138 };
 
 export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
   const [chart, setChart] = useState(null);
@@ -58,12 +62,9 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
   const upperPositions = useMemo(
     () =>
       toothPositions(UPPER_TEETH, {
-        cx: VIEW.width / 2,
-        cy: 260,
-        rx: 300,
-        ry: 140,
+        ...UPPER_ARCH,
         invert: false,
-        labelPad: 82,
+        labelPad: 90,
       }),
     []
   );
@@ -71,12 +72,9 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
   const lowerPositions = useMemo(
     () =>
       toothPositions(LOWER_TEETH, {
-        cx: VIEW.width / 2,
-        cy: 590,
-        rx: 300,
-        ry: 140,
+        ...LOWER_ARCH,
         invert: true,
-        labelPad: 82,
+        labelPad: 90,
       }),
     []
   );
@@ -222,21 +220,33 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
               aria-label="Interactive FDI dental chart with upper and lower arches"
             >
               <defs>
-                <radialGradient id="fdiGingivaUpper" cx="50%" cy="62%" r="68%">
-                  <stop offset="0%" stopColor="#fff8f7" />
-                  <stop offset="55%" stopColor="#f7d4d0" />
-                  <stop offset="100%" stopColor="#e8a8a0" />
+                <linearGradient id="fdiPageWash" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#faf6f2" />
+                  <stop offset="100%" stopColor="#f3ebe4" />
+                </linearGradient>
+                <radialGradient id="fdiGingivaBand" cx="50%" cy="45%" r="72%">
+                  <stop offset="0%" stopColor="#fce8e3" />
+                  <stop offset="45%" stopColor="#f0c4bb" />
+                  <stop offset="100%" stopColor="#d99288" />
                 </radialGradient>
-                <radialGradient id="fdiGingivaLower" cx="50%" cy="38%" r="68%">
-                  <stop offset="0%" stopColor="#fff8f7" />
-                  <stop offset="55%" stopColor="#f7d4d0" />
-                  <stop offset="100%" stopColor="#e8a8a0" />
+                <radialGradient id="fdiGingivaInner" cx="50%" cy="50%" r="65%">
+                  <stop offset="0%" stopColor="#fff5f2" />
+                  <stop offset="100%" stopColor="#e8b0a6" />
                 </radialGradient>
-                <radialGradient id="fdiOralCavity" cx="50%" cy="50%" r="55%">
-                  <stop offset="0%" stopColor="#ffffff" />
-                  <stop offset="70%" stopColor="#fff5f3" />
-                  <stop offset="100%" stopColor="#f3cfc9" />
+                <radialGradient id="fdiPalate" cx="50%" cy="40%" r="70%">
+                  <stop offset="0%" stopColor="#fff9f7" />
+                  <stop offset="55%" stopColor="#f7d8d1" />
+                  <stop offset="100%" stopColor="#e8b4aa" />
                 </radialGradient>
+                <radialGradient id="fdiTongue" cx="50%" cy="55%" r="68%">
+                  <stop offset="0%" stopColor="#f7c4bc" />
+                  <stop offset="55%" stopColor="#e89a90" />
+                  <stop offset="100%" stopColor="#d07a72" />
+                </radialGradient>
+                <linearGradient id="fdiVestibule" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="rgba(214, 140, 130, 0.35)" />
+                  <stop offset="100%" stopColor="rgba(196, 110, 100, 0.18)" />
+                </linearGradient>
                 <linearGradient id="fdiToothIvory" x1="0.15" y1="0" x2="0.9" y2="1">
                   <stop offset="0%" stopColor="#fffef9" />
                   <stop offset="35%" stopColor="#f8f1e3" />
@@ -244,60 +254,159 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
                   <stop offset="100%" stopColor="#dcc9a8" />
                 </linearGradient>
                 <radialGradient id="fdiToothCusp" cx="35%" cy="30%" r="70%">
-                  <stop offset="0%" stopColor="rgba(255,255,255,0.72)" />
-                  <stop offset="55%" stopColor="rgba(255,248,235,0.28)" />
+                  <stop offset="0%" stopColor="rgba(255,255,255,0.65)" />
+                  <stop offset="55%" stopColor="rgba(255,248,235,0.22)" />
                   <stop offset="100%" stopColor="rgba(220,200,160,0)" />
                 </radialGradient>
                 <linearGradient id="fdiToothHighlight" x1="0" y1="0" x2="0.35" y2="1">
-                  <stop offset="0%" stopColor="rgba(255,255,255,0.58)" />
-                  <stop offset="40%" stopColor="rgba(255,255,255,0.12)" />
+                  <stop offset="0%" stopColor="rgba(255,255,255,0.45)" />
+                  <stop offset="45%" stopColor="rgba(255,255,255,0.08)" />
                   <stop offset="100%" stopColor="rgba(255,255,255,0)" />
                 </linearGradient>
                 <linearGradient id="fdiToothShade" x1="0.5" y1="0" x2="0.5" y2="1">
-                  <stop offset="0%" stopColor="rgba(180,150,110,0.08)" />
-                  <stop offset="100%" stopColor="rgba(150,120,85,0.22)" />
+                  <stop offset="0%" stopColor="rgba(180,150,110,0.06)" />
+                  <stop offset="100%" stopColor="rgba(150,120,85,0.18)" />
                 </linearGradient>
-                <filter id="fdiSoftShadow" x="-45%" y="-45%" width="190%" height="190%">
-                  <feDropShadow dx="0.8" dy="1.6" stdDeviation="1.4" floodColor="#8b5a4a" floodOpacity="0.28" />
+                <filter id="fdiSoftShadow" x="-35%" y="-35%" width="170%" height="170%">
+                  <feDropShadow dx="0.4" dy="0.8" stdDeviation="0.7" floodColor="#8b5a4a" floodOpacity="0.18" />
                 </filter>
               </defs>
 
               {/* Soft page wash */}
-              <rect x="0" y="0" width={VIEW.width} height={VIEW.height} fill="#fbf7f4" rx="18" />
+              <rect x="0" y="0" width={VIEW.width} height={VIEW.height} fill="url(#fdiPageWash)" rx="18" />
 
-              {/* Upper gingival field */}
-              <ellipse
-                cx={VIEW.width / 2}
-                cy={260}
-                rx={385}
-                ry={195}
-                fill="url(#fdiGingivaUpper)"
-                opacity="0.95"
-              />
-              {/* Lower gingival field */}
-              <ellipse
-                cx={VIEW.width / 2}
-                cy={590}
-                rx={385}
-                ry={195}
-                fill="url(#fdiGingivaLower)"
-                opacity="0.95"
-              />
-              {/* Shared oral cavity / open center */}
-              <ellipse
-                cx={VIEW.width / 2}
-                cy={425}
-                rx={195}
-                ry={110}
-                fill="url(#fdiOralCavity)"
-                stroke="rgba(196, 120, 110, 0.28)"
-                strokeWidth="1.5"
-              />
+              {/* —— Upper arch mouth anatomy (2D occlusal) —— */}
+              <g className="fdi-mouth fdi-mouth--upper" aria-hidden="true">
+                <path
+                  className="fdi-mouth__vestibule"
+                  d={vestibulePath({
+                    cx: UPPER_ARCH.cx,
+                    cy: UPPER_ARCH.cy,
+                    outerRx: UPPER_ARCH.rx + 72,
+                    outerRy: UPPER_ARCH.ry + 60,
+                    innerRx: UPPER_ARCH.rx + 42,
+                    innerRy: UPPER_ARCH.ry + 34,
+                    invert: false,
+                  })}
+                  fill="url(#fdiVestibule)"
+                />
+                <path
+                  className="fdi-mouth__gingiva"
+                  d={horseshoeBandPath({
+                    cx: UPPER_ARCH.cx,
+                    cy: UPPER_ARCH.cy,
+                    outerRx: UPPER_ARCH.rx + 48,
+                    outerRy: UPPER_ARCH.ry + 42,
+                    innerRx: UPPER_ARCH.rx - 40,
+                    innerRy: UPPER_ARCH.ry - 30,
+                    invert: false,
+                  })}
+                  fill="url(#fdiGingivaBand)"
+                  stroke="rgba(176, 110, 100, 0.4)"
+                  strokeWidth="1.25"
+                />
+                <path
+                  className="fdi-mouth__gingiva-ridge"
+                  d={horseshoeBandPath({
+                    cx: UPPER_ARCH.cx,
+                    cy: UPPER_ARCH.cy,
+                    outerRx: UPPER_ARCH.rx + 22,
+                    outerRy: UPPER_ARCH.ry + 18,
+                    innerRx: UPPER_ARCH.rx - 28,
+                    innerRy: UPPER_ARCH.ry - 20,
+                    invert: false,
+                  })}
+                  fill="url(#fdiGingivaInner)"
+                  opacity="0.7"
+                />
+                <path
+                  className="fdi-mouth__palate"
+                  d={palatePath({
+                    cx: UPPER_ARCH.cx,
+                    cy: UPPER_ARCH.cy + 22,
+                    rx: UPPER_ARCH.rx - 88,
+                    ry: UPPER_ARCH.ry - 36,
+                  })}
+                  fill="url(#fdiPalate)"
+                  stroke="rgba(196, 130, 120, 0.3)"
+                  strokeWidth="1"
+                />
+                <path
+                  d={`M ${UPPER_ARCH.cx} ${UPPER_ARCH.cy - 48} Q ${UPPER_ARCH.cx + 3} ${UPPER_ARCH.cy + 14} ${UPPER_ARCH.cx} ${UPPER_ARCH.cy + 78}`}
+                  fill="none"
+                  stroke="rgba(196, 130, 120, 0.22)"
+                  strokeWidth="1.2"
+                />
+              </g>
 
-              <text className="fdi-arch-label" x={VIEW.width / 2} y={265} textAnchor="middle">
+              {/* —— Lower arch mouth anatomy (2D occlusal) —— */}
+              <g className="fdi-mouth fdi-mouth--lower" aria-hidden="true">
+                <path
+                  className="fdi-mouth__vestibule"
+                  d={vestibulePath({
+                    cx: LOWER_ARCH.cx,
+                    cy: LOWER_ARCH.cy,
+                    outerRx: LOWER_ARCH.rx + 72,
+                    outerRy: LOWER_ARCH.ry + 60,
+                    innerRx: LOWER_ARCH.rx + 42,
+                    innerRy: LOWER_ARCH.ry + 34,
+                    invert: true,
+                  })}
+                  fill="url(#fdiVestibule)"
+                />
+                <path
+                  className="fdi-mouth__gingiva"
+                  d={horseshoeBandPath({
+                    cx: LOWER_ARCH.cx,
+                    cy: LOWER_ARCH.cy,
+                    outerRx: LOWER_ARCH.rx + 48,
+                    outerRy: LOWER_ARCH.ry + 42,
+                    innerRx: LOWER_ARCH.rx - 40,
+                    innerRy: LOWER_ARCH.ry - 30,
+                    invert: true,
+                  })}
+                  fill="url(#fdiGingivaBand)"
+                  stroke="rgba(176, 110, 100, 0.4)"
+                  strokeWidth="1.25"
+                />
+                <path
+                  className="fdi-mouth__gingiva-ridge"
+                  d={horseshoeBandPath({
+                    cx: LOWER_ARCH.cx,
+                    cy: LOWER_ARCH.cy,
+                    outerRx: LOWER_ARCH.rx + 22,
+                    outerRy: LOWER_ARCH.ry + 18,
+                    innerRx: LOWER_ARCH.rx - 28,
+                    innerRy: LOWER_ARCH.ry - 20,
+                    invert: true,
+                  })}
+                  fill="url(#fdiGingivaInner)"
+                  opacity="0.7"
+                />
+                <path
+                  className="fdi-mouth__tongue"
+                  d={tonguePath({
+                    cx: LOWER_ARCH.cx,
+                    cy: LOWER_ARCH.cy - 16,
+                    rx: LOWER_ARCH.rx - 95,
+                    ry: LOWER_ARCH.ry - 40,
+                  })}
+                  fill="url(#fdiTongue)"
+                  stroke="rgba(170, 90, 85, 0.3)"
+                  strokeWidth="1"
+                />
+                <path
+                  d={`M ${LOWER_ARCH.cx} ${LOWER_ARCH.cy - 72} Q ${LOWER_ARCH.cx - 3} ${LOWER_ARCH.cy - 8} ${LOWER_ARCH.cx} ${LOWER_ARCH.cy + 52}`}
+                  fill="none"
+                  stroke="rgba(170, 90, 85, 0.25)"
+                  strokeWidth="1.15"
+                />
+              </g>
+
+              <text className="fdi-arch-label" x={VIEW.width / 2} y={258} textAnchor="middle">
                 UPPER
               </text>
-              <text className="fdi-arch-label" x={VIEW.width / 2} y={595} textAnchor="middle">
+              <text className="fdi-arch-label" x={VIEW.width / 2} y={593} textAnchor="middle">
                 LOWER
               </text>
 

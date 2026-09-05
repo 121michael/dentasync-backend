@@ -3739,17 +3739,20 @@ strong {
 }
 .fdi-chart-svg {
   display: block;
-  width: min(100%, 1020px);
+  width: min(100%, 1040px);
   height: auto;
   margin: 0 auto;
   user-select: none;
 }
+.fdi-mouth {
+  pointer-events: none;
+}
 .fdi-arch-label {
   fill: #6d28d9;
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 800;
   letter-spacing: 0.16em;
-  opacity: 0.72;
+  opacity: 0.62;
   pointer-events: none;
 }
 .fdi-tooth {
@@ -3760,13 +3763,13 @@ strong {
   pointer-events: all;
 }
 .fdi-tooth__shadow {
-  fill: rgba(110, 70, 55, 0.16);
+  fill: rgba(110, 70, 55, 0.1);
   pointer-events: none;
 }
 .fdi-tooth__shape {
   fill: url(#fdiToothIvory);
   stroke: #b9a48a;
-  stroke-width: 1.55;
+  stroke-width: 1.45;
   filter: url(#fdiSoftShadow);
   transition: filter 0.15s ease, stroke 0.15s ease;
 }
