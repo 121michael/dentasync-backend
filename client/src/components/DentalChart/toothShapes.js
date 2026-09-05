@@ -122,13 +122,14 @@ export function toothPositions(
   teeth,
   { cx, cy, rx, ry, invert = false, labelPad = 42, viewWidth = 860, viewHeight = 680 }
 ) {
-  const contactGap = 5.5;
+  const contactGap = 4;
   const edgePad = 18;
   const items = teeth.map((tooth) => {
     const type = toothTypeFromFdi(tooth);
     const scale = toothScale(tooth);
     const shape = TOOTH_SHAPES[type];
-    const halfWidth = shape.hit.rx * scale * 0.86;
+    // Use near-full crown width so contactGap maps to visible separation.
+    const halfWidth = shape.hit.rx * scale * 0.98;
     // Mild anterior inset — keep the familiar arch shape.
     const radiusScale =
       type === "molar" ? 1.0 : type === "premolar" ? 0.99 : type === "canine" ? 0.97 : 0.94;
