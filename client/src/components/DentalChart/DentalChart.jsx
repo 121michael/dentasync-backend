@@ -19,8 +19,8 @@ import { gumArchStrokePath } from "./mouthShapes";
 const VIEW = { width: 860, height: 680 };
 
 // Same mouth placement as before — only slightly tighter.
-const UPPER_ARCH = { cx: VIEW.width / 2, cy: 208, rx: 228, ry: 138 };
-const LOWER_ARCH = { cx: VIEW.width / 2, cy: 462, rx: 228, ry: 138 };
+const UPPER_ARCH = { cx: VIEW.width / 2, cy: 208, rx: 232, ry: 138 };
+const LOWER_ARCH = { cx: VIEW.width / 2, cy: 462, rx: 232, ry: 138 };
 
 export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
   const [chart, setChart] = useState(null);
