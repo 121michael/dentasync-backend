@@ -3739,7 +3739,7 @@ strong {
 }
 .fdi-chart-svg {
   display: block;
-  width: min(100%, 900px);
+  width: min(100%, 860px);
   height: auto;
   margin: 0 auto;
   user-select: none;
@@ -3750,11 +3750,11 @@ strong {
 }
 .fdi-arch-label {
   fill: #111111;
-  font-size: 17px;
+  font-size: 15px;
   font-weight: 700;
   letter-spacing: 0.12em;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  opacity: 0.95;
+  opacity: 0.9;
   pointer-events: none;
 }
 .fdi-tooth {

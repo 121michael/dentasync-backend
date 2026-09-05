@@ -12,16 +12,15 @@ export function toothTypeFromFdi(toothNumber) {
   return "molar";
 }
 
-/** Compact scales — continuous row with tiny embrasures, like the reference. */
+/** Compact scales — continuous row with tiny embrasures; slightly reduced for fit. */
 export function toothScale(toothNumber) {
   const type = toothTypeFromFdi(toothNumber);
   const digit = Number(String(toothNumber).slice(-1));
-  // Sized so 16 crowns fill the arch with near-contacts (reference density).
-  if (type === "molar") return digit === 8 ? 1.28 : digit === 7 ? 1.38 : 1.42;
-  if (type === "premolar") return digit === 4 ? 1.2 : 1.15;
-  if (type === "canine") return 1.22;
-  if (type === "lateral_incisor") return 1.05;
-  return 1.18;
+  if (type === "molar") return digit === 8 ? 1.12 : digit === 7 ? 1.22 : 1.26;
+  if (type === "premolar") return digit === 4 ? 1.06 : 1.02;
+  if (type === "canine") return 1.08;
+  if (type === "lateral_incisor") return 0.94;
+  return 1.05;
 }
 
 /**
@@ -119,14 +118,14 @@ export const TOOTH_SHAPES = {
 /**
  * Place teeth on a horseshoe with width-aware packing (near-contacts like the reference).
  */
-export function toothPositions(teeth, { cx, cy, rx, ry, invert = false, labelPad = 48 }) {
-  const contactGap = 1.2;
+export function toothPositions(teeth, { cx, cy, rx, ry, invert = false, labelPad = 44 }) {
+  const contactGap = 0.9;
   const items = teeth.map((tooth) => {
     const type = toothTypeFromFdi(tooth);
     const scale = toothScale(tooth);
     const shape = TOOTH_SHAPES[type];
     // Use outline-ish width (slightly under hit box) for tighter visual contacts.
-    const halfWidth = shape.hit.rx * scale * 0.88;
+    const halfWidth = shape.hit.rx * scale * 0.86;
     return { tooth, type, scale, halfWidth };
   });
 
@@ -144,7 +143,8 @@ export function toothPositions(teeth, { cx, cy, rx, ry, invert = false, labelPad
     const y = cy + ry * Math.sin(angle);
     const rotate = (angle * 180) / Math.PI + 90;
 
-    const typePad = item.type === "molar" ? 14 : item.type === "premolar" ? 10 : 8;
+    // Keep FDI numbers just outside enamel — clear of crowns, inside the card.
+    const typePad = item.type === "molar" ? 16 : item.type === "premolar" ? 12 : 10;
     const pad = labelPad + typePad;
 
     return {
