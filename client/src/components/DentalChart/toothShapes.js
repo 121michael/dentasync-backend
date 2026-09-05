@@ -116,35 +116,50 @@ export const TOOTH_SHAPES = {
 };
 
 /**
- * Place teeth on a horseshoe with even packing (near-contacts, no stack overlap).
+ * Place teeth on a horseshoe with width-aware packing (near-contacts like the reference).
  */
 export function toothPositions(teeth, { cx, cy, rx, ry, invert = false, labelPad = 48 }) {
-  const count = teeth.length;
-  return teeth.map((tooth, index) => {
-    const t = count === 1 ? 0.5 : index / (count - 1);
-    // Mild easing — keep contacts even across the arch.
-    const eased = t < 0.5 ? Math.pow(t * 2, 0.96) / 2 : 1 - Math.pow((1 - t) * 2, 0.96) / 2;
+  const contactGap = 1.8;
+  const items = teeth.map((tooth) => {
+    const type = toothTypeFromFdi(tooth);
+    const scale = toothScale(tooth);
+    const shape = TOOTH_SHAPES[type];
+    // Mesial–distal half-width along the arch (local X after rotation).
+    const halfWidth = shape.hit.rx * scale * 0.92;
+    return { tooth, type, scale, halfWidth };
+  });
+
+  const spans = items.map((item, index) => {
+    if (index === 0) return item.halfWidth;
+    return items[index - 1].halfWidth + item.halfWidth + contactGap;
+  });
+  const total = spans.reduce((sum, value) => sum + value, 0) + items[items.length - 1].halfWidth;
+
+  let cursor = 0;
+  return items.map((item, index) => {
+    cursor += index === 0 ? item.halfWidth : spans[index];
+    const t = cursor / total;
+    // Slight ease keeps midline a touch denser without opening big anterior gaps.
+    const eased = t < 0.5 ? Math.pow(t * 2, 0.98) / 2 : 1 - Math.pow((1 - t) * 2, 0.98) / 2;
 
     const angle = invert ? Math.PI - eased * Math.PI : Math.PI + eased * Math.PI;
     const x = cx + rx * Math.cos(angle);
     const y = cy + ry * Math.sin(angle);
     const rotate = (angle * 180) / Math.PI + 90;
 
-    const scale = toothScale(tooth);
-    const type = toothTypeFromFdi(tooth);
-    const typePad = type === "molar" ? 14 : type === "premolar" ? 10 : 8;
+    const typePad = item.type === "molar" ? 14 : item.type === "premolar" ? 10 : 8;
     const pad = labelPad + typePad;
 
     return {
-      tooth,
+      tooth: item.tooth,
       x,
       y,
       rotate,
       angle,
       labelX: cx + (rx + pad) * Math.cos(angle),
       labelY: cy + (ry + pad) * Math.sin(angle),
-      type,
-      scale,
+      type: item.type,
+      scale: item.scale,
     };
   });
 }
