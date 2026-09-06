@@ -12,15 +12,15 @@ export function toothTypeFromFdi(toothNumber) {
   return "molar";
 }
 
-/** Compact scales — continuous row with tiny embrasures; slightly reduced for fit. */
+/** Crown scales — reduced so teeth fit the arch without looking overgrown. */
 export function toothScale(toothNumber) {
   const type = toothTypeFromFdi(toothNumber);
   const digit = Number(String(toothNumber).slice(-1));
-  if (type === "molar") return digit === 8 ? 1.12 : digit === 7 ? 1.22 : 1.26;
-  if (type === "premolar") return digit === 4 ? 1.06 : 1.02;
-  if (type === "canine") return 1.08;
-  if (type === "lateral_incisor") return 0.94;
-  return 1.05;
+  if (type === "molar") return digit === 8 ? 0.9 : digit === 7 ? 0.98 : 1.02;
+  if (type === "premolar") return digit === 4 ? 0.86 : 0.82;
+  if (type === "canine") return 0.88;
+  if (type === "lateral_incisor") return 0.76;
+  return 0.84;
 }
 
 /**
@@ -122,7 +122,7 @@ export function toothPositions(
   teeth,
   { cx, cy, rx, ry, invert = false, labelPad = 42, viewWidth = 860, viewHeight = 680 }
 ) {
-  const contactGap = 5.5;
+  const contactGap = 4;
   const edgePad = 18;
   const items = teeth.map((tooth) => {
     const type = toothTypeFromFdi(tooth);
