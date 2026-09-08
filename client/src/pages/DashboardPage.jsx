@@ -6,7 +6,6 @@ import {
   CircleCheck,
   ClipboardList,
   Clock3,
-  FileText,
   HeartPulse,
   MapPin,
   ShieldCheck,
@@ -246,7 +245,6 @@ export function DashboardPage() {
               { label: "Book appointment", detail: "Choose a treatment and time", icon: CalendarDays, to: "/appointments" },
               { label: "Track live queue", detail: "See your place in line", icon: UsersRound, to: "/queue" },
               { label: "AI Assistant", detail: "Ask questions or attach an X-ray", icon: Sparkles, to: "/assistant" },
-              { label: "View records", detail: "Review your care archive", icon: FileText, to: "/records" },
               { label: "Contact clinic", detail: "Get help from our care team", icon: ClipboardList, to: "/support" },
             ].map(({ label, detail, icon: Icon, to }) => (
               <button key={label} className="quick-action" onClick={() => navigate(to)}>

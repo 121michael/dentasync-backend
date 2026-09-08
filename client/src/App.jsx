@@ -134,7 +134,7 @@ function PortalRoutes() {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/appointments" element={<AppointmentsPage />} />
           <Route path="/queue" element={<QueuePage />} />
-          <Route path="/records" element={<RecordsPage />} />
+          <Route path="/records" element={<Navigate to="/dashboard" replace />} />
           <Route path="/assistant" element={<ClinicAssistantPage />} />
           <Route path="/family" element={<FamilyPage />} />
           <Route path="/profile" element={<ProfilePage theme={theme} onThemeChange={setTheme} />} />
