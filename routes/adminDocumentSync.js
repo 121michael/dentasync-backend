@@ -54,12 +54,16 @@ function sourceLabel(sourceType, mimeType, originalName) {
 }
 
 function auditActor(req) {
+  const name =
+    `${req.admin?.first_name || ""} ${req.admin?.last_name || ""}`.trim() ||
+    req.admin?.email ||
+    "Admin";
   return {
     actorId: req.admin?.id ? String(req.admin.id) : null,
-    actorName: req.admin?.fullName || req.admin?.email || "Admin",
+    actorName: name,
     actorRole: "admin",
     ipAddress: req.ip || null,
-    sessionId: req.admin?.sessionId ? String(req.admin.sessionId) : null,
+    sessionId: null,
   };
 }
 
