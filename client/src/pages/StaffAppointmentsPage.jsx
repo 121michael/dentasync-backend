@@ -52,15 +52,17 @@ export function StaffAppointmentsPage() {
 
   useEffect(() => {
     const focusId = searchParams.get("focus");
-    if (!focusId || focusHandledRef.current === focusId) return;
+    if (!focusId) return;
+    if (focusHandledRef.current === focusId) return;
 
     let cancelled = false;
-    focusHandledRef.current = focusId;
 
     (async () => {
       try {
         const response = await api.getStaffAppointment(focusId);
-        if (cancelled || !response?.appointment) return;
+        if (cancelled) return;
+        if (!response?.appointment) return;
+
         const appointment = response.appointment;
         const status = String(appointment.status || "").toLowerCase();
         let nextTab = "today";
@@ -70,6 +72,7 @@ export function StaffAppointmentsPage() {
         else if (status === "cancelled" || status === "no_show") nextTab = "cancelled";
         else if (status === "checked_in") nextTab = "today";
 
+        focusHandledRef.current = focusId;
         setTab(nextTab);
         setDetail(appointment);
         setHighlightId(appointment.id);
@@ -78,11 +81,11 @@ export function StaffAppointmentsPage() {
         next.set("tab", nextTab);
         setSearchParams(next, { replace: true });
       } catch (focusError) {
+        if (cancelled) return;
         pushToast(focusError.message || "Unable to open the related appointment.", "error");
         const next = new URLSearchParams(searchParams);
         next.delete("focus");
         setSearchParams(next, { replace: true });
-        focusHandledRef.current = "";
       }
     })();
 

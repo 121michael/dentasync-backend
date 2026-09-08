@@ -25,17 +25,17 @@ export function getStaffNotificationTarget(notification) {
     type === "appointment_cancelled" ||
     entityType === "appointment"
   ) {
-    let tab = "pending";
+    const params = new URLSearchParams();
     if (/cancel/i.test(type) || /cancel/i.test(title)) {
-      tab = "cancelled";
-    } else if (/confirm|status|action|reschedul/i.test(title) && !/request|new/i.test(title)) {
-      tab = "confirmed";
+      params.set("tab", "cancelled");
+    } else if (/new appointment request|booking from/i.test(title) || type === "appointment_created") {
+      params.set("tab", "pending");
     }
-    const params = new URLSearchParams({ tab });
     if (focus) params.set("focus", focus);
+    const query = params.toString();
     return {
       targetPage: "appointments",
-      path: `/staff/appointments?${params.toString()}`,
+      path: query ? `/staff/appointments?${query}` : "/staff/appointments",
       label: "View appointment",
     };
   }
