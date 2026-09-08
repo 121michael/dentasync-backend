@@ -491,7 +491,8 @@ export function AdminSyncPage() {
           <h2>Choose document source</h2>
           <p className="muted-copy">
             Hard copy via camera, or digital PDF / PNG / JPEG. Only documents are accepted — a face photo or unrelated
-            picture is rejected. The file is used only to read text; it is not kept after import.
+            picture is rejected. The file is used only to read text; it is not kept after import. Tip: keep the paper
+            upright when scanning. Handwriting may need corrections before Confirm & Save.
           </p>
 
           <div className="admin-sync-source-grid">
