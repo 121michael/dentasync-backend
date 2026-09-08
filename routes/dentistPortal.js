@@ -333,7 +333,7 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
 
   router.get("/queue", async (req, res) => {
     const scope = dentistScopeClause("appointment", req.dentist);
-    const tab = stringValue(req.query.tab, 40)?.toLowerCase() || "ongoing";
+    const tab = stringValue(req.query.tab, 40)?.toLowerCase() || "inline";
     let statusFilter;
     if (tab === "inline" || tab === "in_line") {
       statusFilter = `queue.status IN ('checked_in', 'waiting', 'preparing')`;
