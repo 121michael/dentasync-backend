@@ -141,6 +141,14 @@ export const api = {
   getStaffDashboard: () => request("/staff/dashboard"),
   getStaffCheckIns: () => request("/staff/check-ins"),
   staffCheckIn: (body) => request("/staff/check-in", { method: "POST", body }),
+  getStaffWalkInQrSession: () => request("/staff/check-in/qr-session"),
+  createStaffWalkInQrSession: () => request("/staff/check-in/qr-session", { method: "POST" }),
+  revokeStaffWalkInQrSession: (sessionId) =>
+    request(`/staff/check-in/qr-session/${sessionId}/revoke`, { method: "POST" }),
+  validateWalkInQr: (token) =>
+    request(`/public/walk-in-check-in/${encodeURIComponent(token)}`, { authenticated: false }),
+  redeemWalkInQr: (token) =>
+    request("/patient/walk-in-check-in", { method: "POST", body: { token } }),
   getStaffQueue: () => request("/staff/queue"),
   getStaffQueueSummary: () => request("/staff/queue/summary"),
   resetStaffQueue: () => request("/staff/queue/reset", { method: "POST" }),

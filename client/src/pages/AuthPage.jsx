@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   ArrowRight,
@@ -27,6 +27,7 @@ function initialPendingOtp() {
 
 export function AuthPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { startSession } = useAuth();
   const [mode, setMode] = useState("login");
   const [screen, setScreen] = useState(() => (initialPendingOtp() ? "otp" : "form"));
@@ -42,6 +43,12 @@ export function AuthPage() {
     password: "",
     otp: "",
   });
+
+  function safeNextPath() {
+    const next = String(searchParams.get("next") || "").trim();
+    if (!next.startsWith("/") || next.startsWith("//")) return null;
+    return next;
+  }
 
   useEffect(() => {
     if (screen === "otp") {
@@ -69,17 +76,20 @@ export function AuthPage() {
       });
       startSession(response.token, response.user);
       const role = String(response.user?.role || "").toLowerCase();
+      const nextPath = safeNextPath();
       const redirectTo =
-        response.redirectTo ||
-        (role === "admin"
-          ? "/admin/dashboard"
-          : role === "staff"
-            ? "/staff/dashboard"
-            : role === "dentist"
-              ? "/dentist/dashboard"
-              : role === "patient"
-                ? "/dashboard"
-                : "/access-denied");
+        role === "patient" && nextPath
+          ? nextPath
+          : response.redirectTo ||
+            (role === "admin"
+              ? "/admin/dashboard"
+              : role === "staff"
+                ? "/staff/dashboard"
+                : role === "dentist"
+                  ? "/dentist/dashboard"
+                  : role === "patient"
+                    ? "/dashboard"
+                    : "/access-denied");
       navigate(redirectTo, { replace: true });
     } catch (error) {
       if (error instanceof ApiError && error.data?.requiresOtp) {

@@ -2301,6 +2301,75 @@ strong {
 .staff-scanner-card h3,
 .staff-verified-card h3 { margin: 0; font-size: 1.05rem; }
 .staff-verified-card--idle { color: var(--text-muted); }
+.staff-checkin-hero {
+  margin: 0 0 1rem;
+  padding: 1rem 1.1rem;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(91, 42, 134, .08), rgba(255,255,255,.9));
+  border: 1px solid rgba(91, 42, 134, .12);
+}
+.staff-checkin-hero h3 { margin: 0; font-size: 1.15rem; }
+.staff-checkin-hero p { margin: .35rem 0 0; color: var(--text-muted); font-size: .82rem; }
+.staff-rfid-status {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  margin: .85rem 0;
+  padding: .4rem .7rem;
+  border-radius: 999px;
+  font-size: .74rem;
+  font-weight: 600;
+  background: var(--amethyst-100);
+  color: var(--amethyst-700);
+}
+.staff-rfid-status--scanning { background: #fff7ed; color: #c2410c; }
+.staff-rfid-status--success { background: #ecfdf5; color: #047857; }
+.staff-rfid-status--error { background: #fff1f2; color: #be123c; }
+.staff-walkin-qr {
+  display: grid;
+  justify-items: center;
+  gap: .7rem;
+  margin-top: 1rem;
+  padding: 1rem;
+  border-radius: 18px;
+  background: #fff;
+  border: 1px solid var(--border);
+}
+.staff-walkin-qr img {
+  width: min(100%, 320px);
+  height: auto;
+  border-radius: 12px;
+}
+.staff-walkin-qr strong { text-align: center; }
+.staff-walkin-qr small { color: var(--text-muted); }
+.walkin-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  background:
+    radial-gradient(circle at top left, rgba(91, 42, 134, .16), transparent 40%),
+    linear-gradient(180deg, #f7f2fc, #fff);
+}
+.walkin-card {
+  width: min(100%, 480px);
+  display: grid;
+  gap: .85rem;
+  padding: 1.4rem;
+  border-radius: 22px;
+  background: #fff;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+}
+.walkin-card h1 { margin: 0; font-size: 1.45rem; }
+.walkin-actions,
+.walkin-success {
+  display: grid;
+  gap: .75rem;
+  justify-items: start;
+  padding-top: .35rem;
+}
+.walkin-success { color: #047857; }
 .staff-detail-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));

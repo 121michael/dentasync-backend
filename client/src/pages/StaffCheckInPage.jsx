@@ -1,22 +1,31 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Camera, Nfc, QrCode, RefreshCw, X } from "lucide-react";
+import { Nfc, QrCode, RefreshCw, ShieldCheck } from "lucide-react";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { StaffStatusBadge } from "../components/StaffUI";
 import { useStaffUi } from "../components/StaffLayout";
 import { formatStaffDateTime, formatStaffTime } from "../staffUtils";
 
+function secondsLeft(expiresAt) {
+  if (!expiresAt) return 0;
+  return Math.max(0, Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000));
+}
+
+function formatCountdown(totalSeconds) {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
 export function StaffCheckInPage() {
   const { pushToast } = useStaffUi();
-  const videoRef = useRef(null);
-  const streamRef = useRef(null);
-  const scanTimerRef = useRef(null);
+  const rfidInputRef = useRef(null);
   const [mode, setMode] = useState("rfid");
   const [rfidCode, setRfidCode] = useState("");
-  const [manualCode, setManualCode] = useState("");
-  const [cameraOpen, setCameraOpen] = useState(false);
   const [verified, setVerified] = useState(null);
   const [checkIns, setCheckIns] = useState(null);
+  const [qrSession, setQrSession] = useState(null);
+  const [countdown, setCountdown] = useState(0);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [scannerState, setScannerState] = useState("ready");
@@ -31,114 +40,108 @@ export function StaffCheckInPage() {
     }
   }, []);
 
-  useEffect(() => {
-    loadLog();
-    const timer = window.setInterval(loadLog, 25000);
-    return () => window.clearInterval(timer);
-  }, [loadLog]);
-
-  useEffect(() => {
-    return () => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
-      }
-      if (scanTimerRef.current) {
-        window.clearInterval(scanTimerRef.current);
-      }
-    };
+  const loadQrSession = useCallback(async () => {
+    try {
+      const response = await api.getStaffWalkInQrSession();
+      setQrSession(response.session || null);
+    } catch {
+      setQrSession(null);
+    }
   }, []);
 
-  async function runCheckIn(payload) {
+  useEffect(() => {
+    loadLog();
+    loadQrSession();
+    const timer = window.setInterval(loadLog, 25000);
+    return () => window.clearInterval(timer);
+  }, [loadLog, loadQrSession]);
+
+  useEffect(() => {
+    if (mode === "rfid") {
+      window.setTimeout(() => rfidInputRef.current?.focus(), 50);
+    }
+  }, [mode, scannerState]);
+
+  useEffect(() => {
+    if (!qrSession?.expiresAt) {
+      setCountdown(0);
+      return undefined;
+    }
+    const tick = () => {
+      const remaining = secondsLeft(qrSession.expiresAt);
+      setCountdown(remaining);
+      if (remaining <= 0) {
+        setQrSession(null);
+      }
+    };
+    tick();
+    const timer = window.setInterval(tick, 1000);
+    return () => window.clearInterval(timer);
+  }, [qrSession]);
+
+  async function runRfidCheckIn(rawTag) {
+    const tag = String(rawTag || "").trim();
+    if (!tag) {
+      setError("Tap a patient RFID card on the reader.");
+      return;
+    }
     setBusy(true);
     setError("");
     setScannerState("scanning");
     try {
-      const response = await api.staffCheckIn(payload);
-      setVerified(response);
+      const response = await api.staffCheckIn({ method: "rfid", rfidTag: tag });
+      setVerified({ ...response, method: "rfid" });
       setScannerState("success");
       pushToast(response.message || "Patient checked in successfully.");
       setRfidCode("");
-      setManualCode("");
       await loadLog();
     } catch (checkInError) {
       setScannerState("error");
       setError(checkInError.message);
       pushToast(checkInError.message, "error");
+      setRfidCode("");
     } finally {
       setBusy(false);
-      window.setTimeout(() => setScannerState("ready"), 1800);
+      window.setTimeout(() => {
+        setScannerState("ready");
+        rfidInputRef.current?.focus();
+      }, 1600);
     }
   }
 
   async function submitRfid(event) {
     event.preventDefault();
-    if (!rfidCode.trim()) {
-      setError("Scan or enter an RFID tag / patient code.");
-      return;
-    }
-    await runCheckIn({ method: "rfid", rfidTag: rfidCode.trim(), code: rfidCode.trim() });
+    await runRfidCheckIn(rfidCode);
   }
 
-  async function submitManualQr(event) {
-    event.preventDefault();
-    if (!manualCode.trim()) {
-      setError("Enter or scan a patient QR payload.");
-      return;
-    }
-    await runCheckIn({ method: "qr", qrPayload: manualCode.trim(), code: manualCode.trim() });
-  }
-
-  async function startQrCamera() {
+  async function generateQr() {
+    setBusy(true);
     setError("");
-    setMode("qr");
     try {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        throw new Error("Camera is not available in this browser. Use manual QR entry instead.");
-      }
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" } },
-        audio: false,
-      });
-      streamRef.current = stream;
-      setCameraOpen(true);
-      window.requestAnimationFrame(() => {
-        if (videoRef.current) videoRef.current.srcObject = stream;
-      });
-
-      if ("BarcodeDetector" in window) {
-        const detector = new window.BarcodeDetector({ formats: ["qr_code"] });
-        scanTimerRef.current = window.setInterval(async () => {
-          if (!videoRef.current || busy) return;
-          try {
-            const codes = await detector.detect(videoRef.current);
-            const value = codes?.[0]?.rawValue;
-            if (value) {
-              window.clearInterval(scanTimerRef.current);
-              scanTimerRef.current = null;
-              stopCamera();
-              await runCheckIn({ method: "qr", qrPayload: value, code: value });
-            }
-          } catch {
-            // Keep scanning.
-          }
-        }, 900);
-      }
-    } catch (cameraError) {
-      setError(cameraError.message || "Unable to open the camera for QR scanning.");
-      pushToast("Unable to open QR camera.", "error");
+      const response = await api.createStaffWalkInQrSession();
+      setQrSession(response.session);
+      setMode("qr");
+      pushToast(response.message || "Walk-in QR code ready for patients.");
+    } catch (qrError) {
+      setError(qrError.message);
+      pushToast(qrError.message, "error");
+    } finally {
+      setBusy(false);
     }
   }
 
-  function stopCamera() {
-    if (scanTimerRef.current) {
-      window.clearInterval(scanTimerRef.current);
-      scanTimerRef.current = null;
+  async function revokeQr() {
+    if (!qrSession?.id) return;
+    setBusy(true);
+    try {
+      await api.revokeStaffWalkInQrSession(qrSession.id);
+      setQrSession(null);
+      pushToast("Walk-in QR code revoked.");
+    } catch (revokeError) {
+      pushToast(revokeError.message, "error");
+    } finally {
+      setBusy(false);
     }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
-    setCameraOpen(false);
   }
 
   if (error && !checkIns) return <ErrorState message={error} onRetry={loadLog} />;
@@ -151,32 +154,34 @@ export function StaffCheckInPage() {
       <section className="staff-panel">
         <div className="staff-panel__heading">
           <div>
-            <span className="eyebrow">Front desk arrival</span>
-            <h2>Patient Check-In Center</h2>
-            <p>Validate attendance with RFID or QR, then place patients into the live queue.</p>
+            <span className="eyebrow">Walk-in arrival</span>
+            <h2>Patient Check-In</h2>
+            <p>Welcome patients as they enter the clinic. RFID is primary; QR is for patients without a card.</p>
           </div>
           <button className="button button--secondary" onClick={loadLog}>
             <RefreshCw size={16} /> Refresh Log
           </button>
         </div>
 
+        <div className="staff-checkin-hero">
+          <h3>Welcome. Please check in.</h3>
+          <p>Patient taps RFID if they have a card. If not, staff shows a temporary QR for the patient to scan.</p>
+        </div>
+
         <div className="admin-tabs" role="tablist" aria-label="Check-in method">
           <button
             type="button"
             className={`admin-tab ${mode === "rfid" ? "is-active" : ""}`}
-            onClick={() => {
-              stopCamera();
-              setMode("rfid");
-            }}
+            onClick={() => setMode("rfid")}
           >
-            RFID Check-In
+            Tap RFID Card
           </button>
           <button
             type="button"
             className={`admin-tab ${mode === "qr" ? "is-active" : ""}`}
             onClick={() => setMode("qr")}
           >
-            QR Code Check-In
+            No RFID? Use QR Code
           </button>
         </div>
 
@@ -184,64 +189,80 @@ export function StaffCheckInPage() {
           <div className="staff-checkin-grid">
             <article className={`staff-scanner-card staff-scanner-card--${scannerState}`}>
               <Nfc size={34} />
-              <h3>Ready for RFID Scan</h3>
+              <h3>Tap your RFID card</h3>
               <p>
                 {scannerState === "scanning"
-                  ? "Verifying patient, appointment, and queue…"
+                  ? "Verifying patient and appointment…"
                   : scannerState === "success"
-                    ? "Check-in recorded."
-                    : "Hold the patient card near the reader or type the RFID / patient code."}
+                    ? "Check-in recorded. Queue number issued."
+                    : scannerState === "error"
+                      ? "RFID check-in failed. Try again or use QR."
+                      : "Patient: hold your RFID card on the reader. Staff does not need to type a name."}
               </p>
+              <div className={`staff-rfid-status staff-rfid-status--${scannerState}`}>
+                <ShieldCheck size={16} />
+                <span>
+                  Reader status:{" "}
+                  {scannerState === "scanning"
+                    ? "Reading"
+                    : scannerState === "success"
+                      ? "Success"
+                      : scannerState === "error"
+                        ? "Error"
+                        : "Ready"}
+                </span>
+              </div>
               <form className="admin-form" onSubmit={submitRfid}>
                 <label className="field">
-                  <span>RFID tag / patient code</span>
+                  <span className="sr-only">RFID tag</span>
                   <input
+                    ref={rfidInputRef}
                     value={rfidCode}
                     onChange={(event) => setRfidCode(event.target.value)}
-                    placeholder="Scan RFID or enter patient ID / phone"
+                    placeholder="Waiting for RFID tap…"
+                    autoComplete="off"
                     autoFocus
+                    disabled={busy}
                   />
                 </label>
-                <button className="button button--primary" disabled={busy}>
-                  {busy ? "Checking in…" : "Process RFID Check-In"}
+                <button className="button button--primary" disabled={busy || !rfidCode.trim()}>
+                  {busy ? "Checking in…" : "Complete RFID Check-In"}
                 </button>
               </form>
+              <p className="muted-copy">RFID cards are assigned by Admin. Check-in never creates a new RFID.</p>
             </article>
             <VerifiedPanel verified={verified} />
           </div>
         ) : (
           <div className="staff-checkin-grid">
-            <article className="staff-scanner-card">
+            <article className="staff-scanner-card staff-scanner-card--qr">
               <QrCode size={34} />
-              <h3>Scan Patient QR Code</h3>
-              <p>Use the staff device camera or paste a QR payload / appointment code.</p>
-              {cameraOpen ? (
-                <div className="admin-camera-panel">
-                  <video ref={videoRef} autoPlay playsInline muted className="admin-camera-preview" />
-                  <button type="button" className="button button--secondary" onClick={stopCamera}>
-                    <X size={16} /> Close Camera
-                  </button>
+              <h3>Staff-generated QR check-in</h3>
+              <p>Generate a temporary clinic QR. The patient scans it with their phone and signs in to finish check-in.</p>
+              {qrSession?.qrDataUrl && countdown > 0 ? (
+                <div className="staff-walkin-qr">
+                  <img src={qrSession.qrDataUrl} alt="Temporary walk-in check-in QR code" />
+                  <strong>Please scan this QR code using your phone.</strong>
+                  <small>Expires in {formatCountdown(countdown)}</small>
+                  <div className="staff-heading-actions">
+                    <button type="button" className="button button--secondary" onClick={generateQr} disabled={busy}>
+                      Generate new QR
+                    </button>
+                    <button type="button" className="button button--danger" onClick={revokeQr} disabled={busy}>
+                      Revoke QR
+                    </button>
+                  </div>
                 </div>
               ) : (
-                <button type="button" className="button button--secondary" onClick={startQrCamera}>
-                  <Camera size={16} /> Open QR Camera
+                <button type="button" className="button button--primary" onClick={generateQr} disabled={busy}>
+                  <QrCode size={16} /> Generate QR Check-In
                 </button>
               )}
-              <form className="admin-form" onSubmit={submitManualQr}>
-                <label className="field">
-                  <span>QR payload / appointment ID</span>
-                  <input
-                    value={manualCode}
-                    onChange={(event) => setManualCode(event.target.value)}
-                    placeholder='e.g. 42 or {"appointmentId":42}'
-                  />
-                </label>
-                <button className="button button--primary" disabled={busy}>
-                  {busy ? "Verifying…" : "Verify QR Check-In"}
-                </button>
-              </form>
+              <p className="muted-copy">
+                The QR contains only a secure temporary token — never patient passwords or clinical data.
+              </p>
             </article>
-            <VerifiedPanel verified={verified} />
+            <VerifiedPanel verified={verified} emptyHint="Successful QR check-ins appear in the log and notifications as patients redeem the code." />
           </div>
         )}
       </section>
@@ -251,6 +272,7 @@ export function StaffCheckInPage() {
           <div>
             <span className="eyebrow">Today</span>
             <h2>Check-In Log</h2>
+            <p>Successful walk-ins join the existing Queue Management list with a real queue number.</p>
           </div>
         </div>
         {checkIns.length ? (
@@ -287,31 +309,35 @@ export function StaffCheckInPage() {
             </table>
           </div>
         ) : (
-          <EmptyState title="No check-ins yet" detail="RFID and QR arrivals will appear here." />
+          <EmptyState title="No check-ins yet" detail="RFID taps and QR walk-ins will appear here." />
         )}
       </section>
     </div>
   );
 }
 
-function VerifiedPanel({ verified }) {
+function VerifiedPanel({ verified, emptyHint }) {
   if (!verified?.verified) {
     return (
       <article className="staff-verified-card staff-verified-card--idle">
-        <h3>Awaiting verification</h3>
-        <p>Successful RFID/QR check-ins show patient, appointment, and queue details here.</p>
+        <h3>Awaiting check-in</h3>
+        <p>{emptyHint || "Successful RFID check-ins show patient, appointment, and queue details here."}</p>
       </article>
     );
   }
 
   return (
     <article className="staff-verified-card">
-      <span className="eyebrow">Patient Verified</span>
+      <span className="eyebrow">Check-In Successful</span>
       <h3>{verified.patient?.fullName}</h3>
       <div className="staff-detail-grid">
         <p>
-          <small>Patient ID</small>
-          <strong>{verified.patient?.id}</strong>
+          <small>Method</small>
+          <strong>{String(verified.method || "rfid").toUpperCase()}</strong>
+        </p>
+        <p>
+          <small>Queue Number</small>
+          <strong>{verified.queue?.queueNumber || verified.queue?.token}</strong>
         </p>
         <p>
           <small>Appointment</small>
@@ -322,19 +348,15 @@ function VerifiedPanel({ verified }) {
         </p>
         <p>
           <small>Dentist</small>
-          <strong>{verified.appointment?.dentist}</strong>
-        </p>
-        <p>
-          <small>Service</small>
-          <strong>{verified.appointment?.service}</strong>
-        </p>
-        <p>
-          <small>Queue Number</small>
-          <strong>{verified.queue?.queueNumber || verified.queue?.token}</strong>
+          <strong>{verified.appointment?.dentist || "—"}</strong>
         </p>
         <p>
           <small>Check-In Time</small>
           <strong>{formatStaffDateTime(verified.queue?.checkedInAt)}</strong>
+        </p>
+        <p>
+          <small>Status</small>
+          <strong>{verified.message}</strong>
         </p>
       </div>
     </article>

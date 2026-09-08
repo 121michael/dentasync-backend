@@ -5,6 +5,7 @@ const bcrypt = require("bcrypt");
 const express = require("express");
 const clinicalPatients = require("../services/clinicalPatients");
 const staffCheckIn = require("../services/staffCheckIn");
+const staffWalkInQr = require("../services/staffWalkInQr");
 
 const QUEUE_STATUS_MAP = {
   checked_in: "checked_in",
@@ -1414,9 +1415,16 @@ function createStaffPortalRouter({
     const patientId =
       staffCheckIn.stringValue(req.body?.patientId, 120) || payload?.patientId || null;
     const rfidTag =
-      staffCheckIn.stringValue(req.body?.rfidTag, 120) || payload?.rfidTag || payload?.code || null;
-    const phone = staffCheckIn.stringValue(req.body?.phone, 40);
-    const email = staffCheckIn.stringValue(req.body?.email, 254);
+      staffCheckIn.stringValue(req.body?.rfidTag, 120) ||
+      (method === "rfid" ? payload?.rfidTag || payload?.code || null : payload?.rfidTag || null);
+    const phone = method === "rfid" ? null : staffCheckIn.stringValue(req.body?.phone, 40);
+    const email = method === "rfid" ? null : staffCheckIn.stringValue(req.body?.email, 254);
+
+    if (method === "rfid" && !rfidTag && !appointmentId) {
+      return res.status(400).json({
+        message: "Tap a patient RFID card on the reader to check in.",
+      });
+    }
 
     const client = await db.connect();
     let transactionOpen = false;
@@ -1433,22 +1441,31 @@ function createStaffPortalRouter({
       if (!appointment) {
         let patient = null;
         try {
-          patient = await staffCheckIn.findPatient(client, {
-            patientId,
-            rfidTag,
-            code: payload?.code,
-            phone,
-            email,
-          });
+          if (method === "rfid") {
+            patient = await staffCheckIn.findPatient(client, { rfidTag });
+          } else {
+            patient = await staffCheckIn.findPatient(client, {
+              patientId,
+              rfidTag,
+              code: payload?.code,
+              phone,
+              email,
+            });
+          }
         } catch (lookupError) {
           if (!isMissingRelation(lookupError)) throw lookupError;
-          patient = await staffCheckIn.findPatient(client, { patientId, code: payload?.code, phone, email });
+          if (method !== "rfid") {
+            patient = await staffCheckIn.findPatient(client, { patientId, code: payload?.code, phone, email });
+          }
         }
         if (!patient) {
           await client.query("ROLLBACK");
           transactionOpen = false;
           return res.status(404).json({
-            message: "Patient not found for this RFID/QR code. Verify the tag or patient ID.",
+            message:
+              method === "rfid"
+                ? "RFID not recognized. Ask Admin to assign this card to the patient account."
+                : "Patient not found for this check-in code.",
           });
         }
         if (!patient.is_verified) {
@@ -1469,7 +1486,7 @@ function createStaffPortalRouter({
           await client.query("ROLLBACK");
           transactionOpen = false;
           return res.status(404).json({
-            message: "No confirmed appointment found for this patient today.",
+            message: "No eligible appointment found for this patient today.",
             patient: {
               id: patient.id,
               fullName: `${patient.first_name || ""} ${patient.last_name || ""}`.trim(),
@@ -1483,6 +1500,7 @@ function createStaffPortalRouter({
         appointment,
         staff: req.staff,
         notifyClinicStaff: notifyStaff,
+        checkInMethod: method,
       });
 
       await client.query("COMMIT");
@@ -1501,7 +1519,7 @@ function createStaffPortalRouter({
 
       return res.status(checkIn.alreadyCheckedIn ? 200 : 201).json({
         message: checkIn.alreadyCheckedIn
-          ? "Patient is already checked in."
+          ? "Patient already checked in."
           : "Patient checked in successfully.",
         method,
         verified: true,
@@ -1540,6 +1558,73 @@ function createStaffPortalRouter({
       });
     } finally {
       client.release();
+    }
+  });
+
+  router.get("/check-in/qr-session", async (req, res) => {
+    try {
+      const session = await staffWalkInQr.getActiveWalkInQrSession(db, { staffId: req.staff.id });
+      return res.json({ session });
+    } catch (error) {
+      if (staffWalkInQr.isMissingRelation(error)) {
+        return res.status(503).json({
+          message: "Walk-in QR check-in is not available. Run npm run migrate:walkin-qr.",
+        });
+      }
+      console.error("Staff QR session load error:", error.message);
+      return res.status(500).json({ message: "Unable to load the walk-in QR session." });
+    }
+  });
+
+  router.post("/check-in/qr-session", async (req, res) => {
+    try {
+      // Revoke any active sessions for this desk staff so only one QR is shown.
+      await db.query(
+        `UPDATE staff_walkin_qr_sessions
+         SET revoked_at = CURRENT_TIMESTAMP
+         WHERE created_by_user_id = $1
+           AND revoked_at IS NULL
+           AND expires_at > CURRENT_TIMESTAMP`,
+        [String(req.staff.id)]
+      );
+      const session = await staffWalkInQr.createWalkInQrSession(db, { staffId: req.staff.id });
+      return res.status(201).json({
+        message: "Walk-in QR code generated. Ask the patient to scan it with their phone.",
+        session,
+      });
+    } catch (error) {
+      if (staffWalkInQr.isMissingRelation(error)) {
+        return res.status(503).json({
+          message: "Walk-in QR check-in is not available. Run npm run migrate:walkin-qr.",
+        });
+      }
+      console.error("Staff QR session create error:", error.message);
+      return res.status(500).json({ message: "Unable to generate the walk-in QR code." });
+    }
+  });
+
+  router.post("/check-in/qr-session/:id/revoke", async (req, res) => {
+    const sessionId = numericId(req.params.id);
+    if (!sessionId) {
+      return res.status(400).json({ message: "A valid QR session is required." });
+    }
+    try {
+      const revoked = await staffWalkInQr.revokeWalkInQrSession(db, {
+        sessionId,
+        staffId: req.staff.id,
+      });
+      if (!revoked) {
+        return res.status(404).json({ message: "Active QR session not found." });
+      }
+      return res.json({ message: "Walk-in QR code revoked." });
+    } catch (error) {
+      if (staffWalkInQr.isMissingRelation(error)) {
+        return res.status(503).json({
+          message: "Walk-in QR check-in is not available. Run npm run migrate:walkin-qr.",
+        });
+      }
+      console.error("Staff QR session revoke error:", error.message);
+      return res.status(500).json({ message: "Unable to revoke the walk-in QR code." });
     }
   });
 

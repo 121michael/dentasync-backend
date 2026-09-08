@@ -10,6 +10,8 @@ const { linkClinicalRecordsToUser } = require("../services/clinicalPatients");
 const { estimateWaitMinutesForPosition } = require("../services/waitTime");
 const { answerWithOptionalGemini } = require("../services/clinicAssistant");
 const { analyzeDentalImageBuffer, DISCLAIMER: IMAGE_ANALYSIS_DISCLAIMER } = require("../services/dentalImageAnalysis");
+const staffCheckIn = require("../services/staffCheckIn");
+const staffWalkInQr = require("../services/staffWalkInQr");
 
 const SERVICES = [
   {
@@ -2061,6 +2063,115 @@ function createPatientPortalRouter({
     } catch (error) {
       console.error("Mark notification read error:", error.message);
       return res.status(500).json({ message: "Unable to update the notification." });
+    }
+  });
+
+  router.post("/walk-in-check-in", async (req, res) => {
+    const token = stringValue(req.body?.token, 120);
+    const userId = userIdFor(req);
+    if (!token) {
+      return res.status(400).json({ message: "A walk-in QR token is required." });
+    }
+
+    const client = await db.connect();
+    let transactionOpen = false;
+    try {
+      const validity = await staffWalkInQr.findValidWalkInQrSession(client, token);
+      if (validity.status !== "valid") {
+        const message =
+          validity.status === "expired"
+            ? "This QR code has expired. Ask staff to generate a new one."
+            : validity.status === "revoked"
+              ? "This QR code is no longer active. Ask staff to generate a new one."
+              : "This QR code is not valid.";
+        return res.status(410).json({ message, status: validity.status });
+      }
+
+      await client.query("BEGIN");
+      transactionOpen = true;
+      await client.query("SELECT pg_advisory_xact_lock(hashtext('patient_portal_queue'))");
+
+      const appointment = await staffCheckIn.findAppointmentForCheckIn(client, { patientId: userId });
+      if (!appointment) {
+        await client.query("ROLLBACK");
+        transactionOpen = false;
+        return res.status(404).json({
+          message: "No eligible appointment found for check-in today.",
+        });
+      }
+
+      const checkIn = await staffCheckIn.performStaffCheckIn(client, {
+        appointment,
+        staff: null,
+        notifyClinicStaff,
+        checkInMethod: "qr",
+      });
+
+      try {
+        await client.query(
+          `INSERT INTO staff_walkin_qr_redemptions (
+             session_id, patient_user_id, appointment_id, queue_entry_id
+           ) VALUES ($1, $2, $3, $4)
+           ON CONFLICT (session_id, patient_user_id) DO NOTHING`,
+          [
+            validity.session.id,
+            String(userId),
+            appointment.id,
+            checkIn.queueEntry.id,
+          ]
+        );
+      } catch (redemptionError) {
+        if (redemptionError.code !== "42P01") throw redemptionError;
+      }
+
+      await client.query("COMMIT");
+      transactionOpen = false;
+
+      if (!checkIn.alreadyCheckedIn && clinicSms?.notifyQueueSms) {
+        clinicSms
+          .notifyQueueSms({
+            userId,
+            queueEntry: checkIn.queueEntry,
+            actorRole: "patient",
+            actorId: userId,
+          })
+          .catch((smsError) => console.warn("Walk-in QR check-in SMS failed:", smsError.message));
+      }
+
+      return res.status(checkIn.alreadyCheckedIn ? 200 : 201).json({
+        message: checkIn.alreadyCheckedIn
+          ? "Patient already checked in."
+          : "Checked in successfully.",
+        method: "qr",
+        alreadyCheckedIn: checkIn.alreadyCheckedIn,
+        patient: {
+          id: appointment.user_id,
+          fullName: appointment.patient_name || "Patient",
+        },
+        appointment: mapAppointment(appointment),
+        queue: {
+          id: checkIn.queueEntry.id,
+          token: checkIn.queueEntry.token,
+          queueNumber: checkIn.queueEntry.token,
+          position: checkIn.queueEntry.position,
+          status: checkIn.queueEntry.status,
+          waitMinutes: Number(checkIn.queueEntry.estimated_wait_minutes || 0),
+          checkedInAt: checkIn.queueEntry.checked_in_at || new Date().toISOString(),
+        },
+      });
+    } catch (error) {
+      if (transactionOpen) {
+        await client.query("ROLLBACK");
+      }
+      if (staffWalkInQr.isMissingRelation(error)) {
+        return res.status(503).json({
+          message: "Walk-in QR check-in is not available. Ask staff for help.",
+        });
+      }
+      console.error("Walk-in QR redeem error:", error.message);
+      return res.status(500).json({ message: "Unable to complete walk-in check-in." });
+    } finally {
+      client.release();
     }
   });
 

@@ -230,6 +230,36 @@ app.get("/", async (req, res) => {
 });
 
 // Public waiting-room board (no private medical details).
+app.get("/api/public/walk-in-check-in/:token", async (req, res) => {
+  try {
+    const staffWalkInQr = require("./services/staffWalkInQr");
+    const validity = await staffWalkInQr.findValidWalkInQrSession(db, req.params.token);
+    if (validity.status !== "valid") {
+      return res.status(validity.status === "invalid" ? 404 : 410).json({
+        status: validity.status,
+        message:
+          validity.status === "expired"
+            ? "This QR code has expired. Ask staff to generate a new one."
+            : validity.status === "revoked"
+              ? "This QR code is no longer active."
+              : "This QR code is not valid.",
+        expiresAt: validity.session?.expires_at || null,
+      });
+    }
+    return res.json({
+      status: "valid",
+      expiresAt: validity.session.expires_at,
+      message: "Sign in with your patient account to complete clinic check-in.",
+    });
+  } catch (error) {
+    if (error?.code === "42P01") {
+      return res.status(503).json({ message: "Walk-in QR check-in is not available yet." });
+    }
+    console.error("Public walk-in QR validate error:", error.message);
+    return res.status(500).json({ message: "Unable to validate the walk-in QR code." });
+  }
+});
+
 app.get("/api/public/queue-display", async (_req, res) => {
   try {
     const result = await db.query(

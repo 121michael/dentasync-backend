@@ -42,6 +42,7 @@ import { DentistQueuePage } from "./pages/DentistQueuePage";
 import { DentistAppointmentsPage } from "./pages/DentistAppointmentsPage";
 import { DentistRecordsPage } from "./pages/DentistRecordsPage";
 import { DentistProfilePage } from "./pages/DentistProfilePage";
+import { WalkInCheckInPage } from "./pages/WalkInCheckInPage";
 import { useAuth } from "./useAuth";
 
 function roleFor(user) {
@@ -120,6 +121,7 @@ function PortalRoutes() {
   return (
     <Routes>
       <Route path="/queue-display" element={<QueueDisplayPage />} />
+      <Route path="/walk-in-check-in" element={<WalkInCheckInPage />} />
       <Route element={<PublicOnly />}>
         <Route path="/login" element={<AuthPage />} />
         <Route path="/register" element={<AuthPage />} />
