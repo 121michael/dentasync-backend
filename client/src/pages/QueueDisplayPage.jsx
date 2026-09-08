@@ -41,9 +41,12 @@ export function QueueDisplayPage() {
   return (
     <main className="queue-display">
       <header className="queue-display__header">
-        <div>
-          <p className="eyebrow eyebrow--light">Amethyst Dental · Live Queue</p>
-          <h1>{data?.clinicName || "Amethyst Dental Clinic"}</h1>
+        <div className="queue-display__brand">
+          <img src="/logo.png" alt="Amethyst Dental" className="queue-display__logo" />
+          <div>
+            <p className="eyebrow eyebrow--light">Amethyst Dental · Live Queue</p>
+            <h1>{data?.clinicName || "Amethyst Dental Clinic"}</h1>
+          </div>
         </div>
         <div className="queue-display__clock">
           <strong>{time}</strong>

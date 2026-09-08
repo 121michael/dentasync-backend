@@ -3,7 +3,6 @@ import {
   Bell,
   CalendarDays,
   ClipboardPlus,
-  Gem,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -19,6 +18,7 @@ import { api } from "../api";
 import { staffInitials } from "../staffUtils";
 import { StaffConfirmModal, StaffToastStack } from "./StaffUI";
 import { onNotificationsChanged } from "../notificationEvents";
+import { BrandMark } from "./BrandMark";
 
 const StaffUiContext = createContext(null);
 
@@ -175,13 +175,7 @@ export function StaffLayout() {
       <div className="staff-shell">
         <aside className={`staff-sidebar ${isMobileMenuOpen ? "is-open" : ""}`}>
           <div className="staff-sidebar__brand">
-            <span className="staff-sidebar__gem" aria-hidden="true">
-              <Gem size={21} />
-            </span>
-            <span>
-              <strong>AMETHYST</strong>
-              <small>Clinic Operations</small>
-            </span>
+            <BrandMark title="AMETHYST" subtitle="Clinic Operations" />
             <button className="staff-sidebar__close" onClick={closeMenu} aria-label="Close navigation">
               <X size={20} />
             </button>

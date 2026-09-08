@@ -4,7 +4,6 @@ import {
   BadgeCheck,
   CalendarDays,
   Check,
-  CreditCard,
   KeyRound,
   LockKeyhole,
   Save,
@@ -173,7 +172,10 @@ export function ProfilePage({ theme, onThemeChange }) {
       <section className="membership-card">
         <div className="membership-card__shine" />
         <div className="membership-card__top">
-          <span className="membership-card__logo"><CreditCard size={21} /> Amethyst Dental</span>
+          <span className="membership-card__logo">
+            <img src="/logo.png" alt="" className="membership-card__logo-image" />
+            Amethyst Dental
+          </span>
           <span>PREMIUM PATIENT</span>
         </div>
         <div className="membership-card__identity">

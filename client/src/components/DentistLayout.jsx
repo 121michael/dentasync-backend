@@ -2,7 +2,6 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   CalendarDays,
   FolderOpen,
-  Gem,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -15,6 +14,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useAuth } from "../useAuth";
 import { dentistInitials } from "../dentistUtils";
+import { BrandMark } from "./BrandMark";
 
 const navigation = [
   { to: "/dentist/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -67,13 +67,7 @@ export function DentistLayout() {
     <div className="dentist-shell">
       <aside className={`dentist-sidebar ${isOpen ? "is-open" : ""}`}>
         <div className="dentist-sidebar__brand">
-          <span className="dentist-sidebar__gem" aria-hidden="true">
-            <Gem size={21} />
-          </span>
-          <span>
-            <strong>AMETHYST</strong>
-            <small>Dental Clinic</small>
-          </span>
+          <BrandMark title="AMETHYST" subtitle="Dental Clinic" />
           <button className="dentist-sidebar__close" onClick={() => setIsOpen(false)} aria-label="Close navigation">
             <X size={20} />
           </button>

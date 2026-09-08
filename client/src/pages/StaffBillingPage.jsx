@@ -84,9 +84,9 @@ export function StaffBillingPage() {
       return;
     }
     popup.document.write(`<!doctype html><html><head><title>${invoice.invoiceCode}</title>
-      <style>body{font-family:Georgia,serif;padding:32px;color:#1f1235}h1{color:#5b21b6}table{width:100%;border-collapse:collapse;margin-top:24px}td{padding:8px;border-bottom:1px solid #eadff7}</style>
+      <style>body{font-family:Georgia,serif;padding:32px;color:#1f1235}h1{color:#5b21b6;display:flex;align-items:center;gap:12px}img{width:48px;height:48px;object-fit:contain;border-radius:12px;background:#fff}table{width:100%;border-collapse:collapse;margin-top:24px}td{padding:8px;border-bottom:1px solid #eadff7}</style>
       </head><body>
-      <h1>Amethyst Dental Invoice</h1>
+      <h1><img src="${window.location.origin}/logo.png" alt="Amethyst Dental" /> Amethyst Dental Invoice</h1>
       <p><strong>${invoice.invoiceCode}</strong></p>
       <table>
         <tr><td>Patient</td><td>${invoice.patientName}</td></tr>

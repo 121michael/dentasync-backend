@@ -9,7 +9,6 @@ import {
   Cloud,
   CreditCard,
   FolderOpen,
-  Gem,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -23,6 +22,7 @@ import { useAuth } from "../useAuth";
 import { api } from "../api";
 import { AdminConfirmModal, AdminToastStack } from "./AdminUI";
 import { onNotificationsChanged } from "../notificationEvents";
+import { BrandMark } from "./BrandMark";
 
 const AdminUiContext = createContext(null);
 
@@ -174,11 +174,7 @@ export function AdminLayout() {
       <div className="admin-shell">
         <aside className={`admin-sidebar ${isOpen ? "is-open" : ""}`}>
           <div className="admin-sidebar__brand">
-            <span className="admin-sidebar__gem" aria-hidden="true"><Gem size={21} /></span>
-            <span>
-              <strong>AMETHYST</strong>
-              <small>Administrative Suite</small>
-            </span>
+            <BrandMark title="AMETHYST" subtitle="Administrative Suite" />
             <button className="admin-sidebar__close" onClick={() => setIsOpen(false)} aria-label="Close navigation">
               <X size={20} />
             </button>
