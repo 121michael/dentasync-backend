@@ -321,7 +321,7 @@ export function DentistRecordsPage() {
         <DentistModal title={detail.patient.fullName} onClose={() => setDetail(null)} wide>
           <div className="dentist-detail-grid">
             <p>
-              <strong>ID:</strong> {detail.patient.id}
+              <strong>Patient ID:</strong> {detail.patient.recordCode || detail.patient.id}
             </p>
             <p>
               <strong>Phone:</strong> {detail.patient.phone || "—"}
