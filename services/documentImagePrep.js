@@ -45,7 +45,7 @@ function scoreDocumentText(text) {
 async function prepareOrientedVariants(filePath) {
   const sharp = require("sharp");
   const original = fs.readFileSync(filePath);
-  const image = sharp(original, { failOn: "none" }).rotate(); // apply EXIF if present
+  const image = sharp(original, { failOn: "none" }).rotate();
   const meta = await image.metadata();
   const variants = [];
 
@@ -54,19 +54,13 @@ async function prepareOrientedVariants(filePath) {
     if (degrees) {
       pipeline = pipeline.rotate(degrees);
     }
-    // Upscale small scans; normalize contrast for ink-on-form photos.
     const width = meta.width || 1200;
     if (width < 1600) {
       pipeline = pipeline.resize({ width: Math.round(width * 1.8), withoutEnlargement: false });
     } else if (width > 2800) {
       pipeline = pipeline.resize({ width: 2400 });
     }
-    const buffer = await pipeline
-      .grayscale()
-      .normalize()
-      .sharpen()
-      .png()
-      .toBuffer();
+    const buffer = await pipeline.grayscale().normalize().sharpen().png().toBuffer();
     variants.push({ degrees, buffer });
   }
   return variants;
@@ -89,7 +83,7 @@ function runEasyOcr(filePath) {
   const result = spawnSync("python3", [scriptPath, filePath], {
     encoding: "utf8",
     maxBuffer: 8 * 1024 * 1024,
-    timeout: 120000,
+    timeout: 180000,
     env: { ...process.env, PYTHONWARNINGS: "ignore" },
   });
   if (result.status !== 0) {
@@ -108,15 +102,6 @@ async function recognizeWithTesseract(filePath) {
   const { createWorker } = require("tesseract.js");
   const worker = await createWorker("eng", 1, { legacyCore: true, legacyLang: true });
   try {
-    try {
-      const osd = await worker.detect(filePath);
-      const orientation = Number(osd?.data?.orientation_degrees || 0);
-      if (orientation && orientation !== 0) {
-        // Caller already tries multiple orientations; keep OSD info in method only.
-      }
-    } catch {
-      /* OSD optional */
-    }
     await worker.setParameters({
       tessedit_pageseg_mode: "6",
       preserve_interword_spaces: "1",
@@ -132,44 +117,37 @@ async function recognizeWithTesseract(filePath) {
 }
 
 async function extractBestImageText(filePath) {
+  // Layout-aware EasyOCR rotates internally and returns structured fields.
+  const easyDirect = runEasyOcr(filePath);
+  if (easyDirect?.text && Number(easyDirect.score || 0) >= 20) {
+    return {
+      text: easyDirect.text,
+      score: Number(easyDirect.score || 0),
+      degrees: Number(easyDirect.degrees || 0),
+      method: "easyocr",
+      confidence: Number(easyDirect.confidence || 0),
+      fields: easyDirect.fields && typeof easyDirect.fields === "object" ? easyDirect.fields : {},
+      uprightPath: null,
+    };
+  }
+
   const variants = await prepareOrientedVariants(filePath);
   const tempPaths = [];
-  let best = { text: "", score: -1, degrees: 0, method: "ocr", confidence: 0 };
+  let best = {
+    text: easyDirect?.text || "",
+    score: Number(easyDirect?.score || -1),
+    degrees: Number(easyDirect?.degrees || 0),
+    method: easyDirect?.text ? "easyocr" : "ocr",
+    confidence: Number(easyDirect?.confidence || 0),
+    fields: easyDirect?.fields || {},
+    uprightPath: null,
+  };
   let keepPath = null;
 
   try {
     for (const variant of variants) {
       const tempPath = writeTempVariant(variant.buffer, variant.degrees);
       tempPaths.push(tempPath);
-
-      const easy = runEasyOcr(tempPath);
-      if (easy?.text) {
-        const score = scoreDocumentText(easy.text) + Number(easy.score || 0);
-        if (score > best.score) {
-          best = {
-            text: easy.text,
-            score,
-            degrees: variant.degrees,
-            method: "easyocr",
-            confidence: Number(easy.confidence || 0),
-            uprightPath: tempPath,
-          };
-          keepPath = tempPath;
-        }
-      }
-    }
-
-    // If EasyOCR already found a strong dental-form signal, skip slower Tesseract passes.
-    if (best.method === "easyocr" && best.score >= 40) {
-      return best;
-    }
-
-    for (const variant of variants) {
-      const tempPath =
-        tempPaths.find((candidate) => candidate.includes(`-${variant.degrees}-`)) ||
-        writeTempVariant(variant.buffer, variant.degrees);
-      if (!tempPaths.includes(tempPath)) tempPaths.push(tempPath);
-
       const tess = await recognizeWithTesseract(tempPath);
       const tessScore = scoreDocumentText(tess.text) + tess.confidence / 20;
       if (tessScore > best.score) {
@@ -179,6 +157,7 @@ async function extractBestImageText(filePath) {
           degrees: variant.degrees,
           method: "ocr",
           confidence: tess.confidence,
+          fields: {},
           uprightPath: tempPath,
         };
         keepPath = tempPath;

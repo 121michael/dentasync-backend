@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Camera, CheckCircle2, FileText, Image as ImageIcon, RefreshCw, Save, Upload, X } from "lucide-react";
+import { Camera, CheckCircle2, FileText, Image as ImageIcon, RefreshCw, Upload, X } from "lucide-react";
 import { ApiError, api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { useAdminUi } from "../components/AdminLayout";
@@ -244,9 +244,10 @@ export function AdminSyncPage() {
       const response = await api.uploadAdminDocumentSync(file, nextSourceType);
       setActiveJob(response.job);
       setPayload(response.job.editedPayload || response.job.extractedPayload || emptyPayload);
+      setEditing(true);
       setMessage(response.message);
       setStep("review");
-      pushToast(response.message || "Document extracted for review.");
+      pushToast(response.message || "Document fields filled for review.");
       await loadServerPreview(response.job.id);
       await load();
     } catch (scanError) {
@@ -575,10 +576,9 @@ export function AdminSyncPage() {
               <span className="eyebrow">
                 {step === "done" ? "Import complete" : "Document data extraction"} · {activeJob.status}
               </span>
-              <h2>{step === "done" ? "Document successfully imported" : "Review extracted information"}</h2>
+              <h2>{step === "done" ? "Document successfully imported" : "Review & confirm"}</h2>
               <p>
-                {activeJob.extractionNotes ||
-                  "Compare extracted fields with the source document. Correct OCR mistakes before confirming."}
+                Values were filled automatically from the document. Correct anything wrong in the fields, then confirm.
               </p>
               <small className="muted-copy">
                 Source: {activeJob.sourceLabel || activeJob.sourceType} · {activeJob.originalName}
@@ -716,24 +716,8 @@ export function AdminSyncPage() {
                 </p>
               ) : null}
 
-              {activeJob.rawText ? (
-                <details className="admin-sync-raw">
-                  <summary>View extracted raw text</summary>
-                  <pre>{activeJob.rawText}</pre>
-                </details>
-              ) : null}
-
               {activeJob.status !== "synced" ? (
                 <div className="admin-heading-actions">
-                  {editing ? (
-                    <button type="button" className="button button--secondary" onClick={saveReview} disabled={Boolean(busy)}>
-                      <Save size={16} /> {busy === "save" ? "Saving…" : "Save Edits"}
-                    </button>
-                  ) : (
-                    <button type="button" className="button button--secondary" onClick={() => setEditing(true)} disabled={Boolean(busy)}>
-                      Edit
-                    </button>
-                  )}
                   <button type="button" className="button button--primary" onClick={confirmAndSave} disabled={Boolean(busy)}>
                     <CheckCircle2 size={16} /> {busy === "sync" ? "Saving…" : "Confirm & Save"}
                   </button>

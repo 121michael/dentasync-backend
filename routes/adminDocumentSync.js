@@ -82,7 +82,7 @@ function mapJob(row) {
     sourceType: row.source_type,
     sourceLabel: sourceLabel(row.source_type, row.mime_type, row.original_name),
     status: row.status,
-    rawText: row.raw_text || "",
+    rawText: "", // OCR dump is temporary server-side only; never shown in Admin UI
     extractedPayload: row.extracted_payload || emptyPayload(),
     editedPayload: row.edited_payload || emptyPayload(),
     extractionNotes: row.extraction_notes || "",
@@ -408,8 +408,7 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
         });
 
         return res.status(201).json({
-          message:
-            "Document validated and readable fields extracted. Please review before saving. The source file is temporary and will be deleted after you confirm.",
+          message: "Document fields were filled automatically. Review them, then Confirm & Save.",
           job: mapJob(updated.rows[0]),
           fieldStatuses: extraction.fieldStatuses || {},
         });

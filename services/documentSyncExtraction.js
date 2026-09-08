@@ -226,24 +226,45 @@ function extractPhoneFromText(text) {
   return "";
 }
 
-function applyGeminiFields(payload, vision) {
-  if (!vision || vision.isDocument === false) return payload;
+function applyExternalFields(payload, fields = {}) {
+  if (!fields || typeof fields !== "object") return payload;
+  const next = payload;
 
-  if (vision.fullName) {
-    const names = splitName(vision.fullName);
-    payload.patient.firstName = names.firstName;
-    payload.patient.lastName = names.lastName;
-    payload.patient.fullName = names.fullName;
+  if (fields.fullName) {
+    const names = splitName(fields.fullName);
+    next.patient.firstName = names.firstName;
+    next.patient.lastName = names.lastName;
+    next.patient.fullName = names.fullName;
   }
-  if (vision.dateOfBirth) payload.patient.dateOfBirth = normalizeDate(vision.dateOfBirth);
-  if (vision.age) payload.patient.age = normalizeAge(vision.age);
-  if (vision.phone) payload.patient.phone = normalizePhone(vision.phone);
-  if (vision.address) payload.patient.address = cleanLine(vision.address);
-  if (vision.procedure) payload.procedure.treatment = cleanLine(vision.procedure);
-  if (vision.treatmentDate) payload.procedure.treatmentDate = normalizeDate(vision.treatmentDate);
-  if (vision.amountCharged) payload.procedure.amountCharged = normalizeAmount(vision.amountCharged);
-  if (vision.notes) payload.procedure.notes = cleanLine(vision.notes);
-  return payload;
+  if (fields.dateOfBirth) next.patient.dateOfBirth = normalizeDate(fields.dateOfBirth);
+  if (fields.age) next.patient.age = normalizeAge(fields.age);
+  if (fields.phone) next.patient.phone = normalizePhone(fields.phone);
+  if (fields.address) next.patient.address = cleanLine(fields.address);
+  if (fields.procedure) {
+    next.procedure.treatment = inferProcedure(fields.procedure) || cleanLine(fields.procedure);
+  }
+  if (fields.treatmentDate) next.procedure.treatmentDate = normalizeDate(fields.treatmentDate);
+  if (fields.amountCharged) next.procedure.amountCharged = normalizeAmount(fields.amountCharged);
+  if (fields.notes) next.procedure.notes = cleanLine(fields.notes);
+  return next;
+}
+
+function refreshFieldStatuses(payload, fieldStatuses = {}) {
+  const next = { ...fieldStatuses };
+  const pairs = {
+    fullName: payload.patient.fullName,
+    phone: payload.patient.phone,
+    age: payload.patient.age,
+    dateOfBirth: payload.patient.dateOfBirth,
+    address: payload.patient.address,
+    treatment: payload.procedure.treatment,
+    treatmentDate: payload.procedure.treatmentDate,
+    amountCharged: payload.procedure.amountCharged,
+  };
+  for (const [key, value] of Object.entries(pairs)) {
+    if (value) next[key] = "detected";
+  }
+  return next;
 }
 
 function captureLabeledBlock(text, labelNames, stopLabels = []) {
@@ -625,6 +646,7 @@ async function extractTextFromFile(filePath, mimeType, originalName) {
       orientationDegrees: best.degrees || 0,
       confidence: best.confidence || 0,
       uprightPath: best.uprightPath || null,
+      fields: best.fields || {},
       warning:
         best.score < 12
           ? "Low OCR confidence. Please verify every field against the document preview."
@@ -684,22 +706,22 @@ async function extractDocumentData(filePath, mimeType, originalName) {
   }
 
   const structured = extractStructuredPayload(extracted.text);
-  if (vision) {
-    structured.payload = applyGeminiFields(structured.payload, vision);
-    // Recompute statuses for filled vision fields.
-    for (const [key, value] of Object.entries({
-      fullName: structured.payload.patient.fullName,
-      phone: structured.payload.patient.phone,
-      age: structured.payload.patient.age,
-      dateOfBirth: structured.payload.patient.dateOfBirth,
-      address: structured.payload.patient.address,
-      treatment: structured.payload.procedure.treatment,
-      treatmentDate: structured.payload.procedure.treatmentDate,
-      amountCharged: structured.payload.procedure.amountCharged,
-    })) {
-      if (value) structured.fieldStatuses[key] = "detected";
-    }
+  // Layout-aware OCR fields and vision fields overwrite weaker regex guesses.
+  structured.payload = applyExternalFields(structured.payload, extracted.fields || {});
+  if (vision && vision.isDocument !== false) {
+    structured.payload = applyExternalFields(structured.payload, {
+      fullName: vision.fullName,
+      dateOfBirth: vision.dateOfBirth,
+      age: vision.age,
+      phone: vision.phone,
+      address: vision.address,
+      procedure: vision.procedure,
+      treatmentDate: vision.treatmentDate,
+      amountCharged: vision.amountCharged,
+      notes: vision.notes,
+    });
   }
+  structured.fieldStatuses = refreshFieldStatuses(structured.payload, structured.fieldStatuses);
 
   const notes = [structured.notes, extracted.warning].filter(Boolean).join(" ");
 
