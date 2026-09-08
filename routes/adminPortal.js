@@ -676,6 +676,140 @@ function createAdminPortalRouter({
     }
   });
 
+  router.patch("/clinical-records/:id/treatments/:treatmentId", async (req, res) => {
+    const recordId = numericId(req.params.id);
+    const treatmentId = numericId(req.params.treatmentId);
+    if (!recordId || !treatmentId) {
+      return res.status(400).json({ message: "A valid clinical record and treatment ID are required." });
+    }
+
+    try {
+      const treatment = await clinicalPatients.updateClinicalTreatment(
+        db,
+        recordId,
+        treatmentId,
+        {
+          treatment: req.body?.treatment ?? req.body?.procedure,
+          treatmentDate: req.body?.treatmentDate ?? req.body?.date,
+          amountCharged: req.body?.amountCharged,
+          amountPaid: req.body?.amountPaid,
+        },
+        { id: req.admin?.id, role: "admin" }
+      );
+
+      await writeAdminAudit(db, {
+        actorId: req.admin?.id,
+        actorName: `${req.admin?.first_name || ""} ${req.admin?.last_name || ""}`.trim() || req.admin?.email,
+        actorRole: "admin",
+        action: "update_treatment_history",
+        targetType: "treatment",
+        targetId: String(treatmentId),
+        targetLabel: treatment.treatment,
+        result: "success",
+        detail: `Updated treatment history for clinical record ${recordId}.`,
+      });
+
+      return res.json({
+        message: "Treatment history updated successfully.",
+        treatment,
+      });
+    } catch (error) {
+      if (error?.status) {
+        return res.status(error.status).json({ message: error.message });
+      }
+      if (clinicalPatients.isMissingRelation(error)) {
+        return res.status(503).json({
+          message: "Clinical patient records are not available. Run npm run migrate:clinical-records.",
+        });
+      }
+      console.error("Admin treatment history update error:", error.message);
+      return res.status(500).json({ message: "Treatment history could not be updated." });
+    }
+  });
+
+  router.get("/clinical-records/:id/dental-chart", async (req, res) => {
+    const recordId = numericId(req.params.id);
+    if (!recordId) {
+      return res.status(400).json({ message: "A valid clinical record ID is required." });
+    }
+
+    try {
+      const record = await db.query(
+        `SELECT id FROM clinic_patient_records
+         WHERE id = $1 AND COALESCE(is_archived, FALSE) = FALSE
+         LIMIT 1`,
+        [recordId]
+      );
+      if (!record.rows.length) {
+        return res.status(404).json({ message: "Patient record not found." });
+      }
+
+      const result = await db
+        .query(
+          `SELECT
+             id, tooth_number, condition_label, notes, created_by, created_by_role,
+             created_at, updated_at,
+             COALESCE(tooth_status, 'healthy') AS tooth_status,
+             COALESCE(conditions_json, '[]'::jsonb) AS conditions_json,
+             COALESCE(treatments_json, '[]'::jsonb) AS treatments_json,
+             updated_by
+           FROM clinic_dental_chart_entries
+           WHERE clinical_record_id = $1
+           ORDER BY tooth_number ASC`,
+          [recordId]
+        )
+        .catch(async (error) => {
+          if (error?.code === "42703") {
+            return db.query(
+              `SELECT id, tooth_number, condition_label, notes, created_by, created_by_role, created_at, updated_at
+               FROM clinic_dental_chart_entries
+               WHERE clinical_record_id = $1
+               ORDER BY tooth_number ASC`,
+              [recordId]
+            );
+          }
+          throw error;
+        });
+
+      return res.json({
+        patientId: recordId,
+        readOnly: true,
+        source: "dentist",
+        entries: result.rows.map((row) => {
+          const conditions = Array.isArray(row.conditions_json)
+            ? row.conditions_json
+            : row.condition_label
+              ? [row.condition_label]
+              : [];
+          const treatments = Array.isArray(row.treatments_json) ? row.treatments_json : [];
+          return {
+            id: row.id,
+            toothNumber: row.tooth_number,
+            conditionLabel: row.condition_label,
+            conditions,
+            condition: conditions,
+            treatments,
+            status: row.tooth_status || "healthy",
+            notes: row.notes || "",
+            createdBy: row.created_by,
+            createdByRole: row.created_by_role,
+            updatedBy: row.updated_by || row.created_by || null,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+          };
+        }),
+      });
+    } catch (error) {
+      if (clinicalPatients.isMissingRelation(error) || error?.code === "42P01") {
+        return res.status(503).json({
+          message: "Dental chart information is currently unavailable. Run npm run migrate:paper-gaps.",
+        });
+      }
+      console.error("Admin dental chart load error:", error.message);
+      return res.status(500).json({ message: "Dental chart information is currently unavailable." });
+    }
+  });
+
   router.post("/patients", async (_req, res) => {
     return res.status(403).json({
       message:

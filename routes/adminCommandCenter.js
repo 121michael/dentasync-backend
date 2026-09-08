@@ -90,6 +90,7 @@ function mapAccount(row, extras = {}) {
     status: (row.status || "active").toLowerCase(),
     verified: Boolean(row.is_verified),
     createdAt: row.created_at || null,
+    statusChangedAt: row.status_changed_at || null,
     archivedAt: row.archived_at || null,
     archivedBy: row.archived_by || null,
     operationalRole: extras.operationalRole ?? row.operational_role ?? "",
@@ -223,27 +224,48 @@ function attachAdminCommandCenterRoutes(router, { db }) {
         `SELECT COUNT(*) AS count
          FROM users
          WHERE COALESCE(is_archived, FALSE) = FALSE
+           AND LOWER(role) = 'patient'
+           AND LOWER(COALESCE(status, 'pending')) NOT IN ('rejected', 'active', 'suspended', 'inactive')
            AND (
              is_verified = FALSE
-             OR LOWER(COALESCE(status, 'active')) IN ('pending', 'unverified')
-           )
-           AND LOWER(role) = 'patient'`
+             OR LOWER(COALESCE(status, 'pending')) IN ('pending', 'unverified')
+           )`
       );
       const result = await db.query(
         `SELECT
            id, first_name, last_name, email, phone, role, status, is_verified, created_at,
+           status_changed_at,
            CONCAT_WS(' ', first_name, last_name) AS full_name
          FROM users
          WHERE COALESCE(is_archived, FALSE) = FALSE
+           AND LOWER(role) = 'patient'
+           AND LOWER(COALESCE(status, 'pending')) NOT IN ('rejected', 'active', 'suspended', 'inactive')
            AND (
              is_verified = FALSE
-             OR LOWER(COALESCE(status, 'active')) IN ('pending', 'unverified')
+             OR LOWER(COALESCE(status, 'pending')) IN ('pending', 'unverified')
            )
-           AND LOWER(role) = 'patient'
          ORDER BY created_at DESC
          LIMIT $1 OFFSET $2`,
         [limit, offset]
-      );
+      ).catch(async (error) => {
+        if (error?.code !== "42703") throw error;
+        return db.query(
+          `SELECT
+             id, first_name, last_name, email, phone, role, status, is_verified, created_at,
+             CONCAT_WS(' ', first_name, last_name) AS full_name
+           FROM users
+           WHERE COALESCE(is_archived, FALSE) = FALSE
+             AND LOWER(role) = 'patient'
+             AND LOWER(COALESCE(status, 'pending')) NOT IN ('rejected', 'active', 'suspended', 'inactive')
+             AND (
+               is_verified = FALSE
+               OR LOWER(COALESCE(status, 'pending')) IN ('pending', 'unverified')
+             )
+           ORDER BY created_at DESC
+           LIMIT $1 OFFSET $2`,
+          [limit, offset]
+        );
+      });
       return res.json({
         page,
         limit,
@@ -253,6 +275,55 @@ function attachAdminCommandCenterRoutes(router, { db }) {
     } catch (error) {
       console.error("Admin pending registrations error:", error.message);
       return res.status(500).json({ message: "Unable to load pending registrations." });
+    }
+  });
+
+  router.get("/registrations/rejected", async (req, res) => {
+    const { page, limit, offset } = parsePagination(req.query);
+    try {
+      const countResult = await db.query(
+        `SELECT COUNT(*) AS count
+         FROM users
+         WHERE COALESCE(is_archived, FALSE) = FALSE
+           AND LOWER(role) = 'patient'
+           AND LOWER(COALESCE(status, '')) = 'rejected'`
+      );
+      const result = await db.query(
+        `SELECT
+           id, first_name, last_name, email, phone, role, status, is_verified, created_at,
+           status_changed_at,
+           CONCAT_WS(' ', first_name, last_name) AS full_name
+         FROM users
+         WHERE COALESCE(is_archived, FALSE) = FALSE
+           AND LOWER(role) = 'patient'
+           AND LOWER(COALESCE(status, '')) = 'rejected'
+         ORDER BY COALESCE(status_changed_at, created_at) ASC, id ASC
+         LIMIT $1 OFFSET $2`,
+        [limit, offset]
+      ).catch(async (error) => {
+        if (error?.code !== "42703") throw error;
+        return db.query(
+          `SELECT
+             id, first_name, last_name, email, phone, role, status, is_verified, created_at,
+             CONCAT_WS(' ', first_name, last_name) AS full_name
+           FROM users
+           WHERE COALESCE(is_archived, FALSE) = FALSE
+             AND LOWER(role) = 'patient'
+             AND LOWER(COALESCE(status, '')) = 'rejected'
+           ORDER BY created_at ASC, id ASC
+           LIMIT $1 OFFSET $2`,
+          [limit, offset]
+        );
+      });
+      return res.json({
+        page,
+        limit,
+        total: count(countResult.rows[0]),
+        requests: result.rows.map((row) => mapAccount(row)),
+      });
+    } catch (error) {
+      console.error("Admin rejected registrations error:", error.message);
+      return res.status(500).json({ message: "Unable to load rejected registrations." });
     }
   });
 
@@ -275,16 +346,39 @@ function attachAdminCommandCenterRoutes(router, { db }) {
         return res.status(404).json({ message: "Registration request not found." });
       }
 
+      const currentStatus = String(existing.rows[0].status || "").toLowerCase();
+      const alreadyVerified = Boolean(existing.rows[0].is_verified);
+      if (decision === "approve" && currentStatus === "active" && alreadyVerified) {
+        return res.status(409).json({ message: "User is already approved." });
+      }
+      if (decision === "reject" && currentStatus === "rejected") {
+        return res.status(409).json({ message: "User is already rejected." });
+      }
+
       const nextStatus = decision === "approve" ? "Active" : "Rejected";
       const verified = decision === "approve";
-      const result = await db.query(
-        `UPDATE users
-         SET is_verified = $1,
-             status = $2
-         WHERE id::text = $3
-         RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at`,
-        [verified, nextStatus, accountId]
-      );
+      let result;
+      try {
+        result = await db.query(
+          `UPDATE users
+           SET is_verified = $1,
+               status = $2,
+               status_changed_at = CURRENT_TIMESTAMP
+           WHERE id::text = $3
+           RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, status_changed_at`,
+          [verified, nextStatus, accountId]
+        );
+      } catch (error) {
+        if (error?.code !== "42703") throw error;
+        result = await db.query(
+          `UPDATE users
+           SET is_verified = $1,
+               status = $2
+           WHERE id::text = $3
+           RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at`,
+          [verified, nextStatus, accountId]
+        );
+      }
 
       await audit(db, req, {
         action: decision === "approve" ? "approve_registration" : "reject_registration",
@@ -309,14 +403,14 @@ function attachAdminCommandCenterRoutes(router, { db }) {
 
       return res.json({
         message:
-          decision === "approve"
-            ? "Account approved successfully. The patient can now open the dashboard and book appointments."
-            : "Registration rejected. Login access is blocked.",
+          decision === "approve" ? "User approved successfully." : "User rejected successfully.",
         account: mapAccount(result.rows[0]),
       });
     } catch (error) {
       console.error(`Admin registration ${decision} error:`, error.message);
-      return res.status(500).json({ message: `Unable to ${decision} registration.` });
+      return res.status(500).json({
+        message: decision === "approve" ? "Unable to approve user." : "Unable to reject user.",
+      });
     }
   }
 
@@ -420,45 +514,78 @@ function attachAdminCommandCenterRoutes(router, { db }) {
       let params;
       let message;
       if (action === "verify" || action === "approve") {
-        sql = `UPDATE users SET is_verified = TRUE, status = 'Active'
+        if (String(target.status || "").toLowerCase() === "active" && target.is_verified && action === "approve") {
+          await client.query("ROLLBACK");
+          transactionOpen = false;
+          return res.status(409).json({ message: "User is already approved." });
+        }
+        sql = `UPDATE users SET is_verified = TRUE, status = 'Active', status_changed_at = CURRENT_TIMESTAMP
                WHERE id::text = $1
-               RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by`;
+               RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by, status_changed_at`;
         params = [accountId];
-        message =
-          action === "verify"
-            ? "Account verified successfully."
-            : "Account approved successfully. The patient can now open the dashboard and book appointments.";
+        message = action === "verify" ? "Account verified successfully." : "User approved successfully.";
       } else if (action === "reject") {
-        sql = `UPDATE users SET is_verified = FALSE, status = 'Rejected'
+        if (String(target.status || "").toLowerCase() === "rejected") {
+          await client.query("ROLLBACK");
+          transactionOpen = false;
+          return res.status(409).json({ message: "User is already rejected." });
+        }
+        sql = `UPDATE users SET is_verified = FALSE, status = 'Rejected', status_changed_at = CURRENT_TIMESTAMP
                WHERE id::text = $1
-               RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by`;
+               RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by, status_changed_at`;
         params = [accountId];
-        message = "Account rejected. Login access is blocked.";
+        message = "User rejected successfully.";
       } else if (action === "suspend") {
-        sql = `UPDATE users SET status = 'Suspended'
+        sql = `UPDATE users SET status = 'Suspended', status_changed_at = CURRENT_TIMESTAMP
                WHERE id::text = $1
-               RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by`;
+               RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by, status_changed_at`;
         params = [accountId];
         message = "Account suspended successfully.";
       } else if (action === "activate") {
-        sql = `UPDATE users SET status = 'Active', is_verified = TRUE
+        sql = `UPDATE users SET status = 'Active', is_verified = TRUE, status_changed_at = CURRENT_TIMESTAMP
                WHERE id::text = $1
-               RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by`;
+               RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by, status_changed_at`;
         params = [accountId];
         message = "Account activated successfully.";
       } else {
         sql = `UPDATE users
                SET is_archived = TRUE,
                    status = 'Inactive',
+                   status_changed_at = CURRENT_TIMESTAMP,
                    archived_at = CURRENT_TIMESTAMP,
                    archived_by = $2
                WHERE id::text = $1
-               RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by`;
+               RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by, status_changed_at`;
         params = [accountId, String(req.admin.id)];
         message = "User archived successfully.";
       }
 
-      const result = await client.query(sql, params);
+      let result;
+      try {
+        result = await client.query(sql, params);
+      } catch (error) {
+        if (error?.code !== "42703") throw error;
+        // Fallback without status_changed_at for older schemas.
+        if (action === "verify" || action === "approve") {
+          result = await client.query(
+            `UPDATE users SET is_verified = TRUE, status = 'Active'
+             WHERE id::text = $1
+             RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by`,
+            [accountId]
+          );
+          message = action === "verify" ? "Account verified successfully." : "User approved successfully.";
+        } else if (action === "reject") {
+          result = await client.query(
+            `UPDATE users SET is_verified = FALSE, status = 'Rejected'
+             WHERE id::text = $1
+             RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by`,
+            [accountId]
+          );
+          message = "User rejected successfully.";
+        } else {
+          throw error;
+        }
+      }
       await client.query("COMMIT");
       transactionOpen = false;
 

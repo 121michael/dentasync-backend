@@ -253,8 +253,15 @@ export const api = {
     const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value || value === 0));
     return request(`/admin/registrations/pending${search.size ? `?${search}` : ""}`);
   },
+  getAdminRejectedRegistrations: (params = {}) => {
+    const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value || value === 0));
+    return request(`/admin/registrations/rejected${search.size ? `?${search}` : ""}`);
+  },
   approveAdminRegistration: (id) => request(`/admin/registrations/${id}/approve`, { method: "POST" }),
   rejectAdminRegistration: (id) => request(`/admin/registrations/${id}/reject`, { method: "POST" }),
+  getAdminClinicalDentalChart: (id) => request(`/admin/clinical-records/${id}/dental-chart`),
+  updateAdminClinicalTreatment: (recordId, treatmentId, body) =>
+    request(`/admin/clinical-records/${recordId}/treatments/${treatmentId}`, { method: "PATCH", body }),
   getAdminArchivedRecords: (params = {}) => {
     const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value || value === 0));
     return request(`/admin/archived${search.size ? `?${search}` : ""}`);

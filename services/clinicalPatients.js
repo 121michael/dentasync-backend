@@ -34,6 +34,45 @@ function isIsoDate(value) {
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
+function parseMoneyAmount(value, fieldLabel) {
+  if (value == null || value === "") {
+    return 0;
+  }
+  const amount = typeof value === "number" ? value : Number(String(value).replace(/,/g, "").trim());
+  if (!Number.isFinite(amount) || amount < 0) {
+    const error = new Error(`${fieldLabel} must be a valid non-negative amount.`);
+    error.status = 400;
+    throw error;
+  }
+  return Math.round(amount * 100) / 100;
+}
+
+function mapClinicalTreatment(row) {
+  return {
+    id: row.id,
+    clinicalRecordId: row.clinical_record_id,
+    treatment: row.treatment,
+    dentistName: row.dentist_name,
+    clinicLocation: row.clinic_location,
+    coverageStatus: row.coverage_status,
+    status: row.status,
+    treatmentDate: row.treatment_date,
+    notes: row.notes || "",
+    durationMinutes: row.duration_minutes != null ? Number(row.duration_minutes) : null,
+    toothNumber: row.tooth_number || null,
+    diagnosisNotes: row.diagnosis_notes || null,
+    procedureDetails: row.procedure_details || null,
+    amountCharged: row.amount_charged != null ? Number(row.amount_charged) : 0,
+    amountPaid: row.amount_paid != null ? Number(row.amount_paid) : 0,
+    appointmentId: row.appointment_id != null ? Number(row.appointment_id) : null,
+    createdBy: row.created_by || null,
+    createdByRole: row.created_by_role || null,
+    updatedBy: row.updated_by || null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at || null,
+  };
+}
+
 function isMissingRelation(error) {
   return error?.code === "42P01";
 }
@@ -152,21 +191,7 @@ async function getClinicalRecord(db, recordId) {
 
   return {
     record: mapClinicalRecord(result.rows[0]),
-    treatments: treatments.rows.map((row) => ({
-      id: row.id,
-      treatment: row.treatment,
-      dentistName: row.dentist_name,
-      clinicLocation: row.clinic_location,
-      coverageStatus: row.coverage_status,
-      status: row.status,
-      treatmentDate: row.treatment_date,
-      notes: row.notes || "",
-      durationMinutes: row.duration_minutes != null ? Number(row.duration_minutes) : null,
-      toothNumber: row.tooth_number || null,
-      diagnosisNotes: row.diagnosis_notes || null,
-      procedureDetails: row.procedure_details || null,
-      createdAt: row.created_at,
-    })),
+    treatments: treatments.rows.map(mapClinicalTreatment),
   };
 }
 
@@ -346,6 +371,12 @@ async function addClinicalTreatment(db, recordId, input, actor = {}) {
   const toothNumber = stringValue(input.toothNumber, 20);
   const diagnosisNotes = stringValue(input.diagnosisNotes, 2000);
   const procedureDetails = stringValue(input.procedureDetails, 2000);
+  const amountCharged = parseMoneyAmount(input.amountCharged, "Amount Charged");
+  const amountPaid = parseMoneyAmount(input.amountPaid, "Amount Paid");
+  const appointmentId =
+    Number.isSafeInteger(Number(input.appointmentId)) && Number(input.appointmentId) > 0
+      ? Number(input.appointmentId)
+      : null;
 
   let result;
   try {
@@ -353,8 +384,9 @@ async function addClinicalTreatment(db, recordId, input, actor = {}) {
       `INSERT INTO clinic_patient_treatments (
          clinical_record_id, treatment, dentist_name, clinic_location, coverage_status,
          status, treatment_date, notes, duration_minutes, tooth_number, diagnosis_notes,
-         procedure_details, created_by, created_by_role
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+         procedure_details, amount_charged, amount_paid, appointment_id,
+         created_by, created_by_role, updated_by
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $16)
        RETURNING *`,
       [
         recordId,
@@ -369,6 +401,9 @@ async function addClinicalTreatment(db, recordId, input, actor = {}) {
         toothNumber,
         diagnosisNotes,
         procedureDetails,
+        amountCharged,
+        amountPaid,
+        appointmentId,
         actor.id ? String(actor.id) : null,
         actor.role || null,
       ]
@@ -405,7 +440,76 @@ async function addClinicalTreatment(db, recordId, input, actor = {}) {
     [recordId, actor.id ? String(actor.id) : null]
   );
 
-  return result.rows[0];
+  return mapClinicalTreatment(result.rows[0]);
+}
+
+async function updateClinicalTreatment(db, recordId, treatmentId, input, actor = {}) {
+  const existing = await db.query(
+    `SELECT *
+     FROM clinic_patient_treatments
+     WHERE id = $1
+       AND clinical_record_id = $2
+     LIMIT 1`,
+    [treatmentId, recordId]
+  );
+  if (!existing.rows.length) {
+    const error = new Error("Treatment history record not found.");
+    error.status = 404;
+    throw error;
+  }
+
+  const treatment = stringValue(input.treatment, 200);
+  if (!treatment) {
+    const error = new Error("Procedure cannot be empty.");
+    error.status = 400;
+    throw error;
+  }
+
+  const treatmentDate = stringValue(input.treatmentDate, 10);
+  if (!treatmentDate || !isIsoDate(treatmentDate)) {
+    const error = new Error("Provide a valid treatment date (YYYY-MM-DD).");
+    error.status = 400;
+    throw error;
+  }
+
+  const amountCharged = parseMoneyAmount(input.amountCharged, "Amount Charged");
+  const amountPaid = parseMoneyAmount(input.amountPaid, "Amount Paid");
+  const actorId = actor.id ? String(actor.id) : null;
+
+  let result;
+  try {
+    result = await db.query(
+      `UPDATE clinic_patient_treatments
+       SET treatment = $1,
+           treatment_date = $2,
+           amount_charged = $3,
+           amount_paid = $4,
+           updated_at = CURRENT_TIMESTAMP,
+           updated_by = $5
+       WHERE id = $6
+         AND clinical_record_id = $7
+       RETURNING *`,
+      [treatment, treatmentDate, amountCharged, amountPaid, actorId, treatmentId, recordId]
+    );
+  } catch (error) {
+    if (error?.code === "42703") {
+      const fallbackError = new Error(
+        "Treatment history amounts are not available. Run npm run migrate:admin-dashboard-updates."
+      );
+      fallbackError.status = 503;
+      throw fallbackError;
+    }
+    throw error;
+  }
+
+  await db.query(
+    `UPDATE clinic_patient_records
+     SET updated_at = CURRENT_TIMESTAMP, updated_by = $2
+     WHERE id = $1`,
+    [recordId, actorId]
+  );
+
+  return mapClinicalTreatment(result.rows[0]);
 }
 
 async function verifyClinicalRecordIdentity(db, recordId, status, actor = {}) {
@@ -483,6 +587,8 @@ module.exports = {
   updateClinicalRecord,
   archiveClinicalRecord,
   addClinicalTreatment,
+  updateClinicalTreatment,
+  mapClinicalTreatment,
   verifyClinicalRecordIdentity,
   linkClinicalRecordsToUser,
   mapClinicalRecord,
@@ -491,4 +597,5 @@ module.exports = {
   normalizeEmail,
   normalizePhone,
   isIsoDate,
+  parseMoneyAmount,
 };

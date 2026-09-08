@@ -23,11 +23,26 @@ const emptyForm = {
   scheduleNotes: "",
 };
 
+function isPendingAccount(user) {
+  const status = String(user?.status || "").toLowerCase();
+  return !user?.verified || status === "pending" || status === "unverified";
+}
+
+function isRejectedAccount(user) {
+  return String(user?.status || "").toLowerCase() === "rejected";
+}
+
+function isApprovedAccount(user) {
+  const status = String(user?.status || "").toLowerCase();
+  return Boolean(user?.verified) && (status === "active" || status === "operational");
+}
+
 export function AdminManageUsersPage() {
   const { pushToast, confirm } = useAdminUi();
   const [tab, setTab] = useState("staff");
   const [data, setData] = useState(null);
   const [pending, setPending] = useState([]);
+  const [rejected, setRejected] = useState([]);
   const [search, setSearch] = useState("");
   const [applied, setApplied] = useState("");
   const [error, setError] = useState("");
@@ -36,17 +51,20 @@ export function AdminManageUsersPage() {
   const [form, setForm] = useState(emptyForm);
   const [detail, setDetail] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [actionBusyId, setActionBusyId] = useState("");
 
   const load = useCallback(async () => {
     try {
       const loader =
         tab === "patient" ? api.getAdminPatients : tab === "staff" ? api.getAdminStaff : api.getAdminDentists;
-      const [list, pendingResponse] = await Promise.all([
+      const [list, pendingResponse, rejectedResponse] = await Promise.all([
         loader({ search: applied, limit: 50 }),
         api.getAdminPendingRegistrations({ limit: 50 }),
+        api.getAdminRejectedRegistrations({ limit: 100 }),
       ]);
       setData(list);
       setPending((pendingResponse.requests || []).filter((request) => request.role === "patient"));
+      setRejected((rejectedResponse.requests || []).filter((request) => request.role === "patient"));
       setError("");
     } catch (loadError) {
       setError(loadError.message);
@@ -128,12 +146,22 @@ export function AdminManageUsersPage() {
       tone: ["archive", "reject", "suspend"].includes(action) ? "danger" : "primary",
     });
     if (!ok) return;
+    setActionBusyId(`${user.id}:${action}`);
     try {
       const response = await api.updateAdminAccountLifecycle(user.id, action);
-      pushToast(response.message || "Account updated successfully.");
+      pushToast(
+        response.message ||
+          (action === "approve"
+            ? "User approved successfully."
+            : action === "reject"
+              ? "User rejected successfully."
+              : "Account updated successfully.")
+      );
       await load();
     } catch (lifecycleError) {
-      pushToast(lifecycleError.message, "error");
+      pushToast(lifecycleError.message || `Unable to ${action} user.`, "error");
+    } finally {
+      setActionBusyId("");
     }
   }
 
@@ -173,28 +201,37 @@ export function AdminManageUsersPage() {
       tone: "primary",
     });
     if (!ok) return;
+    setActionBusyId(`${request.id}:approve`);
     try {
       const response = await api.approveAdminRegistration(request.id);
-      pushToast(response.message || "Account approved successfully.");
+      pushToast(response.message || "User approved successfully.");
+      setPending((current) => current.filter((item) => String(item.id) !== String(request.id)));
       await load();
     } catch (approveError) {
-      pushToast(approveError.message, "error");
+      pushToast(approveError.message || "Unable to approve user.", "error");
+    } finally {
+      setActionBusyId("");
     }
   }
 
   async function rejectRequest(request) {
     const ok = await confirm({
       title: "Reject registration",
-      message: `Are you sure you want to reject ${request.fullName}? Login access will be blocked.`,
+      message: "Are you sure you want to reject this user?",
       confirmLabel: "Reject",
+      tone: "danger",
     });
     if (!ok) return;
+    setActionBusyId(`${request.id}:reject`);
     try {
       const response = await api.rejectAdminRegistration(request.id);
-      pushToast(response.message || "Registration rejected.");
+      pushToast(response.message || "User rejected successfully.");
+      setPending((current) => current.filter((item) => String(item.id) !== String(request.id)));
       await load();
     } catch (rejectError) {
-      pushToast(rejectError.message, "error");
+      pushToast(rejectError.message || "Unable to reject user.", "error");
+    } finally {
+      setActionBusyId("");
     }
   }
 
@@ -261,46 +298,96 @@ export function AdminManageUsersPage() {
                 </tr>
               </thead>
               <tbody>
-                {users.map((user) => (
-                  <tr key={user.id}>
-                    <td><strong>{user.fullName}</strong></td>
-                    <td><code>{user.id}</code></td>
-                    <td>
-                      {tab === "staff"
-                        ? user.operationalRole || user.position || "Clinic Staff"
-                        : tab === "dentist"
-                          ? user.specialization || "General Dentistry"
-                          : user.email}
-                    </td>
-                    <td>{tab === "patient" ? user.phone || "—" : user.email}</td>
-                    <td>
-                      <AdminStatusBadge status={!user.verified || user.status === "pending" ? "pending" : user.status === "active" ? "operational" : user.status} />
-                    </td>
-                    <td>
-                      <div className="admin-row-actions">
-                        <button className="button button--secondary button--compact" onClick={() => setDetail(user)}><Eye size={14} /> View</button>
-                        {tab === "patient" ? (
-                          <>
-                            <button className="button button--primary button--compact" onClick={() => runLifecycle(user, "approve", `Approve ${user.fullName} so they can open the patient dashboard and book appointments?`)}>Approve</button>
-                            <button className="button button--danger button--compact" onClick={() => runLifecycle(user, "reject", `Reject ${user.fullName}? Login access will be blocked.`)}>Reject</button>
-                            <button className="button button--secondary button--compact" onClick={() => runLifecycle(user, "suspend", `Suspend ${user.fullName}?`)}>Suspend</button>
-                          </>
-                        ) : (
-                          <>
-                            <button className="button button--secondary button--compact" onClick={() => openEdit(user)}><Pencil size={14} /> Edit</button>
-                            <button className="button button--secondary button--compact" onClick={() => runLifecycle(user, "verify", `Verify ${user.fullName}?`)}><ShieldCheck size={14} /> Verify</button>
-                            <button className="button button--secondary button--compact" onClick={() => runLifecycle(user, "approve", `Approve ${user.fullName}?`)}>Approve</button>
-                            <button className="button button--secondary button--compact" onClick={() => runLifecycle(user, "reject", `Reject ${user.fullName}?`)}>Reject</button>
-                            <button className="button button--secondary button--compact" onClick={() => runLifecycle(user, "suspend", `Suspend ${user.fullName}?`)}>Suspend</button>
-                            <button className="button button--secondary button--compact" onClick={() => runLifecycle(user, "archive", `Are you sure you want to archive this account?`)}>Archive</button>
-                            <button className="button button--secondary button--compact" onClick={() => changeRole(user)}>Role</button>
-                            <button className="button button--secondary button--compact" onClick={() => resetPassword(user)}><KeyRound size={14} /> Reset</button>
-                          </>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {users.map((user) => {
+                  const pendingUser = isPendingAccount(user);
+                  const rejectedUser = isRejectedAccount(user);
+                  const approvedUser = isApprovedAccount(user);
+                  return (
+                    <tr key={user.id}>
+                      <td><strong>{user.fullName}</strong></td>
+                      <td><code>{user.id}</code></td>
+                      <td>
+                        {tab === "staff"
+                          ? user.operationalRole || user.position || "Clinic Staff"
+                          : tab === "dentist"
+                            ? user.specialization || "General Dentistry"
+                            : user.email}
+                      </td>
+                      <td>{tab === "patient" ? user.phone || "—" : user.email}</td>
+                      <td>
+                        <AdminStatusBadge
+                          status={
+                            rejectedUser
+                              ? "rejected"
+                              : pendingUser
+                                ? "pending"
+                                : approvedUser
+                                  ? "active"
+                                  : user.status
+                          }
+                        />
+                      </td>
+                      <td>
+                        <div className="admin-row-actions">
+                          <button className="button button--secondary button--compact" onClick={() => setDetail(user)}><Eye size={14} /> View</button>
+                          {tab === "patient" ? (
+                            <>
+                              {pendingUser ? (
+                                <>
+                                  <button
+                                    className="button button--primary button--compact"
+                                    disabled={actionBusyId === `${user.id}:approve`}
+                                    onClick={() =>
+                                      runLifecycle(
+                                        user,
+                                        "approve",
+                                        `Approve ${user.fullName} so they can open the patient dashboard and book appointments?`
+                                      )
+                                    }
+                                  >
+                                    Approve
+                                  </button>
+                                  <button
+                                    className="button button--danger button--compact"
+                                    disabled={actionBusyId === `${user.id}:reject`}
+                                    onClick={() =>
+                                      runLifecycle(user, "reject", "Are you sure you want to reject this user?")
+                                    }
+                                  >
+                                    Reject
+                                  </button>
+                                </>
+                              ) : null}
+                              {approvedUser ? (
+                                <button
+                                  className="button button--secondary button--compact"
+                                  onClick={() => runLifecycle(user, "suspend", `Suspend ${user.fullName}?`)}
+                                >
+                                  Suspend
+                                </button>
+                              ) : null}
+                            </>
+                          ) : (
+                            <>
+                              <button className="button button--secondary button--compact" onClick={() => openEdit(user)}><Pencil size={14} /> Edit</button>
+                              <button className="button button--secondary button--compact" onClick={() => runLifecycle(user, "verify", `Verify ${user.fullName}?`)}><ShieldCheck size={14} /> Verify</button>
+                              {!approvedUser ? (
+                                <button className="button button--secondary button--compact" onClick={() => runLifecycle(user, "approve", `Approve ${user.fullName}?`)}>Approve</button>
+                              ) : null}
+                              {!rejectedUser ? (
+                                <button className="button button--secondary button--compact" onClick={() => runLifecycle(user, "reject", "Are you sure you want to reject this user?")}>Reject</button>
+                              ) : null}
+                              <button className="button button--secondary button--compact" onClick={() => runLifecycle(user, "suspend", `Suspend ${user.fullName}?`)}>Suspend</button>
+                              <button className="button button--secondary button--compact" onClick={() => runLifecycle(user, "archive", `Are you sure you want to archive this account?`)}>Archive</button>
+                              <button className="button button--secondary button--compact" onClick={() => changeRole(user)}>Role</button>
+                              <button className="button button--secondary button--compact" onClick={() => resetPassword(user)}><KeyRound size={14} /> Reset</button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -348,8 +435,20 @@ export function AdminManageUsersPage() {
                     <td><AdminStatusBadge status={request.verified ? "verified" : "pending"} /></td>
                     <td>
                       <div className="admin-row-actions">
-                        <button className="button button--primary button--compact" onClick={() => approveRequest(request)}>Approve</button>
-                        <button className="button button--danger button--compact" onClick={() => rejectRequest(request)}>Reject</button>
+                        <button
+                          className="button button--primary button--compact"
+                          disabled={actionBusyId === `${request.id}:approve`}
+                          onClick={() => approveRequest(request)}
+                        >
+                          Approve
+                        </button>
+                        <button
+                          className="button button--danger button--compact"
+                          disabled={actionBusyId === `${request.id}:reject`}
+                          onClick={() => rejectRequest(request)}
+                        >
+                          Reject
+                        </button>
                         <button className="button button--secondary button--compact" onClick={() => setDetail(request)}>View Details</button>
                       </div>
                     </td>
@@ -360,6 +459,52 @@ export function AdminManageUsersPage() {
           </div>
         ) : (
           <EmptyState title="No pending registrations" detail="All registration requests have been reviewed." />
+        )}
+      </section>
+
+      <section className="admin-panel">
+        <div className="admin-panel__heading">
+          <div>
+            <span className="eyebrow">Rejected accounts</span>
+            <h2>Rejected Patient Registrations</h2>
+            <p>
+              Rejected accounts remain available for review. Newly rejected users are appended at the bottom of this list.
+            </p>
+          </div>
+        </div>
+        {rejected.length ? (
+          <div className="admin-table-wrap">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>Full Name</th>
+                  <th>Email</th>
+                  <th>Contact Number</th>
+                  <th>Rejected</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rejected.map((request) => (
+                  <tr key={request.id}>
+                    <td><strong>{request.fullName}</strong></td>
+                    <td>{request.email}</td>
+                    <td>{request.phone || "—"}</td>
+                    <td>{formatAdminDate(request.statusChangedAt || request.createdAt)}</td>
+                    <td><AdminStatusBadge status="rejected" /></td>
+                    <td>
+                      <div className="admin-row-actions">
+                        <button className="button button--secondary button--compact" onClick={() => setDetail(request)}>View Details</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <EmptyState title="No rejected registrations" detail="Rejected patient accounts will appear here." />
         )}
       </section>
 
