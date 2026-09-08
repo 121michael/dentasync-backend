@@ -5,6 +5,7 @@ import { api } from "../api";
 import { BrandMark } from "../components/BrandMark";
 import { LoadingState } from "../components/UI";
 import { useAuth } from "../useAuth";
+import { displayQueueStatus } from "../utils/walkInQr";
 
 export function WalkInCheckInPage() {
   const { user, isLoading } = useAuth();
@@ -88,10 +89,12 @@ export function WalkInCheckInPage() {
         {result ? (
           <div className="walkin-success">
             <CheckCircle2 size={28} />
-            <h2>{result.alreadyCheckedIn ? "Already checked in" : "Check-in successful"}</h2>
+            <h2>{result.alreadyCheckedIn ? "You are already checked in." : "Check-In Successful"}</h2>
             <p>
-              {result.patient?.fullName || "Patient"} · Queue{" "}
-              <strong>{result.queue?.queueNumber || result.queue?.token}</strong>
+              Queue Number: <strong>{result.queue?.queueNumber || result.queue?.token}</strong>
+            </p>
+            <p>
+              Status: <strong>{displayQueueStatus(result.queue?.status || "waiting")}</strong>
             </p>
             <Link className="button button--primary" to="/queue">
               View my queue status

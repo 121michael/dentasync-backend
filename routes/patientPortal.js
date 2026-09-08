@@ -818,22 +818,36 @@ function createPatientPortalRouter({
     const userId = userIdFor(req);
 
     try {
-      const [currentResult, liveResult, preferenceResult] = await Promise.all([
+      const [currentResult, nowServingResult, preferenceResult] = await Promise.all([
         db.query(
-          `SELECT token, position, status, estimated_wait_minutes, checked_in_at
+          `SELECT id, token, position, status, estimated_wait_minutes, checked_in_at, check_in_method
            FROM patient_portal_queue_entries
            WHERE user_id = $1
-             AND status <> 'completed'
+             AND DATE(checked_in_at) = CURRENT_DATE
+             AND status NOT IN ('completed', 'no_show')
            ORDER BY checked_in_at DESC
            LIMIT 1`,
           [userId]
-        ),
+        ).catch(async (error) => {
+          if (error.code !== "42703") throw error;
+          return db.query(
+            `SELECT id, token, position, status, estimated_wait_minutes, checked_in_at
+             FROM patient_portal_queue_entries
+             WHERE user_id = $1
+               AND DATE(checked_in_at) = CURRENT_DATE
+               AND status NOT IN ('completed', 'no_show')
+             ORDER BY checked_in_at DESC
+             LIMIT 1`,
+            [userId]
+          );
+        }),
         db.query(
-          `SELECT token, status, estimated_wait_minutes
+          `SELECT token
            FROM patient_portal_queue_entries
            WHERE DATE(checked_in_at) = CURRENT_DATE
-           ORDER BY position
-           LIMIT 30`
+             AND status = 'dentist'
+           ORDER BY updated_at DESC NULLS LAST, position ASC
+           LIMIT 1`
         ),
         db.query(
           `SELECT notify_queue
@@ -844,27 +858,35 @@ function createPatientPortalRouter({
       ]);
 
       const current = currentResult.rows[0] || null;
-      const liveQueue = liveResult.rows;
-      const nowServing = liveQueue.find((entry) => entry.status === "dentist") || null;
+      const nowServing = nowServingResult.rows[0] || null;
 
       return res.json({
         nowServing: nowServing?.token || null,
         current: current
           ? {
+              id: current.id,
               token: current.token,
+              queueNumber: current.token,
               position: current.position,
               status: current.status,
+              checkInMethod: current.check_in_method || null,
               estimatedWaitMinutes: current.estimated_wait_minutes,
               checkedInAt: current.checked_in_at,
               steps: queueSteps(current.status),
             }
           : null,
-        queue: liveQueue.map((entry) => ({
-          token: entry.token,
-          status: entry.status,
-          estimatedWaitMinutes: entry.estimated_wait_minutes,
-          isCurrentPatient: entry.token === current?.token,
-        })),
+        // Patients only see their own ticket details (not other patients' queue rows).
+        queue: current
+          ? [
+              {
+                token: current.token,
+                queueNumber: current.token,
+                status: current.status,
+                estimatedWaitMinutes: current.estimated_wait_minutes,
+                isCurrentPatient: true,
+              },
+            ]
+          : [],
         notifyWhenNear: preferenceResult.rows[0]?.notify_queue || false,
       });
     } catch (error) {
@@ -887,100 +909,49 @@ function createPatientPortalRouter({
       transactionOpen = true;
       await client.query("SELECT pg_advisory_xact_lock(hashtext('patient_portal_queue'))");
 
-      const appointmentResult = await client.query(
-        `SELECT id
-         FROM patient_portal_appointments
-         WHERE id = $1 AND user_id = $2 AND status IN ('confirmed', 'checked_in')`,
-        [appointmentId, userId]
-      );
-      if (appointmentResult.rows.length === 0) {
+      const appointment = await staffCheckIn.findAppointmentForCheckIn(client, { appointmentId });
+      if (!appointment || String(appointment.user_id) !== String(userId)) {
         await client.query("ROLLBACK");
         transactionOpen = false;
         return res.status(404).json({ message: "A confirmed appointment was not found." });
       }
 
-      const existingResult = await client.query(
-        `SELECT token, position, status, estimated_wait_minutes
-         FROM patient_portal_queue_entries
-         WHERE appointment_id = $1
-           AND status <> 'completed'
-         LIMIT 1`,
-        [appointmentId]
-      );
-      if (existingResult.rows.length > 0) {
-        await client.query("COMMIT");
-        transactionOpen = false;
-        return res.json({ queueEntry: existingResult.rows[0] });
-      }
-
-      const positionResult = await client.query(
-        `SELECT COALESCE(MAX(position), 0) + 1 AS next_position
-         FROM patient_portal_queue_entries
-         WHERE DATE(checked_in_at) = CURRENT_DATE`
-      );
-      const position = Number(positionResult.rows[0].next_position);
-      const token = `A-${String(position + 100).padStart(3, "0")}`;
-
-      const aheadResult = await client.query(
-        `SELECT appointment.service_id, appointment.service_name
-         FROM patient_portal_queue_entries AS queue
-         LEFT JOIN patient_portal_appointments AS appointment
-           ON appointment.id = queue.appointment_id
-         WHERE DATE(queue.checked_in_at) = CURRENT_DATE
-           AND queue.status NOT IN ('completed', 'no_show')
-           AND queue.position < $1
-         ORDER BY queue.position ASC`,
-        [position]
-      );
-      const estimatedWaitMinutes = await estimateWaitMinutesForPosition(client, {
-        position,
-        aheadEntries: aheadResult.rows,
+      const checkIn = await staffCheckIn.performStaffCheckIn(client, {
+        appointment,
+        staff: null,
+        notifyClinicStaff,
+        checkInMethod: "portal",
       });
 
-      const queueResult = await client.query(
-        `INSERT INTO patient_portal_queue_entries (
-           user_id, appointment_id, token, position, status, estimated_wait_minutes
-         ) VALUES ($1, $2, $3, $4, 'checked_in', $5)
-         RETURNING id, token, position, status, estimated_wait_minutes`,
-        [userId, appointmentId, token, position, estimatedWaitMinutes]
-      );
-      await client.query(
-        `UPDATE patient_portal_appointments
-         SET status = 'checked_in', updated_at = CURRENT_TIMESTAMP
-         WHERE id = $1`,
-        [appointmentId]
-      );
-      const patientNameResult = await client.query(
-        `SELECT CONCAT_WS(' ', first_name, last_name) AS full_name
-         FROM users
-         WHERE id::text = $1
-         LIMIT 1`,
-        [userId]
-      );
       await client.query("COMMIT");
       transactionOpen = false;
-      const patientName = String(patientNameResult.rows[0]?.full_name || "").trim() || "Patient";
-      const queueEntry = queueResult.rows[0];
-      await notifyClinicStaff({
-        type: "check_in",
-        title: "Patient check-in alert",
-        body: `${patientName} has checked in. Queue #${queueEntry.token}`,
-        entityType: "queue",
-        entityId: queueEntry.id,
-      });
 
-      if (clinicSms?.notifyQueueSms) {
+      if (!checkIn.alreadyCheckedIn && clinicSms?.notifyQueueSms) {
         clinicSms
           .notifyQueueSms({
             userId,
-            queueEntry: queueResult.rows[0],
+            queueEntry: checkIn.queueEntry,
             actorRole: "patient",
             actorId: userId,
           })
           .catch((smsError) => console.warn("Patient check-in SMS failed:", smsError.message));
       }
 
-      return res.status(201).json({ queueEntry: queueResult.rows[0] });
+      return res.status(checkIn.alreadyCheckedIn ? 200 : 201).json({
+        message: checkIn.alreadyCheckedIn
+          ? "You are already checked in."
+          : "Check-in successful.",
+        alreadyCheckedIn: checkIn.alreadyCheckedIn,
+        queueEntry: {
+          id: checkIn.queueEntry.id,
+          token: checkIn.queueEntry.token,
+          queueNumber: checkIn.queueEntry.token,
+          position: checkIn.queueEntry.position,
+          status: checkIn.queueEntry.status,
+          estimated_wait_minutes: checkIn.queueEntry.estimated_wait_minutes,
+          checkInMethod: checkIn.queueEntry.check_in_method || "portal",
+        },
+      });
     } catch (error) {
       if (transactionOpen) {
         await client.query("ROLLBACK");
@@ -2080,7 +2051,7 @@ function createPatientPortalRouter({
       if (validity.status !== "valid") {
         const message =
           validity.status === "expired"
-            ? "This QR code has expired. Ask staff to generate a new one."
+            ? "QR code expired. Please ask clinic staff to generate a new check-in QR."
             : validity.status === "revoked"
               ? "This QR code is no longer active. Ask staff to generate a new one."
               : "This QR code is not valid.";
@@ -2140,8 +2111,8 @@ function createPatientPortalRouter({
 
       return res.status(checkIn.alreadyCheckedIn ? 200 : 201).json({
         message: checkIn.alreadyCheckedIn
-          ? "Patient already checked in."
-          : "Checked in successfully.",
+          ? "You are already checked in."
+          : "Check-in successful.",
         method: "qr",
         alreadyCheckedIn: checkIn.alreadyCheckedIn,
         patient: {
@@ -2157,6 +2128,7 @@ function createPatientPortalRouter({
           status: checkIn.queueEntry.status,
           waitMinutes: Number(checkIn.queueEntry.estimated_wait_minutes || 0),
           checkedInAt: checkIn.queueEntry.checked_in_at || new Date().toISOString(),
+          checkInMethod: checkIn.queueEntry.check_in_method || "qr",
         },
       });
     } catch (error) {

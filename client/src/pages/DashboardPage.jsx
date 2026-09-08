@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { api } from "../api";
 import { DetailLink, ErrorState, LoadingState } from "../components/UI";
+import { PatientQrCheckInScanner } from "../components/PatientQrCheckInScanner";
 
 function greeting() {
   const hour = new Date().getHours();
@@ -157,6 +158,30 @@ export function DashboardPage() {
           </button>
         </section>
       )}
+
+      <section className="glass-card patient-checkin-card">
+        <div className="card-heading">
+          <div>
+            <span className="eyebrow">Clinic arrival</span>
+            <h2>Check-In</h2>
+            <p>
+              At the clinic, tap your RFID card or scan the staff-generated QR. Both create the same queue
+              number for Patient, Staff, and Dentist portals.
+            </p>
+          </div>
+        </div>
+        <div className="patient-checkin-card__actions">
+          <PatientQrCheckInScanner
+            onCheckedIn={() => {
+              loadDashboard();
+              navigate("/queue");
+            }}
+          />
+          <button className="button button--secondary" onClick={() => navigate("/queue")}>
+            View queue status <ArrowRight size={16} />
+          </button>
+        </div>
+      </section>
 
       <section className="metrics-grid" aria-label="Patient care metrics">
         <MetricCard

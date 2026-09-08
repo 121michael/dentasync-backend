@@ -5,20 +5,17 @@ import {
   CircleDot,
   RefreshCw,
   Ticket,
-  UsersRound,
 } from "lucide-react";
 import { api } from "../api";
+import { PatientQrCheckInScanner } from "../components/PatientQrCheckInScanner";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
-
-function titleCase(value) {
-  return value?.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) || "Waiting";
-}
+import { displayQueueStatus } from "../utils/walkInQr";
 
 export function QueuePage() {
   const [queueData, setQueueData] = useState(null);
   const [appointments, setAppointments] = useState([]);
   const [error, setError] = useState("");
-  const [isCheckingIn, setIsCheckingIn] = useState(false);
+  const [success, setSuccess] = useState("");
 
   const load = useCallback(async () => {
     setError("");
@@ -30,7 +27,7 @@ export function QueuePage() {
       setQueueData(queueResponse);
       setAppointments(
         appointmentResponse.appointments.filter((appointment) =>
-          ["confirmed", "checked_in"].includes(appointment.status)
+          ["confirmed", "checked_in", "pending"].includes(appointment.status)
         )
       );
     } catch (loadError) {
@@ -40,7 +37,7 @@ export function QueuePage() {
 
   useEffect(() => {
     load();
-    const interval = window.setInterval(load, 45000);
+    const interval = window.setInterval(load, 12000);
     return () => window.clearInterval(interval);
   }, [load]);
 
@@ -54,30 +51,22 @@ export function QueuePage() {
     }
   }
 
-  async function checkIn(appointmentId) {
-    setIsCheckingIn(true);
-    setError("");
-    try {
-      await api.checkIn(appointmentId);
-      await load();
-    } catch (checkInError) {
-      setError(checkInError.message);
-    } finally {
-      setIsCheckingIn(false);
-    }
-  }
-
   if (error && !queueData) return <ErrorState message={error} onRetry={load} />;
   if (!queueData) return <LoadingState label="Syncing your live queue" />;
 
-  const { current, nowServing, queue } = queueData;
+  const { current, nowServing } = queueData;
+  const todayAppointments = appointments.filter((appointment) => {
+    const date = String(appointment.date || "").slice(0, 10);
+    const today = new Date().toISOString().slice(0, 10);
+    return date === today || appointment.status === "checked_in";
+  });
 
   return (
     <div className="queue-page">
       <SectionHeading
-        eyebrow="Transparent, calming care"
-        title="Live queue progress"
-        detail="Your estimated wait updates as the clinic moves through each care moment."
+        eyebrow="Central clinic queue"
+        title="Your queue status"
+        detail="RFID and QR check-in both use the same clinic queue number shared with Staff and Dentist."
         action={
           <button className="button button--secondary" onClick={load}>
             <RefreshCw size={16} /> Refresh
@@ -86,24 +75,25 @@ export function QueuePage() {
       />
 
       {error && <p className="inline-alert inline-alert--error">{error}</p>}
+      {success ? <p className="inline-alert inline-alert--success">{success}</p> : null}
 
       {current ? (
         <>
           <section className="queue-hero">
             <div>
-              <span className="eyebrow eyebrow--light">Live queue progress</span>
+              <span className="eyebrow eyebrow--light">Your queue</span>
               <div className="queue-hero__numbers">
                 <div>
                   <small>Now serving</small>
                   <strong>{nowServing || "Preparing next patient"}</strong>
                 </div>
                 <div className="queue-hero__ticket">
-                  <small>Your ticket</small>
+                  <small>Your queue number</small>
                   <strong>{current.token}</strong>
                 </div>
                 <div>
-                  <small>Estimated wait</small>
-                  <strong>~{current.estimatedWaitMinutes} min</strong>
+                  <small>Status</small>
+                  <strong>{displayQueueStatus(current.status)}</strong>
                 </div>
               </div>
             </div>
@@ -118,60 +108,20 @@ export function QueuePage() {
                 <span className="eyebrow">Your care flow</span>
                 <h2>One step at a time</h2>
               </div>
-              <span className="status-pill status-pill--checked_in">{titleCase(current.status)}</span>
+              <span className="status-pill status-pill--checked_in">{displayQueueStatus(current.status)}</span>
             </div>
             <div className="queue-stepper">
-              {current.steps.map((step) => (
+              {(current.steps || []).map((step) => (
                 <div key={step.id} className={`queue-step queue-step--${step.state}`}>
                   <span>{step.state === "complete" ? <Check size={15} /> : <CircleDot size={15} />}</span>
                   <strong>{step.label}</strong>
                 </div>
               ))}
             </div>
-            <div className="care-timeline">
-              {current.steps.map((step) => (
-                <div key={step.id} className={`timeline-item timeline-item--${step.state}`}>
-                  <span>{step.state === "complete" ? <Check size={14} /> : <CircleDot size={14} />}</span>
-                  <div>
-                    <strong>{step.label}</strong>
-                    <small>
-                      {step.state === "complete"
-                        ? "Completed"
-                        : step.state === "current"
-                          ? "Current stage"
-                          : "Upcoming"}
-                    </small>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section className="glass-card queue-list-card">
-            <div className="card-heading">
-              <div>
-                <span className="eyebrow">Today at Amethyst</span>
-                <h2>Live queue</h2>
-              </div>
-              <span className="live-indicator"><i /> Live</span>
-            </div>
-            <div className="queue-table">
-              <div className="queue-table__header">
-                <span>Token</span>
-                <span>Status</span>
-                <span>Estimated time</span>
-              </div>
-              {queue.map((entry) => (
-                <div
-                  key={entry.token}
-                  className={`queue-table__row ${entry.isCurrentPatient ? "is-you" : ""}`}
-                >
-                  <strong>{entry.token} {entry.isCurrentPatient ? <em>You</em> : null}</strong>
-                  <span>{titleCase(entry.status)}</span>
-                  <span>{entry.status === "completed" ? "Completed" : `~${entry.estimatedWaitMinutes} min`}</span>
-                </div>
-              ))}
-            </div>
+            <p className="queue-disclaimer">
+              Estimated wait ~{current.estimatedWaitMinutes || 0} min. This is the same queue number Staff and
+              Dentist see.
+            </p>
             <label className="queue-toggle">
               <span>
                 <BellRing size={18} />
@@ -187,38 +137,47 @@ export function QueuePage() {
               />
               <i aria-hidden="true" />
             </label>
-            <p className="queue-disclaimer">
-              Estimated waiting times may change depending on treatment duration.
-            </p>
           </section>
         </>
       ) : (
         <section className="queue-empty-wrap">
           <EmptyState
             title="No active queue ticket"
-            detail="Check in when you arrive for a confirmed appointment to see real-time queue progress."
+            detail="When you arrive, tap your RFID card or scan the clinic QR code to join the central queue."
           />
-          {appointments.length > 0 && (
-            <div className="checkin-card">
-              <div>
-                <span className="eyebrow">At the clinic?</span>
-                <h2>Check in for your visit</h2>
-                <p>We’ll create your queue token and keep you updated here.</p>
-              </div>
-              <div className="checkin-card__actions">
-                {appointments.map((appointment) => (
-                  <button
-                    key={appointment.id}
-                    className="button button--primary"
-                    onClick={() => checkIn(appointment.id)}
-                    disabled={isCheckingIn}
-                  >
-                    <UsersRound size={17} /> Check in: {appointment.treatment}
-                  </button>
+
+          <div className="checkin-card">
+            <div>
+              <span className="eyebrow">At the clinic?</span>
+              <h2>Check-In</h2>
+              <p>
+                Ask staff for the clinic check-in QR if you do not have an RFID card. Scanning creates your
+                queue number immediately.
+              </p>
+            </div>
+            <PatientQrCheckInScanner
+              onCheckedIn={(response) => {
+                const number = response.queue?.queueNumber || response.queue?.token;
+                setSuccess(
+                  response.alreadyCheckedIn
+                    ? `You are already checked in. Queue ${number}.`
+                    : `Check-in successful. Your queue number is ${number}.`
+                );
+                load();
+              }}
+            />
+            {todayAppointments.length ? (
+              <div className="checkin-card__appointments">
+                <small>Today’s appointment</small>
+                {todayAppointments.map((appointment) => (
+                  <p key={appointment.id}>
+                    <strong>{appointment.treatment || appointment.service}</strong>
+                    <span> · {String(appointment.status || "").replaceAll("_", " ")}</span>
+                  </p>
                 ))}
               </div>
-            </div>
-          )}
+            ) : null}
+          </div>
         </section>
       )}
     </div>

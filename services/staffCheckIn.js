@@ -137,19 +137,56 @@ async function findAppointmentForCheckIn(client, { appointmentId, patientId }) {
   return today.rows[0] || null;
 }
 
-async function performStaffCheckIn(client, { appointment, staff, notifyClinicStaff, checkInMethod = "rfid" }) {
-  const existingResult = await client.query(
-    `SELECT id, token, position, status, estimated_wait_minutes, checked_in_at
-     FROM patient_portal_queue_entries
-     WHERE appointment_id = $1
-       AND status NOT IN ('completed', 'no_show')
+async function findActiveQueueForPatient(client, patientId) {
+  if (!patientId) return null;
+  const result = await client.query(
+    `SELECT
+       queue.id,
+       queue.token,
+       queue.position,
+       queue.status,
+       queue.estimated_wait_minutes,
+       queue.checked_in_at,
+       queue.appointment_id,
+       queue.user_id,
+       queue.check_in_method
+     FROM patient_portal_queue_entries AS queue
+     WHERE queue.user_id = $1
+       AND DATE(queue.checked_in_at) = CURRENT_DATE
+       AND queue.status NOT IN ('completed', 'no_show')
+     ORDER BY queue.checked_in_at DESC
      LIMIT 1`,
-    [appointment.id]
-  );
-  if (existingResult.rows[0]) {
+    [String(patientId)]
+  ).catch(async (error) => {
+    if (error.code !== "42703") throw error;
+    return client.query(
+      `SELECT
+         queue.id,
+         queue.token,
+         queue.position,
+         queue.status,
+         queue.estimated_wait_minutes,
+         queue.checked_in_at,
+         queue.appointment_id,
+         queue.user_id
+       FROM patient_portal_queue_entries AS queue
+       WHERE queue.user_id = $1
+         AND DATE(queue.checked_in_at) = CURRENT_DATE
+         AND queue.status NOT IN ('completed', 'no_show')
+       ORDER BY queue.checked_in_at DESC
+       LIMIT 1`,
+      [String(patientId)]
+    );
+  });
+  return result.rows[0] || null;
+}
+
+async function performStaffCheckIn(client, { appointment, staff, notifyClinicStaff, checkInMethod = "rfid" }) {
+  const existingForPatient = await findActiveQueueForPatient(client, appointment.user_id);
+  if (existingForPatient) {
     return {
       alreadyCheckedIn: true,
-      queueEntry: existingResult.rows[0],
+      queueEntry: existingForPatient,
       appointment,
     };
   }
@@ -178,13 +215,30 @@ async function performStaffCheckIn(client, { appointment, staff, notifyClinicSta
     aheadEntries: aheadResult.rows,
   });
 
-  const queueResult = await client.query(
-    `INSERT INTO patient_portal_queue_entries (
-       user_id, appointment_id, token, position, status, estimated_wait_minutes
-     ) VALUES ($1, $2, $3, $4, 'waiting', $5)
-     RETURNING id, token, position, status, estimated_wait_minutes, checked_in_at`,
-    [String(appointment.user_id), appointment.id, token, position, estimatedWaitMinutes]
-  );
+  const method = String(checkInMethod || "rfid").toLowerCase();
+  let queueResult;
+  try {
+    queueResult = await client.query(
+      `INSERT INTO patient_portal_queue_entries (
+         user_id, appointment_id, token, position, status, estimated_wait_minutes, check_in_method
+       ) VALUES ($1, $2, $3, $4, 'waiting', $5, $6)
+       RETURNING id, token, position, status, estimated_wait_minutes, checked_in_at, check_in_method`,
+      [String(appointment.user_id), appointment.id, token, position, estimatedWaitMinutes, method]
+    );
+  } catch (insertError) {
+    if (insertError.code === "42703") {
+      // Older databases without check_in_method still share the same queue table.
+      queueResult = await client.query(
+        `INSERT INTO patient_portal_queue_entries (
+           user_id, appointment_id, token, position, status, estimated_wait_minutes
+         ) VALUES ($1, $2, $3, $4, 'waiting', $5)
+         RETURNING id, token, position, status, estimated_wait_minutes, checked_in_at`,
+        [String(appointment.user_id), appointment.id, token, position, estimatedWaitMinutes]
+      );
+    } else {
+      throw insertError;
+    }
+  }
 
   await client.query(
     `UPDATE patient_portal_appointments
@@ -211,7 +265,6 @@ async function performStaffCheckIn(client, { appointment, staff, notifyClinicSta
     try {
       const patientName = appointment.patient_name || "Patient";
       const queueEntry = queueResult.rows[0];
-      const methodLabel = String(checkInMethod || "rfid").toLowerCase() === "qr" ? "QR" : "RFID";
       await notifyClinicStaff({
         type: "check_in",
         title: "Patient checked in",
@@ -219,7 +272,6 @@ async function performStaffCheckIn(client, { appointment, staff, notifyClinicSta
         entityType: "queue",
         entityId: queueEntry.id,
         actorId: staff?.id,
-        method: methodLabel,
       });
     } catch {
       // Non-blocking
@@ -237,6 +289,7 @@ module.exports = {
   parseQrPayload,
   findPatient,
   findAppointmentForCheckIn,
+  findActiveQueueForPatient,
   performStaffCheckIn,
   stringValue,
   numericId,

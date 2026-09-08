@@ -12,7 +12,7 @@ const tabs = [
 ];
 
 export function DentistQueuePage() {
-  const [tab, setTab] = useState("ongoing");
+  const [tab, setTab] = useState("inline");
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -31,7 +31,7 @@ export function DentistQueuePage() {
 
   useEffect(() => {
     load();
-    const timer = window.setInterval(load, 15000);
+    const timer = window.setInterval(load, 12000);
     return () => window.clearInterval(timer);
   }, [load]);
 

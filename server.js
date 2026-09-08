@@ -239,7 +239,7 @@ app.get("/api/public/walk-in-check-in/:token", async (req, res) => {
         status: validity.status,
         message:
           validity.status === "expired"
-            ? "This QR code has expired. Ask staff to generate a new one."
+            ? "QR code expired. Please ask clinic staff to generate a new check-in QR."
             : validity.status === "revoked"
               ? "This QR code is no longer active."
               : "This QR code is not valid.",
