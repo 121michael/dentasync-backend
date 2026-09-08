@@ -487,23 +487,23 @@ strong {
 
 .brand-mark__gem {
   display: grid;
-  width: 42px;
-  height: 42px;
+  width: 44px;
+  height: 44px;
   place-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.22);
   border-radius: 14px;
   overflow: hidden;
   color: white;
-  background: #fff;
-  box-shadow: 0 8px 18px rgba(20, 7, 37, 0.22);
+  background: #5b2a86;
+  box-shadow: 0 8px 18px rgba(20, 7, 37, 0.28);
 }
 
 .brand-mark__logo {
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  object-fit: cover;
   display: block;
-  background: #fff;
+  background: #5b2a86;
 }
 
 .brand-mark--compact .brand-mark__gem {
@@ -1774,9 +1774,9 @@ strong {
 .membership-card__logo-image {
   width: 28px;
   height: 28px;
-  object-fit: contain;
+  object-fit: cover;
   border-radius: 8px;
-  background: #fff;
+  background: #5b2a86;
 }
 .membership-card__identity { justify-content: flex-start; }
 .membership-card__avatar { display: grid; width: 58px; height: 58px; place-items: center; border: 1px solid rgba(255,255,255,.34); border-radius: 50%; background: rgba(255,255,255,.14); font-size: 1.1rem; font-weight: 800; }
@@ -1951,10 +1951,10 @@ strong {
 .staff-sidebar__brand .brand-mark { color: #fff; flex: 1; min-width: 0; }
 .staff-sidebar__brand .brand-mark__text strong { letter-spacing: .14em; }
 .staff-sidebar__brand .brand-mark__gem {
-  width: 39px;
-  height: 39px;
+  width: 42px;
+  height: 42px;
   border-radius: 13px;
-  background: #fff;
+  background: #5b2a86;
 }
 .staff-sidebar__close,
 .staff-menu-button { display: none; }
@@ -2467,10 +2467,10 @@ strong {
 .admin-sidebar__brand .brand-mark { color: #fff; flex: 1; min-width: 0; }
 .admin-sidebar__brand .brand-mark__text strong { letter-spacing: .14em; }
 .admin-sidebar__brand .brand-mark__gem {
-  width: 39px;
-  height: 39px;
+  width: 42px;
+  height: 42px;
   border-radius: 13px;
-  background: #fff;
+  background: #5b2a86;
 }
 .admin-sidebar__close,
 .admin-menu-button { display: none; }
@@ -3161,10 +3161,10 @@ strong {
 .dentist-sidebar__brand .brand-mark { color: #fff; flex: 1; min-width: 0; }
 .dentist-sidebar__brand .brand-mark__text strong { letter-spacing: .14em; }
 .dentist-sidebar__brand .brand-mark__gem {
-  width: 39px;
-  height: 39px;
+  width: 42px;
+  height: 42px;
   border-radius: 13px;
-  background: #fff;
+  background: #5b2a86;
 }
 .dentist-sidebar__close,
 .dentist-menu-button { display: none; }
@@ -3651,9 +3651,9 @@ strong {
 .queue-display__logo {
   width: 64px;
   height: 64px;
-  object-fit: contain;
+  object-fit: cover;
   border-radius: 16px;
-  background: #fff;
+  background: #5b2a86;
   box-shadow: 0 10px 24px rgba(20, 7, 37, 0.28);
 }
 .queue-display__header h1 {
