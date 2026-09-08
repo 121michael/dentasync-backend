@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Eye, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
@@ -21,10 +21,12 @@ export function StaffAppointmentsPage() {
   const [tab, setTab] = useState(searchParams.get("tab") || "today");
   const [data, setData] = useState(null);
   const [detail, setDetail] = useState(null);
+  const [highlightId, setHighlightId] = useState(null);
   const [rescheduleTarget, setRescheduleTarget] = useState(null);
   const [rescheduleForm, setRescheduleForm] = useState({ appointmentDate: "", appointmentTime: "" });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
+  const focusHandledRef = useRef("");
 
   const load = useCallback(async () => {
     try {
@@ -42,22 +44,66 @@ export function StaffAppointmentsPage() {
   }, [load]);
 
   useEffect(() => {
-    const focusId = searchParams.get("focus");
-    if (!focusId || !data?.appointments?.length) return;
-    const match = data.appointments.find((item) => String(item.id) === String(focusId));
-    if (match) {
-      openDetails(match.id);
-      setSearchParams({}, { replace: true });
+    const urlTab = searchParams.get("tab");
+    if (urlTab && urlTab !== tab && TABS.some((item) => item.id === urlTab)) {
+      setTab(urlTab);
     }
-  }, [data, searchParams, setSearchParams]);
+  }, [searchParams, tab]);
+
+  useEffect(() => {
+    const focusId = searchParams.get("focus");
+    if (!focusId || focusHandledRef.current === focusId) return;
+
+    let cancelled = false;
+    focusHandledRef.current = focusId;
+
+    (async () => {
+      try {
+        const response = await api.getStaffAppointment(focusId);
+        if (cancelled || !response?.appointment) return;
+        const appointment = response.appointment;
+        const status = String(appointment.status || "").toLowerCase();
+        let nextTab = "today";
+        if (status === "pending") nextTab = "pending";
+        else if (status === "confirmed") nextTab = "confirmed";
+        else if (status === "completed") nextTab = "completed";
+        else if (status === "cancelled" || status === "no_show") nextTab = "cancelled";
+        else if (status === "checked_in") nextTab = "today";
+
+        setTab(nextTab);
+        setDetail(appointment);
+        setHighlightId(appointment.id);
+
+        const next = new URLSearchParams();
+        next.set("tab", nextTab);
+        setSearchParams(next, { replace: true });
+      } catch (focusError) {
+        pushToast(focusError.message || "Unable to open the related appointment.", "error");
+        const next = new URLSearchParams(searchParams);
+        next.delete("focus");
+        setSearchParams(next, { replace: true });
+        focusHandledRef.current = "";
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams, setSearchParams, pushToast]);
 
   const rows = useMemo(() => data?.appointments || [], [data]);
+
+  function changeTab(nextTab) {
+    setTab(nextTab);
+    setSearchParams({ tab: nextTab }, { replace: true });
+  }
 
   async function openDetails(appointmentId) {
     setBusy(`detail-${appointmentId}`);
     try {
       const response = await api.getStaffAppointment(appointmentId);
       setDetail(response.appointment);
+      setHighlightId(appointmentId);
     } catch (detailError) {
       pushToast(detailError.message, "error");
     } finally {
@@ -164,7 +210,7 @@ export function StaffAppointmentsPage() {
               key={item.id}
               type="button"
               className={`admin-tab ${tab === item.id ? "is-active" : ""}`}
-              onClick={() => setTab(item.id)}
+              onClick={() => changeTab(item.id)}
             >
               {item.label}
             </button>
@@ -189,7 +235,14 @@ export function StaffAppointmentsPage() {
               </thead>
               <tbody>
                 {rows.map((appointment) => (
-                  <tr key={appointment.id}>
+                  <tr
+                    key={appointment.id}
+                    className={
+                      highlightId != null && String(highlightId) === String(appointment.id)
+                        ? "is-notification-focus"
+                        : undefined
+                    }
+                  >
                     <td>
                       <code>#{appointment.id}</code>
                     </td>

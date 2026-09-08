@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
-import { CheckCheck, MessageSquare, RefreshCw } from "lucide-react";
+import { CheckCheck, ExternalLink, MessageSquare, RefreshCw } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { StaffModal, StaffStatusBadge } from "../components/StaffUI";
 import { useStaffUi } from "../components/StaffLayout";
 import { formatStaffDateTime } from "../staffUtils";
 import { notifyNotificationsChanged } from "../notificationEvents";
+import { getStaffNotificationTarget } from "../staffNotificationNav";
 
 export function StaffNotificationsPage() {
+  const navigate = useNavigate();
   const { pushToast } = useStaffUi();
   const [notifications, setNotifications] = useState(null);
   const [error, setError] = useState("");
@@ -20,31 +23,19 @@ export function StaffNotificationsPage() {
     patientUserId: "",
   });
 
-  const load = useCallback(async ({ markSeen = false } = {}) => {
+  const load = useCallback(async () => {
     try {
       const response = await api.getStaffNotifications();
-      const items = response.notifications || [];
-      setNotifications(items);
+      setNotifications(response.notifications || []);
       setError("");
-
-      if (markSeen) {
-        const unread = items.filter((item) => !item.read);
-        if (unread.length) {
-          await api.markAllStaffNotificationsRead();
-          setNotifications((current) =>
-            (current || []).map((notification) => ({ ...notification, read: true }))
-          );
-        }
-        notifyNotificationsChanged({ source: "staff", unread: 0 });
-      }
     } catch (loadError) {
       setError(loadError.message);
     }
   }, []);
 
   useEffect(() => {
-    load({ markSeen: true });
-    const timer = window.setInterval(() => load({ markSeen: false }), 20000);
+    load();
+    const timer = window.setInterval(load, 20000);
     return () => window.clearInterval(timer);
   }, [load]);
 
@@ -52,7 +43,11 @@ export function StaffNotificationsPage() {
     setBusy(`read-${notificationId}`);
     try {
       await api.markStaffNotificationRead(notificationId);
-      await load({ markSeen: false });
+      setNotifications((current) =>
+        (current || []).map((notification) =>
+          notification.id === notificationId ? { ...notification, read: true } : notification
+        )
+      );
       notifyNotificationsChanged({ source: "staff" });
     } catch (markError) {
       pushToast(markError.message, "error");
@@ -61,12 +56,36 @@ export function StaffNotificationsPage() {
     }
   }
 
+  async function handleNotificationClick(notification) {
+    const target = getStaffNotificationTarget(notification);
+    if (!notification.read) {
+      try {
+        await api.markStaffNotificationRead(notification.id);
+        setNotifications((current) =>
+          (current || []).map((item) =>
+            item.id === notification.id ? { ...item, read: true } : item
+          )
+        );
+        notifyNotificationsChanged({ source: "staff" });
+      } catch (markError) {
+        pushToast(markError.message, "error");
+      }
+    }
+
+    if (!target?.path) {
+      pushToast("This notification has no linked record yet.", "error");
+      return;
+    }
+
+    navigate(target.path);
+  }
+
   async function markAll() {
     setBusy("all");
     try {
       await api.markAllStaffNotificationsRead();
       pushToast("All notifications marked as read.");
-      await load({ markSeen: false });
+      await load();
       notifyNotificationsChanged({ source: "staff", unread: 0 });
     } catch (markError) {
       pushToast(markError.message, "error");
@@ -80,7 +99,7 @@ export function StaffNotificationsPage() {
     try {
       await api.updateStaffNotificationAction(notificationId, { actionStatus, status: actionStatus });
       pushToast(`Action marked ${actionStatus.replaceAll("_", " ")}.`);
-      await load({ markSeen: false });
+      await load();
     } catch (actionError) {
       pushToast(actionError.message, "error");
     } finally {
@@ -132,52 +151,89 @@ export function StaffNotificationsPage() {
 
         {notifications.length ? (
           <div className="staff-notification-list">
-            {notifications.map((notification) => (
-              <article
-                key={notification.id}
-                className={`staff-notification-card ${notification.read ? "" : "is-unread"}`}
-              >
-                <div>
-                  <div className="staff-notification-card__meta">
-                    <StaffStatusBadge status={notification.type || "system"} />
-                    <StaffStatusBadge
-                      status={notification.actionStatus || notification.action_status || "pending"}
-                    />
-                    <small>{formatStaffDateTime(notification.createdAt)}</small>
+            {notifications.map((notification) => {
+              const target = getStaffNotificationTarget(notification);
+              const clickable = Boolean(target?.path);
+
+              return (
+                <article
+                  key={notification.id}
+                  role={clickable ? "button" : undefined}
+                  tabIndex={clickable ? 0 : undefined}
+                  className={`staff-notification-card ${notification.read ? "" : "is-unread"} ${
+                    clickable ? "is-clickable" : ""
+                  }`}
+                  onClick={() => {
+                    if (clickable) handleNotificationClick(notification);
+                  }}
+                  onKeyDown={(event) => {
+                    if (!clickable) return;
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      handleNotificationClick(notification);
+                    }
+                  }}
+                >
+                  <div>
+                    <div className="staff-notification-card__meta">
+                      <StaffStatusBadge status={notification.type || "system"} />
+                      <StaffStatusBadge
+                        status={notification.actionStatus || notification.action_status || "pending"}
+                      />
+                      <small>{formatStaffDateTime(notification.createdAt)}</small>
+                      {!notification.read ? <span className="staff-notification-card__dot" aria-hidden="true" /> : null}
+                    </div>
+                    <h3>{notification.title}</h3>
+                    <p>{notification.body}</p>
+                    <div
+                      className="staff-row-actions"
+                      style={{ marginTop: "0.75rem" }}
+                      onClick={(event) => event.stopPropagation()}
+                      onKeyDown={(event) => event.stopPropagation()}
+                    >
+                      {["pending", "in_progress", "completed"].map((status) => (
+                        <button
+                          key={status}
+                          type="button"
+                          className={`button button--compact ${
+                            (notification.actionStatus || notification.action_status || "pending") === status
+                              ? "button--primary"
+                              : "button--secondary"
+                          }`}
+                          disabled={Boolean(busy)}
+                          onClick={() => setActionStatus(notification.id, status)}
+                        >
+                          {status.replaceAll("_", " ")}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                  <h3>{notification.title}</h3>
-                  <p>{notification.body}</p>
-                  <div className="staff-row-actions" style={{ marginTop: "0.75rem" }}>
-                    {["pending", "in_progress", "completed"].map((status) => (
+                  <div className="staff-notification-card__aside" onClick={(event) => event.stopPropagation()}>
+                    {clickable ? (
                       <button
-                        key={status}
                         type="button"
-                        className={`button button--compact ${
-                          (notification.actionStatus || notification.action_status || "pending") === status
-                            ? "button--primary"
-                            : "button--secondary"
-                        }`}
-                        disabled={Boolean(busy)}
-                        onClick={() => setActionStatus(notification.id, status)}
+                        className="button button--primary button--compact"
+                        onClick={() => handleNotificationClick(notification)}
                       >
-                        {status.replaceAll("_", " ")}
+                        <ExternalLink size={14} /> {target.label || "View"}
                       </button>
-                    ))}
+                    ) : null}
+                    {!notification.read ? (
+                      <button
+                        type="button"
+                        className="button button--secondary button--compact"
+                        disabled={Boolean(busy)}
+                        onClick={() => markRead(notification.id)}
+                      >
+                        Mark read
+                      </button>
+                    ) : (
+                      <span className="muted-copy">Read</span>
+                    )}
                   </div>
-                </div>
-                {!notification.read ? (
-                  <button
-                    className="button button--secondary button--compact"
-                    disabled={Boolean(busy)}
-                    onClick={() => markRead(notification.id)}
-                  >
-                    Mark read
-                  </button>
-                ) : (
-                  <span className="muted-copy">Read</span>
-                )}
-              </article>
-            ))}
+                </article>
+              );
+            })}
           </div>
         ) : (
           <EmptyState title="No notifications" detail="Clinic alerts and SMS events will appear here." />

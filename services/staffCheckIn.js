@@ -200,12 +200,14 @@ async function performStaffCheckIn(client, { appointment, staff, notifyClinicSta
 
   if (typeof notifyClinicStaff === "function") {
     try {
+      const patientName = appointment.patient_name || "Patient";
+      const queueEntry = queueResult.rows[0];
       await notifyClinicStaff({
         type: "check_in",
         title: "Patient checked in",
-        body: `${appointment.patient_name || "Patient"} checked in by staff and received ${token}.`,
+        body: `${patientName} has checked in. Queue #${token}`,
         entityType: "queue",
-        entityId: token,
+        entityId: queueEntry.id,
         actorId: staff?.id,
       });
     } catch {

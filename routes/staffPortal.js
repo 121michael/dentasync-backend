@@ -1132,6 +1132,52 @@ function createStaffPortalRouter({
   });
 
   router.get("/notifications", async (req, res) => {
+    function mapNotification(notification) {
+      const entityType = notification.entity_type || null;
+      const entityId = notification.entity_id || null;
+      const type = notification.type;
+      let targetPage = null;
+      const normalizedType = String(type || "").toLowerCase();
+      const normalizedEntity = String(entityType || "").toLowerCase();
+      if (normalizedType === "check_in" || normalizedEntity === "queue") {
+        targetPage = "queue";
+      } else if (
+        normalizedType.startsWith("appointment") ||
+        normalizedEntity === "appointment" ||
+        normalizedType === "document" ||
+        normalizedEntity === "document"
+      ) {
+        targetPage = "appointments";
+      } else if (
+        normalizedType === "billing" ||
+        normalizedType === "payment" ||
+        normalizedEntity === "billing" ||
+        normalizedEntity === "invoice"
+      ) {
+        targetPage = "billing";
+      } else if (
+        normalizedEntity === "clinical_patient" ||
+        normalizedEntity === "patient" ||
+        normalizedType === "patient"
+      ) {
+        targetPage = "patient-records";
+      }
+
+      return {
+        id: notification.id,
+        type,
+        title: notification.title,
+        body: notification.body,
+        entityType,
+        entityId,
+        targetPage,
+        targetId: entityId,
+        actionStatus: notification.action_status || "pending",
+        read: Boolean(notification.read_at),
+        createdAt: notification.created_at,
+      };
+    }
+
     try {
       const result = await db.query(
         `SELECT id, type, title, body, entity_type, entity_id, action_status, read_at, created_at
@@ -1142,17 +1188,7 @@ function createStaffPortalRouter({
         [String(req.staff.id)]
       );
       return res.json({
-        notifications: result.rows.map((notification) => ({
-          id: notification.id,
-          type: notification.type,
-          title: notification.title,
-          body: notification.body,
-          entityType: notification.entity_type,
-          entityId: notification.entity_id,
-          actionStatus: notification.action_status || "pending",
-          read: Boolean(notification.read_at),
-          createdAt: notification.created_at,
-        })),
+        notifications: result.rows.map(mapNotification),
       });
     } catch (error) {
       if (isMissingRelation(error)) {
@@ -1166,17 +1202,9 @@ function createStaffPortalRouter({
             [String(req.staff.id)]
           );
           return res.json({
-            notifications: fallback.rows.map((notification) => ({
-              id: notification.id,
-              type: notification.type,
-              title: notification.title,
-              body: notification.body,
-              entityType: notification.entity_type,
-              entityId: notification.entity_id,
-              actionStatus: "pending",
-              read: Boolean(notification.read_at),
-              createdAt: notification.created_at,
-            })),
+            notifications: fallback.rows.map((notification) =>
+              mapNotification({ ...notification, action_status: "pending" })
+            ),
           });
         } catch (fallbackError) {
           console.error("Staff notifications fallback error:", fallbackError.message);

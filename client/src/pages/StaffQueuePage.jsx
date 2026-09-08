@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw, RotateCcw } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { StaffStatusBadge, StaffSummaryCard } from "../components/StaffUI";
@@ -14,12 +15,27 @@ const QUEUE_ACTIONS = [
   { value: "skipped", label: "Skipped" },
 ];
 
+function matchesFocus(entry, focus) {
+  if (!focus) return false;
+  const needle = String(focus).trim().toLowerCase();
+  if (!needle) return false;
+  return (
+    String(entry.id) === String(focus) ||
+    String(entry.token || "").toLowerCase() === needle ||
+    String(entry.queueNumber || "").toLowerCase() === needle ||
+    String(entry.token || "").toLowerCase() === needle.replace(/^#/, "")
+  );
+}
+
 export function StaffQueuePage() {
   const { pushToast, confirm } = useStaffUi();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [queue, setQueue] = useState(null);
   const [summary, setSummary] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
+  const [focusKey, setFocusKey] = useState(() => searchParams.get("focus") || "");
+  const focusedRowRef = useRef(null);
 
   const load = useCallback(async () => {
     try {
@@ -40,6 +56,35 @@ export function StaffQueuePage() {
     const timer = window.setInterval(load, 12000);
     return () => window.clearInterval(timer);
   }, [load]);
+
+  useEffect(() => {
+    const focus = searchParams.get("focus");
+    if (!focus) return;
+    setFocusKey(focus);
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!focusKey || !queue?.length) return;
+    const match = queue.find((entry) => matchesFocus(entry, focusKey));
+    if (!match) return;
+
+    const timer = window.setTimeout(() => {
+      focusedRowRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 80);
+
+    const clearTimer = window.setTimeout(() => {
+      const next = new URLSearchParams(searchParams);
+      if (next.has("focus")) {
+        next.delete("focus");
+        setSearchParams(next, { replace: true });
+      }
+    }, 12000);
+
+    return () => {
+      window.clearTimeout(timer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [focusKey, queue, searchParams, setSearchParams]);
 
   async function updateStatus(entry, status) {
     if (status === "skipped") {
@@ -84,6 +129,8 @@ export function StaffQueuePage() {
   if (error && !queue) return <ErrorState message={error} onRetry={load} />;
   if (!queue) return <LoadingState label="Loading live patient queue…" />;
 
+  const focusedEntry = focusKey ? queue.find((entry) => matchesFocus(entry, focusKey)) : null;
+
   return (
     <div className="staff-page">
       {error ? <p className="inline-alert inline-alert--error">{error}</p> : null}
@@ -99,6 +146,21 @@ export function StaffQueuePage() {
           tone="purple"
         />
       </section>
+
+      {focusedEntry ? (
+        <section className="staff-panel staff-focus-banner" aria-live="polite">
+          <div>
+            <span className="eyebrow">From notification</span>
+            <h2>
+              Queue #{focusedEntry.token || focusedEntry.queueNumber} — {focusedEntry.patientName}
+            </h2>
+            <p>
+              Status: {(focusedEntry.status || "waiting").replaceAll("_", " ")}. The matching queue row is
+              highlighted below.
+            </p>
+          </div>
+        </section>
+      ) : null}
 
       <section className="staff-panel staff-panel--table">
         <div className="staff-panel__heading">
@@ -134,48 +196,55 @@ export function StaffQueuePage() {
                 </tr>
               </thead>
               <tbody>
-                {queue.map((entry) => (
-                  <tr key={entry.id}>
-                    <td>
-                      <code>{entry.token || entry.queueNumber}</code>
-                    </td>
-                    <td>
-                      <strong>{entry.patientName}</strong>
-                    </td>
-                    <td>{formatStaffTime(String(entry.appointment?.time || "").slice(0, 5))}</td>
-                    <td>{entry.appointment?.treatment || "—"}</td>
-                    <td>{entry.appointment?.dentist || "—"}</td>
-                    <td>{formatStaffDateTime(entry.timestamp)}</td>
-                    <td>
-                      <StaffStatusBadge status={entry.status} />
-                    </td>
-                    <td>{entry.waitMinutes ?? 0} min</td>
-                    <td>
-                      <label className="staff-inline-select">
-                        <span className="sr-only">Update queue status</span>
-                        <select
-                          value={
-                            entry.status === "preparing"
-                              ? "called"
-                              : entry.status === "in_chair" || entry.status === "dentist"
-                                ? "in_treatment"
-                                : entry.status === "no_show"
-                                  ? "skipped"
-                                  : entry.status
-                          }
-                          disabled={Boolean(busy)}
-                          onChange={(event) => updateStatus(entry, event.target.value)}
-                        >
-                          {QUEUE_ACTIONS.map((action) => (
-                            <option key={action.value} value={action.value}>
-                              {action.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    </td>
-                  </tr>
-                ))}
+                {queue.map((entry) => {
+                  const isFocused = matchesFocus(entry, focusKey);
+                  return (
+                    <tr
+                      key={entry.id}
+                      ref={isFocused ? focusedRowRef : null}
+                      className={isFocused ? "is-notification-focus" : undefined}
+                    >
+                      <td>
+                        <code>{entry.token || entry.queueNumber}</code>
+                      </td>
+                      <td>
+                        <strong>{entry.patientName}</strong>
+                      </td>
+                      <td>{formatStaffTime(String(entry.appointment?.time || "").slice(0, 5))}</td>
+                      <td>{entry.appointment?.treatment || "—"}</td>
+                      <td>{entry.appointment?.dentist || "—"}</td>
+                      <td>{formatStaffDateTime(entry.timestamp)}</td>
+                      <td>
+                        <StaffStatusBadge status={entry.status} />
+                      </td>
+                      <td>{entry.waitMinutes ?? 0} min</td>
+                      <td>
+                        <label className="staff-inline-select">
+                          <span className="sr-only">Update queue status</span>
+                          <select
+                            value={
+                              entry.status === "preparing"
+                                ? "called"
+                                : entry.status === "in_chair" || entry.status === "dentist"
+                                  ? "in_treatment"
+                                  : entry.status === "no_show"
+                                    ? "skipped"
+                                    : entry.status
+                            }
+                            disabled={Boolean(busy)}
+                            onChange={(event) => updateStatus(entry, event.target.value)}
+                          >
+                            {QUEUE_ACTIONS.map((action) => (
+                              <option key={action.value} value={action.value}>
+                                {action.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

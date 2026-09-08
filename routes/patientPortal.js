@@ -711,19 +711,28 @@ function createPatientPortalRouter({
           ]
         );
       }
+      const patientNameResult = await db.query(
+        `SELECT CONCAT_WS(' ', first_name, last_name) AS full_name
+         FROM users
+         WHERE id::text = $1
+         LIMIT 1`,
+        [userId]
+      );
+      const patientName = String(patientNameResult.rows[0]?.full_name || "").trim() || "a patient";
+      const appointmentId = result.rows[0].id;
       await notifyClinicStaff({
         type: "appointment",
         title: "New Appointment Request",
-        body: `A patient requested ${service.name} with ${dentist.name} on ${appointmentDate} at ${appointmentTime}.`,
+        body: `New appointment booking from ${patientName}. ${service.name} on ${appointmentDate} at ${appointmentTime}.`,
         entityType: "appointment",
-        entityId: result.rows[0].id,
+        entityId: appointmentId,
       });
       await notifyClinicAdmins({
         type: "appointment",
         title: "New Appointment Request",
-        body: `A patient requested ${service.name} with ${dentist.name} on ${appointmentDate} at ${appointmentTime}.`,
+        body: `New appointment booking from ${patientName}. ${service.name} on ${appointmentDate} at ${appointmentTime}.`,
         entityType: "appointment",
-        entityId: result.rows[0].id,
+        entityId: appointmentId,
       });
 
       return res.status(201).json({
@@ -930,7 +939,7 @@ function createPatientPortalRouter({
         `INSERT INTO patient_portal_queue_entries (
            user_id, appointment_id, token, position, status, estimated_wait_minutes
          ) VALUES ($1, $2, $3, $4, 'checked_in', $5)
-         RETURNING token, position, status, estimated_wait_minutes`,
+         RETURNING id, token, position, status, estimated_wait_minutes`,
         [userId, appointmentId, token, position, estimatedWaitMinutes]
       );
       await client.query(
@@ -939,14 +948,23 @@ function createPatientPortalRouter({
          WHERE id = $1`,
         [appointmentId]
       );
+      const patientNameResult = await client.query(
+        `SELECT CONCAT_WS(' ', first_name, last_name) AS full_name
+         FROM users
+         WHERE id::text = $1
+         LIMIT 1`,
+        [userId]
+      );
       await client.query("COMMIT");
       transactionOpen = false;
+      const patientName = String(patientNameResult.rows[0]?.full_name || "").trim() || "Patient";
+      const queueEntry = queueResult.rows[0];
       await notifyClinicStaff({
         type: "check_in",
         title: "Patient check-in alert",
-        body: `A patient checked in and received queue token ${queueResult.rows[0].token}.`,
+        body: `${patientName} has checked in. Queue #${queueEntry.token}`,
         entityType: "queue",
-        entityId: queueResult.rows[0].token,
+        entityId: queueEntry.id,
       });
 
       if (clinicSms?.notifyQueueSms) {

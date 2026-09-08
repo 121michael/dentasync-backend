@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Plus, RefreshCw, Search } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { StaffModal, StaffStatusBadge } from "../components/StaffUI";
@@ -20,12 +21,14 @@ const emptyInvoice = {
 
 export function StaffBillingPage() {
   const { pushToast } = useStaffUi();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState("");
   const [applied, setApplied] = useState("");
   const [data, setData] = useState(null);
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState(emptyInvoice);
   const [selected, setSelected] = useState(null);
+  const [highlightId, setHighlightId] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
 
@@ -41,6 +44,18 @@ export function StaffBillingPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    const focusId = searchParams.get("focus");
+    if (!focusId || !data?.invoices?.length) return;
+    const match = data.invoices.find((invoice) => String(invoice.id) === String(focusId));
+    if (!match) return;
+    setSelected(match);
+    setHighlightId(match.id);
+    const next = new URLSearchParams(searchParams);
+    next.delete("focus");
+    setSearchParams(next, { replace: true });
+  }, [data, searchParams, setSearchParams]);
 
   async function createInvoice(event) {
     event.preventDefault();
@@ -168,7 +183,14 @@ export function StaffBillingPage() {
               </thead>
               <tbody>
                 {invoices.map((invoice) => (
-                  <tr key={invoice.id}>
+                  <tr
+                    key={invoice.id}
+                    className={
+                      highlightId != null && String(highlightId) === String(invoice.id)
+                        ? "is-notification-focus"
+                        : undefined
+                    }
+                  >
                     <td>
                       <code>TXN-{invoice.id}</code>
                     </td>
@@ -188,7 +210,13 @@ export function StaffBillingPage() {
                     <td>{invoice.createdByName || "—"}</td>
                     <td>
                       <div className="staff-row-actions">
-                        <button className="button button--secondary button--compact" onClick={() => setSelected(invoice)}>
+                        <button
+                          className="button button--secondary button--compact"
+                          onClick={() => {
+                            setSelected(invoice);
+                            setHighlightId(invoice.id);
+                          }}
+                        >
                           View
                         </button>
                         <button className="button button--secondary button--compact" onClick={() => printInvoice(invoice)}>

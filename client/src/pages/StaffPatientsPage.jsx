@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Pencil, Plus, Search, Eye } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { StaffModal, StaffStatusBadge } from "../components/StaffUI";
@@ -20,6 +21,7 @@ const emptyForm = {
 
 export function StaffPatientsPage() {
   const { pushToast, confirm } = useStaffUi();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState("");
   const [applied, setApplied] = useState("");
   const [patients, setPatients] = useState(null);
@@ -43,6 +45,25 @@ export function StaffPatientsPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    const focusId = searchParams.get("focus");
+    if (!focusId) return;
+    (async () => {
+      try {
+        const response = await api.getStaffPatient(focusId);
+        if (response?.patient) {
+          setDetail(response.patient);
+        }
+      } catch (viewError) {
+        pushToast(viewError.message, "error");
+      } finally {
+        const next = new URLSearchParams(searchParams);
+        next.delete("focus");
+        setSearchParams(next, { replace: true });
+      }
+    })();
+  }, [searchParams, setSearchParams, pushToast]);
 
   async function openDetail(patientId) {
     setBusy(`view-${patientId}`);
