@@ -292,27 +292,6 @@ export function AdminSyncPage() {
     processFile(file, "soft_copy");
   }
 
-  async function saveReview() {
-    if (!activeJob) return;
-    setBusy("save");
-    setError("");
-    setMessage("");
-    try {
-      const response = await api.updateAdminDocumentSync(activeJob.id, { payload });
-      setActiveJob(response.job);
-      setPayload(response.job.editedPayload);
-      setEditing(false);
-      setMessage(response.message);
-      pushToast(response.message || "Corrections saved.");
-      await load();
-    } catch (saveError) {
-      setError(saveError.message);
-      pushToast(saveError.message, "error");
-    } finally {
-      setBusy("");
-    }
-  }
-
   async function confirmAndSave() {
     if (!activeJob) return;
     setBusy("sync");

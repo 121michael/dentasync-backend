@@ -197,6 +197,8 @@ function normalizeAge(value) {
   if (!match) return "";
   const age = Number(match[1]);
   if (!Number.isInteger(age) || age < 0 || age > 120) return "";
+  // Single-digit OCR ages are usually truncated handwriting (25 -> 2).
+  if (age < 10) return "";
   return String(age);
 }
 

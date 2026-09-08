@@ -198,11 +198,14 @@ def extract_phone(value: str, text: str) -> str:
 
 
 def extract_age(value: str) -> str:
-    match = re.search(r"\b(\d{1,2})\b", value or "")
+    match = re.search(r"\b(\d{1,3})\b", value or "")
     if not match:
         return ""
     age = int(match.group(1))
-    return str(age) if 1 <= age <= 120 else ""
+    # Single-digit ages from handwriting OCR are usually truncated (e.g. 25 -> 2).
+    if age < 10:
+        return ""
+    return str(age) if age <= 120 else ""
 
 
 def normalize_date(value: str) -> str:
