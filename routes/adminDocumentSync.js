@@ -9,19 +9,21 @@ const {
   extractDocumentData,
   normalizePhone,
   normalizeDate,
+  normalizeAmount,
+  DocumentValidationError,
+  UNSUPPORTED_DOCUMENT_MESSAGE,
 } = require("../services/documentSyncExtraction");
 const clinicalPatients = require("../services/clinicalPatients");
+const { writeAdminAudit } = require("../services/adminAudit");
 
 const ALLOWED_TYPES = new Set([
   "application/pdf",
-  "text/plain",
-  "text/csv",
   "image/jpeg",
   "image/png",
-  "image/webp",
-  "image/bmp",
-  "image/tiff",
+  "image/jpg",
 ]);
+
+const ALLOWED_EXTENSIONS = new Set([".pdf", ".png", ".jpg", ".jpeg"]);
 
 function stringValue(value, maxLength = 500) {
   if (typeof value !== "string") return null;
@@ -40,6 +42,27 @@ function isIsoDate(value) {
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
+function sourceLabel(sourceType, mimeType, originalName) {
+  if (sourceType === "hard_copy_scan") return "Scan";
+  const extension = path.extname(originalName || "").toLowerCase();
+  if (mimeType === "application/pdf" || extension === ".pdf") return "PDF";
+  if (mimeType === "image/png" || extension === ".png") return "PNG";
+  if (mimeType === "image/jpeg" || mimeType === "image/jpg" || [".jpg", ".jpeg"].includes(extension)) {
+    return "JPEG";
+  }
+  return "Document";
+}
+
+function auditActor(req) {
+  return {
+    actorId: req.admin?.id ? String(req.admin.id) : null,
+    actorName: req.admin?.fullName || req.admin?.email || "Admin",
+    actorRole: "admin",
+    ipAddress: req.ip || null,
+    sessionId: req.admin?.sessionId ? String(req.admin.sessionId) : null,
+  };
+}
+
 function mapJob(row) {
   return {
     id: row.id,
@@ -47,6 +70,7 @@ function mapJob(row) {
     mimeType: row.mime_type,
     byteSize: Number(row.byte_size || 0),
     sourceType: row.source_type,
+    sourceLabel: sourceLabel(row.source_type, row.mime_type, row.original_name),
     status: row.status,
     rawText: row.raw_text || "",
     extractedPayload: row.extracted_payload || emptyPayload(),
@@ -58,28 +82,34 @@ function mapJob(row) {
     syncedAt: row.synced_at || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    hasPreview: Boolean(row.stored_name),
   };
 }
 
 function sanitizePayload(input) {
-  const base = emptyPayload();
   const patient = input?.patient && typeof input.patient === "object" ? input.patient : {};
   const procedure = input?.procedure && typeof input.procedure === "object" ? input.procedure : {};
 
-  const firstName = stringValue(patient.firstName, 80) || "";
-  const lastName = stringValue(patient.lastName, 80) || "";
+  let firstName = stringValue(patient.firstName, 80) || "";
+  let lastName = stringValue(patient.lastName, 80) || "";
   const fullName =
-    stringValue(patient.fullName, 160) ||
-    `${firstName} ${lastName}`.trim();
+    stringValue(patient.fullName, 160) || `${firstName} ${lastName}`.trim();
+
+  if ((!firstName || !lastName) && fullName) {
+    const parts = fullName.split(/\s+/).filter(Boolean);
+    firstName = firstName || parts[0] || "";
+    lastName = lastName || (parts.length > 1 ? parts.slice(1).join(" ") : "");
+  }
 
   return {
     patient: {
       firstName,
       lastName,
-      fullName,
+      fullName: fullName || `${firstName} ${lastName}`.trim(),
       email: normalizeEmail(patient.email) || "",
       phone: normalizePhone(patient.phone || "") || stringValue(patient.phone, 40) || "",
       dateOfBirth: normalizeDate(patient.dateOfBirth || "") || "",
+      age: stringValue(String(patient.age ?? ""), 3) || "",
       gender: stringValue(patient.gender, 40) || "",
       address: stringValue(patient.address, 300) || "",
     },
@@ -87,6 +117,7 @@ function sanitizePayload(input) {
       treatment: stringValue(procedure.treatment, 180) || "",
       dentistName: stringValue(procedure.dentistName, 120) || "",
       treatmentDate: normalizeDate(procedure.treatmentDate || "") || "",
+      amountCharged: normalizeAmount(procedure.amountCharged || "") || "",
       clinicLocation: stringValue(procedure.clinicLocation, 180) || "Amethyst Dental Clinic",
       status: ["planned", "in_progress", "completed"].includes(String(procedure.status || "").toLowerCase())
         ? String(procedure.status).toLowerCase()
@@ -94,6 +125,80 @@ function sanitizePayload(input) {
       notes: stringValue(procedure.notes, 2000) || "",
       coverageStatus: stringValue(procedure.coverageStatus, 120) || "",
     },
+  };
+}
+
+async function findMatchingClinicalPatient(client, patient) {
+  if (patient.email || patient.phone) {
+    const byContact = await client.query(
+      `SELECT id, record_code, first_name, last_name, email, phone, date_of_birth
+       FROM clinic_patient_records
+       WHERE COALESCE(is_archived, FALSE) = FALSE
+         AND (
+           ($1::text IS NOT NULL AND LOWER(email) = LOWER($1))
+           OR ($2::text IS NOT NULL AND phone = $2)
+         )
+       ORDER BY updated_at DESC
+       LIMIT 1`,
+      [patient.email || null, patient.phone || null]
+    );
+    if (byContact.rows.length) {
+      return {
+        record: byContact.rows[0],
+        matchReason: patient.email && byContact.rows[0].email?.toLowerCase() === patient.email.toLowerCase()
+          ? "email"
+          : "phone",
+      };
+    }
+  }
+
+  if (patient.firstName && patient.lastName && patient.dateOfBirth) {
+    const byIdentity = await client.query(
+      `SELECT id, record_code, first_name, last_name, email, phone, date_of_birth
+       FROM clinic_patient_records
+       WHERE COALESCE(is_archived, FALSE) = FALSE
+         AND LOWER(first_name) = LOWER($1)
+         AND LOWER(last_name) = LOWER($2)
+         AND date_of_birth = $3::date
+       ORDER BY updated_at DESC
+       LIMIT 1`,
+      [patient.firstName, patient.lastName, patient.dateOfBirth]
+    );
+    if (byIdentity.rows.length) {
+      return { record: byIdentity.rows[0], matchReason: "name_and_date_of_birth" };
+    }
+  }
+
+  if (patient.fullName && patient.dateOfBirth) {
+    const byFullName = await client.query(
+      `SELECT id, record_code, first_name, last_name, email, phone, date_of_birth
+       FROM clinic_patient_records
+       WHERE COALESCE(is_archived, FALSE) = FALSE
+         AND LOWER(TRIM(CONCAT(first_name, ' ', last_name))) = LOWER($1)
+         AND date_of_birth = $2::date
+       ORDER BY updated_at DESC
+       LIMIT 1`,
+      [patient.fullName, patient.dateOfBirth]
+    );
+    if (byFullName.rows.length) {
+      return { record: byFullName.rows[0], matchReason: "full_name_and_date_of_birth" };
+    }
+  }
+
+  return { record: null, matchReason: null };
+}
+
+function mapMatchRecord(row) {
+  if (!row) return null;
+  return {
+    id: String(row.id),
+    recordCode: row.record_code || null,
+    firstName: row.first_name || "",
+    lastName: row.last_name || "",
+    fullName: `${row.first_name || ""} ${row.last_name || ""}`.trim(),
+    email: row.email || "",
+    phone: row.phone || "",
+    dateOfBirth: row.date_of_birth || null,
   };
 }
 
@@ -110,8 +215,12 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
     }),
     limits: { fileSize: 12 * 1024 * 1024, files: 1 },
     fileFilter: (_req, file, callback) => {
-      if (!ALLOWED_TYPES.has(file.mimetype)) {
-        return callback(new Error("Upload a PDF, TXT, JPG, or PNG dental document."));
+      const extension = path.extname(file.originalname || "").toLowerCase();
+      if (!ALLOWED_TYPES.has(file.mimetype) && !ALLOWED_EXTENSIONS.has(extension)) {
+        return callback(new Error(UNSUPPORTED_DOCUMENT_MESSAGE));
+      }
+      if (ALLOWED_EXTENSIONS.size && extension && !ALLOWED_EXTENSIONS.has(extension)) {
+        return callback(new Error(UNSUPPORTED_DOCUMENT_MESSAGE));
       }
       callback(null, true);
     },
@@ -153,19 +262,67 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
     }
   });
 
+  router.get("/sync/documents/:id/file", async (req, res) => {
+    try {
+      const result = await db.query(
+        `SELECT stored_name, mime_type, original_name, status
+         FROM admin_portal_document_sync_jobs
+         WHERE id = $1
+         LIMIT 1`,
+        [req.params.id]
+      );
+      if (!result.rows.length) {
+        return res.status(404).json({ message: "Document sync job not found." });
+      }
+      const job = result.rows[0];
+      const filePath = path.join(uploadDirectory, job.stored_name);
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).json({ message: "Document preview file is no longer available." });
+      }
+      res.setHeader("Content-Type", job.mime_type || "application/octet-stream");
+      res.setHeader(
+        "Content-Disposition",
+        `inline; filename="${String(job.original_name || "document").replace(/"/g, "")}"`
+      );
+      return res.sendFile(path.resolve(filePath));
+    } catch (error) {
+      console.error("Document preview error:", error.message);
+      return res.status(500).json({ message: "Unable to load document preview." });
+    }
+  });
+
   router.post("/sync/documents", (req, res) => {
     upload.single("document")(req, res, async (uploadError) => {
       if (uploadError) {
+        await writeAdminAudit(db, {
+          ...auditActor(req),
+          action: "Document Data Import",
+          targetType: "document_sync",
+          result: "failed",
+          detail: `Rejected upload: ${uploadError.message}`,
+        });
         return res.status(400).json({ message: uploadError.message });
       }
       if (!req.file) {
         return res.status(400).json({ message: "Choose a document to scan or upload." });
+      }
+      if (!req.file.size) {
+        fs.unlink(req.file.path, () => {});
+        await writeAdminAudit(db, {
+          ...auditActor(req),
+          action: "Document Data Import",
+          targetType: "document_sync",
+          result: "failed",
+          detail: "Rejected empty/blank file.",
+        });
+        return res.status(400).json({ message: UNSUPPORTED_DOCUMENT_MESSAGE });
       }
 
       const sourceType =
         stringValue(req.body?.sourceType, 40) === "hard_copy_scan"
           ? "hard_copy_scan"
           : "soft_copy";
+      const label = sourceLabel(sourceType, req.file.mimetype, req.file.originalname);
 
       let jobId = null;
       try {
@@ -191,6 +348,17 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
           req.file.originalname
         );
 
+        const notes = [
+          extraction.extractionNotes,
+          extraction.fieldStatuses
+            ? `Field detection: ${Object.entries(extraction.fieldStatuses)
+                .map(([key, status]) => `${key}=${status}`)
+                .join(", ")}`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" ");
+
         const updated = await db.query(
           `UPDATE admin_portal_document_sync_jobs
            SET status = 'extracted',
@@ -201,37 +369,63 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
                updated_at = CURRENT_TIMESTAMP
            WHERE id = $4
            RETURNING *`,
-          [
-            extraction.rawText,
-            JSON.stringify(extraction.payload),
-            extraction.extractionNotes,
-            jobId,
-          ]
+          [extraction.rawText, JSON.stringify(extraction.payload), notes, jobId]
         );
 
+        await writeAdminAudit(db, {
+          ...auditActor(req),
+          action: "Document Data Import",
+          targetType: "document_sync",
+          targetId: String(jobId),
+          targetLabel: req.file.originalname,
+          result: "success",
+          detail: `Source: ${label}. Extracted fields for admin review (not saved to patient database yet).`,
+        });
+
         return res.status(201).json({
-          message: "Document scanned and important fields extracted. Please review before syncing.",
+          message: "Document validated and readable fields extracted. Please review before saving.",
           job: mapJob(updated.rows[0]),
+          fieldStatuses: extraction.fieldStatuses || {},
         });
       } catch (error) {
+        const isValidation =
+          error instanceof DocumentValidationError || error?.code === "INVALID_DOCUMENT";
         if (jobId) {
-          await db.query(
-            `UPDATE admin_portal_document_sync_jobs
-             SET status = 'failed',
-                 error_message = $1,
-                 updated_at = CURRENT_TIMESTAMP
-             WHERE id = $2`,
-            [error.message, jobId]
-          ).catch(() => {});
+          await db
+            .query(
+              `UPDATE admin_portal_document_sync_jobs
+               SET status = 'failed',
+                   error_message = $1,
+                   updated_at = CURRENT_TIMESTAMP
+               WHERE id = $2`,
+              [error.message, jobId]
+            )
+            .catch(() => {});
         }
+
+        if (isValidation && req.file?.path) {
+          fs.unlink(req.file.path, () => {});
+        }
+
+        await writeAdminAudit(db, {
+          ...auditActor(req),
+          action: "Document Data Import",
+          targetType: "document_sync",
+          targetId: jobId ? String(jobId) : null,
+          targetLabel: req.file?.originalname || null,
+          result: "failed",
+          detail: `Source: ${label}. ${error.message}`,
+        });
+
         if (error.code === "42P01") {
           return res.status(503).json({
             message: "Document sync tables are not available. Run npm run migrate:document-sync.",
           });
         }
         console.error("Document scan error:", error.message);
-        return res.status(500).json({
+        return res.status(isValidation ? 400 : 500).json({
           message: error.message || "Unable to scan and extract document data.",
+          code: isValidation ? "INVALID_DOCUMENT" : undefined,
         });
       }
     });
@@ -262,6 +456,34 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
     }
   });
 
+  router.post("/sync/documents/:id/match-preview", async (req, res) => {
+    try {
+      const jobResult = await db.query(
+        `SELECT * FROM admin_portal_document_sync_jobs WHERE id = $1 LIMIT 1`,
+        [req.params.id]
+      );
+      if (!jobResult.rows.length) {
+        return res.status(404).json({ message: "Document sync job not found." });
+      }
+      const payload = sanitizePayload(req.body?.payload || jobResult.rows[0].edited_payload);
+      const match = await findMatchingClinicalPatient(db, payload.patient);
+      return res.json({
+        match: mapMatchRecord(match.record),
+        matchReason: match.matchReason,
+        isNewPatient: !match.record,
+        proposedPatient: {
+          fullName: payload.patient.fullName,
+          dateOfBirth: payload.patient.dateOfBirth || null,
+          age: payload.patient.age || null,
+          phone: payload.patient.phone || null,
+        },
+      });
+    } catch (error) {
+      console.error("Document match preview error:", error.message);
+      return res.status(500).json({ message: "Unable to preview patient match." });
+    }
+  });
+
   router.post("/sync/documents/:id/commit", async (req, res) => {
     const client = await db.connect();
     let transactionOpen = false;
@@ -282,25 +504,27 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
       if (job.status === "synced") {
         await client.query("ROLLBACK");
         transactionOpen = false;
-        return res.status(409).json({ message: "This document was already synced to the database." });
+        return res.status(409).json({ message: "This document was already imported to the database." });
+      }
+      if (job.status === "failed") {
+        await client.query("ROLLBACK");
+        transactionOpen = false;
+        return res.status(400).json({
+          message: "This document was rejected and cannot be saved to the patient database.",
+        });
       }
 
       const payload = sanitizePayload(req.body?.payload || job.edited_payload || job.extracted_payload);
       const patient = payload.patient;
       const procedure = payload.procedure;
+      const confirmNewPatient = Boolean(req.body?.confirmNewPatient);
+      const label = sourceLabel(job.source_type, job.mime_type, job.original_name);
 
       if (!patient.firstName || !patient.lastName) {
         await client.query("ROLLBACK");
         transactionOpen = false;
         return res.status(400).json({
-          message: "Patient first name and last name are required before syncing.",
-        });
-      }
-      if (!procedure.treatment) {
-        await client.query("ROLLBACK");
-        transactionOpen = false;
-        return res.status(400).json({
-          message: "Dental procedure / treatment is required before syncing.",
+          message: "Patient full name is required before saving. Correct the extracted fields first.",
         });
       }
       if (patient.dateOfBirth && !isIsoDate(patient.dateOfBirth)) {
@@ -313,41 +537,53 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
         transactionOpen = false;
         return res.status(400).json({ message: "Provide a valid treatment date (YYYY-MM-DD)." });
       }
-
-      let clinicalRecordId = null;
-      if (patient.email || patient.phone) {
-        const existing = await client.query(
-          `SELECT id
-           FROM clinic_patient_records
-           WHERE COALESCE(is_archived, FALSE) = FALSE
-             AND (
-               ($1::text IS NOT NULL AND LOWER(email) = LOWER($1))
-               OR ($2::text IS NOT NULL AND phone = $2)
-             )
-           ORDER BY updated_at DESC
-           LIMIT 1`,
-          [patient.email || null, patient.phone || null]
-        );
-        if (existing.rows.length) {
-          clinicalRecordId = existing.rows[0].id;
-          await clinicalPatients.updateClinicalRecord(
-            client,
-            clinicalRecordId,
-            {
-              firstName: patient.firstName,
-              lastName: patient.lastName,
-              email: patient.email,
-              phone: patient.phone,
-              dateOfBirth: patient.dateOfBirth,
-              gender: patient.gender,
-              address: patient.address,
-            },
-            { id: req.admin.id, role: "admin-sync" }
-          );
-        }
+      if (procedure.treatment && !procedure.treatmentDate) {
+        await client.query("ROLLBACK");
+        transactionOpen = false;
+        return res.status(400).json({
+          message:
+            "Treatment date is required when a procedure is present. Use the date from the document, not today's booking date.",
+        });
       }
 
-      if (!clinicalRecordId) {
+      const match = await findMatchingClinicalPatient(client, patient);
+      let clinicalRecordId = match.record ? match.record.id : null;
+      let createdNewPatient = false;
+
+      if (!clinicalRecordId && !confirmNewPatient) {
+        await client.query("ROLLBACK");
+        transactionOpen = false;
+        return res.status(409).json({
+          message: "New patient record detected. Review the proposed patient information and confirm to create it.",
+          needsNewPatientConfirmation: true,
+          proposedPatient: {
+            fullName: patient.fullName,
+            dateOfBirth: patient.dateOfBirth || null,
+            age: patient.age || null,
+            phone: patient.phone || null,
+            email: patient.email || null,
+          },
+        });
+      }
+
+      if (clinicalRecordId) {
+        await clinicalPatients.updateClinicalRecord(
+          client,
+          clinicalRecordId,
+          {
+            firstName: patient.firstName,
+            lastName: patient.lastName,
+            email: patient.email,
+            phone: patient.phone,
+            dateOfBirth: patient.dateOfBirth,
+            gender: patient.gender,
+            address: patient.address,
+          },
+          { id: req.admin.id, role: "admin-sync" }
+        );
+      } else {
+        const notesParts = [`Imported from document: ${job.original_name}`];
+        if (patient.age) notesParts.push(`Age at import: ${patient.age}`);
         const created = await clinicalPatients.createClinicalRecord(
           client,
           {
@@ -358,27 +594,40 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
             dateOfBirth: patient.dateOfBirth,
             gender: patient.gender,
             address: patient.address,
-            notes: `Synced from document: ${job.original_name}`,
+            notes: notesParts.join(". "),
           },
           { id: req.admin.id, role: "admin-sync" }
         );
         clinicalRecordId = created.id;
+        createdNewPatient = true;
       }
 
-      const treatment = await clinicalPatients.addClinicalTreatment(
-        client,
-        clinicalRecordId,
-        {
-          treatment: procedure.treatment,
-          dentistName: procedure.dentistName,
-          clinicLocation: procedure.clinicLocation || "Amethyst Dental Clinic",
-          coverageStatus: procedure.coverageStatus,
-          status: procedure.status || "completed",
-          treatmentDate: procedure.treatmentDate || new Date().toISOString().slice(0, 10),
-          notes: procedure.notes || `Synced from document: ${job.original_name}`,
-        },
-        { id: req.admin.id, role: "admin-sync" }
-      );
+      let treatment = null;
+      if (procedure.treatment) {
+        const treatmentNotes = [
+          procedure.notes || null,
+          `Imported from document: ${job.original_name}`,
+          patient.age ? `Patient age on document: ${patient.age}` : null,
+        ]
+          .filter(Boolean)
+          .join(". ");
+
+        treatment = await clinicalPatients.addClinicalTreatment(
+          client,
+          clinicalRecordId,
+          {
+            treatment: procedure.treatment,
+            dentistName: procedure.dentistName,
+            clinicLocation: procedure.clinicLocation || "Amethyst Dental Clinic",
+            coverageStatus: procedure.coverageStatus,
+            status: procedure.status || "completed",
+            treatmentDate: procedure.treatmentDate,
+            amountCharged: procedure.amountCharged || 0,
+            notes: treatmentNotes,
+          },
+          { id: req.admin.id, role: "admin-sync" }
+        );
+      }
 
       await client.query(
         `UPDATE admin_portal_document_sync_jobs
@@ -393,7 +642,7 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
         [
           JSON.stringify(payload),
           String(clinicalRecordId),
-          treatment.id,
+          treatment?.id || null,
           job.id,
         ]
       );
@@ -404,12 +653,33 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
          ) VALUES ($1, 'success', TRUE, TRUE, TRUE, $2)`,
         [
           String(req.admin.id),
-          `Document sync committed clinical record for ${patient.firstName} ${patient.lastName} (${procedure.treatment}).`,
+          `Document import saved for ${patient.firstName} ${patient.lastName}${
+            procedure.treatment ? ` (${procedure.treatment})` : ""
+          }.`,
         ]
       );
 
       await client.query("COMMIT");
       transactionOpen = false;
+
+      await writeAdminAudit(db, {
+        ...auditActor(req),
+        action: "Document Data Import",
+        targetType: "clinical_patient",
+        targetId: String(clinicalRecordId),
+        targetLabel: patient.fullName,
+        result: "success",
+        detail: [
+          `Source: ${label}`,
+          `Result: Successful`,
+          `Patient: ${clinicalRecordId}`,
+          createdNewPatient ? "Created new patient record" : "Updated existing patient record",
+          treatment?.id ? `Treatment: ${treatment.id}` : "No treatment row (patient info only)",
+          match.matchReason ? `Match: ${match.matchReason}` : null,
+        ]
+          .filter(Boolean)
+          .join(". "),
+      });
 
       const refreshed = await db.query(
         `SELECT * FROM admin_portal_document_sync_jobs WHERE id = $1`,
@@ -417,17 +687,27 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
       );
 
       return res.json({
-        message: "Document data synced as a clinical patient record (not a login account).",
+        message: "Document successfully imported and data saved.",
         job: mapJob(refreshed.rows[0]),
         linked: {
           clinicalRecordId: String(clinicalRecordId),
-          treatmentId: treatment.id,
+          treatmentId: treatment?.id || null,
+          createdNewPatient,
+          matchReason: match.matchReason,
         },
       });
     } catch (error) {
       if (transactionOpen) {
         await client.query("ROLLBACK");
       }
+      await writeAdminAudit(db, {
+        ...auditActor(req),
+        action: "Document Data Import",
+        targetType: "document_sync",
+        targetId: req.params.id ? String(req.params.id) : null,
+        result: "failed",
+        detail: error.message || "Unable to save document data.",
+      });
       console.error("Document sync commit error:", error.message);
       return res.status(error.status || 500).json({
         message: error.message || "Unable to sync document data to the database.",

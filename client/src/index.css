@@ -3157,6 +3157,96 @@ strong {
   background:
     linear-gradient(135deg, rgba(243, 234, 252, .95), rgba(255,255,255,.98));
 }
+.admin-sync-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: .55rem;
+  margin: 0 0 1rem;
+  padding: 0;
+  list-style: none;
+}
+.admin-sync-steps li {
+  padding: .55rem .7rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: .72rem;
+  font-weight: 700;
+  text-align: center;
+}
+.admin-sync-steps li.is-active {
+  color: var(--amethyst-800);
+  border-color: rgba(124, 58, 237, .35);
+  background: rgba(243, 234, 252, .85);
+}
+.admin-sync-source-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: .85rem;
+  margin-top: 1rem;
+}
+.admin-sync-source-card {
+  display: grid;
+  gap: .4rem;
+  justify-items: start;
+  text-align: left;
+  padding: 1rem;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color .15s ease, transform .15s ease;
+}
+.admin-sync-source-card:hover {
+  border-color: rgba(124, 58, 237, .4);
+  transform: translateY(-1px);
+}
+.admin-sync-source-card strong {
+  font-size: .9rem;
+}
+.admin-sync-source-card span {
+  color: var(--text-muted);
+  font-size: .72rem;
+  line-height: 1.4;
+}
+.admin-doc-layout {
+  display: grid;
+  grid-template-columns: minmax(0, .95fr) minmax(0, 1.05fr);
+  gap: 1rem;
+  margin-top: 1rem;
+}
+.admin-doc-preview {
+  display: grid;
+  gap: .55rem;
+  padding: .85rem;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  min-height: 280px;
+}
+.admin-doc-preview img,
+.admin-doc-preview__frame {
+  width: 100%;
+  min-height: 320px;
+  max-height: 520px;
+  object-fit: contain;
+  border: 0;
+  border-radius: 10px;
+  background: #fff;
+}
+.admin-doc-fields h3 {
+  margin: 0 0 .75rem;
+  font-size: .95rem;
+}
+@media (max-width: 960px) {
+  .admin-sync-source-grid,
+  .admin-doc-layout,
+  .admin-sync-steps {
+    grid-template-columns: 1fr;
+  }
+}
 .admin-notification-list { display: grid; gap: .7rem; }
 .admin-notification {
   display: grid;

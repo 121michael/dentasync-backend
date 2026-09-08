@@ -57,7 +57,7 @@ const PAGE_TITLES = {
   "/admin/analytics": "General Operations Analytics",
   "/admin/ai-settings": "Amethyst AI Core Settings",
   "/admin/settings": "System Settings",
-  "/admin/sync-data": "Cloud Data Synchronization",
+  "/admin/sync-data": "Document Data Extraction",
   "/admin/audit-logs": "Security Audit",
 };
 

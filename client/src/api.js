@@ -312,8 +312,21 @@ export const api = {
   },
   updateAdminDocumentSync: (id, body) =>
     request(`/admin/sync/documents/${id}`, { method: "PUT", body }),
+  previewAdminDocumentSyncMatch: (id, body) =>
+    request(`/admin/sync/documents/${id}/match-preview`, { method: "POST", body }),
   commitAdminDocumentSync: (id, body) =>
     request(`/admin/sync/documents/${id}/commit`, { method: "POST", body }),
+  async getAdminDocumentSyncFileBlob(id) {
+    const token = accessToken();
+    const response = await fetch(`${API_BASE}/admin/sync/documents/${id}/file`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => null);
+      throw new ApiError(data?.message || "Unable to load document preview.", response.status, data);
+    }
+    return response.blob();
+  },
   getAdminNotifications: () => request("/admin/notifications"),
   markAdminNotificationRead: (id) => request(`/admin/notifications/${id}/read`, { method: "PATCH" }),
   markAllAdminNotificationsRead: () => request("/admin/notifications/read-all", { method: "PATCH" }),
