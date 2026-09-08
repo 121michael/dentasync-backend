@@ -457,12 +457,13 @@ export function AdminSyncPage() {
 
       <section className="admin-panel admin-sync-hero">
         <div>
-          <span className="eyebrow">Document → Database</span>
+          <span className="eyebrow">Text to database</span>
           <h2>Document Data Extraction</h2>
           <p>
-            Scan or upload a patient/treatment document temporarily, extract readable fields with OCR,
-            review and correct them, then confirm. Only structured data is saved — the original scan/PDF/image
-            is deleted afterward.
+            Scan a hard-copy paper or upload a PDF / PNG / JPEG. The system reads what it can from the document
+            (name, date of birth, age, cellphone, procedure, treatment date, amount), lets you correct mistakes,
+            then saves only that structured text to the database. Face photos and non-documents are rejected.
+            Scanned files are temporary for reading only — they are not stored.
           </p>
           <div className="admin-heading-actions" style={{ marginTop: "0.85rem" }}>
             <button type="button" className="button button--secondary" onClick={load}>
@@ -489,7 +490,8 @@ export function AdminSyncPage() {
         <section className="admin-panel">
           <h2>Choose document source</h2>
           <p className="muted-copy">
-            Accepts PDF, PNG, JPEG, or a camera scan of a hard-copy form. Face photos and unrelated images are rejected.
+            Hard copy via camera, or digital PDF / PNG / JPEG. Only documents are accepted — a face photo or unrelated
+            picture is rejected. The file is used only to read text; it is not kept after import.
           </p>
 
           <div className="admin-sync-source-grid">
