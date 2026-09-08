@@ -1021,14 +1021,18 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
         treatments: detail.treatments.map((row) => ({
           id: row.id,
           name: row.treatment,
+          treatment: row.treatment,
           dentist: row.dentistName,
           date: row.treatmentDate,
+          treatmentDate: row.treatmentDate,
           status: row.status,
           notes: row.notes || "",
           durationMinutes: row.durationMinutes,
           toothNumber: row.toothNumber,
           diagnosisNotes: row.diagnosisNotes,
           procedureDetails: row.procedureDetails,
+          amountCharged: row.amountCharged ?? 0,
+          amountPaid: row.amountPaid ?? 0,
         })),
       });
     } catch (error) {
@@ -1441,7 +1445,7 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
         db,
         recordId,
         {
-          treatment: req.body?.treatment,
+          treatment: req.body?.treatment || req.body?.name,
           procedureDetails: req.body?.procedureDetails,
           diagnosisNotes: req.body?.diagnosisNotes,
           durationMinutes: req.body?.durationMinutes,
@@ -1452,22 +1456,29 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
           dentistName,
           clinicLocation: req.body?.clinicLocation,
           coverageStatus: req.body?.coverageStatus,
+          amountCharged: req.body?.amountCharged,
+          amountPaid: req.body?.amountPaid,
         },
         { id: req.dentist.id, role: "dentist" }
       );
 
       return res.status(201).json({
+        message: "Treatment recorded successfully.",
         treatment: {
           id: row.id,
           name: row.treatment,
-          dentist: row.dentist_name,
-          date: row.treatment_date,
+          treatment: row.treatment,
+          dentist: row.dentistName,
+          date: row.treatmentDate,
+          treatmentDate: row.treatmentDate,
           status: row.status,
           notes: row.notes || "",
-          durationMinutes: row.duration_minutes != null ? Number(row.duration_minutes) : null,
-          toothNumber: row.tooth_number || null,
-          diagnosisNotes: row.diagnosis_notes || null,
-          procedureDetails: row.procedure_details || null,
+          durationMinutes: row.durationMinutes,
+          toothNumber: row.toothNumber,
+          diagnosisNotes: row.diagnosisNotes,
+          procedureDetails: row.procedureDetails,
+          amountCharged: row.amountCharged ?? 0,
+          amountPaid: row.amountPaid ?? 0,
         },
       });
     } catch (error) {

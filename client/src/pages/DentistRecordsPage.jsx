@@ -4,7 +4,7 @@ import { api } from "../api";
 import { DentalChart } from "../components/DentalChart";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
 import { DentistModal } from "../components/DentistUI";
-import { formatDentistDate, formatDentistDateTime } from "../dentistUtils";
+import { formatDentistDate } from "../dentistUtils";
 
 const emptyForm = {
   firstName: "",
@@ -18,11 +18,18 @@ const emptyForm = {
 
 const emptyTreatment = {
   name: "",
+  treatmentDate: "",
   durationMinutes: "",
   toothNumber: "",
   diagnosisNotes: "",
+  amountCharged: "",
+  amountPaid: "",
   notes: "",
 };
+
+function formatMoney(value) {
+  return `₱${Number(value || 0).toFixed(2)}`;
+}
 
 export function DentistRecordsPage() {
   const [patients, setPatients] = useState(null);
@@ -101,9 +108,12 @@ export function DentistRecordsPage() {
       const response = await api.addDentistTreatment(detail.patient.id, {
         name: treatmentForm.name,
         treatment: treatmentForm.name,
+        treatmentDate: treatmentForm.treatmentDate || undefined,
         durationMinutes: Number(treatmentForm.durationMinutes) || undefined,
         toothNumber: treatmentForm.toothNumber || undefined,
         diagnosisNotes: treatmentForm.diagnosisNotes,
+        amountCharged: treatmentForm.amountCharged === "" ? 0 : Number(treatmentForm.amountCharged),
+        amountPaid: treatmentForm.amountPaid === "" ? 0 : Number(treatmentForm.amountPaid),
         notes: treatmentForm.notes,
       });
       setSuccess(response.message || "Treatment recorded.");
@@ -397,6 +407,51 @@ export function DentistRecordsPage() {
                   />
                 </label>
                 <label className="field">
+                  <span>Date</span>
+                  <input
+                    type="date"
+                    value={treatmentForm.treatmentDate}
+                    onChange={(event) =>
+                      setTreatmentForm((current) => ({
+                        ...current,
+                        treatmentDate: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <label className="field">
+                  <span>Amount Charged</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={treatmentForm.amountCharged}
+                    onChange={(event) =>
+                      setTreatmentForm((current) => ({
+                        ...current,
+                        amountCharged: event.target.value,
+                      }))
+                    }
+                    placeholder="1500"
+                  />
+                </label>
+                <label className="field">
+                  <span>Amount Paid</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={treatmentForm.amountPaid}
+                    onChange={(event) =>
+                      setTreatmentForm((current) => ({
+                        ...current,
+                        amountPaid: event.target.value,
+                      }))
+                    }
+                    placeholder="1500"
+                  />
+                </label>
+                <label className="field">
                   <span>Duration (minutes)</span>
                   <input
                     type="number"
@@ -458,22 +513,35 @@ export function DentistRecordsPage() {
           <div className="admin-history-list">
             {(detail.treatments || []).length ? (
               detail.treatments.map((treatment) => (
-                <article key={treatment.id}>
-                  <div>
-                    <strong>{treatment.name || treatment.treatment}</strong>
-                    <small>
-                      {formatDentistDateTime(treatment.date)}
-                      {treatment.toothNumber || treatment.tooth_number
-                        ? ` · Tooth ${treatment.toothNumber || treatment.tooth_number}`
-                        : ""}
-                      {treatment.dentist ? ` · ${treatment.dentist}` : ""}
-                      {` · ${treatment.status || "completed"}`}
-                    </small>
-                    {treatment.diagnosisNotes || treatment.diagnosis_notes ? (
-                      <small>{treatment.diagnosisNotes || treatment.diagnosis_notes}</small>
-                    ) : null}
-                    {treatment.notes ? <small>{treatment.notes}</small> : null}
+                <article key={treatment.id} className="admin-history-card">
+                  <div className="admin-detail-grid">
+                    <p>
+                      <small>Date</small>
+                      <strong>{formatDentistDate(treatment.date || treatment.treatmentDate)}</strong>
+                    </p>
+                    <p>
+                      <small>Procedure</small>
+                      <strong>{treatment.name || treatment.treatment}</strong>
+                    </p>
+                    <p>
+                      <small>Amount Charged</small>
+                      <strong>{formatMoney(treatment.amountCharged)}</strong>
+                    </p>
+                    <p>
+                      <small>Amount Paid</small>
+                      <strong>{formatMoney(treatment.amountPaid)}</strong>
+                    </p>
                   </div>
+                  <small className="muted-copy">
+                    {treatment.dentist || "—"} · {treatment.status || "completed"}
+                    {treatment.toothNumber || treatment.tooth_number
+                      ? ` · Tooth ${treatment.toothNumber || treatment.tooth_number}`
+                      : ""}
+                  </small>
+                  {treatment.diagnosisNotes || treatment.diagnosis_notes ? (
+                    <small>{treatment.diagnosisNotes || treatment.diagnosis_notes}</small>
+                  ) : null}
+                  {treatment.notes ? <small>{treatment.notes}</small> : null}
                 </article>
               ))
             ) : (
