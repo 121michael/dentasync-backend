@@ -15,6 +15,12 @@ const {
 } = require("../services/documentSyncExtraction");
 const clinicalPatients = require("../services/clinicalPatients");
 const { writeAdminAudit } = require("../services/adminAudit");
+const {
+  discardTemporaryDocumentFile,
+  temporaryDocumentExists,
+  cleanupFinishedDocumentTemps,
+  resolveTempDocumentPath,
+} = require("../services/documentSyncTempStorage");
 
 const ALLOWED_TYPES = new Set([
   "application/pdf",
@@ -86,7 +92,11 @@ function mapJob(row) {
     syncedAt: row.synced_at || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    hasPreview: Boolean(row.stored_name),
+    // Preview is temporary only while Admin reviews; never after commit/reject.
+    hasPreview:
+      Boolean(row.stored_name) &&
+      ["uploaded", "extracted", "reviewed"].includes(row.status),
+    sourceDocumentRetained: false,
   };
 }
 
@@ -208,6 +218,8 @@ function mapMatchRecord(row) {
 
 function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
   fs.mkdirSync(uploadDirectory, { recursive: true });
+  // Best-effort cleanup of leftover temps from prior commits/rejects.
+  cleanupFinishedDocumentTemps(db, uploadDirectory).catch(() => {});
 
   const upload = multer({
     storage: multer.diskStorage({
@@ -232,13 +244,21 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
 
   router.get("/sync/documents", async (_req, res) => {
     try {
+      await cleanupFinishedDocumentTemps(db, uploadDirectory);
       const result = await db.query(
         `SELECT *
          FROM admin_portal_document_sync_jobs
          ORDER BY created_at DESC
          LIMIT 40`
       );
-      return res.json({ jobs: result.rows.map(mapJob) });
+      return res.json({
+        jobs: result.rows.map((row) => {
+          const job = mapJob(row);
+          job.hasPreview =
+            job.hasPreview && temporaryDocumentExists(uploadDirectory, row.stored_name);
+          return job;
+        }),
+      });
     } catch (error) {
       if (error.code === "42P01") {
         return res.status(503).json({
@@ -259,7 +279,11 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
       if (!result.rows.length) {
         return res.status(404).json({ message: "Document sync job not found." });
       }
-      return res.json({ job: mapJob(result.rows[0]) });
+      const row = result.rows[0];
+      const job = mapJob(row);
+      job.hasPreview =
+        job.hasPreview && temporaryDocumentExists(uploadDirectory, row.stored_name);
+      return res.json({ job });
     } catch (error) {
       console.error("Document sync detail error:", error.message);
       return res.status(500).json({ message: "Unable to load the document sync job." });
@@ -279,16 +303,24 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
         return res.status(404).json({ message: "Document sync job not found." });
       }
       const job = result.rows[0];
-      const filePath = path.join(uploadDirectory, job.stored_name);
-      if (!fs.existsSync(filePath)) {
-        return res.status(404).json({ message: "Document preview file is no longer available." });
+      if (!["uploaded", "extracted", "reviewed"].includes(job.status) || !job.stored_name) {
+        return res.status(410).json({
+          message:
+            "The source document was discarded after processing. Only extracted structured data is retained.",
+        });
+      }
+      const filePath = resolveTempDocumentPath(uploadDirectory, job.stored_name);
+      if (!filePath || !fs.existsSync(filePath)) {
+        return res.status(404).json({
+          message: "Temporary document preview is no longer available.",
+        });
       }
       res.setHeader("Content-Type", job.mime_type || "application/octet-stream");
       res.setHeader(
         "Content-Disposition",
         `inline; filename="${String(job.original_name || "document").replace(/"/g, "")}"`
       );
-      return res.sendFile(path.resolve(filePath));
+      return res.sendFile(filePath);
     } catch (error) {
       console.error("Document preview error:", error.message);
       return res.status(500).json({ message: "Unable to load document preview." });
@@ -372,23 +404,28 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
           targetId: String(jobId),
           targetLabel: req.file.originalname,
           result: "success",
-          detail: `Source: ${label}. Extracted fields for admin review (not saved to patient database yet).`,
+          detail: `Source: ${label}. Extracted fields for admin review. Source document is temporary and will be discarded after confirm or reject.`,
         });
 
         return res.status(201).json({
-          message: "Document validated and readable fields extracted. Please review before saving.",
+          message:
+            "Document validated and readable fields extracted. Please review before saving. The source file is temporary and will be deleted after you confirm.",
           job: mapJob(updated.rows[0]),
           fieldStatuses: extraction.fieldStatuses || {},
         });
       } catch (error) {
         const isValidation =
           error instanceof DocumentValidationError || error?.code === "INVALID_DOCUMENT";
+        const storedName = req.file?.filename || null;
         if (jobId) {
           await db
             .query(
               `UPDATE admin_portal_document_sync_jobs
                SET status = 'failed',
                    error_message = $1,
+                   stored_name = NULL,
+                   raw_text = NULL,
+                   byte_size = 0,
                    updated_at = CURRENT_TIMESTAMP
                WHERE id = $2`,
               [error.message, jobId]
@@ -396,8 +433,11 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
             .catch(() => {});
         }
 
-        if (isValidation && req.file?.path) {
+        // Always discard the temporary source on failure — never keep rejected files.
+        if (req.file?.path) {
           fs.unlink(req.file.path, () => {});
+        } else if (storedName) {
+          discardTemporaryDocumentFile(uploadDirectory, storedName);
         }
 
         await writeAdminAudit(db, {
@@ -407,7 +447,7 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
           targetId: jobId ? String(jobId) : null,
           targetLabel: req.file?.originalname || null,
           result: "failed",
-          detail: `Source: ${label}. ${error.message}`,
+          detail: `Source: ${label}. ${error.message}. Temporary source document discarded.`,
         });
 
         if (error.code === "42P01") {
@@ -575,7 +615,7 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
           { id: req.admin.id, role: "admin-sync" }
         );
       } else {
-        const notesParts = [`Imported from document: ${job.original_name}`];
+        const notesParts = ["Imported via Admin Document Data Extraction"];
         if (patient.age) notesParts.push(`Age at import: ${patient.age}`);
         const created = await clinicalPatients.createClinicalRecord(
           client,
@@ -599,7 +639,7 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
       if (procedure.treatment) {
         const treatmentNotes = [
           procedure.notes || null,
-          `Imported from document: ${job.original_name}`,
+          "Imported via Admin Document Data Extraction",
           patient.age ? `Patient age on document: ${patient.age}` : null,
         ]
           .filter(Boolean)
@@ -622,6 +662,8 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
         );
       }
 
+      const tempStoredName = job.stored_name;
+
       await client.query(
         `UPDATE admin_portal_document_sync_jobs
          SET status = 'synced',
@@ -630,7 +672,10 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
              linked_treatment_id = $3,
              synced_at = CURRENT_TIMESTAMP,
              updated_at = CURRENT_TIMESTAMP,
-             error_message = NULL
+             error_message = NULL,
+             stored_name = NULL,
+             raw_text = NULL,
+             byte_size = 0
          WHERE id = $4`,
         [
           JSON.stringify(payload),
@@ -648,12 +693,15 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
           String(req.admin.id),
           `Document import saved for ${patient.firstName} ${patient.lastName}${
             procedure.treatment ? ` (${procedure.treatment})` : ""
-          }.`,
+          }. Source document discarded.`,
         ]
       );
 
       await client.query("COMMIT");
       transactionOpen = false;
+
+      // Delete temporary source after structured data is committed.
+      discardTemporaryDocumentFile(uploadDirectory, tempStoredName);
 
       await writeAdminAudit(db, {
         ...auditActor(req),
@@ -669,6 +717,7 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
           createdNewPatient ? "Created new patient record" : "Updated existing patient record",
           treatment?.id ? `Treatment: ${treatment.id}` : "No treatment row (patient info only)",
           match.matchReason ? `Match: ${match.matchReason}` : null,
+          "Temporary source document deleted; only structured data retained",
         ]
           .filter(Boolean)
           .join(". "),
@@ -680,7 +729,8 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
       );
 
       return res.json({
-        message: "Document successfully imported and data saved.",
+        message:
+          "Document successfully imported and data saved. The original source document was deleted.",
         job: mapJob(refreshed.rows[0]),
         linked: {
           clinicalRecordId: String(clinicalRecordId),

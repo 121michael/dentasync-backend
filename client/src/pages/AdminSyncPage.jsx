@@ -412,11 +412,16 @@ export function AdminSyncPage() {
       setEditing(response.job.status !== "synced");
       setStep(response.job.status === "synced" ? "done" : response.job.status === "failed" ? "choose" : "review");
       clearPreviews();
-      if (response.job.status !== "failed") {
+      if (response.job.status !== "failed" && response.job.hasPreview) {
         await loadServerPreview(response.job.id);
       }
       if (response.job.status === "failed") {
         setError(response.job.errorMessage || "This document was rejected.");
+      }
+      if (response.job.status === "synced") {
+        setMessage(
+          "Import complete. The original source document was discarded; only confirmed structured data is retained."
+        );
       }
     } catch (openError) {
       setError(openError.message);
@@ -455,8 +460,9 @@ export function AdminSyncPage() {
           <span className="eyebrow">Document → Database</span>
           <h2>Document Data Extraction</h2>
           <p>
-            Scan or upload a patient/treatment document, validate that it is a readable document, extract fields with
-            OCR, review and correct them, then confirm before saving to PostgreSQL.
+            Scan or upload a patient/treatment document temporarily, extract readable fields with OCR,
+            review and correct them, then confirm. Only structured data is saved — the original scan/PDF/image
+            is deleted afterward.
           </p>
           <div className="admin-heading-actions" style={{ marginTop: "0.85rem" }}>
             <button type="button" className="button button--secondary" onClick={load}>
@@ -587,7 +593,11 @@ export function AdminSyncPage() {
                   <img src={previewUrl} alt="Uploaded or scanned document" />
                 )
               ) : (
-                <p className="muted-copy">Preview unavailable for this job.</p>
+                <p className="muted-copy">
+                  {activeJob.status === "synced"
+                    ? "Source document discarded after import. Only confirmed structured data was saved."
+                    : "Temporary preview unavailable for this job."}
+                </p>
               )}
             </div>
 
@@ -729,7 +739,7 @@ export function AdminSyncPage() {
                 <p className="inline-alert inline-alert--success">
                   Saved to clinical record #{activeJob.linkedPatientId}
                   {activeJob.linkedTreatmentId ? ` · treatment #${activeJob.linkedTreatmentId}` : ""} ·{" "}
-                  {formatAdminDateTime(activeJob.syncedAt)}
+                  {formatAdminDateTime(activeJob.syncedAt)}. Original document deleted.
                 </p>
               )}
             </div>
