@@ -16,7 +16,6 @@ import { PasswordResetPage } from "./pages/PasswordResetPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { QueueDisplayPage } from "./pages/QueueDisplayPage";
 import { QueuePage } from "./pages/QueuePage";
-import { RecordsPage } from "./pages/RecordsPage";
 import { StaffAppointmentsPage } from "./pages/StaffAppointmentsPage";
 import { StaffBillingPage } from "./pages/StaffBillingPage";
 import { StaffCheckInPage } from "./pages/StaffCheckInPage";
