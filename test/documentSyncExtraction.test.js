@@ -34,6 +34,33 @@ Amount: ₱800
   assert.equal(fieldStatuses.age, "detected");
 });
 
+test("handwritten dental chart style labels are parsed across lines", () => {
+  const sample = `
+NAME
+ANGELOU OBAS-BAGHTNAN
+ADDRESS
+MANDALUYONG CITY
+TELEPHONE
+09171234567
+AGE
+25
+DESCRIPTION
+ORAL PROPHYLAXIS
+DATE
+SEPT 7, 2024
+AMOUNT
+800
+`;
+  const { payload } = extractStructuredPayload(sample);
+  assert.equal(payload.patient.fullName, "ANGELOU OBAS-BAGHTNAN");
+  assert.equal(payload.patient.address.toUpperCase(), "MANDALUYONG CITY");
+  assert.equal(payload.patient.phone, "639171234567");
+  assert.equal(payload.patient.age, "25");
+  assert.equal(payload.procedure.treatment, "Oral Prophylaxis");
+  assert.equal(payload.procedure.treatmentDate, "2024-09-07");
+  assert.equal(payload.procedure.amountCharged, "800");
+});
+
 test("missing amount stays empty instead of inventing a value", () => {
   const sample = `
 Full Name: Maria Santos
@@ -48,6 +75,7 @@ Treatment Date: 01/15/2026
 test("normalize helpers parse clinic formats", () => {
   assert.equal(normalizeDate("08/18/2026 extra"), "2026-08-18");
   assert.equal(normalizeDate("2026-01-05"), "2026-01-05");
+  assert.equal(normalizeDate("Sept 7, 2024"), "2024-09-07");
   assert.equal(normalizeAmount("₱1,250.50"), "1250.5");
   assert.equal(normalizeAge("30 years"), "30");
 });
