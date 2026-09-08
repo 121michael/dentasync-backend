@@ -206,7 +206,7 @@ export function AppointmentsPage() {
       <div className="appointments-page">
         <SectionHeading
           eyebrow="Your bookings"
-          title="Appointment History"
+          title="Appointment"
           detail="Only appointments you booked appear here — not the service catalog or clinical treatment records."
         />
 
@@ -292,7 +292,7 @@ export function AppointmentsPage() {
 
       <div className="admin-heading-actions" style={{ marginBottom: "1rem" }}>
         <button type="button" className="button button--secondary" onClick={() => navigate("/appointments")}>
-          <ChevronLeft size={16} /> Back to Appointment History
+          <ChevronLeft size={16} /> Back to Appointment
         </button>
       </div>
 

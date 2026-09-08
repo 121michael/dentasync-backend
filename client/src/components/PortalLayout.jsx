@@ -20,7 +20,7 @@ import { onNotificationsChanged } from "../notificationEvents";
 
 const navigation = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/appointments", label: "Appointment History", icon: CalendarDays },
+  { to: "/appointments", label: "Appointment", icon: CalendarDays },
   { to: "/queue", label: "Queue Status", icon: UsersRound },
   { to: "/assistant", label: "AI Assistant", icon: Bot },
   { to: "/family", label: "Family", icon: Users },
