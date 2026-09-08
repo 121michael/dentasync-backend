@@ -676,55 +676,10 @@ function createAdminPortalRouter({
     }
   });
 
-  router.patch("/clinical-records/:id/treatments/:treatmentId", async (req, res) => {
-    const recordId = numericId(req.params.id);
-    const treatmentId = numericId(req.params.treatmentId);
-    if (!recordId || !treatmentId) {
-      return res.status(400).json({ message: "A valid clinical record and treatment ID are required." });
-    }
-
-    try {
-      const treatment = await clinicalPatients.updateClinicalTreatment(
-        db,
-        recordId,
-        treatmentId,
-        {
-          treatment: req.body?.treatment ?? req.body?.procedure,
-          treatmentDate: req.body?.treatmentDate ?? req.body?.date,
-          amountCharged: req.body?.amountCharged,
-          amountPaid: req.body?.amountPaid,
-        },
-        { id: req.admin?.id, role: "admin" }
-      );
-
-      await writeAdminAudit(db, {
-        actorId: req.admin?.id,
-        actorName: `${req.admin?.first_name || ""} ${req.admin?.last_name || ""}`.trim() || req.admin?.email,
-        actorRole: "admin",
-        action: "update_treatment_history",
-        targetType: "treatment",
-        targetId: String(treatmentId),
-        targetLabel: treatment.treatment,
-        result: "success",
-        detail: `Updated treatment history for clinical record ${recordId}.`,
-      });
-
-      return res.json({
-        message: "Treatment history updated successfully.",
-        treatment,
-      });
-    } catch (error) {
-      if (error?.status) {
-        return res.status(error.status).json({ message: error.message });
-      }
-      if (clinicalPatients.isMissingRelation(error)) {
-        return res.status(503).json({
-          message: "Clinical patient records are not available. Run npm run migrate:clinical-records.",
-        });
-      }
-      console.error("Admin treatment history update error:", error.message);
-      return res.status(500).json({ message: "Treatment history could not be updated." });
-    }
+  router.patch("/clinical-records/:id/treatments/:treatmentId", async (_req, res) => {
+    return res.status(403).json({
+      message: "Administrators can view treatment history only. Dentists manage clinical documentation.",
+    });
   });
 
   router.get("/clinical-records/:id/dental-chart", async (req, res) => {

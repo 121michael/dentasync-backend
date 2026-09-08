@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Eye, Pencil, Search } from "lucide-react";
+import { Eye, Search } from "lucide-react";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { AdminModal, AdminStatusBadge } from "../components/AdminUI";
@@ -26,24 +26,6 @@ function formatHistoryDate(value) {
   }).format(date);
 }
 
-function toInputDate(value) {
-  if (!value) return "";
-  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value)) {
-    return value.slice(0, 10);
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toISOString().slice(0, 10);
-}
-
-const emptyEditForm = {
-  treatmentId: "",
-  treatmentDate: "",
-  treatment: "",
-  amountCharged: "0",
-  amountPaid: "0",
-};
-
 export function AdminPatientRecordsPage() {
   const { pushToast } = useAdminUi();
   const [data, setData] = useState(null);
@@ -51,9 +33,6 @@ export function AdminPatientRecordsPage() {
   const [applied, setApplied] = useState("");
   const [error, setError] = useState("");
   const [detail, setDetail] = useState(null);
-  const [editingHistory, setEditingHistory] = useState(false);
-  const [editForm, setEditForm] = useState(emptyEditForm);
-  const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -70,84 +49,9 @@ export function AdminPatientRecordsPage() {
 
   async function viewRecord(record) {
     try {
-      const response = await api.getAdminClinicalRecord(record.id);
-      setDetail(response);
-      setEditingHistory(false);
-      setEditForm(emptyEditForm);
+      setDetail(await api.getAdminClinicalRecord(record.id));
     } catch (viewError) {
-      pushToast(viewError.message, "error");
-    }
-  }
-
-  function startEditHistory() {
-    const treatments = detail?.treatments || [];
-    if (!treatments.length) {
-      pushToast("No treatment history is available to edit.", "warning");
-      return;
-    }
-    const selected = treatments[0];
-    setEditForm({
-      treatmentId: String(selected.id),
-      treatmentDate: toInputDate(selected.treatmentDate),
-      treatment: selected.treatment || "",
-      amountCharged: String(selected.amountCharged ?? 0),
-      amountPaid: String(selected.amountPaid ?? 0),
-    });
-    setEditingHistory(true);
-  }
-
-  function selectTreatmentForEdit(treatmentId) {
-    const selected = (detail?.treatments || []).find((item) => String(item.id) === String(treatmentId));
-    if (!selected) return;
-    setEditForm({
-      treatmentId: String(selected.id),
-      treatmentDate: toInputDate(selected.treatmentDate),
-      treatment: selected.treatment || "",
-      amountCharged: String(selected.amountCharged ?? 0),
-      amountPaid: String(selected.amountPaid ?? 0),
-    });
-  }
-
-  async function saveTreatmentHistory(event) {
-    event.preventDefault();
-    if (!detail?.record?.id || !editForm.treatmentId) return;
-
-    const procedure = editForm.treatment.trim();
-    if (!procedure) {
-      pushToast("Procedure cannot be empty.", "error");
-      return;
-    }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(editForm.treatmentDate)) {
-      pushToast("Date must be valid.", "error");
-      return;
-    }
-    const amountCharged = Number(editForm.amountCharged);
-    const amountPaid = Number(editForm.amountPaid);
-    if (!Number.isFinite(amountCharged) || amountCharged < 0) {
-      pushToast("Amount Charged must be a valid non-negative amount.", "error");
-      return;
-    }
-    if (!Number.isFinite(amountPaid) || amountPaid < 0) {
-      pushToast("Amount Paid must be a valid non-negative amount.", "error");
-      return;
-    }
-
-    setBusy(true);
-    try {
-      const response = await api.updateAdminClinicalTreatment(detail.record.id, editForm.treatmentId, {
-        treatment: procedure,
-        treatmentDate: editForm.treatmentDate,
-        amountCharged,
-        amountPaid,
-      });
-      const refreshed = await api.getAdminClinicalRecord(detail.record.id);
-      setDetail(refreshed);
-      setEditingHistory(false);
-      pushToast(response.message || "Treatment history updated successfully.");
-    } catch (saveError) {
-      pushToast(saveError.message || "Treatment history could not be updated.", "error");
-    } finally {
-      setBusy(false);
+      pushToast(viewError.message || "Unable to load patient record.", "error");
     }
   }
 
@@ -176,8 +80,8 @@ export function AdminPatientRecordsPage() {
             <span className="eyebrow">Patient Search Registry Array</span>
             <h2>Patient Records Vault</h2>
             <p>
-              View-only clinical records created by dentists and staff. These are not login accounts.
-              Patients create their own portal accounts for admin approval.
+              View-only clinical records created by dentists and staff. Administrators can review patient
+              information, treatment history, and the dentist dental chart, but cannot edit clinical data.
             </p>
           </div>
         </div>
@@ -225,11 +129,16 @@ export function AdminPatientRecordsPage() {
                 {records.map((record) => (
                   <tr key={record.id}>
                     <td><code>{record.recordCode || record.id}</code></td>
-                    <td><strong>{record.fullName}</strong><small>{record.email || "No linked portal account"}</small></td>
+                    <td>
+                      <strong>{record.fullName}</strong>
+                      <small>{record.email || "No linked portal account"}</small>
+                    </td>
                     <td>{record.phone || "—"}</td>
                     <td>{[record.age ?? "—", record.gender || "—"].join(" / ")}</td>
                     <td>{record.lastTreatment || "—"}</td>
-                    <td><AdminStatusBadge status={record.linkedUserId ? "linked_account" : "clinical_record"} /></td>
+                    <td>
+                      <AdminStatusBadge status={record.linkedUserId ? "linked_account" : "clinical_record"} />
+                    </td>
                     <td>
                       <button className="button button--secondary button--compact" onClick={() => viewRecord(record)}>
                         <Eye size={14} /> View
@@ -241,19 +150,15 @@ export function AdminPatientRecordsPage() {
             </table>
           </div>
         ) : (
-          <EmptyState title="No clinical records found" detail="Dentists and staff create clinical patient records from their portals." />
+          <EmptyState
+            title="No clinical records found"
+            detail="Dentists and staff create clinical patient records from their portals."
+          />
         )}
       </section>
 
       {detail ? (
-        <AdminModal
-          title="Clinical patient record"
-          onClose={() => {
-            setDetail(null);
-            setEditingHistory(false);
-          }}
-          wide
-        >
+        <AdminModal title="Clinical patient record" onClose={() => setDetail(null)} wide>
           <div className="admin-detail-grid">
             <p><small>Name</small><strong>{detail.record.fullName}</strong></p>
             <p><small>Record code</small><strong>{detail.record.recordCode}</strong></p>
@@ -265,12 +170,12 @@ export function AdminPatientRecordsPage() {
 
           <h3 className="admin-subheading">2D Dental Chart</h3>
           <p className="muted-copy">
-            Displays the dentist&apos;s saved clinical chart. Administrators can review treatments but cannot
-            edit tooth conditions.
+            Read-only view of the dentist&apos;s saved clinical chart for this same patient record.
           </p>
           <DentalChart patientId={detail.record.id} readOnly />
 
           <h3 className="admin-subheading">Treatment History</h3>
+          <p className="muted-copy">View only. Dentists maintain clinical treatment documentation.</p>
           <div className="admin-history-list">
             {(detail.treatments || []).length ? (
               detail.treatments.map((treatment) => (
@@ -296,6 +201,7 @@ export function AdminPatientRecordsPage() {
                   <small className="muted-copy">
                     {treatment.dentistName || "—"} · {treatment.status || "—"}
                     {treatment.toothNumber ? ` · Tooth ${treatment.toothNumber}` : ""}
+                    {treatment.appointmentId ? ` · Appointment ${treatment.appointmentId}` : ""}
                   </small>
                 </article>
               ))
@@ -303,85 +209,6 @@ export function AdminPatientRecordsPage() {
               <p className="muted-copy">No treatments on file.</p>
             )}
           </div>
-
-          <div className="admin-modal__actions" style={{ justifyContent: "flex-start", marginTop: "1rem" }}>
-            <button
-              type="button"
-              className="button button--primary"
-              onClick={startEditHistory}
-              disabled={!(detail.treatments || []).length}
-            >
-              <Pencil size={14} /> Edit
-            </button>
-          </div>
-
-          {editingHistory ? (
-            <form className="admin-form" onSubmit={saveTreatmentHistory} style={{ marginTop: "1rem" }}>
-              <h3 className="admin-subheading">Edit Treatment History</h3>
-              {(detail.treatments || []).length > 1 ? (
-                <label>
-                  Select record
-                  <select
-                    value={editForm.treatmentId}
-                    onChange={(event) => selectTreatmentForEdit(event.target.value)}
-                  >
-                    {(detail.treatments || []).map((treatment) => (
-                      <option key={treatment.id} value={treatment.id}>
-                        {formatAdminDate(treatment.treatmentDate)} — {treatment.treatment}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : null}
-              <label>
-                Date
-                <input
-                  required
-                  type="date"
-                  value={editForm.treatmentDate}
-                  onChange={(event) => setEditForm((current) => ({ ...current, treatmentDate: event.target.value }))}
-                />
-              </label>
-              <label>
-                Procedure
-                <input
-                  required
-                  value={editForm.treatment}
-                  onChange={(event) => setEditForm((current) => ({ ...current, treatment: event.target.value }))}
-                />
-              </label>
-              <label>
-                Amount Charged
-                <input
-                  required
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={editForm.amountCharged}
-                  onChange={(event) => setEditForm((current) => ({ ...current, amountCharged: event.target.value }))}
-                />
-              </label>
-              <label>
-                Amount Paid
-                <input
-                  required
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={editForm.amountPaid}
-                  onChange={(event) => setEditForm((current) => ({ ...current, amountPaid: event.target.value }))}
-                />
-              </label>
-              <div className="admin-modal__actions">
-                <button type="button" className="button button--secondary" onClick={() => setEditingHistory(false)} disabled={busy}>
-                  Cancel
-                </button>
-                <button className="button button--primary" disabled={busy}>
-                  {busy ? "Saving…" : "Save"}
-                </button>
-              </div>
-            </form>
-          ) : null}
         </AdminModal>
       ) : null}
     </div>

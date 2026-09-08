@@ -403,13 +403,18 @@ function attachAdminCommandCenterRoutes(router, { db }) {
 
       return res.json({
         message:
-          decision === "approve" ? "User approved successfully." : "User rejected successfully.",
+          decision === "approve"
+            ? "Patient account approved successfully."
+            : "Patient account rejected successfully.",
         account: mapAccount(result.rows[0]),
       });
     } catch (error) {
       console.error(`Admin registration ${decision} error:`, error.message);
       return res.status(500).json({
-        message: decision === "approve" ? "Unable to approve user." : "Unable to reject user.",
+        message:
+          decision === "approve"
+            ? "Unable to approve patient account."
+            : "Unable to reject patient account.",
       });
     }
   }
@@ -523,7 +528,7 @@ function attachAdminCommandCenterRoutes(router, { db }) {
                WHERE id::text = $1
                RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by, status_changed_at`;
         params = [accountId];
-        message = action === "verify" ? "Account verified successfully." : "User approved successfully.";
+        message = action === "verify" ? "Account verified successfully." : "Patient account approved successfully.";
       } else if (action === "reject") {
         if (String(target.status || "").toLowerCase() === "rejected") {
           await client.query("ROLLBACK");
@@ -534,7 +539,7 @@ function attachAdminCommandCenterRoutes(router, { db }) {
                WHERE id::text = $1
                RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by, status_changed_at`;
         params = [accountId];
-        message = "User rejected successfully.";
+        message = "Patient account rejected successfully.";
       } else if (action === "suspend") {
         sql = `UPDATE users SET status = 'Suspended', status_changed_at = CURRENT_TIMESTAMP
                WHERE id::text = $1
@@ -573,7 +578,7 @@ function attachAdminCommandCenterRoutes(router, { db }) {
              RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by`,
             [accountId]
           );
-          message = action === "verify" ? "Account verified successfully." : "User approved successfully.";
+          message = action === "verify" ? "Account verified successfully." : "Patient account approved successfully.";
         } else if (action === "reject") {
           result = await client.query(
             `UPDATE users SET is_verified = FALSE, status = 'Rejected'
@@ -581,7 +586,7 @@ function attachAdminCommandCenterRoutes(router, { db }) {
              RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by`,
             [accountId]
           );
-          message = "User rejected successfully.";
+          message = "Patient account rejected successfully.";
         } else {
           throw error;
         }

@@ -152,14 +152,22 @@ export function AdminManageUsersPage() {
       pushToast(
         response.message ||
           (action === "approve"
-            ? "User approved successfully."
+            ? "Patient account approved successfully."
             : action === "reject"
-              ? "User rejected successfully."
+              ? "Patient account rejected successfully."
               : "Account updated successfully.")
       );
       await load();
     } catch (lifecycleError) {
-      pushToast(lifecycleError.message || `Unable to ${action} user.`, "error");
+      pushToast(
+        lifecycleError.message ||
+          (action === "approve"
+            ? "Unable to approve patient account."
+            : action === "reject"
+              ? "Unable to reject patient account."
+              : `Unable to ${action} user.`),
+        "error"
+      );
     } finally {
       setActionBusyId("");
     }
@@ -204,11 +212,10 @@ export function AdminManageUsersPage() {
     setActionBusyId(`${request.id}:approve`);
     try {
       const response = await api.approveAdminRegistration(request.id);
-      pushToast(response.message || "User approved successfully.");
-      setPending((current) => current.filter((item) => String(item.id) !== String(request.id)));
+      pushToast(response.message || "Patient account approved successfully.");
       await load();
     } catch (approveError) {
-      pushToast(approveError.message || "Unable to approve user.", "error");
+      pushToast(approveError.message || "Unable to approve patient account.", "error");
     } finally {
       setActionBusyId("");
     }
@@ -217,7 +224,7 @@ export function AdminManageUsersPage() {
   async function rejectRequest(request) {
     const ok = await confirm({
       title: "Reject registration",
-      message: "Are you sure you want to reject this user?",
+      message: "Are you sure you want to reject this patient account?",
       confirmLabel: "Reject",
       tone: "danger",
     });
@@ -225,11 +232,10 @@ export function AdminManageUsersPage() {
     setActionBusyId(`${request.id}:reject`);
     try {
       const response = await api.rejectAdminRegistration(request.id);
-      pushToast(response.message || "User rejected successfully.");
-      setPending((current) => current.filter((item) => String(item.id) !== String(request.id)));
+      pushToast(response.message || "Patient account rejected successfully.");
       await load();
     } catch (rejectError) {
-      pushToast(rejectError.message || "Unable to reject user.", "error");
+      pushToast(rejectError.message || "Unable to reject patient account.", "error");
     } finally {
       setActionBusyId("");
     }
@@ -351,7 +357,7 @@ export function AdminManageUsersPage() {
                                     className="button button--danger button--compact"
                                     disabled={actionBusyId === `${user.id}:reject`}
                                     onClick={() =>
-                                      runLifecycle(user, "reject", "Are you sure you want to reject this user?")
+                                      runLifecycle(user, "reject", "Are you sure you want to reject this patient account?")
                                     }
                                   >
                                     Reject
@@ -375,7 +381,7 @@ export function AdminManageUsersPage() {
                                 <button className="button button--secondary button--compact" onClick={() => runLifecycle(user, "approve", `Approve ${user.fullName}?`)}>Approve</button>
                               ) : null}
                               {!rejectedUser ? (
-                                <button className="button button--secondary button--compact" onClick={() => runLifecycle(user, "reject", "Are you sure you want to reject this user?")}>Reject</button>
+                                <button className="button button--secondary button--compact" onClick={() => runLifecycle(user, "reject", "Are you sure you want to reject this patient account?")}>Reject</button>
                               ) : null}
                               <button className="button button--secondary button--compact" onClick={() => runLifecycle(user, "suspend", `Suspend ${user.fullName}?`)}>Suspend</button>
                               <button className="button button--secondary button--compact" onClick={() => runLifecycle(user, "archive", `Are you sure you want to archive this account?`)}>Archive</button>
