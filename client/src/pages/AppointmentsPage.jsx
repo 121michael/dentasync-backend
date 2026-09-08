@@ -414,39 +414,49 @@ export function AppointmentsPage() {
       <section className="appointment-history">
         <div className="card-heading">
           <div>
-            <span className="eyebrow">Your schedule</span>
-            <h2>Appointments</h2>
+            <span className="eyebrow">Your bookings</span>
+            <h2>Appointment History</h2>
           </div>
         </div>
         {appointments.length ? (
-          <div className="appointment-list">
-            {appointments.map((appointment) => (
-              <article className="appointment-row" key={appointment.id}>
-            <span className={`status-pill status-pill--${appointment.status}`}>
-                  {appointment.status.replaceAll("_", " ")}
-                </span>
-                <div>
-                  <strong>{appointment.treatment}</strong>
-                  <small>
-                    {appointment.dentist} · {appointment.location}
-                    {appointment.coverageType === "hmo"
-                      ? ` · HMO: ${String(
-                          appointment.hmoVerificationStatus || "pending_verification"
-                        ).replaceAll("_", " ")}`
-                      : ""}
-                  </small>
-                </div>
-                <div>
-                  <strong>{displayDate(appointment.date)}</strong>
-                  <small>{displayTime(appointment.time)}</small>
-                </div>
-                {["confirmed", "pending"].includes(appointment.status) ? (
-                  <button className="icon-button icon-button--danger" onClick={() => cancelAppointment(appointment.id)} aria-label="Cancel appointment">
-                    <X size={17} />
-                  </button>
-                ) : null}
-              </article>
-            ))}
+          <div className="appointment-history__table-wrap">
+            <table className="appointment-history__table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Time</th>
+                  <th>Treatment/Service</th>
+                  <th>Status</th>
+                  <th aria-label="Actions" />
+                </tr>
+              </thead>
+              <tbody>
+                {appointments.map((appointment) => (
+                  <tr key={appointment.id}>
+                    <td>{displayDate(appointment.date)}</td>
+                    <td>{displayTime(appointment.time)}</td>
+                    <td>{appointment.treatment || appointment.service || "—"}</td>
+                    <td>
+                      <span className={`status-pill status-pill--${appointment.status}`}>
+                        {String(appointment.status || "").replaceAll("_", " ")}
+                      </span>
+                    </td>
+                    <td>
+                      {["confirmed", "pending"].includes(appointment.status) ? (
+                        <button
+                          className="icon-button icon-button--danger"
+                          onClick={() => cancelAppointment(appointment.id)}
+                          aria-label="Cancel appointment"
+                          type="button"
+                        >
+                          <X size={17} />
+                        </button>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         ) : (
           <EmptyState

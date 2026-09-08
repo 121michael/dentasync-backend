@@ -244,14 +244,17 @@ function mapAppointment(appointment) {
     return null;
   }
 
+  // Patient-facing appointment payload intentionally omits assigned dentist.
+  // Dentist assignment remains stored internally for staff/dentist workflows.
   return {
     id: appointment.id,
     treatment: appointment.service_name,
-    dentist: appointment.dentist_name,
+    service: appointment.service_name,
     date: normalizeIsoDate(appointment.appointment_date),
     time: normalizeTime(appointment.appointment_time),
     location: appointment.clinic_location,
     coverage: appointment.coverage_type,
+    coverageType: appointment.coverage_type,
     hmoProvider: appointment.hmo_provider,
     hmoCompanyName: appointment.hmo_company_name || null,
     hmoBirthDate: normalizeIsoDate(appointment.hmo_birth_date),

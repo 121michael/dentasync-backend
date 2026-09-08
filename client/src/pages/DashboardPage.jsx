@@ -11,7 +11,6 @@ import {
   MapPin,
   ShieldCheck,
   Sparkles,
-  Stethoscope,
   UsersRound,
 } from "lucide-react";
 import { api } from "../api";
@@ -134,9 +133,6 @@ export function DashboardPage() {
               </span>
               <span>
                 <Clock3 size={17} /> {prettyTime(appointment.time)}
-              </span>
-              <span>
-                <Stethoscope size={17} /> {appointment.dentist}
               </span>
               <span>
                 <MapPin size={17} /> {appointment.location}
