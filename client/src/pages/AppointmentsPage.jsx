@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   CalendarDays,
   Check,
+  ChevronLeft,
   ChevronRight,
   Clock3,
   FileUp,
@@ -16,6 +18,13 @@ const TIME_SLOTS = {
   Morning: ["09:00", "09:30", "10:00", "10:30", "11:00"],
   Afternoon: ["13:00", "13:30", "14:00", "14:30", "15:00"],
   Evening: ["16:00", "16:30", "17:00", "17:30"],
+};
+
+const LEGACY_SERVICE_NAMES = {
+  "Dental Cleaning": "Dental Cleaning / Oral Prophylaxis",
+  "Dental Filling": "Permanent Filling / Restoration",
+  "Root Canal": "Root Canal Treatment",
+  "General Consultation": "Oral Examination / Consultation",
 };
 
 function tomorrow() {
@@ -43,7 +52,7 @@ function displayDate(value) {
   }
 
   return new Intl.DateTimeFormat("en-US", {
-    month: "short",
+    month: "long",
     day: "numeric",
     year: "numeric",
   }).format(date);
@@ -68,13 +77,27 @@ function displayTime(value) {
   }).format(new Date(2026, 0, 1, Number(hours), Number(minutes)));
 }
 
+function displayServiceName(appointment) {
+  const raw = appointment?.treatment || appointment?.service || "";
+  return LEGACY_SERVICE_NAMES[raw] || raw || "Service not recorded";
+}
+
+function displayStatus(status) {
+  return String(status || "pending").replaceAll("_", " ");
+}
+
 export function AppointmentsPage() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const isBooking = location.pathname.endsWith("/book");
+
   const [catalog, setCatalog] = useState(null);
   const [appointments, setAppointments] = useState([]);
   const [dependents, setDependents] = useState([]);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [isBusy, setIsBusy] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const [timePeriod, setTimePeriod] = useState("Morning");
   const [form, setForm] = useState({
     serviceId: "",
@@ -99,10 +122,12 @@ export function AppointmentsPage() {
         api.getDependents().catch(() => ({ dependents: [] })),
       ]);
       setCatalog(catalogResponse);
-      setAppointments(appointmentResponse.appointments);
+      setAppointments(appointmentResponse.appointments || []);
       setDependents(dependentsResponse.dependents || dependentsResponse.items || []);
+      setLoaded(true);
     } catch (loadError) {
       setError(loadError.message);
+      setLoaded(true);
     }
   }, []);
 
@@ -135,7 +160,9 @@ export function AppointmentsPage() {
         forPatientUserId: form.forPatientUserId || undefined,
         authorizationDocumentId,
       });
-      setSuccess(`${response.appointment.treatment} was submitted for ${displayDate(response.appointment.date)}.`);
+      setSuccess(
+        `${response.appointment.treatment} was submitted for ${displayDate(response.appointment.date)}.`
+      );
       setForm((current) => ({
         ...current,
         serviceId: "",
@@ -148,6 +175,7 @@ export function AppointmentsPage() {
       }));
       setAuthorizationFile(null);
       await load();
+      navigate("/appointments");
     } catch (submitError) {
       setError(submitError.message);
     } finally {
@@ -156,7 +184,7 @@ export function AppointmentsPage() {
   }
 
   async function cancelAppointment(appointmentId) {
-    if (!window.confirm("Cancel this confirmed appointment?")) return;
+    if (!window.confirm("Cancel this appointment?")) return;
     setError("");
     try {
       await api.cancelAppointment(appointmentId);
@@ -170,35 +198,126 @@ export function AppointmentsPage() {
     }
   }
 
-  if (error && !catalog) return <ErrorState message={error} onRetry={load} />;
+  if (error && !loaded) return <ErrorState message={error} onRetry={load} />;
+  if (!loaded) return <LoadingState label="Loading appointment history…" />;
+
+  if (!isBooking) {
+    return (
+      <div className="appointments-page">
+        <SectionHeading
+          eyebrow="Your bookings"
+          title="Appointment History"
+          detail="Only appointments you booked appear here — not the service catalog or clinical treatment records."
+        />
+
+        <div className="admin-heading-actions" style={{ marginBottom: "1rem" }}>
+          <button type="button" className="button button--primary" onClick={() => navigate("/appointments/book")}>
+            Book an Appointment <ChevronRight size={18} />
+          </button>
+        </div>
+
+        {error ? <p className="inline-alert inline-alert--error">{error}</p> : null}
+        {success ? (
+          <p className="inline-alert inline-alert--success">
+            <Check size={17} /> {success}
+          </p>
+        ) : null}
+
+        <section className="appointment-history">
+          {appointments.length ? (
+            <div className="appointment-history__cards">
+              {appointments.map((appointment) => (
+                <article key={appointment.id} className="appointment-history-card">
+                  <header className="appointment-history-card__header">
+                    <strong>Appointment</strong>
+                    <span className={`status-pill status-pill--${appointment.status}`}>
+                      {displayStatus(appointment.status)}
+                    </span>
+                  </header>
+                  <dl className="appointment-history-card__details">
+                    <div>
+                      <dt>Date</dt>
+                      <dd>{displayDate(appointment.date)}</dd>
+                    </div>
+                    <div>
+                      <dt>Time</dt>
+                      <dd>{displayTime(appointment.time)}</dd>
+                    </div>
+                    <div className="appointment-history-card__service">
+                      <dt>Service</dt>
+                      <dd>{displayServiceName(appointment)}</dd>
+                    </div>
+                    <div>
+                      <dt>Status</dt>
+                      <dd>{displayStatus(appointment.status)}</dd>
+                    </div>
+                  </dl>
+                  {["confirmed", "pending"].includes(appointment.status) ? (
+                    <button
+                      type="button"
+                      className="button button--secondary button--compact"
+                      onClick={() => cancelAppointment(appointment.id)}
+                    >
+                      <X size={15} /> Cancel appointment
+                    </button>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+          ) : (
+            <EmptyState
+              title="No appointment history yet."
+              detail="Book an appointment to see it listed here with the service you selected."
+              action={
+                <button type="button" className="button button--primary" onClick={() => navigate("/appointments/book")}>
+                  Book an Appointment
+                </button>
+              }
+            />
+          )}
+        </section>
+      </div>
+    );
+  }
+
   if (!catalog) return <LoadingState label="Preparing your booking experience" />;
 
   return (
     <div className="appointments-page">
       <SectionHeading
-        eyebrow="Your time, thoughtfully reserved"
-        title="Book your appointment"
-        detail="Choose your preferred treatment, schedule, and coverage option."
+        eyebrow="Reserve a visit"
+        title="Book an Appointment"
+        detail="Choose a service and schedule. Your selected service will appear later in Appointment History."
       />
 
+      <div className="admin-heading-actions" style={{ marginBottom: "1rem" }}>
+        <button type="button" className="button button--secondary" onClick={() => navigate("/appointments")}>
+          <ChevronLeft size={16} /> Back to Appointment History
+        </button>
+      </div>
+
       <div className="booking-progress" aria-label="Appointment booking progress">
-        {["Treatment", "Schedule", "Patient details", "Confirmation"].map((step, index) => (
+        {["Service", "Schedule", "Coverage", "Confirmation"].map((step, index) => (
           <span key={step} className={index === 0 ? "is-current" : ""}>
             <b>0{index + 1}</b> {step}
           </span>
         ))}
       </div>
 
-      {error && <p className="inline-alert inline-alert--error">{error}</p>}
-      {success && <p className="inline-alert inline-alert--success"><Check size={17} /> {success}</p>}
+      {error ? <p className="inline-alert inline-alert--error">{error}</p> : null}
+      {success ? (
+        <p className="inline-alert inline-alert--success">
+          <Check size={17} /> {success}
+        </p>
+      ) : null}
 
       <form className="booking-layout" onSubmit={confirmAppointment}>
         <div className="booking-form">
           <section className="glass-card booking-section">
             <div className="card-heading">
               <div>
-                <span className="eyebrow">01 — Treatment</span>
-                <h2>Select your care focus</h2>
+                <span className="eyebrow">01 — Service</span>
+                <h2>Select your service</h2>
               </div>
             </div>
             <div className="treatment-grid">
@@ -213,8 +332,6 @@ export function AppointmentsPage() {
                     <Stethoscope size={19} />
                   </span>
                   <strong>{service.name}</strong>
-                  <small>{service.description}</small>
-                  <em>{service.duration}</em>
                 </button>
               ))}
             </div>
@@ -224,18 +341,14 @@ export function AppointmentsPage() {
             <div className="card-heading">
               <div>
                 <span className="eyebrow">02 — Schedule</span>
-                <h2>Find a time that feels right</h2>
+                <h2>Choose date and time</h2>
               </div>
               <CalendarDays className="card-heading__icon" size={21} />
             </div>
             {dependents.length ? (
               <label className="field" style={{ marginBottom: "1rem" }}>
                 <span>Book for</span>
-                <select
-                  name="forPatientUserId"
-                  value={form.forPatientUserId}
-                  onChange={updateForm}
-                >
+                <select name="forPatientUserId" value={form.forPatientUserId} onChange={updateForm}>
                   <option value="">Myself</option>
                   {dependents.map((dependent) => (
                     <option
@@ -324,7 +437,7 @@ export function AppointmentsPage() {
               </label>
             </div>
 
-            {form.coverageType === "hmo" && (
+            {form.coverageType === "hmo" ? (
               <div className="hmo-fields">
                 <div className="field-row">
                   <label className="field">
@@ -365,12 +478,14 @@ export function AppointmentsPage() {
                   />
                 </label>
               </div>
-            )}
+            ) : null}
           </section>
 
           <section className="glass-card booking-section booking-section--notes">
             <label className="field">
-              <span>Anything your care team should know? <small>(optional)</small></span>
+              <span>
+                Anything your care team should know? <small>(optional)</small>
+              </span>
               <textarea
                 name="notes"
                 rows="3"
@@ -386,8 +501,8 @@ export function AppointmentsPage() {
           <span className="eyebrow">04 — Confirmation</span>
           <h2>Your visit summary</h2>
           <div className="booking-summary__line">
-            <span>Treatment</span>
-            <strong>{selectedService?.name || "Select a treatment"}</strong>
+            <span>Service</span>
+            <strong>{selectedService?.name || "Select a service"}</strong>
           </div>
           <div className="booking-summary__line">
             <span>Date</span>
@@ -407,64 +522,9 @@ export function AppointmentsPage() {
           >
             {isBusy ? "Submitting your request…" : "Request appointment"} <ChevronRight size={18} />
           </button>
-          <p>Final treatment recommendations are confirmed by your dental team.</p>
+          <p>The service you select is saved with this appointment and shown in Appointment History.</p>
         </aside>
       </form>
-
-      <section className="appointment-history">
-        <div className="card-heading">
-          <div>
-            <span className="eyebrow">Your bookings</span>
-            <h2>Appointment History</h2>
-          </div>
-        </div>
-        {appointments.length ? (
-          <div className="appointment-history__table-wrap">
-            <table className="appointment-history__table">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Time</th>
-                  <th>Treatment/Service</th>
-                  <th>Status</th>
-                  <th aria-label="Actions" />
-                </tr>
-              </thead>
-              <tbody>
-                {appointments.map((appointment) => (
-                  <tr key={appointment.id}>
-                    <td>{displayDate(appointment.date)}</td>
-                    <td>{displayTime(appointment.time)}</td>
-                    <td>{appointment.treatment || appointment.service || "—"}</td>
-                    <td>
-                      <span className={`status-pill status-pill--${appointment.status}`}>
-                        {String(appointment.status || "").replaceAll("_", " ")}
-                      </span>
-                    </td>
-                    <td>
-                      {["confirmed", "pending"].includes(appointment.status) ? (
-                        <button
-                          className="icon-button icon-button--danger"
-                          onClick={() => cancelAppointment(appointment.id)}
-                          aria-label="Cancel appointment"
-                          type="button"
-                        >
-                          <X size={17} />
-                        </button>
-                      ) : null}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <EmptyState
-            title="Your schedule is open"
-            detail="Choose a treatment above to reserve a premium care visit."
-          />
-        )}
-      </section>
     </div>
   );
 }

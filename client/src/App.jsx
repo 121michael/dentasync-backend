@@ -134,6 +134,7 @@ function PortalRoutes() {
           <Route path="/patient/dashboard" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/appointments" element={<AppointmentsPage />} />
+          <Route path="/appointments/book" element={<AppointmentsPage />} />
           <Route path="/queue" element={<QueuePage />} />
           <Route path="/records" element={<Navigate to="/dashboard" replace />} />
           <Route path="/assistant" element={<ClinicAssistantPage />} />

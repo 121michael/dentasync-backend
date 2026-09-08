@@ -64,7 +64,7 @@ function answerFromCatalog(question, services = []) {
     const name = String(service.name || "").toLowerCase();
     if (name && normalized.includes(name.split(" ")[0])) {
       return {
-        answer: `${service.name}: ${service.description || "Available at Amethyst Dental."} Typical duration: ${service.duration || "varies"}. Book it from Appointments. This is general information only, not a diagnosis.`,
+        answer: `${service.name}: ${service.description || "Available at Amethyst Dental."} Book it from Appointments. This is general information only, not a diagnosis.`,
         source: "catalog",
       };
     }

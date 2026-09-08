@@ -16,61 +16,84 @@ const staffWalkInQr = require("../services/staffWalkInQr");
 const SERVICES = [
   {
     id: "cleaning",
-    name: "Dental Cleaning",
-    description: "A gentle professional cleaning for a healthier, brighter smile.",
-    duration: "45 min",
+    name: "Dental Cleaning / Oral Prophylaxis",
+    description: "Professional cleaning and oral prophylaxis.",
+    durationMinutes: 45,
     estimatedCost: 1500,
   },
   {
     id: "extraction",
     name: "Tooth Extraction",
-    description: "Comfort-focused removal with a personalized aftercare plan.",
-    duration: "60 min",
+    description: "Tooth extraction care.",
+    durationMinutes: 60,
     estimatedCost: 3500,
   },
   {
     id: "filling",
-    name: "Dental Filling",
-    description: "Natural-looking restoration for minor decay or damage.",
-    duration: "45 min",
+    name: "Permanent Filling / Restoration",
+    description: "Permanent filling and restoration.",
+    durationMinutes: 45,
     estimatedCost: 2500,
   },
   {
     id: "root-canal",
-    name: "Root Canal",
-    description: "Specialist care to relieve pain and preserve your natural tooth.",
-    duration: "90 min",
+    name: "Root Canal Treatment",
+    description: "Root canal treatment.",
+    durationMinutes: 90,
     estimatedCost: 12000,
   },
   {
     id: "orthodontic-consultation",
     name: "Orthodontic Consultation",
-    description: "A tailored assessment for alignment and smile planning.",
-    duration: "30 min",
+    description: "Orthodontic consultation.",
+    durationMinutes: 30,
     estimatedCost: 1000,
   },
   {
     id: "whitening",
     name: "Teeth Whitening",
-    description: "Professional whitening for a luminous, confident smile.",
-    duration: "60 min",
+    description: "Professional teeth whitening.",
+    durationMinutes: 60,
     estimatedCost: 8000,
   },
   {
     id: "general-consultation",
-    name: "General Consultation",
-    description: "A complete dental assessment with expert guidance.",
-    duration: "30 min",
+    name: "Oral Examination / Consultation",
+    description: "Oral examination and consultation.",
+    durationMinutes: 30,
     estimatedCost: 800,
   },
   {
     id: "emergency-care",
     name: "Emergency Dental Care",
-    description: "Priority assessment for urgent dental pain or injury.",
-    duration: "45 min",
+    description: "Emergency dental care.",
+    durationMinutes: 45,
     estimatedCost: 2000,
   },
+  {
+    id: "oral-surgery",
+    name: "Oral Surgery",
+    description: "Oral surgery procedures.",
+    durationMinutes: 90,
+    estimatedCost: 15000,
+  },
+  {
+    id: "dentures-bridge-crown",
+    name: "Dentures / Fixed Bridge / Crown",
+    description: "Dentures, fixed bridge, or crown.",
+    durationMinutes: 60,
+    estimatedCost: 10000,
+  },
 ];
+
+/** Patient catalog omits marketing copy and duration display fields. */
+function mapCatalogService(service) {
+  return {
+    id: service.id,
+    name: service.name,
+    estimatedCost: service.estimatedCost,
+  };
+}
 
 const DENTISTS = [
   {
@@ -250,6 +273,7 @@ function mapAppointment(appointment) {
   // Dentist assignment remains stored internally for staff/dentist workflows.
   return {
     id: appointment.id,
+    serviceId: appointment.service_id || null,
     treatment: appointment.service_name,
     service: appointment.service_name,
     date: normalizeIsoDate(appointment.appointment_date),
@@ -316,7 +340,7 @@ function createPatientPortalRouter({
   router.use(authenticateToken, requirePatient);
 
   router.get("/catalog", (_req, res) => {
-    res.json({ services: SERVICES, dentists: DENTISTS });
+    res.json({ services: SERVICES.map(mapCatalogService), dentists: DENTISTS });
   });
 
   router.get("/dashboard", async (req, res) => {

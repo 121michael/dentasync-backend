@@ -153,7 +153,7 @@ export function DashboardPage() {
             <h2>Ready when you are</h2>
             <p>Reserve your next dental visit in a few thoughtful steps.</p>
           </div>
-          <button className="button button--light" onClick={() => navigate("/appointments")}>
+          <button className="button button--light" onClick={() => navigate("/appointments/book")}>
             Book a visit <ArrowRight size={17} />
           </button>
         </section>
@@ -267,7 +267,7 @@ export function DashboardPage() {
           </div>
           <div className="quick-actions">
             {[
-              { label: "Book appointment", detail: "Choose a treatment and time", icon: CalendarDays, to: "/appointments" },
+              { label: "Book appointment", detail: "Choose a service and time", icon: CalendarDays, to: "/appointments/book" },
               { label: "Track live queue", detail: "See your place in line", icon: UsersRound, to: "/queue" },
               { label: "AI Assistant", detail: "Ask questions or attach an X-ray", icon: Sparkles, to: "/assistant" },
               { label: "Contact clinic", detail: "Get help from our care team", icon: ClipboardList, to: "/support" },
