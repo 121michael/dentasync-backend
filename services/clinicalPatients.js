@@ -185,7 +185,7 @@ async function getClinicalRecord(db, recordId) {
      FROM clinic_patient_treatments
      WHERE clinical_record_id = $1
      ORDER BY treatment_date DESC, id DESC
-     LIMIT 50`,
+     LIMIT 250`,
     [recordId]
   );
 
@@ -193,6 +193,98 @@ async function getClinicalRecord(db, recordId) {
     record: mapClinicalRecord(result.rows[0]),
     treatments: treatments.rows.map(mapClinicalTreatment),
   };
+}
+
+async function listLinkedAppointments(db, record, { limit = 50 } = {}) {
+  if (!record) return [];
+  try {
+    const result = await db.query(
+      `SELECT
+         appointment.id,
+         appointment.user_id,
+         appointment.service_name,
+         appointment.dentist_id,
+         appointment.appointment_date,
+         appointment.appointment_time,
+         appointment.clinic_location,
+         appointment.status,
+         appointment.notes,
+         appointment.estimated_cost,
+         appointment.created_at,
+         CONCAT_WS(' ', dentist.first_name, dentist.last_name) AS dentist_name,
+         CONCAT_WS(' ', patient.first_name, patient.last_name) AS patient_name,
+         patient.email AS patient_email,
+         patient.phone AS patient_phone
+       FROM patient_portal_appointments AS appointment
+       LEFT JOIN users AS dentist ON dentist.id::text = appointment.dentist_id::text
+       LEFT JOIN users AS patient ON patient.id::text = appointment.user_id::text
+       WHERE (
+         ($1::text IS NOT NULL AND appointment.user_id::text = $1)
+         OR ($2::text IS NOT NULL AND LOWER(patient.email) = LOWER($2))
+         OR ($3::text IS NOT NULL AND patient.phone = $3)
+         OR ($2::text IS NOT NULL AND LOWER(COALESCE(appointment.notes, '')) LIKE '%' || LOWER($2) || '%')
+       )
+       ORDER BY appointment.appointment_date DESC, appointment.appointment_time DESC
+       LIMIT $4`,
+      [
+        record.linkedUserId ? String(record.linkedUserId) : null,
+        record.email || null,
+        record.phone || null,
+        limit,
+      ]
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      patientId: row.user_id,
+      patientName: row.patient_name || "Patient",
+      patientEmail: row.patient_email || null,
+      patientPhone: row.patient_phone || null,
+      treatment: row.service_name,
+      dentistId: row.dentist_id,
+      dentist: row.dentist_name
+        ? `Dr. ${String(row.dentist_name).replace(/^Dr\.\s*/i, "")}`
+        : null,
+      date: row.appointment_date,
+      time: row.appointment_time,
+      location: row.clinic_location,
+      status: row.status,
+      notes: row.notes || "",
+      estimatedCost: row.estimated_cost === undefined || row.estimated_cost === null
+        ? undefined
+        : Number(row.estimated_cost),
+      createdAt: row.created_at,
+    }));
+  } catch (error) {
+    if (error?.code === "42P01") return [];
+    throw error;
+  }
+}
+
+function resolveNextAppointment(appointments = [], afterDate = null) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const after = afterDate ? new Date(afterDate) : null;
+  if (after && !Number.isNaN(after.getTime())) {
+    after.setHours(0, 0, 0, 0);
+  }
+
+  const upcoming = appointments
+    .filter((appointment) => {
+      const status = String(appointment.status || "").toLowerCase();
+      if (["cancelled", "completed", "no_show", "missed"].includes(status)) return false;
+      const date = new Date(appointment.date);
+      if (Number.isNaN(date.getTime())) return false;
+      date.setHours(0, 0, 0, 0);
+      if (after) return date > after;
+      return date >= today;
+    })
+    .sort((a, b) => {
+      const left = new Date(a.date).getTime() - new Date(b.date).getTime();
+      if (left !== 0) return left;
+      return String(a.time || "").localeCompare(String(b.time || ""));
+    });
+
+  return upcoming[0] || null;
 }
 
 async function createClinicalRecord(db, input, actor = {}) {
@@ -583,6 +675,8 @@ async function linkClinicalRecordsToUser(db, user) {
 module.exports = {
   listClinicalRecords,
   getClinicalRecord,
+  listLinkedAppointments,
+  resolveNextAppointment,
   createClinicalRecord,
   updateClinicalRecord,
   archiveClinicalRecord,

@@ -25,6 +25,19 @@ function formatHistoryDate(value) {
   }).format(date);
 }
 
+function treatmentBalance(treatment) {
+  if (treatment?.balance != null && Number.isFinite(Number(treatment.balance))) {
+    return Number(treatment.balance);
+  }
+  return Math.round((Number(treatment?.amountCharged || 0) - Number(treatment?.amountPaid || 0)) * 100) / 100;
+}
+
+function nextAppointmentLabel(treatment, fallbackAppointment) {
+  const next = treatment?.nextAppointment || fallbackAppointment;
+  if (!next?.date) return "No scheduled appointment";
+  return formatHistoryDate(next.date);
+}
+
 export function AdminPatientRecordsPage() {
   const { pushToast } = useAdminUi();
   const [data, setData] = useState(null);
@@ -73,6 +86,7 @@ export function AdminPatientRecordsPage() {
   const record = detail?.record;
   const appointments = detail?.appointments || [];
   const treatments = detail?.treatments || [];
+  const nextAppointment = detail?.nextAppointment || null;
 
   return (
     <div className="admin-page">
@@ -195,40 +209,67 @@ export function AdminPatientRecordsPage() {
             )}
           </div>
 
-          <h3 className="admin-subheading">Treatment History</h3>
-          <p className="muted-copy">View only. Dentists maintain clinical treatment documentation on this same patient record.</p>
-          <div className="admin-history-list">
-            {treatments.length ? (
-              treatments.map((treatment) => (
-                <article key={treatment.id} className="admin-history-card">
-                  <div className="admin-detail-grid">
-                    <p>
-                      <small>Date</small>
-                      <strong>{formatHistoryDate(treatment.treatmentDate)}</strong>
-                    </p>
-                    <p>
-                      <small>Procedure</small>
-                      <strong>{treatment.treatment}</strong>
-                    </p>
-                    <p>
-                      <small>Amount Charged</small>
-                      <strong>{formatMoney(treatment.amountCharged)}</strong>
-                    </p>
-                    <p>
-                      <small>Amount Paid</small>
-                      <strong>{formatMoney(treatment.amountPaid)}</strong>
-                    </p>
-                  </div>
-                  <small className="muted-copy">
-                    {treatment.dentistName || "—"} · {treatment.status || "—"}
-                    {treatment.toothNumber ? ` · Tooth ${treatment.toothNumber}` : ""}
-                  </small>
-                </article>
-              ))
-            ) : (
-              <p className="muted-copy">No treatments on file.</p>
-            )}
-          </div>
+          <section className="treatment-record treatment-record--readonly">
+            <div className="treatment-record__header">
+              <div>
+                <span className="eyebrow">Shared clinical ledger</span>
+                <h2>Treatment Record</h2>
+              </div>
+            </div>
+            <p className="muted-copy">
+              View only. Dentists maintain clinical treatment documentation on this same patient record.
+            </p>
+
+            <div className="treatment-record__patient">
+              <p>
+                <small>Name</small>
+                <strong>{record.fullName || "—"}</strong>
+              </p>
+              <p>
+                <small>Age</small>
+                <strong>{record.age != null && record.age !== "" ? record.age : "—"}</strong>
+              </p>
+              <p>
+                <small>Gender</small>
+                <strong>{record.gender || "—"}</strong>
+              </p>
+            </div>
+
+            <div className="treatment-record__table-wrap">
+              {treatments.length ? (
+                <table className="treatment-record__table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Tooth No/s</th>
+                      <th>Procedure</th>
+                      <th>Dentist</th>
+                      <th>Amount Charged</th>
+                      <th>Amount Paid</th>
+                      <th>Balance</th>
+                      <th>Next Appt.</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {treatments.map((treatment) => (
+                      <tr key={treatment.id}>
+                        <td>{formatHistoryDate(treatment.treatmentDate)}</td>
+                        <td>{treatment.toothNumber || "—"}</td>
+                        <td>{treatment.treatment || "—"}</td>
+                        <td>{treatment.dentistName || "—"}</td>
+                        <td>{formatMoney(treatment.amountCharged)}</td>
+                        <td>{formatMoney(treatment.amountPaid)}</td>
+                        <td>{formatMoney(treatmentBalance(treatment))}</td>
+                        <td>{nextAppointmentLabel(treatment, nextAppointment)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p className="muted-copy">No treatments on file.</p>
+              )}
+            </div>
+          </section>
         </AdminModal>
       ) : null}
     </div>

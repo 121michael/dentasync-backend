@@ -1010,30 +1010,64 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
       if (!detail || detail.record.archived) {
         return res.status(404).json({ message: "Patient record not found." });
       }
+
+      let appointments = [];
+      try {
+        appointments = await clinicalPatients.listLinkedAppointments(db, detail.record, { limit: 100 });
+      } catch (appointmentError) {
+        console.warn("Dentist clinical appointments lookup failed:", appointmentError.message);
+      }
+
+      const patientNextAppointment = clinicalPatients.resolveNextAppointment(appointments);
+
       return res.json({
         patient: {
           ...detail.record,
           patientName: detail.record.fullName,
+          ageSex:
+            detail.record.age !== null || detail.record.gender
+              ? `${detail.record.age !== null && detail.record.age !== undefined ? `${detail.record.age} yrs` : "—"}${
+                  detail.record.gender ? ` / ${detail.record.gender}` : ""
+                }`
+              : "—",
           accountStatus: detail.record.linkedUserId ? "linked_account" : "clinical_record",
           isClinicalRecord: true,
         },
-        appointments: [],
-        treatments: detail.treatments.map((row) => ({
-          id: row.id,
-          name: row.treatment,
-          treatment: row.treatment,
-          dentist: row.dentistName,
-          date: row.treatmentDate,
-          treatmentDate: row.treatmentDate,
-          status: row.status,
-          notes: row.notes || "",
-          durationMinutes: row.durationMinutes,
-          toothNumber: row.toothNumber,
-          diagnosisNotes: row.diagnosisNotes,
-          procedureDetails: row.procedureDetails,
-          amountCharged: row.amountCharged ?? 0,
-          amountPaid: row.amountPaid ?? 0,
-        })),
+        appointments,
+        nextAppointment: patientNextAppointment,
+        treatments: detail.treatments.map((row) => {
+          const amountCharged = Number(row.amountCharged || 0);
+          const amountPaid = Number(row.amountPaid || 0);
+          const nextAppointment =
+            clinicalPatients.resolveNextAppointment(appointments, row.treatmentDate) || patientNextAppointment;
+          return {
+            id: row.id,
+            name: row.treatment,
+            treatment: row.treatment,
+            dentist: row.dentistName,
+            date: row.treatmentDate,
+            treatmentDate: row.treatmentDate,
+            status: row.status,
+            notes: row.notes || "",
+            durationMinutes: row.durationMinutes,
+            toothNumber: row.toothNumber,
+            diagnosisNotes: row.diagnosisNotes,
+            procedureDetails: row.procedureDetails,
+            amountCharged,
+            amountPaid,
+            balance: Math.round((amountCharged - amountPaid) * 100) / 100,
+            appointmentId: row.appointmentId,
+            nextAppointment: nextAppointment
+              ? {
+                  id: nextAppointment.id,
+                  date: nextAppointment.date,
+                  time: nextAppointment.time,
+                  treatment: nextAppointment.treatment,
+                  status: nextAppointment.status,
+                }
+              : null,
+          };
+        }),
       });
     } catch (error) {
       if (clinicalPatients.isMissingRelation(error)) {
@@ -1441,6 +1475,36 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
         stringValue(req.body?.dentistName, 160) ||
         `Dr. ${`${req.dentist.first_name || ""} ${req.dentist.last_name || ""}`.trim()}`.trim();
 
+      let appointmentId =
+        Number.isSafeInteger(Number(req.body?.appointmentId)) && Number(req.body.appointmentId) > 0
+          ? Number(req.body.appointmentId)
+          : null;
+
+      if (!appointmentId) {
+        try {
+          const detail = await clinicalPatients.getClinicalRecord(db, recordId);
+          if (detail?.record) {
+            const appointments = await clinicalPatients.listLinkedAppointments(db, detail.record, {
+              limit: 100,
+            });
+            const treatmentDate =
+              stringValue(req.body?.treatmentDate, 10) || new Date().toISOString().slice(0, 10);
+            const sameDay = appointments.find((appointment) => {
+              const dateText =
+                typeof appointment.date === "string"
+                  ? appointment.date.slice(0, 10)
+                  : appointment.date
+                    ? new Date(appointment.date).toISOString().slice(0, 10)
+                    : "";
+              return dateText === treatmentDate;
+            });
+            if (sameDay) appointmentId = Number(sameDay.id) || null;
+          }
+        } catch (linkError) {
+          console.warn("Dentist treatment appointment link skipped:", linkError.message);
+        }
+      }
+
       const row = await clinicalPatients.addClinicalTreatment(
         db,
         recordId,
@@ -1458,12 +1522,13 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
           coverageStatus: req.body?.coverageStatus,
           amountCharged: req.body?.amountCharged,
           amountPaid: req.body?.amountPaid,
+          appointmentId,
         },
         { id: req.dentist.id, role: "dentist" }
       );
 
       return res.status(201).json({
-        message: "Treatment recorded successfully.",
+        message: "Treatment record saved successfully.",
         treatment: {
           id: row.id,
           name: row.treatment,
@@ -1479,6 +1544,8 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
           procedureDetails: row.procedureDetails,
           amountCharged: row.amountCharged ?? 0,
           amountPaid: row.amountPaid ?? 0,
+          balance: Math.round((Number(row.amountCharged || 0) - Number(row.amountPaid || 0)) * 100) / 100,
+          appointmentId: row.appointmentId,
         },
       });
     } catch (error) {

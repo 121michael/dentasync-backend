@@ -667,50 +667,39 @@ function createAdminPortalRouter({
 
       let appointments = [];
       try {
-        const appointmentResult = await db.query(
-          `SELECT
-             appointment.id,
-             appointment.user_id,
-             appointment.service_name,
-             appointment.dentist_id,
-             appointment.appointment_date,
-             appointment.appointment_time,
-             appointment.clinic_location,
-             appointment.status,
-             appointment.notes,
-             appointment.estimated_cost,
-             appointment.created_at,
-             CONCAT_WS(' ', dentist.first_name, dentist.last_name) AS dentist_name,
-             CONCAT_WS(' ', patient.first_name, patient.last_name) AS patient_name,
-             patient.email AS patient_email,
-             patient.phone AS patient_phone
-           FROM patient_portal_appointments AS appointment
-           LEFT JOIN users AS dentist ON dentist.id::text = appointment.dentist_id::text
-           LEFT JOIN users AS patient ON patient.id::text = appointment.user_id::text
-           WHERE (
-             ($1::text IS NOT NULL AND appointment.user_id::text = $1)
-             OR ($2::text IS NOT NULL AND LOWER(patient.email) = LOWER($2))
-             OR ($3::text IS NOT NULL AND patient.phone = $3)
-             OR ($2::text IS NOT NULL AND LOWER(appointment.notes) LIKE '%' || LOWER($2) || '%')
-           )
-           ORDER BY appointment.appointment_date DESC, appointment.appointment_time DESC
-           LIMIT 25`,
-          [
-            detail.record.linkedUserId ? String(detail.record.linkedUserId) : null,
-            detail.record.email || null,
-            detail.record.phone || null,
-          ]
-        );
-        appointments = appointmentResult.rows.map(mapAppointment);
+        appointments = await clinicalPatients.listLinkedAppointments(db, detail.record, { limit: 100 });
       } catch (appointmentError) {
-        if (appointmentError?.code !== "42P01") {
-          console.warn("Admin clinical record appointments lookup failed:", appointmentError.message);
-        }
+        console.warn("Admin clinical record appointments lookup failed:", appointmentError.message);
       }
+
+      const patientNextAppointment = clinicalPatients.resolveNextAppointment(appointments);
+      const treatments = (detail.treatments || []).map((row) => {
+        const amountCharged = Number(row.amountCharged || 0);
+        const amountPaid = Number(row.amountPaid || 0);
+        const nextAppointment =
+          clinicalPatients.resolveNextAppointment(appointments, row.treatmentDate) || patientNextAppointment;
+        return {
+          ...row,
+          amountCharged,
+          amountPaid,
+          balance: Math.round((amountCharged - amountPaid) * 100) / 100,
+          nextAppointment: nextAppointment
+            ? {
+                id: nextAppointment.id,
+                date: nextAppointment.date,
+                time: nextAppointment.time,
+                treatment: nextAppointment.treatment,
+                status: nextAppointment.status,
+              }
+            : null,
+        };
+      });
 
       return res.json({
         ...detail,
+        treatments,
         appointments,
+        nextAppointment: patientNextAppointment,
       });
     } catch (error) {
       if (clinicalPatients.isMissingRelation(error)) {
