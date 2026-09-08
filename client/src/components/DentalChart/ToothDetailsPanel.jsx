@@ -11,7 +11,6 @@ export function ToothDetailsPanel({
   draft,
   busy,
   error,
-  readOnly = false,
   onChange,
   onToggleCondition,
   onToggleTreatment,
@@ -24,56 +23,8 @@ export function ToothDetailsPanel({
         <span className="eyebrow">Tooth details</span>
         <h3>Select a tooth</h3>
         <p className="muted-copy">
-          {readOnly
-            ? "Click any FDI tooth to review treatments recorded by the dentist."
-            : "Click any FDI tooth on the chart to record condition, treatment, status, and clinical notes. This is a manual charting tool — not an automatic diagnosis."}
+          Click any FDI tooth on the chart to record condition, treatment, status, and clinical notes. This is a manual charting tool — not an automatic diagnosis.
         </p>
-      </aside>
-    );
-  }
-
-  const treatments = Array.isArray(draft.treatments) ? draft.treatments : [];
-  const treatmentLabels = treatments.map((value) => labelFor(value, TREATMENT_OPTIONS));
-
-  if (readOnly) {
-    return (
-      <aside className="fdi-panel glass-card">
-        <div className="fdi-panel__head">
-          <div>
-            <span className="eyebrow">Dentist chart record</span>
-            <h3>Tooth {toothNumber}</h3>
-          </div>
-          <span className={`status-pill status-pill--${String(draft.status || "healthy").replaceAll("_", "-")}`}>
-            {labelFor(draft.status || "healthy", STATUS_OPTIONS)}
-          </span>
-        </div>
-
-        {error ? <p className="inline-alert inline-alert--error">{error}</p> : null}
-
-        <div className="admin-detail-grid" style={{ marginTop: "0.75rem" }}>
-          <p>
-            <small>Treatment</small>
-            <strong>{treatmentLabels.length ? treatmentLabels.join(", ") : "No dentist treatment recorded"}</strong>
-          </p>
-          <p>
-            <small>Notes</small>
-            <strong>{draft.notes?.trim() ? draft.notes : "—"}</strong>
-          </p>
-        </div>
-
-        <div className="fdi-meta">
-          <small>
-            Last updated:{" "}
-            {draft.updatedAt ? formatDentistDateTime(draft.updatedAt) : "Not saved yet"}
-          </small>
-          <small>Updated by: {draft.updatedBy || draft.createdBy || "—"}</small>
-        </div>
-
-        <div className="fdi-panel__actions">
-          <button type="button" className="button button--secondary" onClick={onCancel}>
-            Close
-          </button>
-        </div>
       </aside>
     );
   }

@@ -5,7 +5,6 @@ import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { AdminModal, AdminStatusBadge } from "../components/AdminUI";
 import { useAdminUi } from "../components/AdminLayout";
 import { formatAdminDate } from "../adminUtils";
-import { DentalChart } from "../components/DentalChart";
 
 function formatMoney(value) {
   return `₱${Number(value || 0).toFixed(2)}`;
@@ -71,6 +70,9 @@ export function AdminPatientRecordsPage() {
   if (!data) return <LoadingState label="Loading clinical patient records…" />;
 
   const records = data.records || [];
+  const record = detail?.record;
+  const appointments = detail?.appointments || [];
+  const treatments = detail?.treatments || [];
 
   return (
     <div className="admin-page">
@@ -80,8 +82,8 @@ export function AdminPatientRecordsPage() {
             <span className="eyebrow">Patient Search Registry Array</span>
             <h2>Patient Records Vault</h2>
             <p>
-              View-only clinical records created by dentists and staff. Administrators can review patient
-              information, treatment history, and the dentist dental chart, but cannot edit clinical data.
+              View-only patient information from the same clinical records used by dentists. Administrators can
+              review details and treatment history, but cannot edit clinical data or access the dental chart.
             </p>
           </div>
         </div>
@@ -126,21 +128,21 @@ export function AdminPatientRecordsPage() {
                 </tr>
               </thead>
               <tbody>
-                {records.map((record) => (
-                  <tr key={record.id}>
-                    <td><code>{record.recordCode || record.id}</code></td>
+                {records.map((item) => (
+                  <tr key={item.id}>
+                    <td><code>{item.recordCode || item.id}</code></td>
                     <td>
-                      <strong>{record.fullName}</strong>
-                      <small>{record.email || "No linked portal account"}</small>
+                      <strong>{item.fullName}</strong>
+                      <small>{item.email || "No linked portal account"}</small>
                     </td>
-                    <td>{record.phone || "—"}</td>
-                    <td>{[record.age ?? "—", record.gender || "—"].join(" / ")}</td>
-                    <td>{record.lastTreatment || "—"}</td>
+                    <td>{item.phone || "—"}</td>
+                    <td>{[item.age ?? "—", item.gender || "—"].join(" / ")}</td>
+                    <td>{item.lastTreatment || "—"}</td>
                     <td>
-                      <AdminStatusBadge status={record.linkedUserId ? "linked_account" : "clinical_record"} />
+                      <AdminStatusBadge status={item.linkedUserId ? "linked_account" : "clinical_record"} />
                     </td>
                     <td>
-                      <button className="button button--secondary button--compact" onClick={() => viewRecord(record)}>
+                      <button className="button button--secondary button--compact" onClick={() => viewRecord(item)}>
                         <Eye size={14} /> View
                       </button>
                     </td>
@@ -157,28 +159,47 @@ export function AdminPatientRecordsPage() {
         )}
       </section>
 
-      {detail ? (
-        <AdminModal title="Clinical patient record" onClose={() => setDetail(null)} wide>
+      {detail && record ? (
+        <AdminModal title="Patient Record" onClose={() => setDetail(null)} wide>
           <div className="admin-detail-grid">
-            <p><small>Name</small><strong>{detail.record.fullName}</strong></p>
-            <p><small>Record code</small><strong>{detail.record.recordCode}</strong></p>
-            <p><small>Email</small><strong>{detail.record.email || "—"}</strong></p>
-            <p><small>Phone</small><strong>{detail.record.phone || "—"}</strong></p>
-            <p><small>Created by</small><strong className="capitalize">{detail.record.createdByRole || "—"}</strong></p>
-            <p><small>Linked account</small><strong>{detail.record.linkedUserId || "None"}</strong></p>
+            <p><small>Patient</small><strong>{record.fullName}</strong></p>
+            <p><small>Patient ID</small><strong>{record.recordCode || record.id}</strong></p>
+            <p><small>Date of Birth</small><strong>{formatHistoryDate(record.dateOfBirth)}</strong></p>
+            <p><small>Sex</small><strong>{record.gender || "—"}</strong></p>
+            <p><small>Contact</small><strong>{record.phone || "—"}</strong></p>
+            <p><small>Email</small><strong>{record.email || "—"}</strong></p>
+            <p><small>Address</small><strong>{record.address || "—"}</strong></p>
+            <p><small>Linked account</small><strong>{record.linkedUserId || "None"}</strong></p>
+            <p><small>Created by</small><strong className="capitalize">{record.createdByRole || "—"}</strong></p>
+            <p><small>Notes</small><strong>{record.notes?.trim() ? record.notes : "—"}</strong></p>
           </div>
 
-          <h3 className="admin-subheading">2D Dental Chart</h3>
-          <p className="muted-copy">
-            Read-only view of the dentist&apos;s saved clinical chart for this same patient record.
-          </p>
-          <DentalChart patientId={detail.record.id} readOnly />
+          <h3 className="admin-subheading">Appointments</h3>
+          <div className="admin-history-list">
+            {appointments.length ? (
+              appointments.map((appointment) => (
+                <article key={appointment.id}>
+                  <div>
+                    <strong>
+                      {formatAdminDate(appointment.date)} · {appointment.time || "—"}
+                    </strong>
+                    <small>
+                      {appointment.treatment || "Appointment"} · {appointment.status || "—"}
+                      {appointment.dentist ? ` · ${appointment.dentist}` : ""}
+                    </small>
+                  </div>
+                </article>
+              ))
+            ) : (
+              <p className="muted-copy">No appointments on file for this patient.</p>
+            )}
+          </div>
 
           <h3 className="admin-subheading">Treatment History</h3>
-          <p className="muted-copy">View only. Dentists maintain clinical treatment documentation.</p>
+          <p className="muted-copy">View only. Dentists maintain clinical treatment documentation on this same patient record.</p>
           <div className="admin-history-list">
-            {(detail.treatments || []).length ? (
-              detail.treatments.map((treatment) => (
+            {treatments.length ? (
+              treatments.map((treatment) => (
                 <article key={treatment.id} className="admin-history-card">
                   <div className="admin-detail-grid">
                     <p>
@@ -201,7 +222,6 @@ export function AdminPatientRecordsPage() {
                   <small className="muted-copy">
                     {treatment.dentistName || "—"} · {treatment.status || "—"}
                     {treatment.toothNumber ? ` · Tooth ${treatment.toothNumber}` : ""}
-                    {treatment.appointmentId ? ` · Appointment ${treatment.appointmentId}` : ""}
                   </small>
                 </article>
               ))

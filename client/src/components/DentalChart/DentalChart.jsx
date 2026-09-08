@@ -22,7 +22,7 @@ const VIEW = { width: 860, height: 680 };
 const UPPER_ARCH = { cx: VIEW.width / 2, cy: 208, rx: 232, ry: 138 };
 const LOWER_ARCH = { cx: VIEW.width / 2, cy: 462, rx: 232, ry: 138 };
 
-export function DentalChart({ patientId, dentistName, onTreatmentRecorded, readOnly = false }) {
+export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
   const [chart, setChart] = useState(null);
   const [loadError, setLoadError] = useState("");
   const [saveError, setSaveError] = useState("");
@@ -35,9 +35,7 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded, readO
     if (!patientId) return;
     setLoadError("");
     try {
-      const response = readOnly
-        ? await api.getAdminClinicalDentalChart(patientId)
-        : await api.getDentistDentalChart(patientId);
+      const response = await api.getDentistDentalChart(patientId);
       const next = buildDefaultChart();
       for (const entry of response.entries || response.chart || []) {
         const normalized = normalizeChartEntry(entry);
@@ -47,12 +45,7 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded, readO
       }
       setChart(next);
     } catch (error) {
-      setLoadError(
-        error.message ||
-          (readOnly
-            ? "Dental chart information is currently unavailable."
-            : "Unable to load dental chart.")
-      );
+      setLoadError(error.message || "Unable to load dental chart.");
       setChart(null);
     }
   }
@@ -65,7 +58,7 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded, readO
     setChart(null);
     loadChart();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [patientId, readOnly]);
+  }, [patientId]);
 
   const upperPositions = useMemo(
     () =>
@@ -121,7 +114,7 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded, readO
   }
 
   async function saveTooth() {
-    if (readOnly || !patientId || !selectedTooth || !draft) return;
+    if (!patientId || !selectedTooth || !draft) return;
     setBusy(true);
     setSaveError("");
     setSuccess("");
@@ -211,12 +204,10 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded, readO
         <div className="fdi-chart-canvas glass-card">
           <div className="fdi-chart-canvas__head">
             <div>
-              <span className="eyebrow">{readOnly ? "Dentist clinical chart" : "Interactive FDI chart"}</span>
+              <span className="eyebrow">Interactive FDI chart</span>
               <h2>2D Dental Chart</h2>
               <p className="muted-copy">
-                {readOnly
-                  ? "Read-only view of teeth and treatments recorded by the dentist. Click a tooth to review treatment details."
-                  : "Manual clinical charting. Click a tooth to record status, condition, treatment, and notes."}
+                Manual clinical charting. Click a tooth to record status, condition, treatment, and notes.
               </p>
             </div>
             <small className="fdi-chart-count">
@@ -326,21 +317,11 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded, readO
           </div>
 
           <div className="fdi-legend">
-            {readOnly ? (
-              <>
-                <span className="fdi-legend__item fdi-legend__item--healthy">No treatment</span>
-                <span className="fdi-legend__item fdi-legend__item--treated">Treatment recorded</span>
-                <span className="fdi-legend__item fdi-legend__item--missing">Missing</span>
-              </>
-            ) : (
-              <>
-                <span className="fdi-legend__item fdi-legend__item--healthy">Healthy</span>
-                <span className="fdi-legend__item fdi-legend__item--decay">Decay / Attention</span>
-                <span className="fdi-legend__item fdi-legend__item--treated">Treated</span>
-                <span className="fdi-legend__item fdi-legend__item--under_treatment">Under Treatment</span>
-                <span className="fdi-legend__item fdi-legend__item--missing">Missing</span>
-              </>
-            )}
+            <span className="fdi-legend__item fdi-legend__item--healthy">Healthy</span>
+            <span className="fdi-legend__item fdi-legend__item--decay">Decay / Attention</span>
+            <span className="fdi-legend__item fdi-legend__item--treated">Treated</span>
+            <span className="fdi-legend__item fdi-legend__item--under_treatment">Under Treatment</span>
+            <span className="fdi-legend__item fdi-legend__item--missing">Missing</span>
           </div>
         </div>
 
@@ -349,7 +330,6 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded, readO
           draft={draft}
           busy={busy}
           error={saveError}
-          readOnly={readOnly}
           onChange={updateDraft}
           onToggleCondition={(value) => toggleListValue("condition", value)}
           onToggleTreatment={(value) => toggleListValue("treatments", value)}
