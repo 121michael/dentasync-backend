@@ -352,17 +352,6 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
           req.file.originalname
         );
 
-        const notes = [
-          extraction.extractionNotes,
-          extraction.fieldStatuses
-            ? `Field detection: ${Object.entries(extraction.fieldStatuses)
-                .map(([key, status]) => `${key}=${status}`)
-                .join(", ")}`
-            : null,
-        ]
-          .filter(Boolean)
-          .join(" ");
-
         const updated = await db.query(
           `UPDATE admin_portal_document_sync_jobs
            SET status = 'extracted',
@@ -373,7 +362,7 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
                updated_at = CURRENT_TIMESTAMP
            WHERE id = $4
            RETURNING *`,
-          [extraction.rawText, JSON.stringify(extraction.payload), notes, jobId]
+          [extraction.rawText, JSON.stringify(extraction.payload), extraction.extractionNotes, jobId]
         );
 
         await writeAdminAudit(db, {
