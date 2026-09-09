@@ -46,7 +46,16 @@ function scoreDocumentText(text) {
 
 function countFilledFields(fields) {
   if (!fields || typeof fields !== "object") return 0;
-  return Object.values(fields).filter((value) => String(value || "").trim()).length;
+  return ["fullName", "procedure", "treatmentDate", "amountCharged", "age", "phone"].filter((key) => {
+    const text = String(fields[key] || "").trim();
+    if (!text) return false;
+    if (key === "phone") {
+      const digits = text.replace(/\D/g, "");
+      if (!/^(0\d{10}|9\d{9}|63\d{10})$/.test(digits)) return false;
+    }
+    if (/^date of birth|^amount|^procedure|^treatment/i.test(text)) return false;
+    return true;
+  }).length;
 }
 
 function resultQuality(result) {

@@ -185,8 +185,17 @@ def extract_amount(items: list[dict[str, Any]], text: str) -> str:
 
 
 def extract_phone(value: str, text: str) -> str:
-    candidates = []
-    for source in [value or "", text or ""]:
+    labeled = re.search(
+        r"(?:phone|mobile|cellphone|cell\s*phone|telephone|tel\.?)\s*[:\-]?\s*([+\d()\[\]\-\s]{10,20})",
+        text or "",
+        flags=re.I,
+    )
+    sources = []
+    if labeled:
+        sources.append(labeled.group(1))
+    if value:
+        sources.append(value)
+    for source in sources:
         repaired = (
             source.lower()
             .replace("o", "0")
@@ -195,13 +204,12 @@ def extract_phone(value: str, text: str) -> str:
             .replace("s", "5")
             .replace("b", "8")
         )
-        candidates.extend(re.findall(r"0?9\d{9}", re.sub(r"\D", "", repaired)))
-        candidates.extend(re.findall(r"0?9[\d\s\-.]{9,16}", source))
-    for candidate in candidates:
-        digits = re.sub(r"\D", "", candidate)
+        digits = re.sub(r"\D", "", repaired)
         if re.fullmatch(r"0\d{10}", digits) or re.fullmatch(r"9\d{9}", digits):
             return digits if digits.startswith("0") else f"0{digits}"
-    return clean_value(value)
+        if re.fullmatch(r"63\d{10}", digits):
+            return f"0{digits[2:]}"
+    return ""
 
 
 def extract_age(value: str) -> str:

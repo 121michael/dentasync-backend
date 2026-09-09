@@ -367,18 +367,12 @@ function inferProcedure(text) {
 }
 
 function extractPhoneFromText(text) {
-  // Only accept clearly labeled or unambiguous PH mobile numbers — avoid OCR noise digits.
+  // Only accept mobiles next to an explicit phone label — OCR noise invents digit runs.
   const labeled = String(text || "").match(
     /(?:phone|mobile|cellphone|cell\s*phone|telephone|tel\.?)\s*[:\-]?\s*([+\d()[\]\-\s]{10,20})/i
   );
   if (labeled?.[1]) {
-    const normalized = normalizePhone(labeled[1]);
-    if (normalized) return normalized;
-  }
-  const candidates = String(text || "").match(/\b0?9\d{9}\b/g) || [];
-  for (const candidate of candidates) {
-    const normalized = normalizePhone(candidate);
-    if (normalized) return normalized;
+    return normalizePhone(labeled[1]);
   }
   return "";
 }
