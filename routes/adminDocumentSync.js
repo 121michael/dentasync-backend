@@ -116,6 +116,11 @@ function sanitizePayload(input) {
   }
 
   return {
+    documentForm:
+      input?.documentForm === "treatment_record" ||
+      (Array.isArray(procedure.visits) && procedure.visits.length > 0 && /treatment|tooth/i.test(JSON.stringify(procedure.visits)))
+        ? "treatment_record"
+        : stringValue(input?.documentForm, 40) || "generic",
     patient: {
       firstName,
       lastName,
@@ -130,8 +135,14 @@ function sanitizePayload(input) {
     procedure: {
       treatment: stringValue(procedure.treatment, 180) || "",
       dentistName: stringValue(procedure.dentistName, 120) || "",
-      treatmentDate: normalizeDate(procedure.treatmentDate || "") || "",
-      amountCharged: normalizeAmount(procedure.amountCharged || "") || "",
+      treatmentDate:
+        normalizeDate(procedure.treatmentDate || "") ||
+        stringValue(procedure.treatmentDate, 40) ||
+        "",
+      amountCharged:
+        stringValue(String(procedure.amountCharged ?? ""), 40) ||
+        normalizeAmount(procedure.amountCharged || "") ||
+        "",
       clinicLocation: stringValue(procedure.clinicLocation, 180) || "Amethyst Dental Clinic",
       status: ["planned", "in_progress", "completed"].includes(String(procedure.status || "").toLowerCase())
         ? String(procedure.status).toLowerCase()
@@ -140,17 +151,14 @@ function sanitizePayload(input) {
       coverageStatus: stringValue(procedure.coverageStatus, 120) || "",
       visits: Array.isArray(procedure.visits)
         ? procedure.visits.slice(0, 80).map((row) => ({
-            treatmentDate: normalizeDate(row?.treatmentDate || row?.date || "") || "",
+            treatmentDate: stringValue(row?.treatmentDate || row?.date || "", 40) || "",
             toothNos: stringValue(row?.toothNos || row?.toothNumber || "", 40) || "",
             treatment: stringValue(row?.treatment || row?.procedure || "", 180) || "",
             dentistName: stringValue(row?.dentistName || row?.dentist || "", 120) || "",
-            amountCharged: normalizeAmount(row?.amountCharged || row?.amount || "") || "",
-            amountPaid: normalizeAmount(row?.amountPaid || "") || "",
-            balance: normalizeAmount(row?.balance || "") || "",
-            nextAppt:
-              normalizeDate(row?.nextAppt || row?.nextAppointment || "") ||
-              stringValue(row?.nextAppt || "", 40) ||
-              "",
+            amountCharged: stringValue(String(row?.amountCharged ?? row?.amount ?? ""), 40) || "",
+            amountPaid: stringValue(String(row?.amountPaid ?? ""), 40) || "",
+            balance: stringValue(String(row?.balance ?? ""), 40) || "",
+            nextAppt: stringValue(row?.nextAppt || row?.nextAppointment || "", 40) || "",
           }))
         : [],
     },
@@ -576,7 +584,8 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
         await client.query("ROLLBACK");
         transactionOpen = false;
         return res.status(400).json({
-          message: "Patient full name is required before saving. Correct the extracted fields first.",
+          message:
+            "Patient name is required before saving. Enter the Name from the document (or type it if the line was blank), then try again.",
         });
       }
       if (patient.dateOfBirth && !isIsoDate(patient.dateOfBirth)) {
@@ -584,18 +593,37 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
         transactionOpen = false;
         return res.status(400).json({ message: "Provide a valid patient date of birth (YYYY-MM-DD)." });
       }
-      if (procedure.treatmentDate && !isIsoDate(procedure.treatmentDate)) {
+
+      const visitRows = Array.isArray(procedure.visits)
+        ? procedure.visits.filter((row) => stringValue(row?.treatment, 180))
+        : [];
+      const hasVisitTable = visitRows.length > 0;
+
+      if (!hasVisitTable && procedure.treatmentDate && !isIsoDate(procedure.treatmentDate) && !normalizeDate(procedure.treatmentDate)) {
         await client.query("ROLLBACK");
         transactionOpen = false;
-        return res.status(400).json({ message: "Provide a valid treatment date (YYYY-MM-DD)." });
+        return res.status(400).json({ message: "Provide a valid treatment date from the document." });
       }
-      if (procedure.treatment && !procedure.treatmentDate) {
+      if (!hasVisitTable && procedure.treatment && !(normalizeDate(procedure.treatmentDate) || isIsoDate(procedure.treatmentDate))) {
         await client.query("ROLLBACK");
         transactionOpen = false;
         return res.status(400).json({
           message:
-            "Treatment date is required when a procedure is present. Use the date from the document, not today's booking date.",
+            "Treatment date is required when a procedure is present. Use the date written on the document.",
         });
+      }
+      if (hasVisitTable) {
+        for (const row of visitRows) {
+          const iso = normalizeDate(row.treatmentDate) || (isIsoDate(row.treatmentDate) ? row.treatmentDate : "");
+          if (!iso) {
+            await client.query("ROLLBACK");
+            transactionOpen = false;
+            return res.status(400).json({
+              message:
+                "Each treatment row with a Procedure needs a readable Date from the document (or correct the OCR date before saving).",
+            });
+          }
+        }
       }
 
       const match = await findMatchingClinicalPatient(client, patient);
@@ -655,15 +683,58 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
       }
 
       let treatment = null;
-      if (procedure.treatment) {
-        const treatmentNotes = [
-          procedure.notes || null,
-          "Imported via Admin Document Data Extraction",
-          patient.age ? `Patient age on document: ${patient.age}` : null,
-        ]
-          .filter(Boolean)
-          .join(". ");
+      const savedTreatments = [];
+      let skippedDuplicates = 0;
 
+      if (hasVisitTable) {
+        for (const row of visitRows) {
+          const iso = normalizeDate(row.treatmentDate) || row.treatmentDate;
+          const amountCharged = row.amountCharged || 0;
+          const amountPaid = row.amountPaid || 0;
+          const dup = await client.query(
+            `SELECT id
+             FROM clinic_patient_treatments
+             WHERE clinical_record_id = $1
+               AND treatment_date = $2::date
+               AND LOWER(TRIM(treatment)) = LOWER(TRIM($3))
+               AND COALESCE(amount_charged, 0) = COALESCE($4::numeric, 0)
+             LIMIT 1`,
+            [clinicalRecordId, iso, row.treatment, String(amountCharged).replace(/,/g, "") || "0"]
+          );
+          if (dup.rows.length) {
+            skippedDuplicates += 1;
+            continue;
+          }
+          const rowNotes = [
+            row.balance ? `Balance: ${row.balance}` : null,
+            row.nextAppt ? `Next Appt.: ${row.nextAppt}` : null,
+          ]
+            .filter(Boolean)
+            .join(". ");
+          const createdTreatment = await clinicalPatients.addClinicalTreatment(
+            client,
+            clinicalRecordId,
+            {
+              treatment: row.treatment,
+              dentistName: row.dentistName || "",
+              clinicLocation: procedure.clinicLocation || "Amethyst Dental Clinic",
+              coverageStatus: "",
+              status: "completed",
+              treatmentDate: iso,
+              toothNumber: row.toothNos || "",
+              amountCharged,
+              amountPaid,
+              notes: rowNotes || "",
+            },
+            { id: req.admin.id, role: "admin-sync" }
+          );
+          savedTreatments.push(createdTreatment);
+        }
+        treatment = savedTreatments[0] || null;
+      } else if (procedure.treatment) {
+        const iso =
+          normalizeDate(procedure.treatmentDate) ||
+          (isIsoDate(procedure.treatmentDate) ? procedure.treatmentDate : "");
         treatment = await clinicalPatients.addClinicalTreatment(
           client,
           clinicalRecordId,
@@ -673,12 +744,13 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
             clinicLocation: procedure.clinicLocation || "Amethyst Dental Clinic",
             coverageStatus: procedure.coverageStatus,
             status: procedure.status || "completed",
-            treatmentDate: procedure.treatmentDate,
+            treatmentDate: iso,
             amountCharged: procedure.amountCharged || 0,
-            notes: treatmentNotes,
+            notes: procedure.notes || "",
           },
           { id: req.admin.id, role: "admin-sync" }
         );
+        savedTreatments.push(treatment);
       }
 
       const tempStoredName = job.stored_name;
@@ -711,8 +783,10 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
         [
           String(req.admin.id),
           `Document import saved for ${patient.firstName} ${patient.lastName}${
-            procedure.treatment ? ` (${procedure.treatment})` : ""
-          }. Source document discarded.`,
+            savedTreatments.length
+              ? ` (${savedTreatments.length} treatment row${savedTreatments.length === 1 ? "" : "s"})`
+              : ""
+          }${skippedDuplicates ? `; skipped ${skippedDuplicates} duplicate row(s)` : ""}. Source document discarded.`,
         ]
       );
 
@@ -734,7 +808,8 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
           `Result: Successful`,
           `Patient: ${clinicalRecordId}`,
           createdNewPatient ? "Created new patient record" : "Updated existing patient record",
-          treatment?.id ? `Treatment: ${treatment.id}` : "No treatment row (patient info only)",
+          treatment?.id ? `Treatments saved: ${savedTreatments.length}` : "No treatment row (patient info only)",
+          skippedDuplicates ? `Duplicates skipped: ${skippedDuplicates}` : null,
           match.matchReason ? `Match: ${match.matchReason}` : null,
           "Temporary source document deleted; only structured data retained",
         ]

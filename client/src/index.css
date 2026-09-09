@@ -3789,6 +3789,19 @@ strong {
   margin: 0;
   letter-spacing: .04em;
 }
+.treatment-record--sync .treatment-record__meta {
+  margin-bottom: .35rem;
+}
+.field-grid--three {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, .6fr) minmax(0, .8fr);
+  gap: .75rem;
+}
+@media (max-width: 900px) {
+  .field-grid--three {
+    grid-template-columns: 1fr;
+  }
+}
 .treatment-record--sync .treatment-record__table input {
   width: 100%;
   min-width: 0;

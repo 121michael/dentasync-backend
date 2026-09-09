@@ -5,7 +5,21 @@ import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { useAdminUi } from "../components/AdminLayout";
 import { formatAdminDateTime } from "../adminUtils";
 
+function emptyVisitRow() {
+  return {
+    treatmentDate: "",
+    toothNos: "",
+    treatment: "",
+    dentistName: "",
+    amountCharged: "",
+    amountPaid: "",
+    balance: "",
+    nextAppt: "",
+  };
+}
+
 const emptyPayload = {
+  documentForm: "generic",
   patient: {
     firstName: "",
     lastName: "",
@@ -30,40 +44,22 @@ const emptyPayload = {
   },
 };
 
-function emptyVisitRow() {
-  return {
-    treatmentDate: "",
-    toothNos: "",
-    treatment: "",
-    dentistName: "",
-    amountCharged: "",
-    amountPaid: "",
-    balance: "",
-    nextAppt: "",
-  };
-}
-
-function formatVisitAmount(value) {
-  if (value === null || value === undefined || value === "") return "";
-  const amount = Number(value);
-  if (!Number.isFinite(amount)) return String(value);
-  return amount.toLocaleString("en-PH", { maximumFractionDigits: 2 });
-}
-
-function placeholderFor(value, emptyLabel = "Not detected") {
+function placeholderFor(value, emptyLabel = "Unreadable") {
   return value ? undefined : emptyLabel;
 }
 
 function normalizePayload(input) {
   const next = input && typeof input === "object" ? input : {};
+  const visits = Array.isArray(next.procedure?.visits) ? next.procedure.visits : [];
   return {
     ...emptyPayload,
     ...next,
+    documentForm: next.documentForm || emptyPayload.documentForm,
     patient: { ...emptyPayload.patient, ...(next.patient || {}) },
     procedure: {
       ...emptyPayload.procedure,
       ...(next.procedure || {}),
-      visits: Array.isArray(next.procedure?.visits) ? next.procedure.visits : [],
+      visits: visits.length ? visits : [emptyVisitRow()],
     },
   };
 }
@@ -316,17 +312,24 @@ export function AdminSyncPage() {
       setEditing(true);
       const filled = [
         nextPayload?.patient?.fullName,
-        nextPayload?.patient?.phone,
         nextPayload?.patient?.age,
-        nextPayload?.patient?.dateOfBirth,
-        nextPayload?.procedure?.treatment,
-        nextPayload?.procedure?.treatmentDate,
-        nextPayload?.procedure?.amountCharged,
+        nextPayload?.patient?.gender,
+        ...((nextPayload?.procedure?.visits || []).flatMap((row) => [
+          row?.treatmentDate,
+          row?.treatment,
+          row?.amountCharged,
+          row?.toothNos,
+          row?.dentistName,
+          row?.amountPaid,
+          row?.balance,
+          row?.nextAppt,
+        ]) || []),
       ].filter((value) => String(value || "").trim()).length;
       const autoMessage =
         filled > 0
-          ? `Document detected — auto-filled ${filled} field${filled === 1 ? "" : "s"}. Review, then Confirm & Save.`
-          : response.message || "Document detected. Enter readable fields from the preview, then Confirm & Save.";
+          ? `Document table copied — ${filled} readable value${filled === 1 ? "" : "s"} filled. Correct OCR mistakes, then Confirm & Save.`
+          : response.message ||
+            "Document detected. Copy values from the preview into the table, then Confirm & Save.";
       setMessage(autoMessage);
       setStep("review");
       pushToast(autoMessage);
@@ -642,7 +645,8 @@ export function AdminSyncPage() {
               </span>
               <h2>{step === "done" ? "Document successfully imported" : "Review & confirm"}</h2>
               <p>
-                Values were filled automatically from the document. Correct anything wrong in the fields, then confirm.
+                The table below is copied from the scanned/attached document. Fix OCR mistakes in the cells, then
+                confirm. Blank cells stay blank.
               </p>
               <small className="muted-copy">
                 Source: {activeJob.sourceLabel || activeJob.sourceType} · {activeJob.originalName}
@@ -669,117 +673,45 @@ export function AdminSyncPage() {
             </div>
 
             <div className="admin-doc-fields">
-              <h3>Extracted information</h3>
-              <div className="field-grid field-grid--two">
-                <label className="field field--full">
-                  <span>Full Name</span>
-                  <input
-                    value={payload.patient.fullName}
-                    placeholder={placeholderFor(payload.patient.fullName)}
-                    disabled={!editing || activeJob.status === "synced"}
-                    onChange={(event) => updatePatient("fullName", event.target.value)}
-                  />
-                </label>
-                <label className="field">
-                  <span>Date of Birth</span>
-                  <input
-                    type="date"
-                    value={payload.patient.dateOfBirth}
-                    disabled={!editing || activeJob.status === "synced"}
-                    onChange={(event) => updatePatient("dateOfBirth", event.target.value)}
-                  />
-                </label>
-                <label className="field">
-                  <span>Age</span>
-                  <input
-                    value={payload.patient.age}
-                    placeholder={placeholderFor(payload.patient.age)}
-                    disabled={!editing || activeJob.status === "synced"}
-                    onChange={(event) => updatePatient("age", event.target.value)}
-                  />
-                </label>
-                <label className="field">
-                  <span>Cellphone Number</span>
-                  <input
-                    value={payload.patient.phone}
-                    placeholder={placeholderFor(payload.patient.phone)}
-                    disabled={!editing || activeJob.status === "synced"}
-                    onChange={(event) => updatePatient("phone", event.target.value)}
-                  />
-                </label>
-                <label className="field">
-                  <span>Email</span>
-                  <input
-                    type="email"
-                    value={payload.patient.email}
-                    placeholder={placeholderFor(payload.patient.email)}
-                    disabled={!editing || activeJob.status === "synced"}
-                    onChange={(event) => updatePatient("email", event.target.value)}
-                  />
-                </label>
-                <label className="field field--full">
-                  <span>Procedure</span>
-                  <input
-                    value={payload.procedure.treatment}
-                    placeholder={placeholderFor(payload.procedure.treatment, "Unable to read")}
-                    disabled={!editing || activeJob.status === "synced"}
-                    onChange={(event) => updateProcedure("treatment", event.target.value)}
-                  />
-                </label>
-                <label className="field">
-                  <span>Treatment Date</span>
-                  <input
-                    type="date"
-                    value={payload.procedure.treatmentDate}
-                    disabled={!editing || activeJob.status === "synced"}
-                    onChange={(event) => updateProcedure("treatmentDate", event.target.value)}
-                  />
-                </label>
-                <label className="field">
-                  <span>Amount</span>
-                  <input
-                    value={payload.procedure.amountCharged}
-                    placeholder={placeholderFor(payload.procedure.amountCharged)}
-                    disabled={!editing || activeJob.status === "synced"}
-                    onChange={(event) => updateProcedure("amountCharged", event.target.value)}
-                  />
-                </label>
-                <label className="field">
-                  <span>Dentist</span>
-                  <input
-                    value={payload.procedure.dentistName}
-                    placeholder={placeholderFor(payload.procedure.dentistName)}
-                    disabled={!editing || activeJob.status === "synced"}
-                    onChange={(event) => updateProcedure("dentistName", event.target.value)}
-                  />
-                </label>
-                <label className="field">
-                  <span>Coverage</span>
-                  <input
-                    value={payload.procedure.coverageStatus}
-                    placeholder={placeholderFor(payload.procedure.coverageStatus)}
-                    disabled={!editing || activeJob.status === "synced"}
-                    onChange={(event) => updateProcedure("coverageStatus", event.target.value)}
-                  />
-                </label>
-                <label className="field field--full">
-                  <span>Notes</span>
-                  <textarea
-                    rows="3"
-                    value={payload.procedure.notes}
-                    placeholder={placeholderFor(payload.procedure.notes)}
-                    disabled={!editing || activeJob.status === "synced"}
-                    onChange={(event) => updateProcedure("notes", event.target.value)}
-                  />
-                </label>
-              </div>
+              <h3>Document table</h3>
+              <p className="muted-copy">
+                Copied from the scan/attachment. Edit a cell only to fix OCR mistakes. Leave blank cells blank — do not
+                invent values.
+              </p>
 
               <div className="treatment-record treatment-record--sync">
+                <div className="treatment-record__meta field-grid field-grid--three">
+                  <label className="field">
+                    <span>Name</span>
+                    <input
+                      value={payload.patient.fullName}
+                      placeholder={placeholderFor(payload.patient.fullName, "")}
+                      disabled={!editing || activeJob.status === "synced"}
+                      onChange={(event) => updatePatient("fullName", event.target.value)}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Age</span>
+                    <input
+                      value={payload.patient.age}
+                      placeholder={placeholderFor(payload.patient.age, "")}
+                      disabled={!editing || activeJob.status === "synced"}
+                      onChange={(event) => updatePatient("age", event.target.value)}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Gender</span>
+                    <input
+                      value={payload.patient.gender}
+                      placeholder={placeholderFor(payload.patient.gender, "")}
+                      disabled={!editing || activeJob.status === "synced"}
+                      onChange={(event) => updatePatient("gender", event.target.value)}
+                    />
+                  </label>
+                </div>
+
                 <div className="treatment-record__heading">
                   <h4>TREATMENT RECORD</h4>
-                  <p className="muted-copy">
-                    Paper table replica — Date, Tooth No./s, Procedure, Dentist/s, Amount charged, Amount Paid, Balance, Next Appt.
-                  </p>
                 </div>
                 <div className="treatment-record__table-wrap">
                   <table className="treatment-record__table">
@@ -789,98 +721,88 @@ export function AdminSyncPage() {
                         <th>Tooth No./s</th>
                         <th>Procedure</th>
                         <th>Dentist/s</th>
-                        <th>Amount charged</th>
+                        <th>Amount Charged</th>
                         <th>Amount Paid</th>
                         <th>Balance</th>
                         <th>Next Appt.</th>
-                        {editing && activeJob.status !== "synced" ? <th /> : null}
+                        {editing && activeJob.status !== "synced" ? <th aria-label="Row actions" /> : null}
                       </tr>
                     </thead>
                     <tbody>
-                      {(payload.procedure.visits || []).length ? (
-                        (payload.procedure.visits || []).map((visit, index) => (
-                          <tr key={`visit-${index}`}>
-                            <td>
-                              <input
-                                type="date"
-                                value={visit.treatmentDate || ""}
-                                disabled={!editing || activeJob.status === "synced"}
-                                onChange={(event) => updateVisit(index, "treatmentDate", event.target.value)}
-                              />
-                            </td>
-                            <td>
-                              <input
-                                value={visit.toothNos || ""}
-                                disabled={!editing || activeJob.status === "synced"}
-                                onChange={(event) => updateVisit(index, "toothNos", event.target.value)}
-                              />
-                            </td>
-                            <td>
-                              <input
-                                value={visit.treatment || ""}
-                                disabled={!editing || activeJob.status === "synced"}
-                                onChange={(event) => updateVisit(index, "treatment", event.target.value)}
-                              />
-                            </td>
-                            <td>
-                              <input
-                                value={visit.dentistName || ""}
-                                disabled={!editing || activeJob.status === "synced"}
-                                onChange={(event) => updateVisit(index, "dentistName", event.target.value)}
-                              />
-                            </td>
-                            <td>
-                              <input
-                                value={visit.amountCharged || ""}
-                                placeholder={formatVisitAmount(visit.amountCharged)}
-                                disabled={!editing || activeJob.status === "synced"}
-                                onChange={(event) => updateVisit(index, "amountCharged", event.target.value)}
-                              />
-                            </td>
-                            <td>
-                              <input
-                                value={visit.amountPaid || ""}
-                                disabled={!editing || activeJob.status === "synced"}
-                                onChange={(event) => updateVisit(index, "amountPaid", event.target.value)}
-                              />
-                            </td>
-                            <td>
-                              <input
-                                value={visit.balance || ""}
-                                disabled={!editing || activeJob.status === "synced"}
-                                onChange={(event) => updateVisit(index, "balance", event.target.value)}
-                              />
-                            </td>
-                            <td>
-                              <input
-                                value={visit.nextAppt || ""}
-                                disabled={!editing || activeJob.status === "synced"}
-                                onChange={(event) => updateVisit(index, "nextAppt", event.target.value)}
-                              />
-                            </td>
-                            {editing && activeJob.status !== "synced" ? (
-                              <td>
-                                <button type="button" className="text-link" onClick={() => removeVisitRow(index)}>
-                                  Remove
-                                </button>
-                              </td>
-                            ) : null}
-                          </tr>
-                        ))
-                      ) : (
-                        <tr>
-                          <td colSpan={editing && activeJob.status !== "synced" ? 9 : 8} className="muted-copy">
-                            No visit rows detected from the scan yet. Add rows to match the paper table, or keep using the
-                            primary Procedure / Date / Amount fields above.
+                      {(payload.procedure.visits || [emptyVisitRow()]).map((visit, index) => (
+                        <tr key={`visit-${index}`}>
+                          <td>
+                            <input
+                              value={visit.treatmentDate || ""}
+                              placeholder=""
+                              disabled={!editing || activeJob.status === "synced"}
+                              onChange={(event) => updateVisit(index, "treatmentDate", event.target.value)}
+                            />
                           </td>
+                          <td>
+                            <input
+                              value={visit.toothNos || ""}
+                              disabled={!editing || activeJob.status === "synced"}
+                              onChange={(event) => updateVisit(index, "toothNos", event.target.value)}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              value={visit.treatment || ""}
+                              disabled={!editing || activeJob.status === "synced"}
+                              onChange={(event) => updateVisit(index, "treatment", event.target.value)}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              value={visit.dentistName || ""}
+                              disabled={!editing || activeJob.status === "synced"}
+                              onChange={(event) => updateVisit(index, "dentistName", event.target.value)}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              value={visit.amountCharged || ""}
+                              disabled={!editing || activeJob.status === "synced"}
+                              onChange={(event) => updateVisit(index, "amountCharged", event.target.value)}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              value={visit.amountPaid || ""}
+                              disabled={!editing || activeJob.status === "synced"}
+                              onChange={(event) => updateVisit(index, "amountPaid", event.target.value)}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              value={visit.balance || ""}
+                              disabled={!editing || activeJob.status === "synced"}
+                              onChange={(event) => updateVisit(index, "balance", event.target.value)}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              value={visit.nextAppt || ""}
+                              disabled={!editing || activeJob.status === "synced"}
+                              onChange={(event) => updateVisit(index, "nextAppt", event.target.value)}
+                            />
+                          </td>
+                          {editing && activeJob.status !== "synced" ? (
+                            <td>
+                              <button type="button" className="text-link" onClick={() => removeVisitRow(index)}>
+                                Remove
+                              </button>
+                            </td>
+                          ) : null}
                         </tr>
-                      )}
+                      ))}
                     </tbody>
                   </table>
                 </div>
                 {editing && activeJob.status !== "synced" ? (
                   <button type="button" className="button button--ghost" onClick={addVisitRow}>
-                    Add visit row
+                    Add row
                   </button>
                 ) : null}
               </div>

@@ -43,6 +43,7 @@ class DocumentValidationError extends Error {
 
 function emptyPayload() {
   return {
+    documentForm: "generic",
     patient: {
       firstName: "",
       lastName: "",
@@ -81,40 +82,52 @@ function emptyVisitRow() {
   };
 }
 
+/** Keep OCR cell text as written — no catalog rename, no calculated balance. */
 function normalizeVisitRows(rows = []) {
   if (!Array.isArray(rows)) return [];
   return rows
-    .map((row) => {
-      const treatmentDate = normalizeDate(row?.treatmentDate || row?.date || "") || "";
-      const treatment =
-        inferProcedureToken(row?.treatment || row?.procedure || "") ||
-        cleanLine(row?.treatment || row?.procedure || "");
-      const amountCharged = normalizeAmount(row?.amountCharged || row?.amount || "") || "";
-      const amountPaid = normalizeAmount(row?.amountPaid || "") || "";
-      const balance =
-        normalizeAmount(row?.balance || "") ||
-        (amountCharged && amountPaid
-          ? String(Math.round((Number(amountCharged) - Number(amountPaid)) * 100) / 100)
-          : "");
-      return {
-        treatmentDate,
-        toothNos: cleanLine(row?.toothNos || row?.toothNumber || ""),
-        treatment,
-        dentistName: cleanLine(row?.dentistName || row?.dentist || ""),
-        amountCharged,
-        amountPaid,
-        balance,
-        nextAppt: normalizeDate(row?.nextAppt || row?.nextAppointment || "") || cleanLine(row?.nextAppt || ""),
-      };
-    })
+    .map((row) => ({
+      treatmentDate: cleanLine(row?.treatmentDate || row?.date || ""),
+      toothNos: cleanLine(row?.toothNos || row?.toothNumber || ""),
+      treatment: cleanLine(row?.treatment || row?.procedure || ""),
+      dentistName: cleanLine(row?.dentistName || row?.dentist || ""),
+      amountCharged: cleanLine(String(row?.amountCharged ?? row?.amount ?? "")),
+      amountPaid: cleanLine(String(row?.amountPaid ?? "")),
+      balance: cleanLine(String(row?.balance ?? "")),
+      nextAppt: cleanLine(row?.nextAppt || row?.nextAppointment || ""),
+    }))
     .filter(
       (row) =>
         row.treatmentDate ||
         row.treatment ||
         row.amountCharged ||
         row.toothNos ||
-        row.dentistName
+        row.dentistName ||
+        row.amountPaid ||
+        row.balance ||
+        row.nextAppt
     );
+}
+
+function extractRawProcedureText(windowText, options = {}) {
+  let text = cleanLine(windowText);
+  if (!text) return "";
+  const monthDateRe = new RegExp(
+    `\\b(${MONTH_TOKEN_RE})\\s*[-.]?\\s*(\\d{1,2})(?:st|nd|rd|th)?(?:,)?\\s*(20\\d{2})?\\b`,
+    "ig"
+  );
+  text = text.replace(monthDateRe, " ");
+  text = text.replace(/\b20\d{2}\b/g, " ");
+  if (options.stripTooth) {
+    text = text.replace(/\b\d{1,2}\s*[-–]\s*\d{1,2}\b/g, " ");
+  }
+  if (options.stripAmount) {
+    text = glueSplitAmounts(text)
+      .replace(/\b[1-9]\d{2,5}(?:\.\d{2})?\b/g, " ")
+      .replace(/,/g, " ");
+  }
+  text = text.replace(/\b(?:amount|charged|paid|balance|tooth|no\.?|dentist)\b/gi, " ");
+  return cleanLine(text);
 }
 
 function cleanLine(value) {
@@ -405,29 +418,45 @@ function parseTreatmentRecordRows(rawText) {
     }
     if (!year) continue;
 
-    const month = monthToNumber(dateMatch[1]);
-    const day = String(dateMatch[2]).padStart(2, "0");
-    if (!month) continue;
-    const treatmentDate = `${year}-${month}-${day}`;
+    const treatmentDate = year
+      ? cleanLine(`${dateMatch[1]} ${dateMatch[2]}, ${year}`)
+      : cleanLine(`${dateMatch[1]} ${dateMatch[2]}`);
 
-    const treatment = inferProcedureToken(window);
+    const toothMatch = window.match(/\b(\d{1,2})\s*[-–]\s*(\d{1,2})\b/);
+    const toothNos = toothMatch ? `${toothMatch[1]}-${toothMatch[2]}` : "";
+
     const amountMatches = [
       ...glueSplitAmounts(window)
         .replace(/,/g, "")
         .matchAll(/\b([1-9]\d{2,5})(?:\.00)?\b/g),
     ].map((m) => m[1]);
-    const amount =
+    const amountRaw =
       amountMatches.find((value) => isPlausibleClinicAmount(value)) || "";
+    let amountCharged = "";
+    if (amountRaw) {
+      const withComma = window.match(/\b\d{1,3}(?:,\d{3})+(?:\.\d{2})?\b/);
+      if (withComma && withComma[0].replace(/,/g, "") === amountRaw) {
+        amountCharged = withComma[0];
+      } else {
+        amountCharged = amountRaw;
+      }
+    }
 
-    const toothMatch = window.match(/\b(\d{1,2})\s*[-–]\s*(\d{1,2})\b/);
-    const toothNos = toothMatch ? `${toothMatch[1]}-${toothMatch[2]}` : "";
+    const treatment = extractRawProcedureText(window, {
+      stripTooth: Boolean(toothNos),
+      stripAmount: Boolean(amountCharged),
+    });
 
-    if (!treatment && !amount) continue;
+    if (!treatment && !amountCharged && !toothNos) continue;
 
     rows.push({
       treatmentDate,
       treatment: treatment || "",
-      amountCharged: amount ? normalizeAmount(amount) : "",
+      amountCharged,
+      amountPaid: "",
+      balance: "",
+      dentistName: "",
+      nextAppt: "",
       toothNos,
       raw: window.slice(0, 180),
     });
@@ -597,7 +626,7 @@ function applyExternalFields(payload, fields = {}) {
   }
   if (fields.address && !next.patient.address) next.patient.address = cleanLine(fields.address);
   if (fields.procedure && !next.procedure.treatment) {
-    next.procedure.treatment = inferProcedure(fields.procedure) || cleanLine(fields.procedure);
+    next.procedure.treatment = cleanLine(fields.procedure);
   }
   if (fields.treatmentDate && !next.procedure.treatmentDate) {
     next.procedure.treatmentDate = normalizeDate(fields.treatmentDate);
@@ -849,15 +878,10 @@ function extractStructuredPayload(rawText) {
   payload.procedure.treatment = treatmentBlock && !headerLike.test(treatmentBlock)
     ? treatmentBlock
     : "";
-  // Dense handwriting often yields OCR soup in the procedure column — don't keep it.
+  // Keep procedure text as OCR wrote it — do not rename to a service catalog label.
   if (looksLikeOcrSoup(payload.procedure.treatment)) {
-    payload.procedure.treatment =
-      inferProcedureToken(payload.procedure.treatment) || inferProcedure(payload.procedure.treatment) || "";
+    payload.procedure.treatment = "";
   }
-  const inferred =
-    inferProcedureToken(payload.procedure.treatment || text) ||
-    inferProcedure(payload.procedure.treatment || text);
-  if (inferred) payload.procedure.treatment = inferred;
   fieldStatuses.treatment = fieldStatus(
     payload.procedure.treatment,
     labelPresent(text, /(?:procedure|treatment|dental\s*procedure|service|description)\b/i)
@@ -942,15 +966,21 @@ function extractStructuredPayload(rawText) {
   payload.procedure.notes =
     captureLabeledBlock(text, ["complaint", "notes", "remarks", "findings", "diagnosis"]) ||
     capture(text, [/(?:notes|remarks|findings|diagnosis|complaint)\s*[:\-]\s*(.+)$/im]);
+  // Never invent notes — only keep labeled document notes.
+  if (looksLikeOcrSoup(payload.procedure.notes)) {
+    payload.procedure.notes = "";
+  }
 
-  // Multi-row TREATMENT RECORD tables: auto-fill primary visit + history notes.
+  const isTableForm = isTreatmentRecordForm(text) || /treatment\s*record/i.test(text);
+  payload.documentForm = isTableForm ? "treatment_record" : "generic";
+
+  // Multi-row TREATMENT RECORD: copy visit rows literally into the review table.
   const treatmentRows = parseTreatmentRecordRows(text);
   if (treatmentRows.length) {
+    payload.procedure.visits = normalizeVisitRows(treatmentRows);
     const primary = pickPrimaryTreatmentRow(treatmentRows);
-    if (primary?.treatment && !payload.procedure.treatment) {
-      payload.procedure.treatment = primary.treatment;
-      fieldStatuses.treatment = "detected";
-    } else if (primary?.treatment && /ortho|extraction|exo/i.test(primary.treatment)) {
+    // Mirror first readable row into legacy primary fields for commit compatibility only.
+    if (primary?.treatment) {
       payload.procedure.treatment = primary.treatment;
       fieldStatuses.treatment = "detected";
     }
@@ -962,112 +992,51 @@ function extractStructuredPayload(rawText) {
       payload.procedure.amountCharged = primary.amountCharged;
       fieldStatuses.amountCharged = "detected";
     }
-    const history = summarizeTreatmentRows(treatmentRows);
-    payload.procedure.notes = payload.procedure.notes
-      ? `${payload.procedure.notes} | ${history}`
-      : history;
-    payload.procedure.visits = normalizeVisitRows(
-      treatmentRows.map((row) => ({
-        treatmentDate: row.treatmentDate,
-        toothNos: row.toothNos,
-        treatment: row.treatment,
-        amountCharged: row.amountCharged,
-        dentistName: row.dentistName || "",
-        amountPaid: row.amountPaid || "",
-        balance: row.balance || "",
-        nextAppt: row.nextAppt || "",
-      }))
-    );
-  } else if (isTreatmentRecordForm(text)) {
-    // Headers detected but row OCR was weak — still try fuzzy procedure tokens.
-    const fuzzyTreatment = inferProcedureToken(text);
-    if (fuzzyTreatment && !payload.procedure.treatment) {
-      payload.procedure.treatment = fuzzyTreatment;
-      fieldStatuses.treatment = "detected";
-    }
-    if (!payload.procedure.notes) {
-      payload.procedure.notes =
-        "Treatment record form detected. Review handwriting and confirm procedure/amount before saving.";
-    }
+  } else if (isTableForm) {
+    // Structure ready for admin to copy from the preview — do not invent row values.
+    payload.procedure.visits = [emptyVisitRow()];
+    payload.procedure.treatment = "";
+    payload.procedure.treatmentDate = "";
+    payload.procedure.amountCharged = "";
+    payload.procedure.notes = "";
+    fieldStatuses.treatment = "unable_to_read";
+    fieldStatuses.treatmentDate = "unable_to_read";
+    fieldStatuses.amountCharged = "unable_to_read";
+  } else if (payload.procedure.treatment || payload.procedure.treatmentDate || payload.procedure.amountCharged) {
+    // Non-table documents: show one row matching the paper fields we could read.
+    payload.procedure.visits = normalizeVisitRows([
+      {
+        treatmentDate: payload.procedure.treatmentDate,
+        treatment: payload.procedure.treatment,
+        dentistName: payload.procedure.dentistName,
+        amountCharged: payload.procedure.amountCharged,
+      },
+    ]);
   }
 
-  // Cloud OCR on dense handwritten records often scatters dates/amounts/procedure tokens.
-  // Recover a usable primary visit even when row parsing returned nothing.
-  const noisyFields = extractNoisyTreatmentRecordFields(text);
-  if (noisyFields) {
-    let appliedNoisy = false;
-    const treatmentWeak =
-      !payload.procedure.treatment ||
-      looksLikeOcrSoup(payload.procedure.treatment) ||
-      !KNOWN_PROCEDURES.some((entry) => entry.pattern.test(payload.procedure.treatment));
-    // Prefer recovered installation when early inference latched onto a later EXO row.
-    const preferNoisyInstall =
-      noisyFields.treatment === "Orthodontic Installation" &&
-      /extraction/i.test(payload.procedure.treatment || "");
-    if (noisyFields.treatment && (treatmentWeak || preferNoisyInstall)) {
-      payload.procedure.treatment = noisyFields.treatment;
-      fieldStatuses.treatment = "detected";
-      appliedNoisy = true;
-    }
-    if (noisyFields.treatmentDate) {
-      payload.procedure.treatmentDate = noisyFields.treatmentDate;
-      fieldStatuses.treatmentDate = "detected";
-      appliedNoisy = true;
-    } else if (
-      noisyFields.treatment === "Orthodontic Installation" &&
-      treatmentRows.length === 0 &&
-      appliedNoisy
-    ) {
-      // Avoid keeping a random later-visit month when installation date was unreadable.
-      payload.procedure.treatmentDate = "";
-      fieldStatuses.treatmentDate = fieldStatuses.treatmentDate || "unable_to_read";
-    }
-    if (noisyFields.amountCharged) {
-      const currentAmount = Number(payload.procedure.amountCharged || 0);
-      const recoveredAmount = Number(noisyFields.amountCharged);
-      if (
-        !currentAmount ||
-        currentAmount < 400 ||
-        recoveredAmount === 5000 ||
-        (recoveredAmount >= 4000 && (currentAmount < 4000 || currentAmount > 15000))
-      ) {
-        if (
-          appliedNoisy ||
-          treatmentWeak ||
-          preferNoisyInstall ||
-          payload.procedure.treatment === noisyFields.treatment
-        ) {
-          payload.procedure.amountCharged = noisyFields.amountCharged;
-          fieldStatuses.amountCharged = "detected";
-          appliedNoisy = true;
-        }
-      }
-    }
-    if (
-      noisyFields.notes &&
-      (appliedNoisy || payload.procedure.treatment === noisyFields.treatment)
-    ) {
-      payload.procedure.notes = noisyFields.notes;
-    }
-  }
+  // Do not invent procedure/amount/notes from OCR soup heuristics.
+  // Admin copies unreadable cells from the document preview.
 
   const filledCount = [
     payload.patient.fullName,
-    payload.patient.phone,
     payload.patient.age,
-    payload.patient.dateOfBirth,
-    payload.procedure.treatment,
-    payload.procedure.treatmentDate,
-    payload.procedure.amountCharged,
+    payload.patient.gender,
+    ...(payload.procedure.visits || []).flatMap((row) => [
+      row.treatmentDate,
+      row.treatment,
+      row.amountCharged,
+      row.toothNos,
+      row.dentistName,
+    ]),
   ].filter(Boolean).length;
 
   if (filledCount === 0) {
     notes.push(
-      "Document detected, but structured fields could not be read automatically. Type values from the preview, then Confirm & Save."
+      "Document detected. Copy the table from the preview into the cells below, then Confirm & Save."
     );
   } else {
     notes.push(
-      `Auto-filled ${filledCount} field${filledCount === 1 ? "" : "s"} from the document. Review them, then Confirm & Save.`
+      `Copied ${filledCount} readable value${filledCount === 1 ? "" : "s"} from the document. Correct any OCR mistakes, then Confirm & Save.`
     );
   }
 

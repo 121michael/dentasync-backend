@@ -29,13 +29,14 @@ Amount: ₱800
   assert.equal(payload.patient.age, "30");
   assert.equal(payload.patient.phone, "639171234567");
   assert.equal(payload.procedure.treatment, "Dental Cleaning");
-  assert.equal(payload.procedure.treatmentDate, "2026-08-20");
   assert.equal(payload.procedure.amountCharged, "800");
   assert.equal(fieldStatuses.amountCharged, "detected");
   assert.equal(fieldStatuses.age, "detected");
+  assert.ok(payload.procedure.visits.length >= 1);
+  assert.equal(payload.procedure.visits[0].treatment, "Dental Cleaning");
 });
 
-test("handwritten dental chart style labels are parsed across lines", () => {
+test("handwritten dental chart style labels keep OCR wording", () => {
   const sample = `
 NAME
 ANGELOU OBAS-BAGHTNAN
@@ -57,8 +58,7 @@ AMOUNT
   assert.equal(payload.patient.address.toUpperCase(), "MANDALUYONG CITY");
   assert.equal(payload.patient.phone, "639171234567");
   assert.equal(payload.patient.age, "25");
-  assert.equal(payload.procedure.treatment, "Oral Prophylaxis");
-  assert.equal(payload.procedure.treatmentDate, "2024-09-07");
+  assert.equal(payload.procedure.treatment, "ORAL PROPHYLAXIS");
   assert.equal(payload.procedure.amountCharged, "800");
 });
 
@@ -86,7 +86,7 @@ test("face-like OCR text is rejected as non-document", () => {
   assert.equal(result.isDocument, false);
 });
 
-test("treatment record rows auto-fill primary procedure, date, and amount", () => {
+test("treatment record copies literal procedure text and table rows", () => {
   const sample = `
 TREATMENT RECORD
 Name:
@@ -100,14 +100,19 @@ MAR 21 2024 ORTHO ADJUSTMENT 1650
 MAR 11 2025 EXO 24-44
 `;
   const { payload, fieldStatuses } = extractStructuredPayload(sample);
-  assert.equal(payload.procedure.treatment, "Orthodontic Installation");
-  assert.equal(payload.procedure.treatmentDate, "2023-11-16");
+  assert.equal(payload.documentForm, "treatment_record");
+  assert.equal(payload.procedure.treatment, "ORTHO INSTALLATION");
+  assert.match(payload.procedure.treatmentDate, /NOV\s*16/i);
   assert.equal(payload.procedure.amountCharged, "5000");
   assert.equal(fieldStatuses.treatment, "detected");
-  assert.equal(fieldStatuses.amountCharged, "detected");
-  assert.match(payload.procedure.notes, /Treatment record visits/i);
+  assert.equal(payload.procedure.notes, "");
   assert.equal(payload.patient.gender, "");
   assert.equal(payload.patient.fullName, "");
+  assert.ok(payload.procedure.visits.length >= 4);
+  assert.equal(payload.procedure.visits[0].treatment, "ORTHO INSTALLATION");
+  assert.equal(payload.procedure.visits[1].treatment, "ORTHO ADJUSTMENT");
+  assert.equal(payload.procedure.visits[0].amountPaid, "");
+  assert.equal(payload.procedure.visits[0].balance, "");
 });
 
 test("printed Gender M/F prompt is not treated as Male", () => {
@@ -123,7 +128,7 @@ Amount: 800
   assert.equal(payload.patient.gender, "");
 });
 
-test("parseTreatmentRecordRows reads year-in-tooth-column style dates", () => {
+test("parseTreatmentRecordRows keeps OCR wording and written dates", () => {
   const rows = parseTreatmentRecordRows(`
 NOV 16
 2023
@@ -135,45 +140,34 @@ ORTHO ADJUSTMENT
 1,250
 `);
   assert.ok(rows.length >= 2);
-  assert.equal(rows[0].treatmentDate, "2023-11-16");
-  assert.equal(rows[0].treatment, "Orthodontic Installation");
-  assert.equal(rows[0].amountCharged, "5000");
+  assert.match(rows[0].treatmentDate, /NOV\s*16.*2023/i);
+  assert.equal(rows[0].treatment, "ORTHO INSTALLATION");
+  assert.equal(rows[0].amountCharged, "5,000");
 });
 
-test("noisy OCR.space treatment-record soup still auto-fills procedure/amount/date", () => {
+test("unreadable treatment-record OCR leaves cells empty instead of inventing values", () => {
   const sample = `
 TREATMENT RECORD
 Name
 Age
 Gender M/F
 Date Tooth No Procedure Dentist Amount charged
-NOV
-16
-2023
-QATHO INSTALLATIO
-500 0
-DEC 21
-2023
-ORLD MITMENT
-1,250
-JAN
-25 2024
-ORIO ADJUST
-1250
-EXO
-24-44
+Tooth
+No./s
+LENCORD
+Amount
+charged
 `;
-  const { payload, fieldStatuses } = extractStructuredPayload(sample);
-  assert.equal(payload.procedure.treatment, "Orthodontic Installation");
-  assert.equal(payload.procedure.treatmentDate, "2023-11-16");
-  assert.equal(payload.procedure.amountCharged, "5000");
-  assert.equal(fieldStatuses.treatment, "detected");
-  assert.equal(fieldStatuses.amountCharged, "detected");
-  assert.match(payload.procedure.notes, /Treatment record/i);
-  assert.equal(payload.patient.gender, "");
+  const { payload } = extractStructuredPayload(sample);
+  assert.equal(payload.documentForm, "treatment_record");
+  assert.ok(Array.isArray(payload.procedure.visits));
+  assert.equal(payload.procedure.visits.length, 1);
+  assert.equal(payload.procedure.visits[0].treatment, "");
+  assert.equal(payload.procedure.visits[0].amountCharged, "");
+  assert.equal(payload.procedure.notes, "");
 });
 
-test("treatment record rows are exposed as editable visits table data", () => {
+test("treatment record visits stay editable table data without catalog rename", () => {
   const sample = `
 TREATMENT RECORD
 Name:
@@ -187,7 +181,9 @@ MAR 11 2025 EXO 24-44
   const { payload } = extractStructuredPayload(sample);
   assert.ok(Array.isArray(payload.procedure.visits));
   assert.ok(payload.procedure.visits.length >= 2);
-  assert.equal(payload.procedure.visits[0].treatment, "Orthodontic Installation");
-  assert.equal(payload.procedure.visits[0].treatmentDate, "2023-11-16");
+  assert.equal(payload.procedure.visits[0].treatment, "ORTHO INSTALLATION");
+  assert.match(payload.procedure.visits[0].treatmentDate, /NOV\s*16/i);
   assert.equal(payload.procedure.visits[0].amountCharged, "5000");
+  assert.equal(payload.procedure.visits[2].toothNos, "24-44");
+  assert.match(payload.procedure.visits[2].treatment, /EXO/i);
 });
