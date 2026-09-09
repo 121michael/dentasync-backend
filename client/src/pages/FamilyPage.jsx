@@ -101,8 +101,10 @@ export function FamilyPage() {
           <UserPlus className="card-heading__icon" size={21} />
         </div>
         <p className="muted-copy">
-          The dependent must already have a patient account. You become their authorized account manager
-          for booking and permitted records only.
+          The dependent must already have a patient account (register them first if needed). Enter the
+          same email and phone on that account. For toddler or child under 12, their Profile must also
+          include a date of birth that matches the eligibility age. You become their authorized account
+          manager for booking and permitted records only.
         </p>
         <form className="admin-form" onSubmit={addDependent}>
           <label className="field">

@@ -1642,15 +1642,26 @@ function createPatientPortalRouter({
       }
 
       // Age-gated categories require a recorded birth date under 12 (or under 3 for toddler).
+      // Profiles store DOB in date_of_birth; older paper-gap code also used birth_date.
       if (eligibilityCategory === "toddler" || eligibilityCategory === "child_under_12") {
         const dobResult = await db.query(
-          `SELECT birth_date
+          `SELECT COALESCE(birth_date, date_of_birth) AS birth_date
            FROM patient_portal_profiles
-           WHERE user_id = $1
+           WHERE user_id::text = $1
            LIMIT 1`,
           [dependentUserId]
-        ).catch((error) => {
-          if (error?.code === "42P01" || error?.code === "42703") {
+        ).catch(async (error) => {
+          // birth_date may be missing before migrate:paper-gaps; fall back to date_of_birth only.
+          if (error?.code === "42703") {
+            return db.query(
+              `SELECT date_of_birth AS birth_date
+               FROM patient_portal_profiles
+               WHERE user_id::text = $1
+               LIMIT 1`,
+              [dependentUserId]
+            );
+          }
+          if (error?.code === "42P01") {
             return { rows: [] };
           }
           throw error;
@@ -1660,7 +1671,7 @@ function createPatientPortalRouter({
         if (age == null) {
           return res.status(400).json({
             message:
-              "Child/toddler dependents need a birth date on their patient profile before they can be linked.",
+              "Child/toddler dependents need a date of birth on their patient profile before they can be linked. Sign in as the dependent (or open their Profile) and save Date of birth, then try again.",
           });
         }
         if (eligibilityCategory === "toddler" && age >= 3) {
@@ -1819,49 +1830,87 @@ function createPatientPortalRouter({
          WHERE id = $5`,
         [firstName, lastName, email, phone, userId]
       );
-      const result = await db.query(
-        `INSERT INTO patient_portal_profiles (
-           user_id, date_of_birth, gender, address, emergency_contact_name,
-           emergency_contact_relationship, emergency_contact_phone, allergies,
-           existing_conditions, current_medications, dental_concerns, hmo_provider,
-           hmo_member_number, hmo_status
-         ) VALUES (
-           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-           $14
-         )
-         ON CONFLICT (user_id) DO UPDATE SET
-           date_of_birth = EXCLUDED.date_of_birth,
-           gender = EXCLUDED.gender,
-           address = EXCLUDED.address,
-           emergency_contact_name = EXCLUDED.emergency_contact_name,
-           emergency_contact_relationship = EXCLUDED.emergency_contact_relationship,
-           emergency_contact_phone = EXCLUDED.emergency_contact_phone,
-           allergies = EXCLUDED.allergies,
-           existing_conditions = EXCLUDED.existing_conditions,
-           current_medications = EXCLUDED.current_medications,
-           dental_concerns = EXCLUDED.dental_concerns,
-           hmo_provider = EXCLUDED.hmo_provider,
-           hmo_member_number = EXCLUDED.hmo_member_number,
-           hmo_status = EXCLUDED.hmo_status,
-           updated_at = CURRENT_TIMESTAMP
-         RETURNING *`,
-        [
-          userId,
-          isIsoDate(body.dateOfBirth) ? body.dateOfBirth : null,
-          stringValue(body.gender, 40),
-          stringValue(body.address, 500),
-          stringValue(body.emergencyContactName, 120),
-          stringValue(body.emergencyContactRelationship, 80),
-          stringValue(body.emergencyContactPhone, 40),
-          stringValue(body.allergies, 1200),
-          stringValue(body.existingConditions, 1200),
-          stringValue(body.currentMedications, 1200),
-          stringValue(body.dentalConcerns, 1200),
-          stringValue(body.hmoProvider, 120),
-          stringValue(body.hmoMemberNumber, 120),
-          body.hmoProvider ? "pending_verification" : "not_enrolled",
-        ]
-      );
+      const dateOfBirth = isIsoDate(body.dateOfBirth) ? body.dateOfBirth : null;
+      const profileValues = [
+        userId,
+        dateOfBirth,
+        stringValue(body.gender, 40),
+        stringValue(body.address, 500),
+        stringValue(body.emergencyContactName, 120),
+        stringValue(body.emergencyContactRelationship, 80),
+        stringValue(body.emergencyContactPhone, 40),
+        stringValue(body.allergies, 1200),
+        stringValue(body.existingConditions, 1200),
+        stringValue(body.currentMedications, 1200),
+        stringValue(body.dentalConcerns, 1200),
+        stringValue(body.hmoProvider, 120),
+        stringValue(body.hmoMemberNumber, 120),
+        body.hmoProvider ? "pending_verification" : "not_enrolled",
+      ];
+
+      let result;
+      try {
+        // Keep birth_date in sync with date_of_birth for family/age eligibility checks.
+        result = await db.query(
+          `INSERT INTO patient_portal_profiles (
+             user_id, date_of_birth, birth_date, gender, address, emergency_contact_name,
+             emergency_contact_relationship, emergency_contact_phone, allergies,
+             existing_conditions, current_medications, dental_concerns, hmo_provider,
+             hmo_member_number, hmo_status
+           ) VALUES (
+             $1, $2, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+             $14
+           )
+           ON CONFLICT (user_id) DO UPDATE SET
+             date_of_birth = EXCLUDED.date_of_birth,
+             birth_date = EXCLUDED.birth_date,
+             gender = EXCLUDED.gender,
+             address = EXCLUDED.address,
+             emergency_contact_name = EXCLUDED.emergency_contact_name,
+             emergency_contact_relationship = EXCLUDED.emergency_contact_relationship,
+             emergency_contact_phone = EXCLUDED.emergency_contact_phone,
+             allergies = EXCLUDED.allergies,
+             existing_conditions = EXCLUDED.existing_conditions,
+             current_medications = EXCLUDED.current_medications,
+             dental_concerns = EXCLUDED.dental_concerns,
+             hmo_provider = EXCLUDED.hmo_provider,
+             hmo_member_number = EXCLUDED.hmo_member_number,
+             hmo_status = EXCLUDED.hmo_status,
+             updated_at = CURRENT_TIMESTAMP
+           RETURNING *`,
+          profileValues
+        );
+      } catch (columnError) {
+        if (columnError?.code !== "42703") throw columnError;
+        result = await db.query(
+          `INSERT INTO patient_portal_profiles (
+             user_id, date_of_birth, gender, address, emergency_contact_name,
+             emergency_contact_relationship, emergency_contact_phone, allergies,
+             existing_conditions, current_medications, dental_concerns, hmo_provider,
+             hmo_member_number, hmo_status
+           ) VALUES (
+             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+             $14
+           )
+           ON CONFLICT (user_id) DO UPDATE SET
+             date_of_birth = EXCLUDED.date_of_birth,
+             gender = EXCLUDED.gender,
+             address = EXCLUDED.address,
+             emergency_contact_name = EXCLUDED.emergency_contact_name,
+             emergency_contact_relationship = EXCLUDED.emergency_contact_relationship,
+             emergency_contact_phone = EXCLUDED.emergency_contact_phone,
+             allergies = EXCLUDED.allergies,
+             existing_conditions = EXCLUDED.existing_conditions,
+             current_medications = EXCLUDED.current_medications,
+             dental_concerns = EXCLUDED.dental_concerns,
+             hmo_provider = EXCLUDED.hmo_provider,
+             hmo_member_number = EXCLUDED.hmo_member_number,
+             hmo_status = EXCLUDED.hmo_status,
+             updated_at = CURRENT_TIMESTAMP
+           RETURNING *`,
+          profileValues
+        );
+      }
 
       return res.json({ message: "Your profile has been saved.", profile: result.rows[0] });
     } catch (error) {
