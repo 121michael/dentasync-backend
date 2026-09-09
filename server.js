@@ -20,6 +20,7 @@ const {
   createCorsOptions,
   applySecurityHeaders,
 } = require("./lib/securityConfig");
+const { authenticateToken } = require("./middleware/authMiddleware");
 
 const app = express();
 const { jwtSecret: JWT_SECRET, otpSecret: OTP_SECRET, passwordResetSecret: PASSWORD_RESET_SECRET } =
@@ -46,22 +47,6 @@ app.use((req, res, next) => {
   console.log(`📩 [${new Date().toLocaleTimeString()}] ${req.method} request to ${req.url}`);
   next();
 });
-
-// ==========================================
-// AUTHENTICATION MIDDLEWARE
-// ==========================================
-const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-
-  if (!token) return res.status(401).json({ message: "Access Denied: No Token Provided" });
-
-  jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err) return res.status(403).json({ message: "Invalid or Expired Token" });
-    req.user = user;
-    next();
-  });
-};
 
 // ==========================================
 // REAL OTP DELIVERY SERVICES SETUP
@@ -343,6 +328,7 @@ app.use(
     notifyStaff: (notification) => notifyActiveStaff(db, notification),
     notifyAdmin: (notification) => notifyActiveAdmins(db, notification),
     clinicSms,
+    jwtSecret: JWT_SECRET,
   })
 );
 

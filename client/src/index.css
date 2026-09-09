@@ -422,6 +422,53 @@ strong {
   background: var(--emerald-wash);
 }
 
+.account-switch-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem;
+  margin: 0 1.4rem;
+  padding: 0.72rem 0.95rem;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--brand) 22%, transparent);
+  background: color-mix(in srgb, var(--brand) 10%, white);
+  color: var(--ink);
+}
+
+.account-switch-banner__copy {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.account-switch-banner__copy p {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.35;
+}
+
+.family-dependent-row {
+  align-items: center;
+}
+
+.family-dependent-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-left: auto;
+}
+
+.family-dependent-actions .button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.account-switch-card .button {
+  margin-top: 0.35rem;
+}
+
 .muted-copy {
   color: var(--text-muted);
   font-size: 0.82rem;

@@ -1,5 +1,6 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
+  ArrowLeftRight,
   Bell,
   Bot,
   CalendarDays,
@@ -33,9 +34,10 @@ function initials(user) {
 }
 
 export function PortalLayout({ theme, onToggleTheme }) {
-  const { user, logout } = useAuth();
+  const { user, logout, actingAs, principal, startSession } = useAuth();
   const navigate = useNavigate();
   const [unreadCount, setUnreadCount] = useState(0);
+  const [switchingBack, setSwitchingBack] = useState(false);
   const date = new Intl.DateTimeFormat("en-US", {
     weekday: "long",
     month: "long",
@@ -78,6 +80,19 @@ export function PortalLayout({ theme, onToggleTheme }) {
   function handleLogout() {
     logout();
     navigate("/login", { replace: true });
+  }
+
+  async function handleSwitchBack() {
+    setSwitchingBack(true);
+    try {
+      const response = await api.switchToPrincipal();
+      startSession(response.token, response.user, response.session);
+      navigate("/family", { replace: true });
+    } catch {
+      // Keep current view if switch-back fails; banner remains available.
+    } finally {
+      setSwitchingBack(false);
+    }
   }
 
   const hasUnread = unreadCount > 0;
@@ -140,6 +155,30 @@ export function PortalLayout({ theme, onToggleTheme }) {
             </NavLink>
           </div>
         </header>
+        {actingAs ? (
+          <div className="account-switch-banner" role="status">
+            <div className="account-switch-banner__copy">
+              <ArrowLeftRight size={18} aria-hidden="true" />
+              <p>
+                Viewing as <strong>{user?.fullName || "dependent"}</strong>
+                {principal?.fullName ? (
+                  <>
+                    {" "}
+                    · signed in as {principal.fullName}
+                  </>
+                ) : null}
+              </p>
+            </div>
+            <button
+              type="button"
+              className="button button--secondary button--compact"
+              onClick={handleSwitchBack}
+              disabled={switchingBack}
+            >
+              {switchingBack ? "Switching…" : "Switch to my account"}
+            </button>
+          </div>
+        ) : null}
         <main className="portal-content">
           <Outlet />
         </main>

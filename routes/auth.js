@@ -610,9 +610,33 @@ function createAuthRouter({
         return res.status(404).json({ message: "User account no longer exists." });
       }
 
-      return res.status(200).json({
+      const payload = {
         user: formatUserPayload(userResult.rows[0]),
-      });
+        session: {
+          actingAs: Boolean(req.actingAs),
+          actAsUserId: req.actAsUserId || null,
+          principal: null,
+        },
+      };
+
+      if (req.actingAs && req.authUser) {
+        const principalResult = await db.query("SELECT * FROM users WHERE id = $1", [req.authUser.id]);
+        payload.session.principal = formatUserPayload(
+          principalResult.rows[0] || {
+            id: req.authUser.id,
+            first_name: req.authUser.first_name,
+            last_name: req.authUser.last_name,
+            email: req.authUser.email,
+            phone: req.authUser.phone,
+            role: req.authUser.role,
+            status: req.authUser.status,
+          }
+        );
+      } else {
+        payload.session.principal = formatUserPayload(userResult.rows[0]);
+      }
+
+      return res.status(200).json(payload);
     } catch (error) {
       console.error("Auth /me error:", error.message);
       return res.status(500).json({ message: "Server error retrieving profile." });

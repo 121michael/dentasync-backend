@@ -107,6 +107,14 @@ export const api = {
   addDependent: (body) => request("/patient/dependents", { method: "POST", body }),
   removeDependent: (dependentId) =>
     request(`/patient/dependents/${dependentId}`, { method: "DELETE" }),
+  switchToDependent: (dependentUserId) =>
+    request("/patient/session/act-as", {
+      method: "POST",
+      body: { dependentUserId },
+    }),
+  switchToPrincipal: () =>
+    request("/patient/session/clear", { method: "POST", body: {} }),
+  getPatientSession: () => request("/patient/session"),
   updateQueueNotifications: (notifyWhenNear) =>
     request("/patient/queue/notifications", {
       method: "PATCH",

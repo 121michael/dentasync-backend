@@ -4,9 +4,16 @@ import { AuthContext } from "./authContext";
 
 const TOKEN_KEY = "amethyst_access_token";
 
+const EMPTY_SESSION = {
+  actingAs: false,
+  actAsUserId: null,
+  principal: null,
+};
+
 export function AuthProvider({ children }) {
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY));
   const [user, setUser] = useState(null);
+  const [session, setSession] = useState(EMPTY_SESSION);
   const [isLoading, setIsLoading] = useState(Boolean(token));
 
   useEffect(() => {
@@ -15,6 +22,7 @@ export function AuthProvider({ children }) {
     async function hydrate() {
       if (!token) {
         setUser(null);
+        setSession(EMPTY_SESSION);
         setIsLoading(false);
         return;
       }
@@ -24,12 +32,14 @@ export function AuthProvider({ children }) {
         const response = await api.getCurrentUser();
         if (!cancelled) {
           setUser(response.user);
+          setSession(response.session || EMPTY_SESSION);
         }
       } catch {
         localStorage.removeItem(TOKEN_KEY);
         if (!cancelled) {
           setToken(null);
           setUser(null);
+          setSession(EMPTY_SESSION);
         }
       } finally {
         if (!cancelled) {
@@ -48,11 +58,15 @@ export function AuthProvider({ children }) {
     () => ({
       token,
       user,
+      session,
       isLoading,
-      startSession(sessionToken, sessionUser) {
+      actingAs: Boolean(session?.actingAs),
+      principal: session?.principal || null,
+      startSession(sessionToken, sessionUser, sessionMeta) {
         localStorage.setItem(TOKEN_KEY, sessionToken);
         setToken(sessionToken);
         setUser(sessionUser);
+        setSession(sessionMeta || EMPTY_SESSION);
       },
       updateUser(nextUser) {
         setUser((current) =>
@@ -64,9 +78,10 @@ export function AuthProvider({ children }) {
         sessionStorage.removeItem("amethyst_pending_otp");
         setToken(null);
         setUser(null);
+        setSession(EMPTY_SESSION);
       },
     }),
-    [token, user, isLoading]
+    [token, user, session, isLoading]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
+import { useAuth } from "../useAuth";
 
 const TIME_SLOTS = {
   Morning: ["09:00", "09:30", "10:00", "10:30", "11:00"],
@@ -89,6 +90,7 @@ function displayStatus(status) {
 export function AppointmentsPage() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { actingAs } = useAuth();
   const isBooking = location.pathname.endsWith("/book");
 
   const [catalog, setCatalog] = useState(null);
@@ -345,7 +347,7 @@ export function AppointmentsPage() {
               </div>
               <CalendarDays className="card-heading__icon" size={21} />
             </div>
-            {dependents.length ? (
+            {dependents.length && !actingAs ? (
               <label className="field" style={{ marginBottom: "1rem" }}>
                 <span>Book for</span>
                 <select name="forPatientUserId" value={form.forPatientUserId} onChange={updateForm}>

@@ -5,6 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const bcrypt = require("bcrypt");
 const express = require("express");
+const jwt = require("jsonwebtoken");
 const multer = require("multer");
 const { linkClinicalRecordsToUser } = require("../services/clinicalPatients");
 const { estimateWaitMinutesForPosition } = require("../services/waitTime");
@@ -12,6 +13,7 @@ const { answerWithOptionalGemini } = require("../services/clinicAssistant");
 const { analyzeDentalImageBuffer, DISCLAIMER: IMAGE_ANALYSIS_DISCLAIMER } = require("../services/dentalImageAnalysis");
 const staffCheckIn = require("../services/staffCheckIn");
 const staffWalkInQr = require("../services/staffWalkInQr");
+const { resolveAppSecrets } = require("../lib/securityConfig");
 
 const SERVICES = [
   {
@@ -157,7 +159,9 @@ function ageFromIsoDate(value) {
 }
 
 function requirePatient(req, res, next) {
-  if ((req.user?.role || "").toLowerCase() !== "patient") {
+  // Auth subject (guardian) must be a patient; effective user is also a patient when acting-as.
+  const principalRole = (req.authUser?.role || req.user?.role || "").toLowerCase();
+  if (principalRole !== "patient") {
     return res.status(403).json({ message: "This portal is available to patient accounts only." });
   }
 
@@ -165,7 +169,43 @@ function requirePatient(req, res, next) {
 }
 
 function userIdFor(req) {
+  // Effective patient: dependent when guardian is acting-as, otherwise principal.
   return String(req.user.id);
+}
+
+function principalUserIdFor(req) {
+  return String(req.authUser?.id || req.user.id);
+}
+
+function isActingAsDependent(req) {
+  return Boolean(req.actingAs && req.actAsUserId);
+}
+
+function rejectIfActingAs(req, res, actionLabel = "do that") {
+  if (!isActingAsDependent(req)) {
+    return false;
+  }
+  res.status(403).json({
+    message: `Switch back to your principal account to ${actionLabel}.`,
+    code: "ACT_AS_REQUIRED_CLEAR",
+  });
+  return true;
+}
+
+function formatPortalUser(user) {
+  const firstName = user.first_name || user.firstName || "";
+  const lastName = user.last_name || user.lastName || "";
+  return {
+    id: user.id,
+    firstName,
+    lastName,
+    fullName: `${firstName} ${lastName}`.trim() || user.fullName || user.email || "Patient",
+    email: user.email || "",
+    phone: user.phone || null,
+    role: user.role || "patient",
+    status: String(user.status || "active").toLowerCase(),
+    isVerified: user.is_verified ?? user.isVerified,
+  };
 }
 
 function stringValue(value, maxLength = 500) {
@@ -298,9 +338,42 @@ function createPatientPortalRouter({
   notifyStaff = async () => {},
   notifyAdmin = async () => {},
   clinicSms = null,
+  jwtSecret = null,
 }) {
   const router = express.Router();
   fs.mkdirSync(uploadDirectory, { recursive: true });
+  const sessionJwtSecret = jwtSecret || resolveAppSecrets(process.env).jwtSecret;
+
+  function signPatientSessionToken(principalId, actAsUserId = null) {
+    const payload = {
+      id: String(principalId),
+      role: "patient",
+    };
+    if (actAsUserId) {
+      payload.actAsUserId = String(actAsUserId);
+    }
+    return jwt.sign(payload, sessionJwtSecret, { expiresIn: "8h" });
+  }
+
+  async function recordGuardianSessionEvent(principalId, eventType, detail, req) {
+    try {
+      await db.query(
+        `INSERT INTO patient_portal_login_activity (
+           user_id, event_type, ip_address, user_agent
+         ) VALUES ($1, $2, $3, $4)`,
+        [
+          String(principalId),
+          eventType,
+          req.ip || req.socket?.remoteAddress || null,
+          `${detail || ""} | ${req.get("user-agent") || ""}`.slice(0, 500),
+        ]
+      );
+    } catch (error) {
+      if (error.code !== "42P01") {
+        console.warn("Unable to record guardian session event:", error.message);
+      }
+    }
+  }
 
   async function notifyClinicStaff(notification) {
     try {
@@ -341,6 +414,136 @@ function createPatientPortalRouter({
 
   router.get("/catalog", (_req, res) => {
     res.json({ services: SERVICES.map(mapCatalogService), dentists: DENTISTS });
+  });
+
+  router.get("/session", async (req, res) => {
+    return res.json({
+      user: formatPortalUser(req.user),
+      session: {
+        actingAs: isActingAsDependent(req),
+        principal: formatPortalUser(req.authUser || req.user),
+        actAsUserId: req.actAsUserId || null,
+      },
+    });
+  });
+
+  router.post("/session/act-as", async (req, res) => {
+    const principalId = principalUserIdFor(req);
+    const dependentUserId = stringValue(req.body?.dependentUserId || req.body?.userId, 120);
+
+    if (!dependentUserId) {
+      return res.status(400).json({ message: "Choose a linked dependent to switch into." });
+    }
+    if (dependentUserId === principalId) {
+      return res.status(400).json({ message: "You are already on your principal account." });
+    }
+
+    try {
+      const link = await db.query(
+        `SELECT id
+         FROM patient_portal_dependents
+         WHERE guardian_user_id::text = $1
+           AND dependent_user_id::text = $2
+         LIMIT 1`,
+        [principalId, dependentUserId]
+      );
+      if (!link.rows.length) {
+        return res.status(403).json({
+          message: "You can only switch into dependents linked on Family.",
+        });
+      }
+
+      const dependentResult = await db.query(
+        `SELECT id, first_name, last_name, email, phone, role, status, is_verified
+         FROM users
+         WHERE id::text = $1
+           AND LOWER(role) = 'patient'
+           AND COALESCE(is_archived, FALSE) = FALSE
+         LIMIT 1`,
+        [dependentUserId]
+      );
+      if (!dependentResult.rows.length) {
+        return res.status(404).json({ message: "Dependent patient account was not found." });
+      }
+
+      const dependent = dependentResult.rows[0];
+      const status = String(dependent.status || "active").toLowerCase();
+      if (["inactive", "disabled", "suspended", "rejected"].includes(status)) {
+        return res.status(403).json({ message: "That dependent account is not active." });
+      }
+
+      const principalResult = await db.query(
+        `SELECT id, first_name, last_name, email, phone, role, status, is_verified
+         FROM users WHERE id::text = $1 LIMIT 1`,
+        [principalId]
+      );
+      const principal = principalResult.rows[0] || req.authUser || req.user;
+      const token = signPatientSessionToken(principalId, dependentUserId);
+      await recordGuardianSessionEvent(
+        principalId,
+        "act_as_start",
+        `dependent=${dependentUserId}`,
+        req
+      );
+
+      return res.json({
+        message: `Switched to ${formatPortalUser(dependent).fullName}'s account.`,
+        token,
+        user: formatPortalUser(dependent),
+        session: {
+          actingAs: true,
+          principal: formatPortalUser(principal),
+          actAsUserId: String(dependentUserId),
+        },
+      });
+    } catch (error) {
+      if (error?.code === "42P01") {
+        return res.status(503).json({
+          message: "Dependents are not available. Run npm run migrate:paper-gaps.",
+        });
+      }
+      console.error("Patient act-as error:", error.message);
+      return res.status(500).json({ message: "Unable to switch into that dependent account." });
+    }
+  });
+
+  router.post("/session/clear", async (req, res) => {
+    const principalId = principalUserIdFor(req);
+    try {
+      const principalResult = await db.query(
+        `SELECT id, first_name, last_name, email, phone, role, status, is_verified
+         FROM users WHERE id::text = $1 LIMIT 1`,
+        [principalId]
+      );
+      if (!principalResult.rows.length) {
+        return res.status(401).json({ message: "Principal account was not found." });
+      }
+
+      const principal = principalResult.rows[0];
+      const token = signPatientSessionToken(principalId, null);
+      if (isActingAsDependent(req)) {
+        await recordGuardianSessionEvent(
+          principalId,
+          "act_as_end",
+          `dependent=${req.actAsUserId}`,
+          req
+        );
+      }
+
+      return res.json({
+        message: "Switched back to your principal account.",
+        token,
+        user: formatPortalUser(principal),
+        session: {
+          actingAs: false,
+          principal: formatPortalUser(principal),
+          actAsUserId: null,
+        },
+      });
+    } catch (error) {
+      console.error("Patient clear act-as error:", error.message);
+      return res.status(500).json({ message: "Unable to switch back to your account." });
+    }
   });
 
   router.get("/dashboard", async (req, res) => {
@@ -545,6 +748,7 @@ function createPatientPortalRouter({
 
   router.post("/appointments", async (req, res) => {
     const actorUserId = userIdFor(req);
+    const guardianUserId = principalUserIdFor(req);
     const {
       serviceId,
       dentistId,
@@ -598,14 +802,17 @@ function createPatientPortalRouter({
       normalizedCoverage === "hmo" ? "pending_verification" : "not_applicable";
 
     try {
-      if (bookingFor !== actorUserId) {
+      if (isActingAsDependent(req)) {
+        // While switched into a dependent, bookings always belong to that account.
+        userId = actorUserId;
+      } else if (bookingFor !== actorUserId) {
         const link = await db.query(
           `SELECT id
            FROM patient_portal_dependents
-           WHERE guardian_user_id = $1
-             AND dependent_user_id = $2
+           WHERE guardian_user_id::text = $1
+             AND dependent_user_id::text = $2
            LIMIT 1`,
-          [actorUserId, bookingFor]
+          [guardianUserId, bookingFor]
         ).catch((error) => {
           if (error?.code === "42P01") {
             const missing = new Error("Dependents are not available. Run npm run migrate:paper-gaps.");
@@ -682,8 +889,8 @@ function createPatientPortalRouter({
       }
 
       const bookingNote =
-        userId !== actorUserId
-          ? [stringValue(notes, 1100), `(Booked by guardian account ${actorUserId})`]
+        userId !== guardianUserId || isActingAsDependent(req)
+          ? [stringValue(notes, 1100), `(Booked by guardian account ${guardianUserId})`]
               .filter(Boolean)
               .join(" ")
               .slice(0, 1200)
@@ -727,12 +934,12 @@ function createPatientPortalRouter({
           `${service.name} with ${dentist.name} on ${appointmentDate} at ${appointmentTime} is waiting for clinic confirmation.`,
         ]
       );
-      if (userId !== actorUserId) {
+      if (userId !== guardianUserId) {
         await db.query(
           `INSERT INTO patient_portal_notifications (user_id, type, title, body)
            VALUES ($1, 'appointment', 'Dependent appointment submitted', $2)`,
           [
-            actorUserId,
+            guardianUserId,
             `You booked ${service.name} for a linked dependent on ${appointmentDate} at ${appointmentTime}.`,
           ]
         );
@@ -1509,7 +1716,7 @@ function createPatientPortalRouter({
   });
 
   router.get("/dependents", async (req, res) => {
-    const guardianUserId = userIdFor(req);
+    const guardianUserId = principalUserIdFor(req);
     try {
       const result = await db.query(
         `SELECT
@@ -1574,7 +1781,10 @@ function createPatientPortalRouter({
   });
 
   router.post("/dependents", async (req, res) => {
-    const guardianUserId = userIdFor(req);
+    if (rejectIfActingAs(req, res, "link family dependents")) {
+      return;
+    }
+    const guardianUserId = principalUserIdFor(req);
     let dependentUserId = stringValue(
       req.body?.dependentUserId || req.body?.userId || req.body?.dependentId,
       120
@@ -1738,6 +1948,9 @@ function createPatientPortalRouter({
   });
 
   router.delete("/dependents/:id", async (req, res) => {
+    if (rejectIfActingAs(req, res, "unlink family dependents")) {
+      return;
+    }
     const linkId = Number.parseInt(req.params.id, 10);
     if (!Number.isSafeInteger(linkId) || linkId <= 0) {
       return res.status(400).json({ message: "A valid dependent link ID is required." });
@@ -1747,9 +1960,9 @@ function createPatientPortalRouter({
       const result = await db.query(
         `DELETE FROM patient_portal_dependents
          WHERE id = $1
-           AND guardian_user_id = $2
+           AND guardian_user_id::text = $2
          RETURNING id`,
-        [linkId, userIdFor(req)]
+        [linkId, principalUserIdFor(req)]
       );
       if (!result.rows.length) {
         return res.status(404).json({ message: "Dependent link not found." });
@@ -2038,6 +2251,9 @@ function createPatientPortalRouter({
   });
 
   router.put("/security/password", async (req, res) => {
+    if (rejectIfActingAs(req, res, "change the account password")) {
+      return;
+    }
     const currentPassword = req.body?.currentPassword;
     const newPassword = req.body?.newPassword;
     if (typeof currentPassword !== "string" || typeof newPassword !== "string" || newPassword.length < 10) {
@@ -2047,7 +2263,7 @@ function createPatientPortalRouter({
     try {
       const userResult = await db.query(
         "SELECT password_hash FROM users WHERE id = $1",
-        [userIdFor(req)]
+        [principalUserIdFor(req)]
       );
       if (userResult.rows.length === 0 || !(await bcrypt.compare(currentPassword, userResult.rows[0].password_hash))) {
         return res.status(400).json({ message: "Your current password is incorrect." });
@@ -2056,7 +2272,7 @@ function createPatientPortalRouter({
       const passwordHash = await bcrypt.hash(newPassword, 12);
       await db.query(
         "UPDATE users SET password_hash = $1 WHERE id = $2",
-        [passwordHash, userIdFor(req)]
+        [passwordHash, principalUserIdFor(req)]
       );
       return res.json({ message: "Your password has been updated." });
     } catch (error) {
