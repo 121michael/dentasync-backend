@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Camera, CheckCircle2, FileText, Image as ImageIcon, RefreshCw, Upload, X } from "lucide-react";
+import { Camera, CheckCircle2, FileText, Image as ImageIcon, Plus, RefreshCw, Trash2, Upload, X } from "lucide-react";
 import { ApiError, api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { useAdminUi } from "../components/AdminLayout";
@@ -672,16 +672,19 @@ export function AdminSyncPage() {
               )}
             </div>
 
-            <div className="admin-doc-fields">
-              <h3>Document table</h3>
-              <p className="muted-copy">
-                Copied from the scan/attachment. Edit a cell only to fix OCR mistakes. Leave blank cells blank — do not
-                invent values.
-              </p>
+            <div className="admin-doc-fields doc-table-card">
+              <header className="doc-table-card__header">
+                <h3>Document Table</h3>
+                <p className="doc-table-card__helper">
+                  Copied from the scan/attachment. Edit a cell only to fix OCR mistakes. Leave blank cells blank — do not
+                  invent values.
+                </p>
+              </header>
 
-              <div className="treatment-record treatment-record--sync">
-                <div className="treatment-record__meta field-grid field-grid--three">
-                  <label className="field">
+              <section className="doc-table-card__patient" aria-label="Patient information">
+                <span className="doc-table-card__section-label">Patient Information</span>
+                <div className="doc-table-card__patient-grid">
+                  <label className="doc-table-field">
                     <span>Name</span>
                     <input
                       value={payload.patient.fullName}
@@ -690,7 +693,7 @@ export function AdminSyncPage() {
                       onChange={(event) => updatePatient("fullName", event.target.value)}
                     />
                   </label>
-                  <label className="field">
+                  <label className="doc-table-field">
                     <span>Age</span>
                     <input
                       value={payload.patient.age}
@@ -699,7 +702,7 @@ export function AdminSyncPage() {
                       onChange={(event) => updatePatient("age", event.target.value)}
                     />
                   </label>
-                  <label className="field">
+                  <label className="doc-table-field">
                     <span>Gender</span>
                     <input
                       value={payload.patient.gender}
@@ -709,12 +712,25 @@ export function AdminSyncPage() {
                     />
                   </label>
                 </div>
+              </section>
 
-                <div className="treatment-record__heading">
-                  <h4>TREATMENT RECORD</h4>
-                </div>
-                <div className="treatment-record__table-wrap">
-                  <table className="treatment-record__table">
+              <div className="doc-table-card__divider" aria-hidden="true" />
+
+              <section className="doc-table-card__record" aria-label="Treatment record">
+                <span className="doc-table-card__section-label">Treatment Record</span>
+                <div className="doc-table-card__table-wrap">
+                  <table className="doc-table-card__table">
+                    <colgroup>
+                      <col style={{ width: "12%" }} />
+                      <col style={{ width: "11%" }} />
+                      <col style={{ width: "22%" }} />
+                      <col style={{ width: "14%" }} />
+                      <col style={{ width: "11%" }} />
+                      <col style={{ width: "10%" }} />
+                      <col style={{ width: "10%" }} />
+                      <col style={{ width: "10%" }} />
+                      {editing && activeJob.status !== "synced" ? <col style={{ width: "44px" }} /> : null}
+                    </colgroup>
                     <thead>
                       <tr>
                         <th>Date</th>
@@ -760,21 +776,21 @@ export function AdminSyncPage() {
                               onChange={(event) => updateVisit(index, "dentistName", event.target.value)}
                             />
                           </td>
-                          <td>
+                          <td className="is-amount">
                             <input
                               value={visit.amountCharged || ""}
                               disabled={!editing || activeJob.status === "synced"}
                               onChange={(event) => updateVisit(index, "amountCharged", event.target.value)}
                             />
                           </td>
-                          <td>
+                          <td className="is-amount">
                             <input
                               value={visit.amountPaid || ""}
                               disabled={!editing || activeJob.status === "synced"}
                               onChange={(event) => updateVisit(index, "amountPaid", event.target.value)}
                             />
                           </td>
-                          <td>
+                          <td className="is-amount">
                             <input
                               value={visit.balance || ""}
                               disabled={!editing || activeJob.status === "synced"}
@@ -789,9 +805,15 @@ export function AdminSyncPage() {
                             />
                           </td>
                           {editing && activeJob.status !== "synced" ? (
-                            <td>
-                              <button type="button" className="text-link" onClick={() => removeVisitRow(index)}>
-                                Remove
+                            <td className="doc-table-card__row-action">
+                              <button
+                                type="button"
+                                className="doc-table-card__icon-btn"
+                                title="Remove row"
+                                aria-label="Remove row"
+                                onClick={() => removeVisitRow(index)}
+                              >
+                                <Trash2 size={15} />
                               </button>
                             </td>
                           ) : null}
@@ -800,32 +822,40 @@ export function AdminSyncPage() {
                     </tbody>
                   </table>
                 </div>
-                {editing && activeJob.status !== "synced" ? (
-                  <button type="button" className="button button--ghost" onClick={addVisitRow}>
-                    Add row
-                  </button>
-                ) : null}
-              </div>
+
+                <div className="doc-table-card__footer">
+                  {editing && activeJob.status !== "synced" ? (
+                    <button type="button" className="doc-table-card__add-btn" onClick={addVisitRow}>
+                      <Plus size={15} /> Add Row
+                    </button>
+                  ) : (
+                    <span />
+                  )}
+
+                  {activeJob.status !== "synced" ? (
+                    <button
+                      type="button"
+                      className="button button--primary doc-table-card__save-btn"
+                      onClick={confirmAndSave}
+                      disabled={Boolean(busy)}
+                    >
+                      <CheckCircle2 size={16} /> {busy === "sync" ? "Saving…" : "Confirm & Save"}
+                    </button>
+                  ) : (
+                    <p className="inline-alert inline-alert--success doc-table-card__saved">
+                      Saved to clinical record #{activeJob.linkedPatientId}
+                      {activeJob.linkedTreatmentId ? ` · treatment #${activeJob.linkedTreatmentId}` : ""} ·{" "}
+                      {formatAdminDateTime(activeJob.syncedAt)}. Original document deleted.
+                    </p>
+                  )}
+                </div>
+              </section>
 
               {matchInfo?.isNewPatient === false && matchInfo?.match ? (
                 <p className="inline-alert inline-alert--success">
                   Existing patient match: {matchInfo.match.fullName} (ID {matchInfo.match.id})
                 </p>
               ) : null}
-
-              {activeJob.status !== "synced" ? (
-                <div className="admin-heading-actions">
-                  <button type="button" className="button button--primary" onClick={confirmAndSave} disabled={Boolean(busy)}>
-                    <CheckCircle2 size={16} /> {busy === "sync" ? "Saving…" : "Confirm & Save"}
-                  </button>
-                </div>
-              ) : (
-                <p className="inline-alert inline-alert--success">
-                  Saved to clinical record #{activeJob.linkedPatientId}
-                  {activeJob.linkedTreatmentId ? ` · treatment #${activeJob.linkedTreatmentId}` : ""} ·{" "}
-                  {formatAdminDateTime(activeJob.syncedAt)}. Original document deleted.
-                </p>
-              )}
             </div>
           </div>
         </section>

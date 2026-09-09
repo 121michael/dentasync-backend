@@ -3316,9 +3316,10 @@ strong {
 }
 .admin-doc-layout {
   display: grid;
-  grid-template-columns: minmax(0, .95fr) minmax(0, 1.05fr);
+  grid-template-columns: minmax(280px, 0.9fr) minmax(0, 1.35fr);
   gap: 1rem;
   margin-top: 1rem;
+  align-items: start;
 }
 .admin-doc-preview {
   display: grid;
@@ -3343,11 +3344,260 @@ strong {
   margin: 0 0 .75rem;
   font-size: .95rem;
 }
+
+/* Premium Document Table card (Admin Sync review) */
+.doc-table-card {
+  display: grid;
+  gap: 1rem;
+  max-width: 100%;
+  padding: 1.1rem 1.15rem 1.15rem;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--border) 88%, #fff);
+  background: #fff;
+  box-shadow:
+    0 1px 2px rgba(55, 30, 90, 0.04),
+    0 10px 28px rgba(55, 30, 90, 0.06);
+}
+.doc-table-card__header h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: color-mix(in srgb, var(--text) 92%, var(--amethyst-700, #5b2d8e));
+}
+.doc-table-card__helper {
+  margin: 0.35rem 0 0;
+  max-width: 58ch;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+.doc-table-card__section-label {
+  display: block;
+  margin-bottom: 0.55rem;
+  color: color-mix(in srgb, var(--amethyst-700, #5b2d8e) 78%, var(--text));
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.doc-table-card__patient-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(0, 0.55fr) minmax(0, 0.7fr);
+  gap: 0.7rem;
+}
+.doc-table-field {
+  display: grid;
+  gap: 0.28rem;
+  margin: 0;
+}
+.doc-table-field span {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.doc-table-field input {
+  width: 100%;
+  min-height: 2.15rem;
+  padding: 0.42rem 0.65rem;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--amethyst-50, #f7f2fb) 55%, #fff);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.88rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+.doc-table-field input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--amethyst-500, #7c3aed) 55%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--amethyst-400, #a78bfa) 22%, transparent);
+  background: #fff;
+}
+.doc-table-field input:disabled {
+  opacity: 0.85;
+  cursor: default;
+}
+.doc-table-card__divider {
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--amethyst-300, #c4b5fd) 45%, var(--border)),
+    transparent
+  );
+}
+.doc-table-card__table-wrap {
+  overflow-x: auto;
+  border: 1px solid color-mix(in srgb, var(--border) 90%, transparent);
+  border-radius: 12px;
+  background: #fff;
+  max-height: min(52vh, 480px);
+  overflow-y: auto;
+}
+.doc-table-card__table {
+  width: 100%;
+  min-width: 820px;
+  border-collapse: separate;
+  border-spacing: 0;
+  text-align: left;
+}
+.doc-table-card__table th,
+.doc-table-card__table td {
+  padding: 0.42rem 0.45rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  vertical-align: middle;
+}
+.doc-table-card__table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0.62rem 0.5rem;
+  background: color-mix(in srgb, var(--amethyst-100, #ede4f7) 78%, #fff);
+  color: color-mix(in srgb, var(--amethyst-800, #4c1d75) 70%, var(--text));
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  border-bottom-color: color-mix(in srgb, var(--amethyst-300, #c4b5fd) 40%, var(--border));
+}
+.doc-table-card__table tbody tr {
+  transition: background 0.14s ease;
+}
+.doc-table-card__table tbody tr:hover {
+  background: color-mix(in srgb, var(--amethyst-50, #f7f2fb) 70%, #fff);
+}
+.doc-table-card__table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.doc-table-card__table input {
+  width: 100%;
+  min-width: 0;
+  min-height: 1.95rem;
+  padding: 0.28rem 0.42rem;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8rem;
+  line-height: 1.3;
+  transition: border-color 0.14s ease, box-shadow 0.14s ease, background 0.14s ease;
+}
+.doc-table-card__table tbody tr:hover input {
+  background: color-mix(in srgb, #fff 70%, transparent);
+  border-color: color-mix(in srgb, var(--border) 55%, transparent);
+}
+.doc-table-card__table input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--amethyst-500, #7c3aed) 50%, var(--border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--amethyst-400, #a78bfa) 20%, transparent);
+  background: #fff;
+}
+.doc-table-card__table input:disabled {
+  opacity: 0.9;
+  cursor: default;
+}
+.doc-table-card__table td.is-amount input {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.doc-table-card__row-action {
+  width: 44px;
+  text-align: center;
+}
+.doc-table-card__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  margin: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: color-mix(in srgb, var(--text-muted) 80%, #9f1239);
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+.doc-table-card__icon-btn:hover {
+  border-color: color-mix(in srgb, #f43f5e 25%, var(--border));
+  background: color-mix(in srgb, #fff1f2 80%, #fff);
+  color: #be123c;
+}
+.doc-table-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+  margin-top: 0.15rem;
+}
+.doc-table-card__add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0.45rem 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--amethyst-400, #a78bfa) 35%, var(--border));
+  border-radius: 999px;
+  background: #fff;
+  color: color-mix(in srgb, var(--amethyst-700, #5b2d8e) 85%, var(--text));
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
+}
+.doc-table-card__add-btn:hover {
+  border-color: color-mix(in srgb, var(--amethyst-500, #7c3aed) 45%, var(--border));
+  background: color-mix(in srgb, var(--amethyst-50, #f7f2fb) 80%, #fff);
+  box-shadow: 0 1px 4px rgba(55, 30, 90, 0.08);
+}
+.doc-table-card__save-btn {
+  margin-left: auto;
+  min-height: 2.45rem;
+  padding-inline: 1.15rem;
+  border-radius: 12px;
+  transition: transform 0.12s ease, box-shadow 0.14s ease, filter 0.14s ease;
+}
+.doc-table-card__save-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(91, 45, 142, 0.22);
+}
+.doc-table-card__save-btn:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+.doc-table-card__saved {
+  margin: 0;
+  margin-left: auto;
+}
+
 @media (max-width: 960px) {
   .admin-sync-source-grid,
   .admin-doc-layout,
   .admin-sync-steps {
     grid-template-columns: 1fr;
+  }
+  .doc-table-card__patient-grid {
+    grid-template-columns: 1fr;
+  }
+  .doc-table-card__footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .doc-table-card__save-btn,
+  .doc-table-card__saved {
+    margin-left: 0;
+    width: 100%;
+    justify-content: center;
+  }
+  .doc-table-card__add-btn {
+    width: fit-content;
   }
 }
 .admin-notification-list { display: grid; gap: .7rem; }
@@ -3780,18 +4030,6 @@ strong {
   font-size: .9rem;
   font-weight: 700;
 }
-.treatment-record--sync {
-  margin-top: 1.1rem;
-  display: grid;
-  gap: .7rem;
-}
-.treatment-record--sync .treatment-record__heading h4 {
-  margin: 0;
-  letter-spacing: .04em;
-}
-.treatment-record--sync .treatment-record__meta {
-  margin-bottom: .35rem;
-}
 .field-grid--three {
   display: grid;
   grid-template-columns: minmax(0, 1.6fr) minmax(0, .6fr) minmax(0, .8fr);
@@ -3801,18 +4039,6 @@ strong {
   .field-grid--three {
     grid-template-columns: 1fr;
   }
-}
-.treatment-record--sync .treatment-record__table input {
-  width: 100%;
-  min-width: 0;
-  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
-  border-radius: 8px;
-  padding: .35rem .45rem;
-  font: inherit;
-  background: #fff;
-}
-.treatment-record--sync .treatment-record__table td:last-child {
-  white-space: nowrap;
 }
 .treatment-record__table {
   width: 100%;
