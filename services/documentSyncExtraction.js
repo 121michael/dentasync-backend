@@ -17,15 +17,19 @@ const DOCUMENT_KEYWORD_RE =
 const KNOWN_PROCEDURES = [
   { pattern: /oral\s*prophylaxis|prophylax|pr[o0]r?h?[il1y]{2,}a?x?|prophy(?![a-z])/i, value: "Oral Prophylaxis" },
   { pattern: /dental\s*cleaning|\bcleaning\b|oral\s*prophy/i, value: "Dental Cleaning" },
-  { pattern: /tooth\s*extraction|\bextraction\b/i, value: "Tooth Extraction" },
+  { pattern: /\bexo\b|tooth\s*extraction|\bextraction\b/i, value: "Tooth Extraction" },
   { pattern: /root\s*canal|\brct\b/i, value: "Root Canal" },
   { pattern: /\bfilling\b|\bresto\b/i, value: "Dental Filling" },
   { pattern: /whitening|bleaching/i, value: "Teeth Whitening" },
   { pattern: /\bcrown\b/i, value: "Dental Crown" },
   { pattern: /\bimplant\b/i, value: "Dental Implant" },
-  { pattern: /brace|orthodont/i, value: "Orthodontic Adjustment" },
+  { pattern: /ortho(?:dontic)?\s*install|brace\s*install/i, value: "Orthodontic Installation" },
+  { pattern: /ortho(?:dontic)?\s*adjust|brace\s*adjust|orthodont|\bbrace/i, value: "Orthodontic Adjustment" },
   { pattern: /consultation/i, value: "Consultation" },
 ];
+
+const MONTH_TOKEN_RE =
+  "(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)";
 
 class DocumentValidationError extends Error {
   constructor(message = INVALID_DOCUMENT_MESSAGE) {
@@ -125,7 +129,157 @@ function normalizePhone(value) {
   if (/^0\d{10}$/.test(digits)) return `63${digits.slice(1)}`;
   if (/^9\d{9}$/.test(digits)) return `63${digits}`;
   if (/^63\d{10}$/.test(digits)) return digits;
-  return digits.length >= 10 ? digits : "";
+  return "";
+}
+
+function looksLikePrintedGenderPrompt(value) {
+  const text = cleanLine(value).toLowerCase();
+  return /^(m\s*\/\s*f|m\/f|male\s*\/\s*female|f\s*\/\s*m)$/i.test(text);
+}
+
+function isTreatmentRecordForm(text) {
+  const source = String(text || "");
+  const hasTitle = /treatment\s*record/i.test(source);
+  const hasTableHeaders =
+    /\bdate\b/i.test(source) &&
+    /\bprocedure\b/i.test(source) &&
+    /amount\s*charged|\bamount\b/i.test(source);
+  const hasToothCol = /tooth\s*no|\btooth\b/i.test(source);
+  // Require the tooth column so simple "Patient Treatment Record" forms are not treated as multi-row grids.
+  return hasToothCol && (hasTitle || hasTableHeaders);
+}
+
+function inferProcedureToken(chunk) {
+  const source = String(chunk || "");
+  const fuzzy = source
+    .replace(/0/g, "O")
+    .replace(/1/g, "I")
+    .replace(/5/g, "S");
+  if (/\bEXO\b|extraction/i.test(source)) return "Tooth Extraction";
+  if (/ortho\s*install|installation/i.test(source) || /ORTHO.*INSTAL/i.test(fuzzy)) {
+    return "Orthodontic Installation";
+  }
+  if (
+    /ortho\s*adjust|adjustment/i.test(source) ||
+    /ORTHO.*ADJUST|ORTHO.*ADJM|ORM.*ADJUST|OATH.*ADJUST/i.test(fuzzy)
+  ) {
+    return "Orthodontic Adjustment";
+  }
+  return inferProcedure(source);
+}
+
+/**
+ * Parse multi-row clinic "TREATMENT RECORD" tables into visit entries.
+ * Handles common handwriting layouts where the year sits in the Tooth column.
+ */
+function parseTreatmentRecordRows(rawText) {
+  const text = String(rawText || "");
+  if (!text.trim()) return [];
+
+  const rows = [];
+  const monthDateRe = new RegExp(
+    `\\b(${MONTH_TOKEN_RE})\\s*[-.]?\\s*(\\d{1,2})(?:st|nd|rd|th)?(?:,)?\\s*(20\\d{2})?\\b`,
+    "i"
+  );
+
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => cleanLine(line))
+    .filter(Boolean);
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const dateMatch = line.match(monthDateRe);
+    if (!dateMatch) continue;
+
+    // Keep the row local: current line + next line only when it supplies year / amount / procedure.
+    const next = lines[i + 1] || "";
+    const next2 = lines[i + 2] || "";
+    const next3 = lines[i + 3] || "";
+    const monthDateReLocal = new RegExp(monthDateRe.source, "i");
+    const nextHasOwnDate = monthDateReLocal.test(next);
+    const parts = [line];
+    if (!nextHasOwnDate && /^(20\d{2})\b/.test(next)) {
+      parts.push(next);
+      if (next2 && !monthDateReLocal.test(next2) && /ortho|exo|install|adjust|bracket/i.test(next2)) {
+        parts.push(next2);
+        if (next3 && !monthDateReLocal.test(next3) && /\b\d{1,3}(?:,\d{3})*(?:\.\d{2})?\b/.test(next3)) {
+          parts.push(next3);
+        }
+      }
+    } else if (
+      !nextHasOwnDate &&
+      /ortho|exo|install|adjust|bracket|\b\d{3,5}\b/i.test(next)
+    ) {
+      parts.push(next);
+    }
+    const window = parts.join(" ");
+
+    let year = dateMatch[3] || "";
+    if (!year) {
+      const nearbyYear = window.match(/\b(20\d{2})\b/);
+      year = nearbyYear?.[1] || "";
+    }
+    if (!year) continue;
+
+    const month = monthToNumber(dateMatch[1]);
+    const day = String(dateMatch[2]).padStart(2, "0");
+    if (!month) continue;
+    const treatmentDate = `${year}-${month}-${day}`;
+
+    const treatment = inferProcedureToken(window);
+    const amountMatches = [
+      ...window.replace(/,/g, "").matchAll(/\b([1-9]\d{2,5})(?:\.00)?\b/g),
+    ].map((m) => m[1]);
+    const amount =
+      amountMatches.find((value) => {
+        const n = Number(value);
+        return n >= 100 && n <= 200000 && !/^20\d{2}$/.test(value);
+      }) || "";
+
+    const toothMatch = window.match(/\b(\d{1,2})\s*[-–]\s*(\d{1,2})\b/);
+    const toothNos = toothMatch ? `${toothMatch[1]}-${toothMatch[2]}` : "";
+
+    if (!treatment && !amount) continue;
+
+    rows.push({
+      treatmentDate,
+      treatment: treatment || "",
+      amountCharged: amount ? normalizeAmount(amount) : "",
+      toothNos,
+      raw: window.slice(0, 180),
+    });
+  }
+
+  const seen = new Set();
+  return rows.filter((row) => {
+    const key = `${row.treatmentDate}|${row.treatment}|${row.amountCharged}|${row.toothNos}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function pickPrimaryTreatmentRow(rows) {
+  if (!rows?.length) return null;
+  // Prefer the earliest installation with an amount, else latest visit with amount, else latest visit.
+  const withAmount = rows.filter((row) => row.amountCharged);
+  const installation = withAmount.find((row) => /install/i.test(row.treatment));
+  if (installation) return installation;
+  if (withAmount.length) return withAmount[withAmount.length - 1];
+  return rows[rows.length - 1];
+}
+
+function summarizeTreatmentRows(rows, limit = 8) {
+  if (!rows?.length) return "";
+  const lines = rows.slice(0, limit).map((row) => {
+    const bits = [row.treatmentDate, row.treatment || "Visit"];
+    if (row.toothNos) bits.push(`tooth ${row.toothNos}`);
+    if (row.amountCharged) bits.push(`₱${row.amountCharged}`);
+    return bits.join(" · ");
+  });
+  const extra = rows.length > limit ? ` (+${rows.length - limit} more visits)` : "";
+  return `Treatment record visits: ${lines.join("; ")}${extra}`;
 }
 
 function monthToNumber(monthToken) {
@@ -213,41 +367,61 @@ function inferProcedure(text) {
 }
 
 function extractPhoneFromText(text) {
-  const compact = String(text || "").replace(/[^\d]/g, " ");
-  const candidates = compact.match(/\b0?9\d{9}\b/g) || [];
-  if (candidates.length) {
-    return normalizePhone(candidates[0]);
+  // Only accept clearly labeled or unambiguous PH mobile numbers — avoid OCR noise digits.
+  const labeled = String(text || "").match(
+    /(?:phone|mobile|cellphone|cell\s*phone|telephone|tel\.?)\s*[:\-]?\s*([+\d()[\]\-\s]{10,20})/i
+  );
+  if (labeled?.[1]) {
+    const normalized = normalizePhone(labeled[1]);
+    if (normalized) return normalized;
   }
-  // OCR may split digits across lines; gather long digit runs.
-  const digitsOnly = String(text || "").replace(/\D/g, " ");
-  const runs = digitsOnly.match(/\d{10,12}/g) || [];
-  for (const run of runs) {
-    const normalized = normalizePhone(run);
+  const candidates = String(text || "").match(/\b0?9\d{9}\b/g) || [];
+  for (const candidate of candidates) {
+    const normalized = normalizePhone(candidate);
     if (normalized) return normalized;
   }
   return "";
+}
+
+function isPlausiblePersonName(value) {
+  const text = cleanLine(value);
+  if (!text || text.length < 3) return false;
+  if (/^(date|age|gender|phone|address|patient|name|procedure|treatment|amount|tooth)\b/i.test(text)) {
+    return false;
+  }
+  if (/[:\d]/.test(text) && !/^[A-Za-z][A-Za-z .,'\-]+$/.test(text)) return false;
+  return /[A-Za-z]{2,}/.test(text);
 }
 
 function applyExternalFields(payload, fields = {}) {
   if (!fields || typeof fields !== "object") return payload;
   const next = payload;
 
-  if (fields.fullName) {
+  if (fields.fullName && isPlausiblePersonName(fields.fullName) && !next.patient.fullName) {
     const names = splitName(fields.fullName);
     next.patient.firstName = names.firstName;
     next.patient.lastName = names.lastName;
     next.patient.fullName = names.fullName;
   }
-  if (fields.dateOfBirth) next.patient.dateOfBirth = normalizeDate(fields.dateOfBirth);
-  if (fields.age) next.patient.age = normalizeAge(fields.age);
-  if (fields.phone) next.patient.phone = normalizePhone(fields.phone);
-  if (fields.address) next.patient.address = cleanLine(fields.address);
-  if (fields.procedure) {
+  if (fields.dateOfBirth && !next.patient.dateOfBirth) {
+    next.patient.dateOfBirth = normalizeDate(fields.dateOfBirth);
+  }
+  if (fields.age && !next.patient.age) next.patient.age = normalizeAge(fields.age);
+  if (fields.phone && !next.patient.phone) {
+    const phone = normalizePhone(fields.phone);
+    if (phone) next.patient.phone = phone;
+  }
+  if (fields.address && !next.patient.address) next.patient.address = cleanLine(fields.address);
+  if (fields.procedure && !next.procedure.treatment) {
     next.procedure.treatment = inferProcedure(fields.procedure) || cleanLine(fields.procedure);
   }
-  if (fields.treatmentDate) next.procedure.treatmentDate = normalizeDate(fields.treatmentDate);
-  if (fields.amountCharged) next.procedure.amountCharged = normalizeAmount(fields.amountCharged);
-  if (fields.notes) next.procedure.notes = cleanLine(fields.notes);
+  if (fields.treatmentDate && !next.procedure.treatmentDate) {
+    next.procedure.treatmentDate = normalizeDate(fields.treatmentDate);
+  }
+  if (fields.amountCharged && !next.procedure.amountCharged) {
+    next.procedure.amountCharged = normalizeAmount(fields.amountCharged);
+  }
+  if (fields.notes && !next.procedure.notes) next.procedure.notes = cleanLine(fields.notes);
   return next;
 }
 
@@ -352,8 +526,20 @@ function captureLabeledBlock(text, labelNames, stopLabels = []) {
       for (let j = i + 1; j < lines.length; j += 1) {
         const next = lines[j];
         const nextLower = normalizeLabelLine(next);
-        if (stopSet.has(nextLower) || labelSet.includes(nextLower)) break;
-        if (/^(date|no\.?|description|time|debit|credit|amount|balance)$/i.test(next)) break;
+        const startsWithKnownLabel = [...stopSet].some(
+          (label) =>
+            nextLower === label ||
+            nextLower.startsWith(`${label} `) ||
+            nextLower.startsWith(`${label}:`)
+        );
+        if (stopSet.has(nextLower) || labelSet.includes(nextLower) || startsWithKnownLabel) break;
+        if (
+          /^(date|no\.?|description|time|debit|credit|amount|balance|gender|sex|tooth|procedure|dentist)/i.test(
+            next
+          )
+        ) {
+          break;
+        }
         values.push(next);
         if (values.join(" ").length > 80) break;
       }
@@ -374,10 +560,16 @@ function extractStructuredPayload(rawText) {
     captureLabeledBlock(text, ["name", "patient name", "full name"]) ||
     capture(text, [
       /(?:patient\s*name|full\s*name|^name)\s*[:\-]\s*([A-Za-z0-9 .,'\-_]+)/im,
-      /(?:^|\n)\s*name\s*[:\-]?\s*([A-Za-z][A-Za-z0-9 .,'\-_]{2,80})/im,
+      /(?:^|\n)\s*name\s*[:\-]\s*([A-Za-z][A-Za-z0-9 .,'\-_]{2,80})/im,
       /(?:mr\.?|ms\.?|mrs\.?|dr\.?)\s+([A-Za-z]+(?:\s+[A-Za-z\-]+){1,4})/,
     ]);
-  const names = splitName(fullName.replace(/^(mr|ms|mrs|dr)\.?\s+/i, ""));
+  const rejectedName =
+    /^(age|gender|sex|date|address|phone|telephone|cellphone|procedure|treatment|amount|tooth|dentist|name)$/i;
+  const names = splitName(
+    rejectedName.test(fullName.replace(/^(mr|ms|mrs|dr)\.?\s+/i, ""))
+      ? ""
+      : fullName.replace(/^(mr|ms|mrs|dr)\.?\s+/i, "")
+  );
   payload.patient.firstName = names.firstName;
   payload.patient.lastName = names.lastName;
   payload.patient.fullName = names.fullName;
@@ -419,17 +611,32 @@ function extractStructuredPayload(rawText) {
   payload.patient.age = normalizeAge(
     captureLabeledBlock(text, ["age"]) ||
       capture(text, [
-        /(?:^|\n)\s*age\s*[:\-]?\s*([0-9]{1,3})(?:\s*(?:years?|yrs?|y\.?o\.?))?/im,
-        /\bage\s*[:\-]?\s*([0-9]{1,3})\b/i,
+        /(?:^|\n)\s*age\s*[:\-]\s*([0-9]{1,3})(?:\s*(?:years?|yrs?|y\.?o\.?))?(?:\n|$)/im,
+        /\bage\s*[:\-]\s*([0-9]{1,3})\b/i,
       ])
   );
+  // Blank Age: labels on treatment records must not steal day numbers from visit dates.
+  if (isTreatmentRecordForm(text) && !/(?:^|\n)\s*age\s*[:\-]\s*[0-9]{1,3}\b/im.test(text)) {
+    payload.patient.age = "";
+  }
   fieldStatuses.age = fieldStatus(payload.patient.age, labelPresent(text, /\bage\b/i));
 
   payload.patient.gender = capture(text, [
-    /(?:gender|sex)\s*[:\-]\s*(male|female|m|f|other)/i,
+    /(?:gender|sex)\s*[:\-]\s*(male|female|m|f|other)\b/i,
   ]);
+  if (looksLikePrintedGenderPrompt(payload.patient.gender) || /m\s*\/\s*f/i.test(payload.patient.gender)) {
+    payload.patient.gender = "";
+  }
+  // Printed forms often show "Gender: M/F" with no selection — ignore that prompt text.
+  if (/gender\s*[:\-]?\s*m\s*\/?\s*f/i.test(text) && !/(?:gender|sex)\s*[:\-]\s*(male|female)\b/i.test(text)) {
+    const selected = text.match(/(?:gender|sex)\s*[:\-]\s*([mf])\b(?!\s*\/)/i);
+    payload.patient.gender = selected?.[1] || "";
+  }
   if (/^m$/i.test(payload.patient.gender)) payload.patient.gender = "Male";
   if (/^f$/i.test(payload.patient.gender)) payload.patient.gender = "Female";
+  if (!/^(male|female|other)$/i.test(payload.patient.gender || "")) {
+    payload.patient.gender = "";
+  }
   fieldStatuses.gender = fieldStatus(
     payload.patient.gender,
     labelPresent(text, /(?:gender|sex)\b/i)
@@ -546,13 +753,59 @@ function extractStructuredPayload(rawText) {
     captureLabeledBlock(text, ["complaint", "notes", "remarks", "findings", "diagnosis"]) ||
     capture(text, [/(?:notes|remarks|findings|diagnosis|complaint)\s*[:\-]\s*(.+)$/im]);
 
-  if (!payload.patient.fullName && !payload.procedure.treatment) {
+  // Multi-row TREATMENT RECORD tables: auto-fill primary visit + history notes.
+  const treatmentRows = parseTreatmentRecordRows(text);
+  if (treatmentRows.length) {
+    const primary = pickPrimaryTreatmentRow(treatmentRows);
+    if (primary?.treatment && !payload.procedure.treatment) {
+      payload.procedure.treatment = primary.treatment;
+      fieldStatuses.treatment = "detected";
+    } else if (primary?.treatment && /ortho|extraction|exo/i.test(primary.treatment)) {
+      payload.procedure.treatment = primary.treatment;
+      fieldStatuses.treatment = "detected";
+    }
+    if (primary?.treatmentDate) {
+      payload.procedure.treatmentDate = primary.treatmentDate;
+      fieldStatuses.treatmentDate = "detected";
+    }
+    if (primary?.amountCharged) {
+      payload.procedure.amountCharged = primary.amountCharged;
+      fieldStatuses.amountCharged = "detected";
+    }
+    const history = summarizeTreatmentRows(treatmentRows);
+    payload.procedure.notes = payload.procedure.notes
+      ? `${payload.procedure.notes} | ${history}`
+      : history;
+  } else if (isTreatmentRecordForm(text)) {
+    // Headers detected but row OCR was weak — still try fuzzy procedure tokens.
+    const fuzzyTreatment = inferProcedureToken(text);
+    if (fuzzyTreatment && !payload.procedure.treatment) {
+      payload.procedure.treatment = fuzzyTreatment;
+      fieldStatuses.treatment = "detected";
+    }
+    if (!payload.procedure.notes) {
+      payload.procedure.notes =
+        "Treatment record form detected. Review handwriting and confirm procedure/amount before saving.";
+    }
+  }
+
+  const filledCount = [
+    payload.patient.fullName,
+    payload.patient.phone,
+    payload.patient.age,
+    payload.patient.dateOfBirth,
+    payload.procedure.treatment,
+    payload.procedure.treatmentDate,
+    payload.procedure.amountCharged,
+  ].filter(Boolean).length;
+
+  if (filledCount === 0) {
     notes.push(
-      "Limited structured fields were detected. Please type the values from the document preview before saving."
+      "Document detected, but structured fields could not be read automatically. Type values from the preview, then Confirm & Save."
     );
   } else {
     notes.push(
-      "Extracted readable fields from the document. Correct any OCR mistakes before confirming. The source file stays temporary only."
+      `Auto-filled ${filledCount} field${filledCount === 1 ? "" : "s"} from the document. Review them, then Confirm & Save.`
     );
   }
 
@@ -722,10 +975,44 @@ async function extractDocumentData(filePath, mimeType, originalName) {
       amountCharged: vision.amountCharged,
       notes: vision.notes,
     });
+    if (Array.isArray(vision.visits) && vision.visits.length) {
+      const visitLines = vision.visits
+        .slice(0, 10)
+        .map((visit) => {
+          const bits = [visit.date, visit.procedure, visit.toothNos, visit.amount]
+            .map((value) => cleanLine(value))
+            .filter(Boolean);
+          return bits.join(" · ");
+        })
+        .filter(Boolean);
+      if (visitLines.length) {
+        const history = `Treatment record visits: ${visitLines.join("; ")}`;
+        structured.payload.procedure.notes = structured.payload.procedure.notes
+          ? `${structured.payload.procedure.notes} | ${history}`
+          : history;
+      }
+    }
   }
   structured.fieldStatuses = refreshFieldStatuses(structured.payload, structured.fieldStatuses);
 
-  const notes = [structured.notes, extracted.warning].filter(Boolean).join(" ");
+  const filledCount = [
+    structured.payload.patient.fullName,
+    structured.payload.patient.phone,
+    structured.payload.patient.age,
+    structured.payload.patient.dateOfBirth,
+    structured.payload.procedure.treatment,
+    structured.payload.procedure.treatmentDate,
+    structured.payload.procedure.amountCharged,
+  ].filter(Boolean).length;
+
+  const notes = [
+    filledCount
+      ? `Auto-filled ${filledCount} field${filledCount === 1 ? "" : "s"} from the document. Review them, then Confirm & Save.`
+      : structured.notes,
+    extracted.warning,
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return {
     rawText: extracted.text,
@@ -735,6 +1022,7 @@ async function extractDocumentData(filePath, mimeType, originalName) {
     method: vision ? `${extracted.method}+vision` : extracted.method,
     validation: likeness,
     orientationDegrees: extracted.orientationDegrees || 0,
+    autoFilledCount: filledCount,
   };
 }
 
@@ -752,4 +1040,7 @@ module.exports = {
   normalizeAge,
   inferProcedure,
   fieldStatus,
+  parseTreatmentRecordRows,
+  pickPrimaryTreatmentRow,
+  isTreatmentRecordForm,
 };

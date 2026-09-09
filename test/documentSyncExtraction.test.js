@@ -8,6 +8,7 @@ const {
   normalizeAmount,
   normalizeAge,
   assessDocumentLikeness,
+  parseTreatmentRecordRows,
 } = require("../services/documentSyncExtraction");
 
 test("document extraction pulls patient, age, procedure, and amount fields", () => {
@@ -85,13 +86,56 @@ test("face-like OCR text is rejected as non-document", () => {
   assert.equal(result.isDocument, false);
 });
 
-test("labeled dental form text is accepted as a document", () => {
+test("treatment record rows auto-fill primary procedure, date, and amount", () => {
   const sample = `
-Patient Name: Ana Reyes
-Procedure: Root Canal
-Treatment Date: 03/01/2026
-Phone: 09180001111
+TREATMENT RECORD
+Name:
+Age:
+Gender: M/F
+Date | Tooth No./s | Procedure | Dentist/s | Amount charged | Amount Paid | Balance | Next Appt.
+NOV 16 2023 ORTHO INSTALLATION 5000
+DEC 21 2023 ORTHO ADJUSTMENT 1250
+JAN 25 2024 ORTHO ADJUSTMENT 1250
+MAR 21 2024 ORTHO ADJUSTMENT 1650
+MAR 11 2025 EXO 24-44
 `;
-  const result = assessDocumentLikeness(sample, "ocr");
-  assert.equal(result.isDocument, true);
+  const { payload, fieldStatuses } = extractStructuredPayload(sample);
+  assert.equal(payload.procedure.treatment, "Orthodontic Installation");
+  assert.equal(payload.procedure.treatmentDate, "2023-11-16");
+  assert.equal(payload.procedure.amountCharged, "5000");
+  assert.equal(fieldStatuses.treatment, "detected");
+  assert.equal(fieldStatuses.amountCharged, "detected");
+  assert.match(payload.procedure.notes, /Treatment record visits/i);
+  assert.equal(payload.patient.gender, "");
+  assert.equal(payload.patient.fullName, "");
+});
+
+test("printed Gender M/F prompt is not treated as Male", () => {
+  const sample = `
+Name: Ana Reyes
+Age: 28
+Gender: M/F
+Procedure: Dental Cleaning
+Amount: 800
+`;
+  const { payload } = extractStructuredPayload(sample);
+  assert.equal(payload.patient.fullName, "Ana Reyes");
+  assert.equal(payload.patient.gender, "");
+});
+
+test("parseTreatmentRecordRows reads year-in-tooth-column style dates", () => {
+  const rows = parseTreatmentRecordRows(`
+NOV 16
+2023
+ORTHO INSTALLATION
+5,000
+DEC 21
+2023
+ORTHO ADJUSTMENT
+1,250
+`);
+  assert.ok(rows.length >= 2);
+  assert.equal(rows[0].treatmentDate, "2023-11-16");
+  assert.equal(rows[0].treatment, "Orthodontic Installation");
+  assert.equal(rows[0].amountCharged, "5000");
 });

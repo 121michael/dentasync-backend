@@ -55,6 +55,13 @@ KEYWORDS = list({kw for values in LABELS.values() for kw in values}) + [
     "prophylaxis",
     "oral",
     "dental",
+    "treatment",
+    "record",
+    "ortho",
+    "installation",
+    "adjustment",
+    "exo",
+    "tooth",
 ]
 
 
@@ -248,18 +255,63 @@ def infer_procedure(text: str, value: str) -> str:
     mapping = [
         (r"oral\s*prophylaxis|prophylax|pr[o0]r?h?[il1y]{2,}|prophy", "Oral Prophylaxis"),
         (r"cleaning", "Dental Cleaning"),
-        (r"extraction", "Tooth Extraction"),
+        (r"\bexo\b|extraction", "Tooth Extraction"),
         (r"root\s*canal|\brct\b", "Root Canal"),
         (r"filling|resto", "Dental Filling"),
         (r"whitening|bleach", "Teeth Whitening"),
         (r"crown", "Dental Crown"),
         (r"implant", "Dental Implant"),
-        (r"orthodont|brace", "Orthodontic Adjustment"),
+        (r"ortho(?:dontic)?\s*install|installation", "Orthodontic Installation"),
+        (r"ortho(?:dontic)?\s*adjust|adjustment|orthodont|brace", "Orthodontic Adjustment"),
     ]
     for pattern, label in mapping:
         if re.search(pattern, blob, flags=re.I):
             return label
     return clean_value(value)
+
+
+def extract_treatment_record_fields(text: str) -> dict[str, str]:
+    """Best-effort autofill from multi-row TREATMENT RECORD OCR text."""
+    blob = text or ""
+    # Require tooth-column style grids, not simple patient treatment forms.
+    if not re.search(r"tooth\s*no|\btooth\b", blob, flags=re.I):
+        return {}
+    if not re.search(r"treatment\s*record|\bprocedure\b", blob, flags=re.I):
+        return {}
+
+    procedure = ""
+    if re.search(r"ortho(?:dontic)?\s*install|installation", blob, flags=re.I):
+        procedure = "Orthodontic Installation"
+    elif re.search(r"\bexo\b|extraction", blob, flags=re.I):
+        procedure = "Tooth Extraction"
+    elif re.search(r"ortho(?:dontic)?\s*adjust|adjustment|orthodont", blob, flags=re.I):
+        procedure = "Orthodontic Adjustment"
+
+    amounts = re.findall(r"\b([1-9]\d{2,5})(?:\.00)?\b", blob)
+    amount = ""
+    for candidate in amounts:
+        if re.fullmatch(r"20\d{2}", candidate):
+            continue
+        value = int(candidate)
+        if 100 <= value <= 200000:
+            amount = candidate
+            if procedure == "Orthodontic Installation" or value >= 3000:
+                break
+
+    month = re.search(
+        r"\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s*[-.]?\s*(\d{1,2})(?:st|nd|rd|th)?(?:,)?\s*(20\d{2})\b",
+        blob,
+        flags=re.I,
+    )
+    treatment_date = normalize_date(month.group(0)) if month else ""
+
+    notes = "Treatment record form detected."
+    return {
+        "procedure": procedure,
+        "treatmentDate": treatment_date,
+        "amountCharged": amount,
+        "notes": notes,
+    }
 
 
 def structured_from_items(items: list[dict[str, Any]], text: str) -> dict[str, str]:
@@ -272,7 +324,7 @@ def structured_from_items(items: list[dict[str, Any]], text: str) -> dict[str, s
     amount = extract_amount(items, text)
     notes = find_values_for_label(items, LABELS["complaint"], multi=True)
 
-    return {
+    fields = {
         "fullName": full_name,
         "address": address,
         "phone": phone,
@@ -282,6 +334,14 @@ def structured_from_items(items: list[dict[str, Any]], text: str) -> dict[str, s
         "amountCharged": amount,
         "notes": notes,
     }
+
+    # Fill gaps from TREATMENT RECORD table heuristics.
+    record_fields = extract_treatment_record_fields(text)
+    for key, value in record_fields.items():
+        if value and not fields.get(key):
+            fields[key] = value
+
+    return fields
 
 
 def read_image(reader, image) -> tuple[str, list[dict[str, Any]], float]:

@@ -243,11 +243,25 @@ export function AdminSyncPage() {
     try {
       const response = await api.uploadAdminDocumentSync(file, nextSourceType);
       setActiveJob(response.job);
-      setPayload(response.job.editedPayload || response.job.extractedPayload || emptyPayload);
+      const nextPayload = response.job.editedPayload || response.job.extractedPayload || emptyPayload;
+      setPayload(nextPayload);
       setEditing(true);
-      setMessage(response.message);
+      const filled = [
+        nextPayload?.patient?.fullName,
+        nextPayload?.patient?.phone,
+        nextPayload?.patient?.age,
+        nextPayload?.patient?.dateOfBirth,
+        nextPayload?.procedure?.treatment,
+        nextPayload?.procedure?.treatmentDate,
+        nextPayload?.procedure?.amountCharged,
+      ].filter((value) => String(value || "").trim()).length;
+      const autoMessage =
+        filled > 0
+          ? `Document detected — auto-filled ${filled} field${filled === 1 ? "" : "s"}. Review, then Confirm & Save.`
+          : response.message || "Document detected. Enter readable fields from the preview, then Confirm & Save.";
+      setMessage(autoMessage);
       setStep("review");
-      pushToast(response.message || "Document fields filled for review.");
+      pushToast(autoMessage);
       await loadServerPreview(response.job.id);
       await load();
     } catch (scanError) {
@@ -471,8 +485,9 @@ export function AdminSyncPage() {
           <h2>Choose document source</h2>
           <p className="muted-copy">
             Hard copy via camera, or digital PDF / PNG / JPEG. Only documents are accepted — a face photo or unrelated
-            picture is rejected. The file is used only to read text; it is not kept after import. Tip: keep the paper
-            upright when scanning. Handwriting may need corrections before Confirm & Save.
+            picture is rejected. When a document is detected, patient and treatment fields auto-fill immediately for
+            review. The file is used only to read text; it is not kept after import. Tip: keep the paper upright and
+            well-lit. Dense handwriting may still need corrections before Confirm & Save.
           </p>
 
           <div className="admin-sync-source-grid">

@@ -25,6 +25,8 @@ const DENTAL_KEYWORDS = [
   "patient",
   "prophylaxis",
   "dental",
+  "ortho",
+  "tooth",
 ];
 
 function scoreDocumentText(text) {
@@ -36,10 +38,24 @@ function scoreDocumentText(text) {
   }
   if (/\b0?9\d{9}\b/.test(normalized.replace(/\D/g, " "))) score += 10;
   if (/\b(19|20)\d{2}\b/.test(normalized)) score += 4;
-  if (/\b(oral|cleaning|filling|extraction|prophylaxis|root\s*canal)\b/i.test(normalized)) {
+  if (/\b(oral|cleaning|filling|extraction|prophylaxis|root\s*canal|ortho|exo)\b/i.test(normalized)) {
     score += 10;
   }
   return score;
+}
+
+function countFilledFields(fields) {
+  if (!fields || typeof fields !== "object") return 0;
+  return Object.values(fields).filter((value) => String(value || "").trim()).length;
+}
+
+function resultQuality(result) {
+  const fields = result?.fields && typeof result.fields === "object" ? result.fields : {};
+  const filled = countFilledFields(fields);
+  const hasProcedure = Boolean(fields.procedure || fields.treatment);
+  const hasAmount = Boolean(fields.amountCharged);
+  const hasName = Boolean(fields.fullName);
+  return filled * 20 + (hasProcedure ? 25 : 0) + (hasAmount ? 15 : 0) + (hasName ? 20 : 0) + Number(result?.score || 0);
 }
 
 async function prepareOrientedVariants(filePath) {
@@ -119,7 +135,16 @@ async function recognizeWithTesseract(filePath) {
 async function extractBestImageText(filePath) {
   // Layout-aware EasyOCR rotates internally and returns structured fields.
   const easyDirect = runEasyOcr(filePath);
-  if (easyDirect?.text && Number(easyDirect.score || 0) >= 20) {
+  const easyFilled = countFilledFields(easyDirect?.fields);
+  const easyStrong =
+    easyDirect?.text &&
+    Number(easyDirect.score || 0) >= 20 &&
+    easyFilled >= 2;
+
+  // Only short-circuit when EasyOCR already produced usable autofill fields.
+  // Header-only forms (TREATMENT RECORD tables) often score high on keywords
+  // while handwriting remains unread — those must continue to Tesseract merge.
+  if (easyStrong) {
     return {
       text: easyDirect.text,
       score: Number(easyDirect.score || 0),
@@ -143,23 +168,28 @@ async function extractBestImageText(filePath) {
     uprightPath: null,
   };
   let keepPath = null;
+  let bestQuality = resultQuality(best);
 
   try {
     for (const variant of variants) {
       const tempPath = writeTempVariant(variant.buffer, variant.degrees);
       tempPaths.push(tempPath);
       const tess = await recognizeWithTesseract(tempPath);
-      const tessScore = scoreDocumentText(tess.text) + tess.confidence / 20;
-      if (tessScore > best.score) {
-        best = {
-          text: tess.text,
-          score: tessScore,
-          degrees: variant.degrees,
-          method: "ocr",
-          confidence: tess.confidence,
-          fields: {},
-          uprightPath: tempPath,
-        };
+      const mergedText = [easyDirect?.text || "", tess.text].filter(Boolean).join("\n");
+      const tessScore = scoreDocumentText(mergedText || tess.text) + tess.confidence / 20;
+      const candidate = {
+        text: mergedText || tess.text,
+        score: Math.max(tessScore, Number(easyDirect?.score || 0)),
+        degrees: variant.degrees,
+        method: easyDirect?.text ? "easyocr+ocr" : "ocr",
+        confidence: Math.max(Number(easyDirect?.confidence || 0), tess.confidence),
+        fields: easyDirect?.fields || {},
+        uprightPath: tempPath,
+      };
+      const quality = resultQuality(candidate) + (tess.text ? 5 : 0);
+      if (quality > bestQuality) {
+        best = candidate;
+        bestQuality = quality;
         keepPath = tempPath;
       }
     }
@@ -179,4 +209,5 @@ module.exports = {
   prepareOrientedVariants,
   extractBestImageText,
   runEasyOcr,
+  countFilledFields,
 };

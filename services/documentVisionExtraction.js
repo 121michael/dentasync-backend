@@ -26,17 +26,26 @@ Return JSON ONLY (no markdown) with this exact shape:
   "treatmentDate": "",
   "amountCharged": "",
   "notes": "",
-  "rawTextSummary": ""
+  "rawTextSummary": "",
+  "visits": [{"date":"","procedure":"","amount":"","toothNos":""}]
 }
 
 Rules:
 - isDocument must be false for selfies, face portraits, landscapes, or non-document photos.
 - Only fill fields that are clearly readable in the image. Use empty string when not readable. Do NOT invent values.
-- phone: keep digits, preferably Philippine mobile like 09XXXXXXXXX.
+- phone: keep digits, preferably Philippine mobile like 09XXXXXXXXX. Leave empty if not clearly written.
+- gender prompts printed as "M/F" with no selection mean gender is empty.
 - treatmentDate: prefer ISO YYYY-MM-DD when possible (e.g. Sept 7, 2024 -> 2024-09-07).
 - amountCharged: numeric only, no currency symbol.
-- procedure: use the written treatment/description (e.g. Oral Prophylaxis).
+- procedure: use the written treatment/description (e.g. Oral Prophylaxis, Orthodontic Adjustment, Tooth Extraction / EXO).
 - For Filipino dental charts/forms with labels NAME, TELEPHONE, AGE, DESCRIPTION, AMOUNT, DATE — map those fields.
+- For multi-row TREATMENT RECORD tables:
+  - Put visit rows into "visits" (date, procedure, amount, toothNos) when readable.
+  - Prefer the earliest Orthodontic Installation with amount for procedure/treatmentDate/amountCharged.
+  - If no installation, use the latest visit that has a readable amount.
+  - If amounts are dashes, still capture procedure/date.
+  - Put a short visit history into notes (e.g. "Ortho adjustments Nov 2023–May 2026; EXO Mar 2025").
+  - Name/Age/Gender may be blank on these forms — leave them empty rather than guessing.
 - Ignore tooth chart drawings unless needed for notes.`;
 
   const response = await fetch(

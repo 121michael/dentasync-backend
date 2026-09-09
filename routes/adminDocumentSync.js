@@ -407,10 +407,15 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
           detail: `Source: ${label}. Extracted fields for admin review. Source document is temporary and will be discarded after confirm or reject.`,
         });
 
+        const filled = Number(extraction.autoFilledCount || 0);
         return res.status(201).json({
-          message: "Document fields were filled automatically. Review them, then Confirm & Save.",
+          message:
+            filled > 0
+              ? `Document detected — auto-filled ${filled} field${filled === 1 ? "" : "s"}. Review them, then Confirm & Save.`
+              : "Document detected. Enter readable fields from the preview, then Confirm & Save.",
           job: mapJob(updated.rows[0]),
           fieldStatuses: extraction.fieldStatuses || {},
+          autoFilledCount: filled,
         });
       } catch (error) {
         const isValidation =
