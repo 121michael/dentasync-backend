@@ -26,11 +26,46 @@ const emptyPayload = {
     status: "completed",
     notes: "",
     coverageStatus: "",
+    visits: [],
   },
 };
 
+function emptyVisitRow() {
+  return {
+    treatmentDate: "",
+    toothNos: "",
+    treatment: "",
+    dentistName: "",
+    amountCharged: "",
+    amountPaid: "",
+    balance: "",
+    nextAppt: "",
+  };
+}
+
+function formatVisitAmount(value) {
+  if (value === null || value === undefined || value === "") return "";
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return String(value);
+  return amount.toLocaleString("en-PH", { maximumFractionDigits: 2 });
+}
+
 function placeholderFor(value, emptyLabel = "Not detected") {
   return value ? undefined : emptyLabel;
+}
+
+function normalizePayload(input) {
+  const next = input && typeof input === "object" ? input : {};
+  return {
+    ...emptyPayload,
+    ...next,
+    patient: { ...emptyPayload.patient, ...(next.patient || {}) },
+    procedure: {
+      ...emptyPayload.procedure,
+      ...(next.procedure || {}),
+      visits: Array.isArray(next.procedure?.visits) ? next.procedure.visits : [],
+    },
+  };
 }
 
 function syncFullName(patient) {
@@ -143,6 +178,37 @@ export function AdminSyncPage() {
     }));
   }
 
+  function updateVisit(index, field, value) {
+    setPayload((current) => {
+      const visits = [...(current.procedure.visits || [])];
+      visits[index] = { ...emptyVisitRow(), ...visits[index], [field]: value };
+      return {
+        ...current,
+        procedure: { ...current.procedure, visits },
+      };
+    });
+  }
+
+  function addVisitRow() {
+    setPayload((current) => ({
+      ...current,
+      procedure: {
+        ...current.procedure,
+        visits: [...(current.procedure.visits || []), emptyVisitRow()],
+      },
+    }));
+  }
+
+  function removeVisitRow(index) {
+    setPayload((current) => ({
+      ...current,
+      procedure: {
+        ...current.procedure,
+        visits: (current.procedure.visits || []).filter((_, i) => i !== index),
+      },
+    }));
+  }
+
   function cameraErrorMessage(cameraError) {
     const name = cameraError?.name || "";
     if (!window.isSecureContext) {
@@ -243,7 +309,9 @@ export function AdminSyncPage() {
     try {
       const response = await api.uploadAdminDocumentSync(file, nextSourceType);
       setActiveJob(response.job);
-      const nextPayload = response.job.editedPayload || response.job.extractedPayload || emptyPayload;
+      const nextPayload = normalizePayload(
+        response.job.editedPayload || response.job.extractedPayload || emptyPayload
+      );
       setPayload(nextPayload);
       setEditing(true);
       const filled = [
@@ -350,7 +418,7 @@ export function AdminSyncPage() {
         confirmNewPatient: Boolean(matchPreview.isNewPatient),
       });
       setActiveJob(response.job);
-      setPayload(response.job.editedPayload);
+      setPayload(normalizePayload(response.job.editedPayload));
       setMessage(response.message);
       setStep("done");
       setEditing(false);
@@ -374,7 +442,7 @@ export function AdminSyncPage() {
             confirmNewPatient: true,
           });
           setActiveJob(response.job);
-          setPayload(response.job.editedPayload);
+          setPayload(normalizePayload(response.job.editedPayload));
           setMessage(response.message);
           setStep("done");
           setEditing(false);
@@ -402,7 +470,9 @@ export function AdminSyncPage() {
     try {
       const response = await api.getAdminDocumentSyncJob(jobId);
       setActiveJob(response.job);
-      setPayload(response.job.editedPayload || response.job.extractedPayload || emptyPayload);
+      setPayload(
+        normalizePayload(response.job.editedPayload || response.job.extractedPayload || emptyPayload)
+      );
       setEditing(response.job.status !== "synced");
       setStep(response.job.status === "synced" ? "done" : response.job.status === "failed" ? "choose" : "review");
       clearPreviews();
@@ -702,6 +772,117 @@ export function AdminSyncPage() {
                     onChange={(event) => updateProcedure("notes", event.target.value)}
                   />
                 </label>
+              </div>
+
+              <div className="treatment-record treatment-record--sync">
+                <div className="treatment-record__heading">
+                  <h4>TREATMENT RECORD</h4>
+                  <p className="muted-copy">
+                    Paper table replica — Date, Tooth No./s, Procedure, Dentist/s, Amount charged, Amount Paid, Balance, Next Appt.
+                  </p>
+                </div>
+                <div className="treatment-record__table-wrap">
+                  <table className="treatment-record__table">
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Tooth No./s</th>
+                        <th>Procedure</th>
+                        <th>Dentist/s</th>
+                        <th>Amount charged</th>
+                        <th>Amount Paid</th>
+                        <th>Balance</th>
+                        <th>Next Appt.</th>
+                        {editing && activeJob.status !== "synced" ? <th /> : null}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(payload.procedure.visits || []).length ? (
+                        (payload.procedure.visits || []).map((visit, index) => (
+                          <tr key={`visit-${index}`}>
+                            <td>
+                              <input
+                                type="date"
+                                value={visit.treatmentDate || ""}
+                                disabled={!editing || activeJob.status === "synced"}
+                                onChange={(event) => updateVisit(index, "treatmentDate", event.target.value)}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                value={visit.toothNos || ""}
+                                disabled={!editing || activeJob.status === "synced"}
+                                onChange={(event) => updateVisit(index, "toothNos", event.target.value)}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                value={visit.treatment || ""}
+                                disabled={!editing || activeJob.status === "synced"}
+                                onChange={(event) => updateVisit(index, "treatment", event.target.value)}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                value={visit.dentistName || ""}
+                                disabled={!editing || activeJob.status === "synced"}
+                                onChange={(event) => updateVisit(index, "dentistName", event.target.value)}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                value={visit.amountCharged || ""}
+                                placeholder={formatVisitAmount(visit.amountCharged)}
+                                disabled={!editing || activeJob.status === "synced"}
+                                onChange={(event) => updateVisit(index, "amountCharged", event.target.value)}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                value={visit.amountPaid || ""}
+                                disabled={!editing || activeJob.status === "synced"}
+                                onChange={(event) => updateVisit(index, "amountPaid", event.target.value)}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                value={visit.balance || ""}
+                                disabled={!editing || activeJob.status === "synced"}
+                                onChange={(event) => updateVisit(index, "balance", event.target.value)}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                value={visit.nextAppt || ""}
+                                disabled={!editing || activeJob.status === "synced"}
+                                onChange={(event) => updateVisit(index, "nextAppt", event.target.value)}
+                              />
+                            </td>
+                            {editing && activeJob.status !== "synced" ? (
+                              <td>
+                                <button type="button" className="text-link" onClick={() => removeVisitRow(index)}>
+                                  Remove
+                                </button>
+                              </td>
+                            ) : null}
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={editing && activeJob.status !== "synced" ? 9 : 8} className="muted-copy">
+                            No visit rows detected from the scan yet. Add rows to match the paper table, or keep using the
+                            primary Procedure / Date / Amount fields above.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                {editing && activeJob.status !== "synced" ? (
+                  <button type="button" className="button button--ghost" onClick={addVisitRow}>
+                    Add visit row
+                  </button>
+                ) : null}
               </div>
 
               {matchInfo?.isNewPatient === false && matchInfo?.match ? (

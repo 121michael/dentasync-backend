@@ -138,6 +138,21 @@ function sanitizePayload(input) {
         : "completed",
       notes: stringValue(procedure.notes, 2000) || "",
       coverageStatus: stringValue(procedure.coverageStatus, 120) || "",
+      visits: Array.isArray(procedure.visits)
+        ? procedure.visits.slice(0, 80).map((row) => ({
+            treatmentDate: normalizeDate(row?.treatmentDate || row?.date || "") || "",
+            toothNos: stringValue(row?.toothNos || row?.toothNumber || "", 40) || "",
+            treatment: stringValue(row?.treatment || row?.procedure || "", 180) || "",
+            dentistName: stringValue(row?.dentistName || row?.dentist || "", 120) || "",
+            amountCharged: normalizeAmount(row?.amountCharged || row?.amount || "") || "",
+            amountPaid: normalizeAmount(row?.amountPaid || "") || "",
+            balance: normalizeAmount(row?.balance || "") || "",
+            nextAppt:
+              normalizeDate(row?.nextAppt || row?.nextAppointment || "") ||
+              stringValue(row?.nextAppt || "", 40) ||
+              "",
+          }))
+        : [],
     },
   };
 }

@@ -63,8 +63,58 @@ function emptyPayload() {
       status: "completed",
       notes: "",
       coverageStatus: "",
+      visits: [],
     },
   };
+}
+
+function emptyVisitRow() {
+  return {
+    treatmentDate: "",
+    toothNos: "",
+    treatment: "",
+    dentistName: "",
+    amountCharged: "",
+    amountPaid: "",
+    balance: "",
+    nextAppt: "",
+  };
+}
+
+function normalizeVisitRows(rows = []) {
+  if (!Array.isArray(rows)) return [];
+  return rows
+    .map((row) => {
+      const treatmentDate = normalizeDate(row?.treatmentDate || row?.date || "") || "";
+      const treatment =
+        inferProcedureToken(row?.treatment || row?.procedure || "") ||
+        cleanLine(row?.treatment || row?.procedure || "");
+      const amountCharged = normalizeAmount(row?.amountCharged || row?.amount || "") || "";
+      const amountPaid = normalizeAmount(row?.amountPaid || "") || "";
+      const balance =
+        normalizeAmount(row?.balance || "") ||
+        (amountCharged && amountPaid
+          ? String(Math.round((Number(amountCharged) - Number(amountPaid)) * 100) / 100)
+          : "");
+      return {
+        treatmentDate,
+        toothNos: cleanLine(row?.toothNos || row?.toothNumber || ""),
+        treatment,
+        dentistName: cleanLine(row?.dentistName || row?.dentist || ""),
+        amountCharged,
+        amountPaid,
+        balance,
+        nextAppt: normalizeDate(row?.nextAppt || row?.nextAppointment || "") || cleanLine(row?.nextAppt || ""),
+      };
+    })
+    .filter(
+      (row) =>
+        row.treatmentDate ||
+        row.treatment ||
+        row.amountCharged ||
+        row.toothNos ||
+        row.dentistName
+    );
 }
 
 function cleanLine(value) {
@@ -916,6 +966,18 @@ function extractStructuredPayload(rawText) {
     payload.procedure.notes = payload.procedure.notes
       ? `${payload.procedure.notes} | ${history}`
       : history;
+    payload.procedure.visits = normalizeVisitRows(
+      treatmentRows.map((row) => ({
+        treatmentDate: row.treatmentDate,
+        toothNos: row.toothNos,
+        treatment: row.treatment,
+        amountCharged: row.amountCharged,
+        dentistName: row.dentistName || "",
+        amountPaid: row.amountPaid || "",
+        balance: row.balance || "",
+        nextAppt: row.nextAppt || "",
+      }))
+    );
   } else if (isTreatmentRecordForm(text)) {
     // Headers detected but row OCR was weak — still try fuzzy procedure tokens.
     const fuzzyTreatment = inferProcedureToken(text);

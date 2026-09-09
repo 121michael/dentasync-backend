@@ -3780,13 +3780,26 @@ strong {
   font-size: .9rem;
   font-weight: 700;
 }
-.treatment-record__table-wrap {
-  overflow-x: auto;
-  border: 1px solid var(--border);
-  border-radius: 14px;
+.treatment-record--sync {
+  margin-top: 1.1rem;
+  display: grid;
+  gap: .7rem;
+}
+.treatment-record--sync .treatment-record__heading h4 {
+  margin: 0;
+  letter-spacing: .04em;
+}
+.treatment-record--sync .treatment-record__table input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 8px;
+  padding: .35rem .45rem;
+  font: inherit;
   background: #fff;
-  max-height: min(52vh, 520px);
-  overflow-y: auto;
+}
+.treatment-record--sync .treatment-record__table td:last-child {
+  white-space: nowrap;
 }
 .treatment-record__table {
   width: 100%;

@@ -172,3 +172,22 @@ EXO
   assert.match(payload.procedure.notes, /Treatment record/i);
   assert.equal(payload.patient.gender, "");
 });
+
+test("treatment record rows are exposed as editable visits table data", () => {
+  const sample = `
+TREATMENT RECORD
+Name:
+Age:
+Gender: M/F
+Date | Tooth No./s | Procedure | Dentist/s | Amount charged | Amount Paid | Balance | Next Appt.
+NOV 16 2023 ORTHO INSTALLATION 5000
+DEC 21 2023 ORTHO ADJUSTMENT 1250
+MAR 11 2025 EXO 24-44
+`;
+  const { payload } = extractStructuredPayload(sample);
+  assert.ok(Array.isArray(payload.procedure.visits));
+  assert.ok(payload.procedure.visits.length >= 2);
+  assert.equal(payload.procedure.visits[0].treatment, "Orthodontic Installation");
+  assert.equal(payload.procedure.visits[0].treatmentDate, "2023-11-16");
+  assert.equal(payload.procedure.visits[0].amountCharged, "5000");
+});
