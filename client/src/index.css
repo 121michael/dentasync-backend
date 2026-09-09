@@ -3314,12 +3314,16 @@ strong {
   font-size: .72rem;
   line-height: 1.4;
 }
+
 .admin-doc-layout {
   display: grid;
-  grid-template-columns: minmax(280px, 0.9fr) minmax(0, 1.35fr);
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
   gap: 1rem;
   margin-top: 1rem;
   align-items: start;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 .admin-doc-preview {
   display: grid;
@@ -3329,6 +3333,8 @@ strong {
   border: 1px solid var(--border);
   background: var(--surface-muted);
   min-height: 280px;
+  min-width: 0;
+  max-width: 100%;
 }
 .admin-doc-preview img,
 .admin-doc-preview__frame {
@@ -3340,17 +3346,22 @@ strong {
   border-radius: 10px;
   background: #fff;
 }
-.admin-doc-fields h3 {
-  margin: 0 0 .75rem;
-  font-size: .95rem;
+.admin-doc-fields,
+.admin-doc-fields.doc-table-card {
+  min-width: 0;
+  max-width: 100%;
 }
 
 /* Premium Document Table card (Admin Sync review) */
 .doc-table-card {
   display: grid;
-  gap: 1rem;
+  gap: 0.9rem;
+  width: 100%;
   max-width: 100%;
-  padding: 1.1rem 1.15rem 1.15rem;
+  min-width: 0;
+  overflow: hidden;
+  box-sizing: border-box;
+  padding: 1rem 1.05rem 1.05rem;
   border-radius: 16px;
   border: 1px solid color-mix(in srgb, var(--border) 88%, #fff);
   background: #fff;
@@ -3367,7 +3378,7 @@ strong {
 }
 .doc-table-card__helper {
   margin: 0.35rem 0 0;
-  max-width: 58ch;
+  max-width: 100%;
   color: var(--text-muted);
   font-size: 0.78rem;
   line-height: 1.45;
@@ -3381,15 +3392,23 @@ strong {
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
+.doc-table-card__patient,
+.doc-table-card__record {
+  min-width: 0;
+  max-width: 100%;
+}
 .doc-table-card__patient-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.7fr) minmax(0, 0.55fr) minmax(0, 0.7fr);
   gap: 0.7rem;
+  width: 100%;
+  max-width: 100%;
 }
 .doc-table-field {
   display: grid;
   gap: 0.28rem;
   margin: 0;
+  min-width: 0;
 }
 .doc-table-field span {
   color: var(--text-muted);
@@ -3399,6 +3418,8 @@ strong {
 }
 .doc-table-field input {
   width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   min-height: 2.15rem;
   padding: 0.42rem 0.65rem;
   border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
@@ -3429,7 +3450,11 @@ strong {
   );
 }
 .doc-table-card__table-wrap {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   overflow-x: auto;
+  overscroll-behavior-x: contain;
   border: 1px solid color-mix(in srgb, var(--border) 90%, transparent);
   border-radius: 12px;
   background: #fff;
@@ -3438,29 +3463,34 @@ strong {
 }
 .doc-table-card__table {
   width: 100%;
-  min-width: 820px;
+  max-width: 100%;
+  min-width: 0;
+  table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;
   text-align: left;
 }
 .doc-table-card__table th,
 .doc-table-card__table td {
-  padding: 0.42rem 0.45rem;
+  padding: 0.38rem 0.35rem;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
   vertical-align: middle;
+  overflow: hidden;
 }
 .doc-table-card__table th {
   position: sticky;
   top: 0;
   z-index: 1;
-  padding: 0.62rem 0.5rem;
+  padding: 0.55rem 0.4rem;
   background: color-mix(in srgb, var(--amethyst-100, #ede4f7) 78%, #fff);
   color: color-mix(in srgb, var(--amethyst-800, #4c1d75) 70%, var(--text));
-  font-size: 0.64rem;
+  font-size: 0.58rem;
   font-weight: 700;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   border-bottom-color: color-mix(in srgb, var(--amethyst-300, #c4b5fd) 40%, var(--border));
 }
 .doc-table-card__table tbody tr {
@@ -3473,17 +3503,23 @@ strong {
   border-bottom: 0;
 }
 .doc-table-card__table input {
+  display: block;
   width: 100%;
+  max-width: 100%;
   min-width: 0;
-  min-height: 1.95rem;
-  padding: 0.28rem 0.42rem;
+  box-sizing: border-box;
+  min-height: 1.85rem;
+  padding: 0.24rem 0.35rem;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 7px;
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 0.8rem;
-  line-height: 1.3;
+  font-size: 0.76rem;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   transition: border-color 0.14s ease, box-shadow 0.14s ease, background 0.14s ease;
 }
 .doc-table-card__table tbody tr:hover input {
@@ -3495,6 +3531,9 @@ strong {
   border-color: color-mix(in srgb, var(--amethyst-500, #7c3aed) 50%, var(--border));
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--amethyst-400, #a78bfa) 20%, transparent);
   background: #fff;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
 }
 .doc-table-card__table input:disabled {
   opacity: 0.9;
@@ -3505,15 +3544,17 @@ strong {
   font-variant-numeric: tabular-nums;
 }
 .doc-table-card__row-action {
-  width: 44px;
+  width: 40px;
+  max-width: 40px;
   text-align: center;
+  padding-inline: 0.2rem;
 }
 .doc-table-card__icon-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.85rem;
-  height: 1.85rem;
+  width: 1.7rem;
+  height: 1.7rem;
   margin: 0;
   padding: 0;
   border: 1px solid transparent;
@@ -3532,22 +3573,25 @@ strong {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.85rem;
+  gap: 0.75rem;
   flex-wrap: wrap;
-  margin-top: 0.15rem;
+  width: 100%;
+  max-width: 100%;
+  margin-top: 0.1rem;
+  box-sizing: border-box;
 }
 .doc-table-card__add-btn {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
   margin: 0;
-  padding: 0.45rem 0.85rem;
+  padding: 0.42rem 0.8rem;
   border: 1px solid color-mix(in srgb, var(--amethyst-400, #a78bfa) 35%, var(--border));
   border-radius: 999px;
   background: #fff;
   color: color-mix(in srgb, var(--amethyst-700, #5b2d8e) 85%, var(--text));
   font: inherit;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
@@ -3559,9 +3603,10 @@ strong {
 }
 .doc-table-card__save-btn {
   margin-left: auto;
-  min-height: 2.45rem;
-  padding-inline: 1.15rem;
+  min-height: 2.35rem;
+  padding-inline: 1.05rem;
   border-radius: 12px;
+  max-width: 100%;
   transition: transform 0.12s ease, box-shadow 0.14s ease, filter 0.14s ease;
 }
 .doc-table-card__save-btn:hover:not(:disabled) {
@@ -3575,6 +3620,7 @@ strong {
 .doc-table-card__saved {
   margin: 0;
   margin-left: auto;
+  max-width: 100%;
 }
 
 @media (max-width: 960px) {
@@ -3599,7 +3645,13 @@ strong {
   .doc-table-card__add-btn {
     width: fit-content;
   }
+  /* Only scroll horizontally on narrow screens if needed */
+  .doc-table-card__table {
+    min-width: 680px;
+    table-layout: auto;
+  }
 }
+
 .admin-notification-list { display: grid; gap: .7rem; }
 .admin-notification {
   display: grid;
@@ -4029,6 +4081,14 @@ strong {
   color: var(--text);
   font-size: .9rem;
   font-weight: 700;
+}
+.treatment-record__table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fff;
+  max-height: min(52vh, 520px);
+  overflow-y: auto;
 }
 .field-grid--three {
   display: grid;
