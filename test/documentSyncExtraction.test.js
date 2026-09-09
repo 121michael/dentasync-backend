@@ -139,3 +139,36 @@ ORTHO ADJUSTMENT
   assert.equal(rows[0].treatment, "Orthodontic Installation");
   assert.equal(rows[0].amountCharged, "5000");
 });
+
+test("noisy OCR.space treatment-record soup still auto-fills procedure/amount/date", () => {
+  const sample = `
+TREATMENT RECORD
+Name
+Age
+Gender M/F
+Date Tooth No Procedure Dentist Amount charged
+NOV
+16
+2023
+QATHO INSTALLATIO
+500 0
+DEC 21
+2023
+ORLD MITMENT
+1,250
+JAN
+25 2024
+ORIO ADJUST
+1250
+EXO
+24-44
+`;
+  const { payload, fieldStatuses } = extractStructuredPayload(sample);
+  assert.equal(payload.procedure.treatment, "Orthodontic Installation");
+  assert.equal(payload.procedure.treatmentDate, "2023-11-16");
+  assert.equal(payload.procedure.amountCharged, "5000");
+  assert.equal(fieldStatuses.treatment, "detected");
+  assert.equal(fieldStatuses.amountCharged, "detected");
+  assert.match(payload.procedure.notes, /Treatment record/i);
+  assert.equal(payload.patient.gender, "");
+});
