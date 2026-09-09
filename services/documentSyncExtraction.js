@@ -379,12 +379,16 @@ function extractPhoneFromText(text) {
 
 function isPlausiblePersonName(value) {
   const text = cleanLine(value);
-  if (!text || text.length < 3) return false;
+  if (!text || text.length < 3 || text.length > 60) return false;
   if (/^(date|age|gender|phone|address|patient|name|procedure|treatment|amount|tooth)\b/i.test(text)) {
     return false;
   }
-  if (/[:\d]/.test(text) && !/^[A-Za-z][A-Za-z .,'\-]+$/.test(text)) return false;
-  return /[A-Za-z]{2,}/.test(text);
+  if (/[0-9:;|_=]/.test(text)) return false;
+  if ((text.match(/[A-Za-z]/g) || []).length < 3) return false;
+  // Reject OCR soup with too many short junk tokens.
+  const tokens = text.split(/\s+/).filter(Boolean);
+  if (tokens.length > 6) return false;
+  return /^[A-Za-z][A-Za-z .,'\-]+$/.test(text);
 }
 
 function applyExternalFields(payload, fields = {}) {
@@ -559,10 +563,9 @@ function extractStructuredPayload(rawText) {
     ]);
   const rejectedName =
     /^(age|gender|sex|date|address|phone|telephone|cellphone|procedure|treatment|amount|tooth|dentist|name)$/i;
+  const cleanedName = fullName.replace(/^(mr|ms|mrs|dr)\.?\s+/i, "");
   const names = splitName(
-    rejectedName.test(fullName.replace(/^(mr|ms|mrs|dr)\.?\s+/i, ""))
-      ? ""
-      : fullName.replace(/^(mr|ms|mrs|dr)\.?\s+/i, "")
+    rejectedName.test(cleanedName) || !isPlausiblePersonName(cleanedName) ? "" : cleanedName
   );
   payload.patient.firstName = names.firstName;
   payload.patient.lastName = names.lastName;
