@@ -234,28 +234,6 @@ export function AuthPage() {
           </form>
         ) : (
           <form className="auth-card" onSubmit={isRegistration ? submitRegistration : submitLogin}>
-            <div className="auth-tabs" role="tablist" aria-label="Portal access">
-              <button
-                type="button"
-                className={mode === "login" ? "is-active" : ""}
-                onClick={() => {
-                  setMode("login");
-                  setMessage("");
-                }}
-              >
-                Sign in
-              </button>
-              <button
-                type="button"
-                className={mode === "register" ? "is-active" : ""}
-                onClick={() => {
-                  setMode("register");
-                  setMessage("");
-                }}
-              >
-                Create account
-              </button>
-            </div>
             <span className="auth-card__icon">
               <ShieldCheck size={26} />
             </span>
@@ -350,6 +328,28 @@ export function AuthPage() {
                   : "Enter your portal"}{" "}
               <ArrowRight size={18} />
             </button>
+            <div className="auth-tabs" role="tablist" aria-label="Portal access">
+              <button
+                type="button"
+                className={mode === "login" ? "is-active" : ""}
+                onClick={() => {
+                  setMode("login");
+                  setMessage("");
+                }}
+              >
+                Sign in
+              </button>
+              <button
+                type="button"
+                className={mode === "register" ? "is-active" : ""}
+                onClick={() => {
+                  setMode("register");
+                  setMessage("");
+                }}
+              >
+                Create account
+              </button>
+            </div>
           </form>
         )}
         <p className="auth-security-note">

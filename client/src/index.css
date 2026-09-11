@@ -575,7 +575,8 @@ strong {
 .auth-tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  margin-bottom: 0.9rem;
+  margin-top: 0.35rem;
+  margin-bottom: 0;
   padding: 0.25rem;
   border-radius: 12px;
   background: var(--surface-muted);
