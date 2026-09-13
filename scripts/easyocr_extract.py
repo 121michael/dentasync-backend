@@ -258,24 +258,81 @@ def normalize_date(value: str) -> str:
     return ""
 
 
+def clean_person_name(value: str) -> str:
+    text = clean_value(value)
+    text = re.sub(r"\b(age|gender|m\s*/\s*f|name)\b.*$", "", text, flags=re.I)
+    text = re.sub(r"[^A-Za-z .,'\-]", " ", text)
+    text = re.sub(r"\s+", " ", text).strip(" -")
+    if len(text) < 3:
+        return ""
+    if re.search(r"\b(amount|procedure|tooth|date|balance|dentist|appt)\b", text, flags=re.I):
+        return ""
+    tokens = text.split()
+    if not tokens or len(tokens) > 6:
+        return ""
+    return text
+
+
+def looks_like_procedure(value: str) -> bool:
+    text = value or ""
+    if re.search(r"charged|balance|appt|dentist|tooth\s*no|amount\s*paid", text, flags=re.I):
+        return False
+    return bool(
+        re.search(
+            r"prophylax|prophy|pr[o0].{0,10}h[iy]?l?a?x|ortho|install|adjust|exo|extraction|cleaning|filling|whitening|crown|implant|consultation",
+            text,
+            flags=re.I,
+        )
+    )
+
+
 def infer_procedure(text: str, value: str) -> str:
-    blob = f"{value}\n{text}".lower()
+    # Prefer the written clinic wording (exact-ish), not invented catalog labels from header soup.
+    if looks_like_procedure(value):
+        cleaned = clean_value(value)
+        if re.search(r"pr[o0].{0,10}h[iy]?l?a?x|prophy|prophylax", cleaned, flags=re.I):
+            return "ORAL PROPHYLAXIS"
+        if re.search(r"ortho.{0,10}install|installation", cleaned, flags=re.I):
+            return "ORTHO INSTALLATION"
+        if re.search(r"ortho.{0,10}adjust|adjustment", cleaned, flags=re.I):
+            return "ORTHO ADJUSTMENT"
+        if re.search(r"\bexo\b|extraction", cleaned, flags=re.I):
+            return "EXO"
+        return cleaned.upper()
+
+    blob = text or ""
     mapping = [
-        (r"oral\s*prophylaxis|prophylax|pr[o0]r?h?[il1y]{2,}|prophy", "Oral Prophylaxis"),
-        (r"cleaning", "Dental Cleaning"),
-        (r"\bexo\b|extraction", "Tooth Extraction"),
-        (r"root\s*canal|\brct\b", "Root Canal"),
-        (r"filling|resto", "Dental Filling"),
-        (r"whitening|bleach", "Teeth Whitening"),
-        (r"crown", "Dental Crown"),
-        (r"implant", "Dental Implant"),
-        (r"ortho(?:dontic)?\s*install|installation", "Orthodontic Installation"),
-        (r"ortho(?:dontic)?\s*adjust|adjustment|orthodont|brace", "Orthodontic Adjustment"),
+        (r"oral\s*prophylaxis|pr[o0].{0,10}h[iy]?l?a?x|prophylax|prophy", "ORAL PROPHYLAXIS"),
+        (r"ortho(?:dontic)?\s*install|installation", "ORTHO INSTALLATION"),
+        (r"ortho(?:dontic)?\s*adjust|adjustment", "ORTHO ADJUSTMENT"),
+        (r"\bexo\b|extraction", "EXO"),
+        (r"dental\s*cleaning|\bcleaning\b", "DENTAL CLEANING"),
+        (r"\bfilling\b|\bresto\b", "DENTAL FILLING"),
     ]
     for pattern, label in mapping:
         if re.search(pattern, blob, flags=re.I):
             return label
-    return clean_value(value)
+    return ""
+
+
+def recover_treatment_record_name(text: str) -> str:
+    lines = [clean_value(line) for line in str(text or "").splitlines()]
+    lines = [line for line in lines if line]
+    if not lines:
+        return ""
+    age_idx = next((i for i, line in enumerate(lines) if re.match(r"^age\b", line, flags=re.I)), -1)
+    if age_idx <= 0:
+        return ""
+    candidates = []
+    for line in lines[:age_idx]:
+        if re.match(r"^(name|treatment\s*record|gender)\b", line, flags=re.I):
+            continue
+        person = clean_person_name(line)
+        if person:
+            candidates.append(person)
+    if not candidates:
+        return ""
+    return clean_person_name(" ".join(candidates[:3]))
 
 
 def extract_treatment_record_fields(text: str) -> dict[str, str]:
@@ -287,14 +344,7 @@ def extract_treatment_record_fields(text: str) -> dict[str, str]:
     if not re.search(r"treatment\s*record|\bprocedure\b", blob, flags=re.I):
         return {}
 
-    procedure = ""
-    if re.search(r"ortho(?:dontic)?\s*install|installation", blob, flags=re.I):
-        procedure = "Orthodontic Installation"
-    elif re.search(r"\bexo\b|extraction", blob, flags=re.I):
-        procedure = "Tooth Extraction"
-    elif re.search(r"ortho(?:dontic)?\s*adjust|adjustment|orthodont", blob, flags=re.I):
-        procedure = "Orthodontic Adjustment"
-
+    procedure = infer_procedure(blob, "")
     amounts = re.findall(r"\b([1-9]\d{2,5})(?:\.00)?\b", blob)
     amount = ""
     for candidate in amounts:
@@ -303,7 +353,7 @@ def extract_treatment_record_fields(text: str) -> dict[str, str]:
         value = int(candidate)
         if 100 <= value <= 200000:
             amount = candidate
-            if procedure == "Orthodontic Installation" or value >= 3000:
+            if procedure == "ORTHO INSTALLATION" or value >= 3000:
                 break
 
     month = re.search(
@@ -312,23 +362,28 @@ def extract_treatment_record_fields(text: str) -> dict[str, str]:
         flags=re.I,
     )
     treatment_date = normalize_date(month.group(0)) if month else ""
+    full_name = recover_treatment_record_name(blob)
 
-    notes = "Treatment record form detected."
     return {
+        "fullName": full_name,
         "procedure": procedure,
         "treatmentDate": treatment_date,
         "amountCharged": amount,
-        "notes": notes,
+        "notes": "",
     }
 
 
 def structured_from_items(items: list[dict[str, Any]], text: str) -> dict[str, str]:
-    full_name = find_values_for_label(items, LABELS["fullName"], multi=True)
+    full_name = clean_person_name(find_values_for_label(items, LABELS["fullName"], multi=True))
     address = find_values_for_label(items, LABELS["address"], multi=True)
     phone = extract_phone(find_values_for_label(items, LABELS["phone"]), text)
     age = extract_age(find_values_for_label(items, LABELS["age"]))
-    procedure = infer_procedure(text, find_values_for_label(items, LABELS["procedure"], multi=True))
+    procedure_value = find_values_for_label(items, LABELS["procedure"], multi=True)
+    procedure = infer_procedure(text, procedure_value)
     treatment_date = normalize_date(find_values_for_label(items, LABELS["treatmentDate"], multi=True))
+    # Also catch handwritten month dates anywhere in description/date cells.
+    if not treatment_date:
+        treatment_date = normalize_date(text)
     amount = extract_amount(items, text)
     notes = find_values_for_label(items, LABELS["complaint"], multi=True)
 
@@ -348,6 +403,10 @@ def structured_from_items(items: list[dict[str, Any]], text: str) -> dict[str, s
     for key, value in record_fields.items():
         if value and not fields.get(key):
             fields[key] = value
+    if not fields.get("fullName"):
+        recovered = recover_treatment_record_name(text)
+        if recovered:
+            fields["fullName"] = recovered
 
     return fields
 

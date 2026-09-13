@@ -142,12 +142,63 @@ function countReadableDocumentFields(payload) {
   ].filter((value) => String(value || "").trim()).length;
 }
 
+function hasMeaningfulDocumentRead(payload) {
+  if (!payload || typeof payload !== "object") return false;
+  const patient = payload.patient || {};
+  const procedure = payload.procedure || {};
+  const visits = Array.isArray(procedure.visits) ? procedure.visits : [];
+  const hasName = Boolean(String(patient.fullName || "").trim());
+  const hasContact = Boolean(String(patient.phone || "").trim()) || Boolean(String(patient.age || "").trim());
+  const hasProcedure =
+    isPlausibleProcedure(procedure.treatment) ||
+    visits.some((row) => isPlausibleProcedure(row?.treatment));
+  const hasVisitSignal = visits.some(
+    (row) =>
+      String(row?.treatmentDate || "").trim() ||
+      String(row?.amountCharged || "").trim() ||
+      String(row?.toothNos || "").trim()
+  );
+  const hasAmount = Boolean(String(procedure.amountCharged || "").trim());
+  return hasName || hasProcedure || hasVisitSignal || hasAmount || (hasContact && hasName);
+}
+
+function sanitizeExtractedPayload(payload) {
+  if (!payload || typeof payload !== "object") return payload;
+  if (payload.procedure) {
+    if (payload.procedure.treatment && !isPlausibleProcedure(payload.procedure.treatment)) {
+      payload.procedure.treatment = "";
+    }
+    if (Array.isArray(payload.procedure.visits)) {
+      payload.procedure.visits = normalizeVisitRows(
+        payload.procedure.visits.filter(
+          (row) =>
+            isPlausibleProcedure(row?.treatment) ||
+            String(row?.treatmentDate || "").trim() ||
+            String(row?.amountCharged || "").trim() ||
+            String(row?.toothNos || "").trim() ||
+            String(row?.dentistName || "").trim()
+        )
+      );
+    }
+    const hasProcedureSignal =
+      isPlausibleProcedure(payload.procedure.treatment) ||
+      (payload.procedure.visits || []).some((row) => isPlausibleProcedure(row?.treatment));
+    // Amounts without a readable procedure are usually OCR noise on dense tables.
+    if (!hasProcedureSignal) {
+      payload.procedure.amountCharged = "";
+      payload.procedure.treatmentDate = payload.procedure.treatmentDate || "";
+    }
+  }
+  return payload;
+}
+
 function ensureReadableExtraction(payload) {
+  sanitizeExtractedPayload(payload);
   const filledCount = countReadableDocumentFields(payload);
-  if (filledCount === 0) {
+  if (filledCount === 0 || !hasMeaningfulDocumentRead(payload)) {
     throw new DocumentValidationError(UNREADABLE_DOCUMENT_MESSAGE);
   }
-  return filledCount;
+  return countReadableDocumentFields(payload);
 }
 
 function applyVisionVisits(payload, visits = []) {
@@ -652,7 +703,11 @@ function extractPhoneFromText(text) {
 }
 
 function isPlausiblePersonName(value) {
-  const text = cleanLine(value);
+  const text = cleanLine(value)
+    .replace(/[_]+/g, " ")
+    .replace(/[^A-Za-z .,'\-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
   if (!text || text.length < 3 || text.length > 60) return false;
   if (/^(date|age|gender|phone|address|patient|name|procedure|treatment|amount|tooth)\b/i.test(text)) {
     return false;
@@ -662,7 +717,131 @@ function isPlausiblePersonName(value) {
   // Reject OCR soup with too many short junk tokens.
   const tokens = text.split(/\s+/).filter(Boolean);
   if (tokens.length > 6) return false;
+  if (/amount|procedure|dentist|balance|appt/i.test(text)) return false;
   return /^[A-Za-z][A-Za-z .,'\-]+$/.test(text);
+}
+
+function isPlausibleProcedure(value) {
+  const text = cleanLine(value);
+  if (!text || text.length < 3) return false;
+  if (/dentis|charged|balance|appt|tooth\s*no|amount\s*paid|gender|telephone/i.test(text)) {
+    return false;
+  }
+  return /prophylax|prophy|ortho|install|adjust|exo|extraction|cleaning|filling|whitening|crown|implant|consultation|oral/i.test(
+    text
+  );
+}
+
+function repairOcrPhoneDigits(value) {
+  const repaired = String(value || "")
+    .toLowerCase()
+    .replace(/[oq]/g, "0")
+    .replace(/[il]/g, "1")
+    .replace(/s/g, "5")
+    .replace(/b/g, "8")
+    .replace(/g/g, "9");
+  return normalizePhone(repaired);
+}
+
+function recoverNoisyOcrFields(rawText, existingFields = {}) {
+  const text = String(rawText || "");
+  const fields = { ...existingFields };
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => cleanLine(line))
+    .filter(Boolean);
+
+  if (!fields.fullName) {
+    const labeled = captureLabeledBlock(text, ["name", "patient name", "full name"], [
+      "address",
+      "telephone",
+      "age",
+      "gender",
+    ]);
+    if (isPlausiblePersonName(labeled)) {
+      fields.fullName = labeled;
+    } else {
+      const ageIdx = lines.findIndex((line) => /^age\b/i.test(line.replace(/[_:.\-]/g, " ").trim()));
+      if (ageIdx > 0) {
+        const nameBits = [];
+        for (const line of lines.slice(0, ageIdx)) {
+          if (/^(name|treatment\s*record|gender)\b/i.test(line)) continue;
+          if (isPlausiblePersonName(line)) nameBits.push(line);
+        }
+        const joined = cleanLine(nameBits.slice(0, 3).join(" "));
+        if (isPlausiblePersonName(joined)) fields.fullName = joined;
+      }
+    }
+  }
+
+  if (!fields.age) {
+    const ageLabeled = capture(text, [
+      /age\s*[:\-_]+\s*(\d{1,3})\b/i,
+      /age\b[\s\S]{0,20}?\b(\d{2,3})\b/i,
+    ]);
+    const age = normalizeAge(ageLabeled);
+    if (age) fields.age = age;
+  }
+
+  if (!fields.phone) {
+    const phoneLabeled = capture(text, [
+      /(?:telephone|cellphone|cell\s*phone|phone|mobile|tel\.?)\s*[:\-]?\s*([A-Za-z0-9()[\]\-\s]{8,24})/i,
+    ]);
+    const phone = repairOcrPhoneDigits(phoneLabeled) || extractPhoneFromText(text);
+    if (phone) fields.phone = phone;
+  }
+
+  if (!fields.address) {
+    const address = captureLabeledBlock(text, ["address", "residence"], [
+      "telephone",
+      "cellphone",
+      "phone",
+      "age",
+      "occupation",
+    ]);
+    if (address && address.length >= 4) fields.address = address;
+  }
+
+  if (!fields.procedure || !isPlausibleProcedure(fields.procedure)) {
+    if (/pr[o0].{0,10}h[iy]?l?a?x|prophylax|prophy/i.test(text)) {
+      fields.procedure = "ORAL PROPHYLAXIS";
+    } else if (/ortho.{0,10}install|installation/i.test(text)) {
+      fields.procedure = "ORTHO INSTALLATION";
+    } else if (/ortho.{0,10}adjust|adjustment/i.test(text)) {
+      fields.procedure = "ORTHO ADJUSTMENT";
+    } else if (/\bexo\b|extraction/i.test(text)) {
+      fields.procedure = "EXO";
+    }
+  }
+
+  if (!fields.treatmentDate) {
+    const dateMatch = text.match(
+      new RegExp(
+        `\\b(${MONTH_TOKEN_RE})\\s*[-.]?\\s*(\\d{1,2})(?:st|nd|rd|th)?(?:,)?\\s*(20\\d{2})\\b`,
+        "i"
+      )
+    );
+    if (dateMatch) {
+      fields.treatmentDate = cleanLine(dateMatch[0]);
+    }
+  }
+
+  if (!fields.amountCharged) {
+    const amountMatch = text.match(
+      /(?:amount|credit|debit)\b[\s\S]{0,80}?\b([1-9]\d{2,5})(?:\.00)?\b/i
+    );
+    if (amountMatch) {
+      const amount = normalizeAmount(amountMatch[1]);
+      if (amount && !/^20\d{2}$/.test(amount)) fields.amountCharged = amount;
+    }
+  }
+
+  if (!fields.gender) {
+    const genderMatch = text.match(/gender\s*[:\-]?\s*(?:m\s*\/\s*f\s*)?([MF])\b/i);
+    if (genderMatch?.[1]) fields.gender = genderMatch[1].toUpperCase();
+  }
+
+  return fields;
 }
 
 function applyExternalFields(payload, fields = {}) {
@@ -670,7 +849,12 @@ function applyExternalFields(payload, fields = {}) {
   const next = payload;
 
   if (fields.fullName && isPlausiblePersonName(fields.fullName) && !next.patient.fullName) {
-    const names = splitName(fields.fullName);
+    const cleanedName = cleanLine(fields.fullName)
+      .replace(/[_]+/g, " ")
+      .replace(/[^A-Za-z .,'\-]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    const names = splitName(cleanedName);
     next.patient.firstName = names.firstName;
     next.patient.lastName = names.lastName;
     next.patient.fullName = names.fullName;
@@ -680,11 +864,15 @@ function applyExternalFields(payload, fields = {}) {
   }
   if (fields.age && !next.patient.age) next.patient.age = normalizeAge(fields.age);
   if (fields.phone && !next.patient.phone) {
-    const phone = normalizePhone(fields.phone);
+    const phone = normalizePhone(fields.phone) || repairOcrPhoneDigits(fields.phone);
     if (phone) next.patient.phone = phone;
   }
   if (fields.address && !next.patient.address) next.patient.address = cleanLine(fields.address);
-  if (fields.procedure && !next.procedure.treatment) {
+  if (fields.gender && !next.patient.gender) {
+    const gender = cleanLine(fields.gender).toUpperCase();
+    if (gender === "M" || gender === "F") next.patient.gender = gender;
+  }
+  if (fields.procedure && !next.procedure.treatment && isPlausibleProcedure(fields.procedure)) {
     // Keep the document wording exactly — do not rename to a catalog label.
     next.procedure.treatment = cleanLine(fields.procedure);
   }
@@ -1305,7 +1493,8 @@ async function extractDocumentData(filePath, mimeType, originalName) {
 
   const structured = extractStructuredPayload(extracted.text);
   // Layout-aware OCR fields and vision fields fill empty slots with exact document values.
-  structured.payload = applyExternalFields(structured.payload, extracted.fields || {});
+  const recovered = recoverNoisyOcrFields(extracted.text, extracted.fields || {});
+  structured.payload = applyExternalFields(structured.payload, recovered);
   if (vision && vision.isDocument !== false) {
     structured.payload = applyExternalFields(structured.payload, {
       fullName: vision.fullName,
@@ -1317,6 +1506,7 @@ async function extractDocumentData(filePath, mimeType, originalName) {
       treatmentDate: vision.treatmentDate,
       amountCharged: vision.amountCharged,
       notes: vision.notes,
+      gender: vision.gender,
     });
     if (Array.isArray(vision.visits) && vision.visits.length) {
       structured.payload = applyVisionVisits(structured.payload, vision.visits);
@@ -1326,9 +1516,7 @@ async function extractDocumentData(filePath, mimeType, originalName) {
   // If OCR/layout produced primary treatment fields but no visit rows, mirror them into the table.
   if (
     !(structured.payload.procedure.visits || []).length &&
-    (structured.payload.procedure.treatment ||
-      structured.payload.procedure.treatmentDate ||
-      structured.payload.procedure.amountCharged)
+    isPlausibleProcedure(structured.payload.procedure.treatment)
   ) {
     structured.payload.procedure.visits = normalizeVisitRows([
       {
@@ -1342,7 +1530,17 @@ async function extractDocumentData(filePath, mimeType, originalName) {
 
   structured.fieldStatuses = refreshFieldStatuses(structured.payload, structured.fieldStatuses);
 
-  const filledCount = ensureReadableExtraction(structured.payload);
+  let filledCount = 0;
+  try {
+    filledCount = ensureReadableExtraction(structured.payload);
+  } catch (error) {
+    if (error instanceof DocumentValidationError) {
+      throw new DocumentValidationError(
+        `${UNREADABLE_DOCUMENT_MESSAGE} Tip: use a bright, upright photo. On Windows, run npm.cmd install and ensure the PC can reach OCR.space (or set OCR_SPACE_API_KEY).`
+      );
+    }
+    throw error;
+  }
 
   const notes = [
     `Document read successfully — populated ${filledCount} field${filledCount === 1 ? "" : "s"} with exact values from the scan. Review them, then Confirm & Save.`,

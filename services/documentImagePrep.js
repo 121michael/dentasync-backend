@@ -46,14 +46,18 @@ function scoreDocumentText(text) {
 
 function countFilledFields(fields) {
   if (!fields || typeof fields !== "object") return 0;
-  return ["fullName", "procedure", "treatmentDate", "amountCharged", "age", "phone"].filter((key) => {
+  return ["fullName", "procedure", "treatmentDate", "amountCharged", "age", "phone", "address"].filter((key) => {
     const text = String(fields[key] || "").trim();
     if (!text) return false;
     if (key === "phone") {
       const digits = text.replace(/\D/g, "");
       if (!/^(0\d{10}|9\d{9}|63\d{10})$/.test(digits)) return false;
     }
+    if (key === "address" && text.length < 4) return false;
     if (/^date of birth|^amount|^procedure|^treatment/i.test(text)) return false;
+    if (key === "procedure" && /dentis|charged|balance|appt|tooth\s*no|amount\s*paid/i.test(text)) {
+      return false;
+    }
     return true;
   }).length;
 }
@@ -67,37 +71,97 @@ function resultQuality(result) {
   return filled * 20 + (hasProcedure ? 25 : 0) + (hasAmount ? 15 : 0) + (hasName ? 20 : 0) + Number(result?.score || 0);
 }
 
-async function prepareOrientedVariants(filePath) {
-  const sharp = require("sharp");
-  const original = fs.readFileSync(filePath);
-  const image = sharp(original, { failOn: "none" }).rotate();
-  const meta = await image.metadata();
-  const variants = [];
-
-  for (const degrees of [0, 90, 180, 270]) {
-    let pipeline = sharp(original, { failOn: "none" }).rotate();
-    if (degrees) {
-      pipeline = pipeline.rotate(degrees);
-    }
-    const width = meta.width || 1200;
-    if (width < 1600) {
-      pipeline = pipeline.resize({ width: Math.round(width * 1.8), withoutEnlargement: false });
-    } else if (width > 2800) {
-      pipeline = pipeline.resize({ width: 2400 });
-    }
-    const buffer = await pipeline.grayscale().normalize().sharpen().png().toBuffer();
-    variants.push({ degrees, buffer });
-  }
-  return variants;
-}
-
-function writeTempVariant(buffer, degrees) {
+function writeTempVariant(buffer, label) {
   const tempPath = path.join(
     os.tmpdir(),
-    `doc-sync-${process.pid}-${degrees}-${Date.now()}.png`
+    `doc-sync-${process.pid}-${label}-${Date.now()}.png`
   );
   fs.writeFileSync(tempPath, buffer);
   return tempPath;
+}
+
+async function buildPreprocessVariants(filePath) {
+  const sharp = require("sharp");
+  const original = fs.readFileSync(filePath);
+  const base = sharp(original, { failOn: "none" }).rotate();
+  const meta = await base.metadata();
+  const targetWidth =
+    !meta.width || meta.width < 1600
+      ? Math.round((meta.width || 1000) * 1.8)
+      : meta.width > 2600
+        ? 2200
+        : meta.width;
+
+  const sized = await sharp(original, { failOn: "none" })
+    .rotate()
+    .resize({ width: targetWidth, withoutEnlargement: false })
+    .toBuffer();
+
+  const { data, info } = await sharp(sized, { failOn: "none" })
+    .ensureAlpha()
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  const redSuppressed = Buffer.alloc(info.width * info.height);
+  for (let i = 0, j = 0; i < data.length; i += 3, j += 1) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    // Fade red printed form lines; keep dark handwritten ink.
+    let value = Math.min(g, b);
+    if (r > g + 20 && r > b + 20) {
+      value = Math.min(255, value + 90);
+    }
+    redSuppressed[j] = value;
+  }
+
+  const variants = [];
+  variants.push({
+    label: "gray",
+    degrees: 0,
+    buffer: await sharp(sized, { failOn: "none" }).grayscale().normalize().sharpen().png().toBuffer(),
+  });
+  variants.push({
+    label: "contrast",
+    degrees: 0,
+    buffer: await sharp(sized, { failOn: "none" })
+      .grayscale()
+      .normalize()
+      .linear(1.45, -35)
+      .sharpen()
+      .png()
+      .toBuffer(),
+  });
+  variants.push({
+    label: "redsup",
+    degrees: 0,
+    buffer: await sharp(redSuppressed, {
+      raw: { width: info.width, height: info.height, channels: 1 },
+    })
+      .normalize()
+      .sharpen()
+      .png()
+      .toBuffer(),
+  });
+
+  // Also try 90/180/270 on the strongest contrast pipeline for sideways phone photos.
+  for (const degrees of [90, 180, 270]) {
+    variants.push({
+      label: `contrast-${degrees}`,
+      degrees,
+      buffer: await sharp(sized, { failOn: "none" })
+        .rotate(degrees)
+        .grayscale()
+        .normalize()
+        .linear(1.35, -30)
+        .sharpen()
+        .png()
+        .toBuffer(),
+    });
+  }
+
+  return variants;
 }
 
 function runEasyOcr(filePath) {
@@ -123,12 +187,12 @@ function runEasyOcr(filePath) {
   }
 }
 
-async function recognizeWithTesseract(filePath) {
+async function recognizeWithTesseract(filePath, pageSegMode = "6") {
   const { createWorker } = require("tesseract.js");
   const worker = await createWorker("eng", 1, { legacyCore: true, legacyLang: true });
   try {
     await worker.setParameters({
-      tessedit_pageseg_mode: "6",
+      tessedit_pageseg_mode: String(pageSegMode),
       preserve_interword_spaces: "1",
     });
     const result = await worker.recognize(filePath);
@@ -141,19 +205,49 @@ async function recognizeWithTesseract(filePath) {
   }
 }
 
+function mergeUniqueTexts(parts) {
+  const seen = new Set();
+  const kept = [];
+  for (const part of parts) {
+    const text = String(part || "").trim();
+    if (!text) continue;
+    const key = text.toLowerCase().replace(/\s+/g, " ").slice(0, 240);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    kept.push(text);
+  }
+  return kept.join("\n");
+}
+
 async function extractBestImageText(filePath) {
-  // Layout-aware EasyOCR rotates internally and returns structured fields.
-  const easyDirect = runEasyOcr(filePath);
+  // Always OCR the original photo with EasyOCR first — aggressive preprocess can erase ink.
+  const easyOriginal = runEasyOcr(filePath);
+  let easyPrepPath = null;
+  let easyPreprocessed = null;
+  try {
+    const variantsForEasy = await buildPreprocessVariants(filePath);
+    const preferred =
+      variantsForEasy.find((entry) => entry.label === "contrast") ||
+      variantsForEasy.find((entry) => entry.label === "redsup") ||
+      variantsForEasy[0];
+    if (preferred?.buffer) {
+      easyPrepPath = writeTempVariant(preferred.buffer, "easy-source");
+      easyPreprocessed = runEasyOcr(easyPrepPath);
+    }
+  } catch {
+    easyPreprocessed = null;
+  }
+
+  const easyDirect =
+    resultQuality(easyOriginal) >= resultQuality(easyPreprocessed) ? easyOriginal : easyPreprocessed || easyOriginal;
   const easyFilled = countFilledFields(easyDirect?.fields);
   const easyStrong =
     easyDirect?.text &&
-    Number(easyDirect.score || 0) >= 20 &&
+    Number(easyDirect.score || 0) >= 18 &&
     easyFilled >= 2;
 
-  // Only short-circuit when EasyOCR already produced usable autofill fields.
-  // Header-only forms (TREATMENT RECORD tables) often score high on keywords
-  // while handwriting remains unread — those must continue to Tesseract merge.
   if (easyStrong) {
+    if (easyPrepPath) fs.unlink(easyPrepPath, () => {});
     return {
       text: easyDirect.text,
       score: Number(easyDirect.score || 0),
@@ -165,8 +259,11 @@ async function extractBestImageText(filePath) {
     };
   }
 
-  const variants = await prepareOrientedVariants(filePath);
+  const variants = await buildPreprocessVariants(filePath);
+  const uprightVariants = variants.filter((entry) => entry.degrees === 0);
+  const rotatedVariants = variants.filter((entry) => entry.degrees !== 0);
   const tempPaths = [];
+  const textParts = [easyDirect?.text || ""];
   let best = {
     text: easyDirect?.text || "",
     score: Number(easyDirect?.score || -1),
@@ -179,12 +276,14 @@ async function extractBestImageText(filePath) {
   let keepPath = null;
   let bestQuality = resultQuality(best);
 
-  try {
-    for (const variant of variants) {
-      const tempPath = writeTempVariant(variant.buffer, variant.degrees);
-      tempPaths.push(tempPath);
-      const tess = await recognizeWithTesseract(tempPath);
-      const mergedText = [easyDirect?.text || "", tess.text].filter(Boolean).join("\n");
+  async function considerVariant(variant) {
+    const tempPath = writeTempVariant(variant.buffer, `${variant.label}-${variant.degrees}`);
+    tempPaths.push(tempPath);
+    const modes = variant.label === "redsup" || variant.label === "contrast" ? ["6", "4"] : ["6"];
+    for (const psm of modes) {
+      const tess = await recognizeWithTesseract(tempPath, psm);
+      if (tess.text) textParts.push(tess.text);
+      const mergedText = mergeUniqueTexts([easyDirect?.text || "", ...textParts]);
       const tessScore = scoreDocumentText(mergedText || tess.text) + tess.confidence / 20;
       const candidate = {
         text: mergedText || tess.text,
@@ -195,18 +294,36 @@ async function extractBestImageText(filePath) {
         fields: easyDirect?.fields || {},
         uprightPath: tempPath,
       };
-      const quality = resultQuality(candidate) + (tess.text ? 5 : 0);
+      const quality = resultQuality(candidate) + (tess.text ? 5 : 0) + (variant.degrees === 0 ? 3 : 0);
       if (quality > bestQuality) {
         best = candidate;
         bestQuality = quality;
         keepPath = tempPath;
       }
     }
+  }
+
+  try {
+    for (const variant of uprightVariants) {
+      await considerVariant(variant);
+    }
+    if (countFilledFields(best.fields) < 2 && scoreDocumentText(best.text) < 24) {
+      for (const variant of rotatedVariants) {
+        await considerVariant(variant);
+      }
+    }
+
+    // Always return the richest merged text, even if field quality stayed weak.
+    best.text = mergeUniqueTexts([best.text, ...textParts]);
+    best.score = Math.max(best.score, scoreDocumentText(best.text));
   } finally {
     for (const tempPath of tempPaths) {
       if (tempPath !== keepPath) {
         fs.unlink(tempPath, () => {});
       }
+    }
+    if (easyPrepPath && easyPrepPath !== keepPath) {
+      fs.unlink(easyPrepPath, () => {});
     }
   }
 
@@ -215,7 +332,7 @@ async function extractBestImageText(filePath) {
 
 module.exports = {
   scoreDocumentText,
-  prepareOrientedVariants,
+  prepareOrientedVariants: buildPreprocessVariants,
   extractBestImageText,
   runEasyOcr,
   countFilledFields,
