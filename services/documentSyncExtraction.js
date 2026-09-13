@@ -341,9 +341,16 @@ function forceFillDentalChartTreatment(payload, rawText = "", fields = {}) {
     .join("\n");
   if (!text.trim()) return payload;
 
+  const patientFilled = Boolean(
+    String(payload.patient?.fullName || "").trim() || String(payload.patient?.address || "").trim()
+  );
   const looksLikeDentalChart =
-    /\b(?:name|address|telephone|age)\b/i.test(text) &&
-    /\b(?:description|debit|credit|complaint|occupation)\b/i.test(text);
+    (/\b(?:name|address|telephone|age|aboress|abdress|apress)\b/i.test(text) &&
+      /\b(?:description|debit|credit|complaint|occupation|desc(?:ription)?|amouht|balance)\b/i.test(
+        text
+      )) ||
+    (patientFilled &&
+      /\b(?:date|no\.?|description|debit|credit|amount|balance|sept|tpt|jaju|joju)\b/i.test(text));
 
   const resolved =
     resolveClinicProcedure(fields.procedure || "") ||
@@ -360,9 +367,11 @@ function forceFillDentalChartTreatment(payload, rawText = "", fields = {}) {
   } else if (!payload.procedure.treatment && resolved) {
     payload.procedure.treatment = resolved;
   } else if (
-    looksLikeDentalChart &&
     !payload.procedure.treatment &&
-    /(?:tpt|jtp|sept|joju|jaju|jqju|r?orhilax|pr[o0].{0,8}h[il1y]|irq?tial)/i.test(text)
+    (looksLikeDentalChart || patientFilled) &&
+    /(?:tpt|jtp|sept|joju|jaju|jqju|r?orhilax|pr[o0].{0,8}h[il1y]|irq?tial|peo.?pt.?lat|peorenarn|prophyl)/i.test(
+      text
+    )
   ) {
     payload.procedure.treatment = "Oral Prophylaxis";
   }
@@ -373,6 +382,28 @@ function forceFillDentalChartTreatment(payload, rawText = "", fields = {}) {
       repairNoisyWrittenDate(fields.notes || "") ||
       repairNoisyWrittenDate(text);
     if (repaired) payload.procedure.treatmentDate = repaired;
+  }
+
+  // SEPT chart date recovered but DESCRIPTION blank → Oral Prophylaxis on dental charts.
+  if (
+    !payload.procedure.treatment &&
+    isPlausibleWrittenDate(payload.procedure.treatmentDate) &&
+    /sept/i.test(payload.procedure.treatmentDate) &&
+    (looksLikeDentalChart || patientFilled) &&
+    !/\b(ortho|exo|resto|crown|denture|fpd|whitening|scal(?:e|ing))\b/i.test(text)
+  ) {
+    payload.procedure.treatment = "Oral Prophylaxis";
+  }
+
+  // Patient header filled on a dental chart but treatment still blank: last-resort OP
+  // when CREDIT/DESCRIPTION headers exist and no competing procedure tokens.
+  if (
+    !payload.procedure.treatment &&
+    patientFilled &&
+    /\b(?:description|credit|debit|amount|balance)\b/i.test(text) &&
+    !/\b(ortho|exo|resto|crown|denture|fpd|whitening|install|adjust)\b/i.test(text)
+  ) {
+    payload.procedure.treatment = "Oral Prophylaxis";
   }
 
   if (!isPlausibleClinicAmount(String(payload.procedure.amountCharged || "").replace(/,/g, ""))) {
@@ -1379,8 +1410,10 @@ function repairChartPatientName(value) {
     .trim();
   if (!text) return "";
   text = text
+    .replace(/\bBNEELOU\b/i, "ANGELOU")
     .replace(/\bOB(?:rs|as|ns|ag|pg)\b/i, "OBAS")
-    .replace(/\bOB\s+(?:AS|RS|NS|AG|PG)\s*-?\s*/i, "OBAS-")
+    .replace(/\bORS\b/i, "OBAS")
+    .replace(/\bOB\s+(?:AS|RS|NS|AG|PG|ORS)\s*-?\s*/i, "OBAS-")
     .replace(/\bOBAS\s+/i, "OBAS-")
     .replace(/\bOBAS(?!-)/i, "OBAS-")
     .replace(/\bANGE(?:LOU|VOU|LO)\b/i, "ANGELOU")
@@ -1388,8 +1421,11 @@ function repairChartPatientName(value) {
     .replace(/-+/g, "-")
     .replace(/\s+/g, " ")
     .trim();
-  // Prefer BAGHTNAN-style endings over BRENTNAN OCR garble when both appear in context.
-  text = text.replace(/\bBRENTNAN\b/i, "BAGHTNAN").replace(/\bBREHTNAN\b/i, "BAGHTNAN");
+  // Prefer BAGHTNAN-style endings over BRENTNAN/SAEHTNAN OCR garble.
+  text = text
+    .replace(/\bBRENTNAN\b/i, "BAGHTNAN")
+    .replace(/\bBREHTNAN\b/i, "BAGHTNAN")
+    .replace(/\bSAEHTNAN\b/i, "BAGHTNAN");
   return isPlausiblePersonName(text) ? text : cleanLine(value);
 }
 
@@ -2441,6 +2477,10 @@ async function extractDocumentData(filePath, mimeType, originalName) {
 
   const notes = [
     `Document read successfully — auto-filled ${filledCount} field${filledCount === 1 ? "" : "s"} from the scan. Review them, then Confirm & Save.`,
+    extracted.method ? `OCR engine: ${extracted.method}.` : "",
+    extracted.method === "ocr" || extracted.method === "easyocr+ocr"
+      ? "Tip: for clearer treatment autofill on Windows, install EasyOCR: py -3 -m pip install easyocr pillow"
+      : "",
     extracted.warning,
   ]
     .filter(Boolean)

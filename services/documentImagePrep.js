@@ -211,18 +211,53 @@ async function buildPreprocessVariants(filePath) {
   return variants;
 }
 
+function resolvePythonCommand() {
+  const candidates = [
+    ["python3", []],
+    ["py", ["-3"]],
+    ["python", []],
+  ];
+  for (const [cmd, prefix] of candidates) {
+    const probe = spawnSync(cmd, [...prefix, "-c", "import sys; print(sys.version)"], {
+      encoding: "utf8",
+      timeout: 8000,
+      windowsHide: true,
+    });
+    if (probe.status === 0) {
+      return { cmd, prefix };
+    }
+  }
+  return null;
+}
+
+let cachedPythonLauncher = undefined;
+
 function runEasyOcr(filePath) {
   const scriptPath = path.join(__dirname, "..", "scripts", "easyocr_extract.py");
   if (!fs.existsSync(scriptPath)) {
     return null;
   }
-  const result = spawnSync("python3", [scriptPath, filePath], {
+  if (cachedPythonLauncher === undefined) {
+    cachedPythonLauncher = resolvePythonCommand();
+    if (!cachedPythonLauncher) {
+      console.warn(
+        "EasyOCR skipped: no Python found (tried python3, py -3, python). Install Python 3 and: py -3 -m pip install easyocr pillow"
+      );
+    }
+  }
+  if (!cachedPythonLauncher) return null;
+
+  const { cmd, prefix } = cachedPythonLauncher;
+  const result = spawnSync(cmd, [...prefix, scriptPath, filePath], {
     encoding: "utf8",
     maxBuffer: 8 * 1024 * 1024,
     timeout: 180000,
+    windowsHide: true,
     env: { ...process.env, PYTHONWARNINGS: "ignore" },
   });
   if (result.status !== 0) {
+    const err = String(result.stderr || result.stdout || "").slice(0, 400);
+    if (err) console.warn("EasyOCR failed:", err);
     return null;
   }
   try {

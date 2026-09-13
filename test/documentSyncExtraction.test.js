@@ -503,3 +503,32 @@ test("IRQtial OCR token resolves to Oral Prophylaxis", () => {
   assert.equal(resolveClinicProcedure("IRQtial"), "Oral Prophylaxis");
   assert.equal(resolveClinicProcedure("rOrhilax"), "Oral Prophylaxis");
 });
+
+test("SEPT date without description still fills Oral Prophylaxis on dental charts", () => {
+  const sample = `
+NAME
+BNEELOU ORS-SAEHTNAN
+ADDRESS
+MANDALUYONG CITY
+AGE
+25
+DATE
+NO
+DESCRIPTION
+TIME
+DEBIT
+CREDIT
+AMOUNT
+BALANCE
+(tpt-
+Jaju
+3148
+`;
+  const { payload } = extractStructuredPayload(sample);
+  assert.equal(payload.patient.address, "MANDALUYONG CITY");
+  assert.match(payload.procedure.treatmentDate, /SEPT\s*7,\s*2024/i);
+  assert.equal(payload.procedure.treatment, "Oral Prophylaxis");
+  assert.ok(payload.procedure.visits.length >= 1);
+  assert.equal(payload.procedure.visits[0].treatment, "Oral Prophylaxis");
+  assert.match(payload.procedure.visits[0].treatmentDate, /SEPT\s*7,\s*2024/i);
+});
