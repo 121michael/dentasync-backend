@@ -226,6 +226,26 @@ def is_plausible_clinic_amount(value: str | int) -> bool:
     return True
 
 
+def snap_clinic_fee(value: str | int) -> str:
+    try:
+        amount = int(float(str(value).replace(",", "")))
+    except Exception:
+        return ""
+    if amount < 400 or amount > 20000:
+        return ""
+    rounds = [500, 800, 1000, 1200, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 6000, 7000, 8000, 10000]
+    best = ""
+    best_dist = 81
+    for round_amount in rounds:
+        dist = abs(amount - round_amount)
+        if dist < best_dist:
+            best = str(round_amount)
+            best_dist = dist
+    if best:
+        return best
+    return str(amount) if is_plausible_clinic_amount(amount) else ""
+
+
 def repair_ocr_year_token(value: str) -> str:
     token = re.sub(r"[^A-Za-z0-9]", "", value or "").lower()
     if re.fullmatch(r"20[0-3]\d", token):
@@ -254,13 +274,15 @@ def repair_ocr_amount_token(value: str) -> str:
         return ""
 
     if re.fullmatch(r"[1-9]\d{2,5}", raw):
-        return raw if is_plausible_clinic_amount(raw) else ""
+        return snap_clinic_fee(raw) or (raw if is_plausible_clinic_amount(raw) else "")
     if len(raw) < 3 or len(raw) > 6:
         return ""
     chars = list(raw.lower())
     zeroish = set("0odquvw")
     if chars[0] in {"b", "8"} and all(ch in zeroish or ch == "0" for ch in chars[1:]):
         chars[0] = "2"
+    if chars[0] in {"e", "f"} and all(ch in zeroish or ch in {"0", "7"} for ch in chars[1:]):
+        chars[0] = "3"
     mapping = {
         "o": "0",
         "d": "0",
@@ -274,6 +296,8 @@ def repair_ocr_amount_token(value: str) -> str:
         "s": "5",
         "b": "8",
         "g": "9",
+        "e": "3",
+        "f": "3",
     }
     digits = "".join(ch if ch.isdigit() else mapping.get(ch, "") for ch in chars)
     if not re.fullmatch(r"[1-9]\d{2,5}", digits):
@@ -281,7 +305,7 @@ def repair_ocr_amount_token(value: str) -> str:
     amount = int(digits)
     if re.search(r"[A-Za-z]", raw) and amount < 1000:
         return ""
-    return str(amount) if is_plausible_clinic_amount(amount) else ""
+    return snap_clinic_fee(amount) or (str(amount) if is_plausible_clinic_amount(amount) else "")
 
 
 def repair_noisy_written_date(text: str) -> str:
@@ -449,22 +473,25 @@ def extract_amount(items: list[dict[str, Any]], text: str) -> str:
     if match:
         consider(match.group(1))
 
-    for noisy in re.findall(r"\b([bB8][0oOdqvuw]{2,4})\b", text or ""):
+    for noisy in re.findall(r"\b([bBeEfF8][0oOdqvuw7]{2,4})\b", text or ""):
         consider(noisy)
 
-    # Prefer letter-repaired clinic amounts (Buvd -> 2000) over glued digit junk.
-    if letter_hits:
-        return letter_hits[0]
-    if numeric_hits:
-        # Prefer typical prophylaxis fees (1000-5000) when several candidates exist.
-        preferred = [value for value in numeric_hits if 1000 <= int(value) <= 5000]
-        return preferred[0] if preferred else numeric_hits[0]
+    # Prefer letter-repaired / snapped clinic amounts, favoring 2000-5000 prophylaxis fees.
+    pool = letter_hits + numeric_hits
+    if pool:
+        snapped = [snap_clinic_fee(value) or value for value in pool]
+        snapped = [value for value in snapped if value and is_plausible_clinic_amount(value)]
+        preferred = [value for value in snapped if 1000 <= int(value) <= 5000]
+        # Prefer higher prophylaxis-like fees when both 2000 and 3000 candidates appear.
+        if preferred:
+            return str(max(int(value) for value in preferred))
+        return snapped[0] if snapped else ""
     return ""
 
 
 def extract_phone(value: str, text: str) -> str:
     labeled = re.search(
-        r"(?:phone|mobile|cellphone|cell\s*phone|telephone|tel\.?)\s*[:\-]?\s*([+\d()\[\]\-\sA-Za-z]{8,24})",
+        r"(?:phone|mobile|cellphone|cell\s*phone|telephone|tel\.?|ielephone)\s*[:\-]?\s*([+\d()\[\]\-\sA-Za-z]{8,24})",
         text or "",
         flags=re.I,
     )
@@ -473,16 +500,29 @@ def extract_phone(value: str, text: str) -> str:
         sources.append(labeled.group(1))
     if value:
         sources.append(value)
+    # Also catch phone-like OCR soup on its own line after TELEPHONE.
+    for match in re.finditer(
+        r"(?:telephone|ielephone|phone)\s*\n\s*([A-Za-z0-9]{9,14})",
+        text or "",
+        flags=re.I,
+    ):
+        sources.append(match.group(1))
     for source in sources:
         repaired = (
             source.lower()
             .replace("o", "0")
-            .replace("q", "0")
+            .replace("q", "9")
+            .replace("g", "9")
             .replace("i", "1")
             .replace("l", "1")
+            .replace("z", "2")
             .replace("s", "5")
+            .replace("a", "4")
+            .replace("u", "4")
+            .replace("h", "4")
             .replace("b", "8")
-            .replace("g", "9")
+            .replace("t", "7")
+            .replace("e", "6")
         )
         digits = re.sub(r"\D", "", repaired)
         if re.fullmatch(r"0\d{10}", digits) or re.fullmatch(r"9\d{9}", digits):
@@ -1092,6 +1132,28 @@ def read_image(reader, image) -> tuple[str, list[dict[str, Any]], float]:
     return text, items, confidence
 
 
+def read_image_digits(reader, image) -> list[str]:
+    """Digit-only OCR pass for faint CREDIT/AMOUNT cells (e.g. 3000 read as Buvd)."""
+    import numpy as np
+
+    array = np.array(image)
+    try:
+        rows = reader.readtext(array, detail=1, paragraph=False, allowlist="0123456789")
+    except TypeError:
+        rows = reader.readtext(array, detail=1, paragraph=False)
+    hits: list[str] = []
+    for _bbox, text, conf in rows:
+        value = re.sub(r"\D", "", str(text or ""))
+        if not value or float(conf or 0) < 0.05:
+            continue
+        snapped = snap_clinic_fee(value)
+        if snapped:
+            hits.append(snapped)
+        elif is_plausible_clinic_amount(value):
+            hits.append(value)
+    return hits
+
+
 def merge_fields(base: dict[str, Any], extra: dict[str, Any]) -> dict[str, Any]:
     merged = dict(base or {})
     for key, value in (extra or {}).items():
@@ -1175,8 +1237,35 @@ def main() -> int:
                 else:
                     enhanced = ImageOps.autocontrast(ImageEnhance.Sharpness(crop).enhance(1.4))
                 crop_text, crop_items, _conf = read_image(reader, enhanced)
+                # Amount crop: also try digit-only OCR so 3000 is not stuck as Buvd/2000.
+                if idx == 4:
+                    digit_hits = read_image_digits(reader, enhanced)
+                    if digit_hits:
+                        best_digit = str(max(int(value) for value in digit_hits))
+                        crop_text = f"{crop_text}\namount {best_digit}".strip()
+                        crop_items.append(
+                            {
+                                "text": best_digit,
+                                "conf": 0.5,
+                                "cx": 0,
+                                "cy": 0,
+                                "left": 0,
+                                "right": 0,
+                                "top": 0,
+                                "bottom": 0,
+                            }
+                        )
                 crop_fields = structured_from_items(crop_items, crop_text)
                 fields = merge_fields(fields, crop_fields)
+                if crop_fields.get("amountCharged"):
+                    current_amount = fields.get("amountCharged") or ""
+                    candidate = snap_clinic_fee(crop_fields["amountCharged"]) or crop_fields["amountCharged"]
+                    if (not current_amount) or (
+                        is_plausible_clinic_amount(candidate)
+                        and int(re.sub(r"\D", "", candidate) or 0)
+                        >= int(re.sub(r"\D", "", current_amount) or 0)
+                    ):
+                        fields["amountCharged"] = candidate
                 if crop_fields.get("visits") and (
                     not fields.get("visits") or len(crop_fields["visits"]) > len(fields.get("visits") or [])
                 ):

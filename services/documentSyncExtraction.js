@@ -530,6 +530,24 @@ function isPlausibleClinicAmount(value) {
   return true;
 }
 
+/** Snap near-miss OCR fees (3070, 2980) to common clinic round amounts. */
+function snapClinicFee(value) {
+  const n = Number(String(value || "").replace(/,/g, ""));
+  if (!Number.isFinite(n) || n < 400 || n > 20000) return "";
+  const rounds = [500, 800, 1000, 1200, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 6000, 7000, 8000, 10000];
+  if (rounds.includes(Math.trunc(n))) return String(Math.trunc(n));
+  let best = "";
+  let bestDist = 81;
+  for (const round of rounds) {
+    const dist = Math.abs(n - round);
+    if (dist < bestDist) {
+      best = String(round);
+      bestDist = dist;
+    }
+  }
+  return best;
+}
+
 function looksLikePrintedGenderPrompt(value) {
   return /^(?:gender|sex)?\s*[\[\(]?\s*(?:male|m)\s*[\/|,]\s*(?:female|f)\s*[\]\)]?$/i.test(
     String(value || "").trim()
@@ -1059,7 +1077,7 @@ function repairOcrYearToken(value) {
   return /^20[0-3]\d$/.test(out) ? out : "";
 }
 
-/** Repair amount tokens like b0vd / B0v1 that OCR reads instead of 2000. */
+/** Repair amount tokens like b0vd / B0v1 that OCR reads instead of 2000/3000. */
 function repairOcrAmountToken(value) {
   const cleaned = cleanLine(String(value || ""))
     .replace(/(?:₱|php)/gi, "")
@@ -1071,19 +1089,25 @@ function repairOcrAmountToken(value) {
     if (isPlausibleClinicAmount(digits)) {
       return cleaned;
     }
+    const snapped = snapClinicFee(digits);
+    if (snapped) return snapped;
   }
 
   const raw = cleaned.replace(/[^A-Za-z0-9]/g, "");
   if (!raw) return "";
   if (/^[1-9]\d{2,5}$/.test(raw)) {
-    return isPlausibleClinicAmount(raw) ? raw : "";
+    if (isPlausibleClinicAmount(raw)) return raw;
+    return snapClinicFee(raw) || "";
   }
   if (raw.length < 3 || raw.length > 6) return "";
   const chars = raw.toLowerCase().split("");
   const zeroish = new Set(["0", "o", "d", "q", "u", "v", "w"]);
-  // Handwritten 2 leading a run of zeros is often read as B/8.
+  // Handwritten 2/3 leading a run of zeros is often read as B/8/E.
   if ((chars[0] === "b" || chars[0] === "8") && chars.slice(1).every((char) => zeroish.has(char) || char === "0")) {
     chars[0] = "2";
+  }
+  if ((chars[0] === "e" || chars[0] === "f") && chars.slice(1).every((char) => zeroish.has(char) || char === "0" || char === "7")) {
+    chars[0] = "3";
   }
   const map = {
     o: "0",
@@ -1098,12 +1122,16 @@ function repairOcrAmountToken(value) {
     s: "5",
     b: "8",
     g: "9",
+    e: "3",
+    f: "3",
   };
   const digits = chars.map((char) => (/^\d$/.test(char) ? char : map[char] || "")).join("");
   if (!/^[1-9]\d{2,5}$/.test(digits) || looksLikeYear(digits)) return "";
   const numeric = Number(digits);
   // Letter-repaired short tokens like b0w -> 200 are usually truncated 2000/3000 amounts.
   if (/[A-Za-z]/.test(cleaned) && numeric < 1000) return "";
+  const snapped = snapClinicFee(numeric);
+  if (snapped) return snapped;
   if (!isPlausibleClinicAmount(numeric)) return "";
   return String(numeric);
 }
@@ -1177,11 +1205,14 @@ function isPlausibleWrittenDate(value) {
 function repairOcrPhoneDigits(value) {
   const repaired = String(value || "")
     .toLowerCase()
-    .replace(/[oq]/g, "0")
+    .replace(/[o]/g, "0")
+    .replace(/[qg]/g, "9")
     .replace(/[il]/g, "1")
-    .replace(/s/g, "5")
+    .replace(/[zs]/g, (ch) => (ch === "z" ? "2" : "5"))
+    .replace(/[auh]/g, "4")
     .replace(/b/g, "8")
-    .replace(/g/g, "9");
+    .replace(/t/g, "7")
+    .replace(/e/g, "6");
   return normalizePhone(repaired);
 }
 
@@ -1336,8 +1367,10 @@ function nameQualityScore(value) {
   if (tokens.length >= 2) score += 16;
   if (tokens.length >= 3) score += 6;
   if (/^[A-Za-z]+(?:[\s\-][A-Za-z]+)+$/.test(text)) score += 14;
-  // Penalize known OCR garble from this chart family / all-caps soup.
-  if (/ancelol|bneelou|bnegenou|ors\b|saehtnan|oors|brghtnan|bree?n\s*trg/i.test(text)) score -= 28;
+  // Prefer Angelou/Obas-style chart names; penalize known OCR garble.
+  if (/obas|baght|bagat|angelou|aneelou|ancelou|obns|obrs/i.test(text)) score += 24;
+  if (/ancelol|bneelou|bnegenou|saehtnan|oors|brghtnan|bree?n\s*trg/i.test(text)) score -= 28;
+  if (/\bors\b/i.test(text) && !/obas|obrs|obns/i.test(text)) score -= 18;
   if (/[0-9]/.test(text)) score -= 10;
   if (/\b[A-Z]{2}\s+[A-Z]{2}\b/.test(text)) score -= 8;
   // Do not prefer ALL CAPS alone — EasyOCR mixed/lowercase is often more accurate.
