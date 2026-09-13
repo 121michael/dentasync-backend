@@ -217,6 +217,42 @@ charged
   assert.equal(payload.procedure.notes, "");
 });
 
+test("treatment record labeled fields still fill the Document Table when row parse fails", () => {
+  const sample = `
+TREATMENT RECORD
+Name: Algene Reyes
+Age: 22
+Gender: M/F
+Date Tooth No./s Procedure Dentist/s Amount charged
+DESCRIPTION
+ORTHO INSTALLATION
+DATE
+NOV 16, 2023
+AMOUNT
+5,000
+`;
+  const { payload } = extractStructuredPayload(sample);
+  assert.equal(payload.documentForm, "treatment_record");
+  assert.ok(payload.procedure.visits.length >= 1);
+  assert.match(payload.procedure.visits[0].treatment, /ORTHO\s*INSTALLATION/i);
+  assert.match(payload.procedure.visits[0].treatmentDate, /NOV\s*16,\s*2023/i);
+  assert.equal(payload.procedure.visits[0].amountCharged, "5,000");
+});
+
+test("slash-dated treatment rows are copied into the Document Table", () => {
+  const sample = `
+TREATMENT RECORD
+Date Tooth No Procedure Amount charged
+11/16/2023 ORTHO INSTALLATION 5000
+12/21/2023 ORTHO ADJUSTMENT 1250
+`;
+  const { payload } = extractStructuredPayload(sample);
+  assert.ok(payload.procedure.visits.length >= 2);
+  assert.equal(payload.procedure.visits[0].treatment, "ORTHO INSTALLATION");
+  assert.equal(payload.procedure.visits[0].amountCharged, "5000");
+  assert.match(payload.procedure.visits[0].treatmentDate, /11\/16\/2023/);
+});
+
 test("ensureReadableExtraction errors when no document fields can be read", () => {
   const { payload } = extractStructuredPayload(`
 TREATMENT RECORD

@@ -162,6 +162,72 @@ function hasMeaningfulDocumentRead(payload) {
   return hasName || hasProcedure || hasVisitSignal || hasAmount || (hasContact && hasName);
 }
 
+function hasReadableVisitSignal(row = {}) {
+  return Boolean(
+    isPlausibleProcedure(row?.treatment) ||
+      isPlausibleWrittenDate(row?.treatmentDate) ||
+      String(row?.amountCharged || "").trim() ||
+      String(row?.toothNos || "").trim() ||
+      String(row?.dentistName || "").trim()
+  );
+}
+
+function buildVisitFromPrimary(procedure = {}) {
+  return normalizeVisitRows([
+    {
+      treatmentDate: procedure.treatmentDate || "",
+      treatment: procedure.treatment || "",
+      dentistName: procedure.dentistName || "",
+      amountCharged: procedure.amountCharged || "",
+      toothNos: procedure.toothNos || "",
+    },
+  ]);
+}
+
+function mirrorPrimaryTreatmentIntoVisits(payload) {
+  if (!payload?.procedure) return payload;
+  const primary = payload.procedure;
+  const hasPrimary =
+    isPlausibleProcedure(primary.treatment) ||
+    isPlausibleWrittenDate(primary.treatmentDate) ||
+    Number(String(primary.amountCharged || "").replace(/,/g, "")) >= 100;
+  if (!hasPrimary) return payload;
+
+  const visits = normalizeVisitRows(primary.visits || []);
+  const primaryScore = procedureQualityScore(primary.treatment);
+  const visitScore = visits.reduce((best, row) => Math.max(best, procedureQualityScore(row.treatment)), 0);
+
+  if (visits.length === 0 || primaryScore > visitScore) {
+    payload.procedure.visits = buildVisitFromPrimary(primary);
+    return payload;
+  }
+
+  // Fill blank visit cells from readable primary fields (common on TREATMENT RECORD OCR).
+  const first = { ...visits[0] };
+  let changed = false;
+  if (!isPlausibleProcedure(first.treatment) && isPlausibleProcedure(primary.treatment)) {
+    first.treatment = primary.treatment;
+    changed = true;
+  }
+  if (!isPlausibleWrittenDate(first.treatmentDate) && isPlausibleWrittenDate(primary.treatmentDate)) {
+    first.treatmentDate = primary.treatmentDate;
+    changed = true;
+  }
+  if (
+    !String(first.amountCharged || "").trim() &&
+    Number(String(primary.amountCharged || "").replace(/,/g, "")) >= 100
+  ) {
+    first.amountCharged = primary.amountCharged;
+    changed = true;
+  }
+  if (changed) {
+    payload.procedure.visits = normalizeVisitRows([first, ...visits.slice(1)]);
+  } else {
+    payload.procedure.visits = visits;
+  }
+  return payload;
+}
+
 function sanitizeExtractedPayload(payload) {
   if (!payload || typeof payload !== "object") return payload;
   if (payload.patient?.age) {
@@ -196,20 +262,19 @@ function sanitizeExtractedPayload(payload) {
                 ? row.amountCharged
                 : ""),
           }))
-          .filter(
-            (row) =>
-              isPlausibleProcedure(row?.treatment) ||
-              isPlausibleWrittenDate(row?.treatmentDate) ||
-              String(row?.amountCharged || "").trim() ||
-              String(row?.toothNos || "").trim() ||
-              String(row?.dentistName || "").trim()
-          )
+          .filter((row) => hasReadableVisitSignal(row))
       );
     }
     const hasProcedureSignal =
       isPlausibleProcedure(payload.procedure.treatment) ||
       (payload.procedure.visits || []).some((row) => isPlausibleProcedure(row?.treatment));
-    if (!hasProcedureSignal) {
+    const hasVisitMoneyOrDate = (payload.procedure.visits || []).some(
+      (row) =>
+        isPlausibleWrittenDate(row?.treatmentDate) ||
+        Number(String(row?.amountCharged || "").replace(/,/g, "")) >= 100
+    );
+    // Keep readable amounts when the visit/date already proves this is a treatment row.
+    if (!hasProcedureSignal && !hasVisitMoneyOrDate && !isPlausibleWrittenDate(payload.procedure.treatmentDate)) {
       payload.procedure.amountCharged = "";
     }
     const amountNumeric = Number(String(payload.procedure.amountCharged || "").replace(/,/g, ""));
@@ -267,6 +332,7 @@ function extractRawProcedureText(windowText, options = {}) {
     "ig"
   );
   text = text.replace(monthDateRe, " ");
+  text = text.replace(/\b\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}\b/g, " ");
   text = text.replace(/\b20\d{2}\b/g, " ");
   if (options.stripTooth) {
     text = text.replace(/\b\d{1,2}\s*[-–]\s*\d{1,2}\b/g, " ");
@@ -276,7 +342,7 @@ function extractRawProcedureText(windowText, options = {}) {
       .replace(/\b[1-9]\d{2,5}(?:\.\d{2})?\b/g, " ")
       .replace(/,/g, " ");
   }
-  text = text.replace(/\b(?:amount|charged|paid|balance|tooth|no\.?|dentist)\b/gi, " ");
+  text = text.replace(/\b(?:amount|charged|paid|balance|tooth|no\.?|dentist|treatment\s*record|record)\b/gi, " ");
   return cleanLine(text);
 }
 
@@ -357,7 +423,9 @@ function glueSplitAmounts(text) {
 function isPlausibleClinicAmount(value) {
   const n = Number(value);
   if (!Number.isFinite(n) || n < 100 || n > 200000) return false;
-  if (n >= 2000 && n <= 2100) return false; // years
+  // Reject calendar years mistaken for fees (keep plain 2000/3000 clinic amounts).
+  if (/^19\d{2}$/.test(String(Math.trunc(n)))) return false;
+  if (/^20[1-3]\d$/.test(String(Math.trunc(n)))) return false;
   if (/^\d{1,2}20\d{2}$/.test(String(Math.trunc(n)))) return false; // day+year glue
   return true;
 }
@@ -527,6 +595,7 @@ function parseTreatmentRecordRows(rawText) {
     `\\b(${MONTH_TOKEN_RE})\\s*[-.]?\\s*(\\d{1,2})(?:st|nd|rd|th)?(?:,)?\\s*(20\\d{2})?\\b`,
     "i"
   );
+  const slashDateRe = /\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\b/;
 
   const lines = text
     .split(/\r?\n/)
@@ -536,41 +605,67 @@ function parseTreatmentRecordRows(rawText) {
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
     const dateMatch = line.match(monthDateRe);
-    if (!dateMatch) continue;
+    const slashMatch =
+      !dateMatch &&
+      /ortho|exo|install|adjust|bracket|prophylax|cleaning|filling|extraction|pr[o0]/i.test(line)
+        ? line.match(slashDateRe)
+        : null;
+    if (!dateMatch && !slashMatch) continue;
 
-    // Keep the row local: current line + next line only when it supplies year / amount / procedure.
+    // Keep the row local: current line + following lines that supply year / amount / procedure.
     const next = lines[i + 1] || "";
     const next2 = lines[i + 2] || "";
     const next3 = lines[i + 3] || "";
     const monthDateReLocal = new RegExp(monthDateRe.source, "i");
-    const nextHasOwnDate = monthDateReLocal.test(next);
+    const nextHasOwnDate = monthDateReLocal.test(next) || slashDateRe.test(next);
     const parts = [line];
     if (!nextHasOwnDate && /^(20\d{2})\b/.test(next)) {
       parts.push(next);
-      if (next2 && !monthDateReLocal.test(next2) && /ortho|exo|install|adjust|bracket/i.test(next2)) {
+      if (next2 && !monthDateReLocal.test(next2) && !slashDateRe.test(next2)) {
         parts.push(next2);
-        if (next3 && !monthDateReLocal.test(next3) && /\b\d{1,3}(?:,\d{3})*(?:\.\d{2})?\b/.test(next3)) {
+        if (next3 && !monthDateReLocal.test(next3) && !slashDateRe.test(next3)) {
           parts.push(next3);
         }
       }
     } else if (
       !nextHasOwnDate &&
-      /ortho|exo|install|adjust|bracket|\b\d{3,5}\b/i.test(next)
+      /ortho|exo|install|adjust|bracket|prophylax|cleaning|filling|extraction|pr[o0]|\b\d{3,5}\b/i.test(next)
     ) {
       parts.push(next);
+      if (
+        next2 &&
+        !monthDateReLocal.test(next2) &&
+        !slashDateRe.test(next2) &&
+        (/ortho|exo|install|adjust|bracket|prophylax|cleaning|filling|extraction|pr[o0]|\b\d{3,5}\b/i.test(next2) ||
+          /^(20\d{2})\b/.test(next2))
+      ) {
+        parts.push(next2);
+      }
+    } else if (!nextHasOwnDate && /^(20\d{2})\b/.test(next2)) {
+      // Year often lands two lines below a month/day OCR split.
+      parts.push(next, next2);
     }
     const window = parts.join(" ");
 
-    let year = dateMatch[3] || "";
-    if (!year) {
-      const nearbyYear = window.match(/\b(20\d{2})\b/);
-      year = nearbyYear?.[1] || "";
+    let treatmentDate = "";
+    if (dateMatch) {
+      let year = dateMatch[3] || "";
+      if (!year) {
+        const nearbyYear = window.match(/\b(20\d{2})\b/);
+        year = nearbyYear?.[1] || "";
+      }
+      // Prefer keeping a dated treatment row even when OCR lost the year; sanitize may drop it later.
+      treatmentDate = year
+        ? cleanLine(`${dateMatch[1]} ${dateMatch[2]}, ${year}`)
+        : cleanLine(`${dateMatch[1]} ${dateMatch[2]}`);
+      if (!year && !/ortho|exo|install|adjust|prophylax|cleaning|filling|extraction|pr[o0]|\b[1-9]\d{2,5}\b/i.test(window)) {
+        continue;
+      }
+    } else if (slashMatch) {
+      let year = slashMatch[3];
+      if (year.length === 2) year = `20${year}`;
+      treatmentDate = cleanLine(`${slashMatch[1]}/${slashMatch[2]}/${year}`);
     }
-    if (!year) continue;
-
-    const treatmentDate = year
-      ? cleanLine(`${dateMatch[1]} ${dateMatch[2]}, ${year}`)
-      : cleanLine(`${dateMatch[1]} ${dateMatch[2]}`);
 
     const toothMatch = window.match(/\b(\d{1,2})\s*[-–]\s*(\d{1,2})\b/);
     const toothNos = toothMatch ? `${toothMatch[1]}-${toothMatch[2]}` : "";
@@ -592,10 +687,17 @@ function parseTreatmentRecordRows(rawText) {
       }
     }
 
-    const treatment = extractRawProcedureText(window, {
+    let treatment = extractRawProcedureText(window, {
       stripTooth: Boolean(toothNos),
       stripAmount: Boolean(amountCharged),
     });
+    if (treatment && !isPlausibleProcedure(treatment)) {
+      // Keep OCR wording only when it still looks like a clinic procedure token.
+      const token = treatment.match(
+        /\b(oral\s*prophylaxis|pr[o0][A-Za-z]{0,10}h[il1y][A-Za-z]{0,10}|ortho(?:dontic)?\s*install(?:ation)?|ortho(?:dontic)?\s*adjust(?:ment)?|qatho\s*install|oatho\s*install|exo|tooth\s*extraction|extraction|dental\s*cleaning|cleaning|filling)\b/i
+      );
+      treatment = token ? cleanLine(token[0]) : "";
+    }
 
     if (!treatment && !amountCharged && !toothNos) continue;
 
@@ -934,10 +1036,10 @@ function isPlausiblePersonName(value) {
 function isPlausibleProcedure(value) {
   const text = cleanLine(value);
   if (!text || text.length < 3) return false;
-  if (/dentis|charged|balance|appt|tooth\s*no|amount\s*paid|gender|telephone|\(|trt\b|joju/i.test(text)) {
+  if (/dentis|charged|balance|appt|tooth\s*no|amount\s*paid|gender|telephone|\(|trt\b|joju|provenance|^(record|treatment\s*record)$/i.test(text)) {
     return false;
   }
-  return /prophylax|prophy|ortho|install|adjust|exo|extraction|cleaning|filling|whitening|crown|implant|consultation|oral|pr[o0].{0,10}h[il1y]/i.test(
+  return /prophylax|prophy|ortho|qatho|oatho|install|adjust|exo|extraction|cleaning|filling|whitening|crown|implant|consultation|oral|pr[o0].{0,10}h[il1y]/i.test(
     text
   );
 }
@@ -1277,6 +1379,8 @@ function captureLabeledBlock(text, labelNames, stopLabels = []) {
     const rest = normalized.slice(label.length).replace(/^[:\-\s]+/, "");
     // Prevent short label "date" matching "date of birth" / "date performed".
     if (label === "date" && /^(of|performed|birth)/i.test(rest)) return false;
+    // Prevent "treatment" matching the form title "TREATMENT RECORD".
+    if (label === "treatment" && /^(record)\b/i.test(rest)) return false;
     return true;
   };
 
@@ -1448,12 +1552,15 @@ function extractStructuredPayload(rawText) {
       /(?:procedure|treatment|dental\s*procedure|service|description)\s*[:\-]?\s*(.+)$/im,
       /(?:orthodontic|cleaning|extraction|filling|root\s*canal|whitening|crown|implant|oral\s*prophylaxis|prophylaxis)[^\n.]{0,80}/i,
     ]);
-  const headerLike = /^(time|debit|credit|date|amount|balance|no\.?|description)$/i;
+  const headerLike = /^(time|debit|credit|date|amount|balance|no\.?|description|record|treatment\s*record)$/i;
   payload.procedure.treatment = treatmentBlock && !headerLike.test(treatmentBlock)
     ? treatmentBlock
     : "";
   // Keep procedure text as OCR wrote it — do not rename to a service catalog label.
-  if (looksLikeOcrSoup(payload.procedure.treatment)) {
+  if (
+    looksLikeOcrSoup(payload.procedure.treatment) ||
+    /^(record|treatment\s*record)$/i.test(payload.procedure.treatment)
+  ) {
     payload.procedure.treatment = "";
   }
   fieldStatuses.treatment = fieldStatus(
@@ -1579,26 +1686,24 @@ function extractStructuredPayload(rawText) {
       payload.procedure.amountCharged = primary.amountCharged;
       fieldStatuses.amountCharged = "detected";
     }
+  } else if (
+    payload.procedure.treatment ||
+    payload.procedure.treatmentDate ||
+    payload.procedure.amountCharged
+  ) {
+    // Table or chart: if labeled fields were readable, always put them in the Document Table.
+    payload.procedure.visits = buildVisitFromPrimary(payload.procedure);
+    if (isTableForm && !payload.procedure.visits.length) {
+      fieldStatuses.treatment = fieldStatuses.treatment || "unable_to_read";
+      fieldStatuses.treatmentDate = fieldStatuses.treatmentDate || "unable_to_read";
+      fieldStatuses.amountCharged = fieldStatuses.amountCharged || "unable_to_read";
+    }
   } else if (isTableForm) {
-    // Leave visits empty so later OCR/layout fills can mirror readable primary fields.
+    // Truly unreadable table — leave empty for the admin to fill from the preview.
     payload.procedure.visits = [];
-    payload.procedure.treatment = "";
-    payload.procedure.treatmentDate = "";
-    payload.procedure.amountCharged = "";
-    payload.procedure.notes = "";
     fieldStatuses.treatment = "unable_to_read";
     fieldStatuses.treatmentDate = "unable_to_read";
     fieldStatuses.amountCharged = "unable_to_read";
-  } else if (payload.procedure.treatment || payload.procedure.treatmentDate || payload.procedure.amountCharged) {
-    // Non-table documents: show one row matching the paper fields we could read.
-    payload.procedure.visits = normalizeVisitRows([
-      {
-        treatmentDate: payload.procedure.treatmentDate,
-        treatment: payload.procedure.treatment,
-        dentistName: payload.procedure.dentistName,
-        amountCharged: payload.procedure.amountCharged,
-      },
-    ]);
   }
 
   // Do not invent procedure/amount/notes from OCR soup heuristics.
@@ -1850,30 +1955,7 @@ async function extractDocumentData(filePath, mimeType, originalName) {
   }
 
   // If OCR/layout produced primary treatment fields but no visit rows, mirror them into the table.
-  // Also replace a weak/empty placeholder row when primary fields are stronger.
-  {
-    const visits = normalizeVisitRows(structured.payload.procedure.visits || []);
-    const primaryScore = procedureQualityScore(structured.payload.procedure.treatment);
-    const visitScore = visits.reduce((best, row) => Math.max(best, procedureQualityScore(row.treatment)), 0);
-    const shouldMirror =
-      primaryScore > 0 &&
-      (visits.length === 0 ||
-        primaryScore > visitScore ||
-        (!visits.some((row) => row.treatmentDate || row.amountCharged) &&
-          (structured.payload.procedure.treatmentDate || structured.payload.procedure.amountCharged)));
-    if (shouldMirror) {
-      structured.payload.procedure.visits = normalizeVisitRows([
-        {
-          treatmentDate: structured.payload.procedure.treatmentDate,
-          treatment: structured.payload.procedure.treatment,
-          dentistName: structured.payload.procedure.dentistName,
-          amountCharged: structured.payload.procedure.amountCharged,
-        },
-      ]);
-    } else {
-      structured.payload.procedure.visits = visits;
-    }
-  }
+  mirrorPrimaryTreatmentIntoVisits(structured.payload);
 
   structured.fieldStatuses = refreshFieldStatuses(structured.payload, structured.fieldStatuses);
 
@@ -1889,21 +1971,9 @@ async function extractDocumentData(filePath, mimeType, originalName) {
     throw error;
   }
 
-  // After sanitizing junk cells, mirror a clean visit row from readable primary fields.
-  if (
-    !(structured.payload.procedure.visits || []).length &&
-    isPlausibleProcedure(structured.payload.procedure.treatment)
-  ) {
-    structured.payload.procedure.visits = normalizeVisitRows([
-      {
-        treatmentDate: structured.payload.procedure.treatmentDate,
-        treatment: structured.payload.procedure.treatment,
-        dentistName: structured.payload.procedure.dentistName,
-        amountCharged: structured.payload.procedure.amountCharged,
-      },
-    ]);
-    filledCount = countReadableDocumentFields(structured.payload);
-  }
+  // After sanitizing junk cells, mirror any remaining readable primary fields into the table.
+  mirrorPrimaryTreatmentIntoVisits(structured.payload);
+  filledCount = countReadableDocumentFields(structured.payload);
 
   const notes = [
     `Document read successfully — populated ${filledCount} field${filledCount === 1 ? "" : "s"} with exact values from the scan. Review them, then Confirm & Save.`,

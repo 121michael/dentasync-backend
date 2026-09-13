@@ -571,12 +571,13 @@ def extract_treatment_record_fields(text: str) -> dict[str, str]:
         return {}
 
     procedure = literal_procedure(blob, "")
-    amounts = re.findall(r"\b([1-9]\d{2,5})(?:\.00)?\b", blob)
+    amounts = re.findall(r"\b([1-9]\d{0,2}(?:,\d{3})+|[1-9]\d{2,5})(?:\.00)?\b", blob)
     amount = ""
     for candidate in amounts:
-        if re.fullmatch(r"20\d{2}", candidate):
+        digits = candidate.replace(",", "")
+        if re.fullmatch(r"20[1-3]\d", digits):
             continue
-        value = int(candidate)
+        value = int(float(digits))
         if 100 <= value <= 200000:
             amount = candidate
             if re.search(r"install", procedure or "", flags=re.I) or value >= 3000:
@@ -584,6 +585,10 @@ def extract_treatment_record_fields(text: str) -> dict[str, str]:
 
     month = MONTH_RE.search(blob)
     treatment_date = clean_value(month.group(0)) if month else ""
+    if not treatment_date:
+        slash = re.search(r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b", blob)
+        if slash:
+            treatment_date = clean_value(slash.group(0))
     full_name = recover_treatment_record_name(blob)
 
     return {
