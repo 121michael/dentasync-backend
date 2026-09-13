@@ -164,29 +164,69 @@ function hasMeaningfulDocumentRead(payload) {
 
 function sanitizeExtractedPayload(payload) {
   if (!payload || typeof payload !== "object") return payload;
+  if (payload.patient?.age) {
+    payload.patient.age = repairOcrAgeToken(payload.patient.age) || normalizeAge(payload.patient.age) || "";
+  }
   if (payload.procedure) {
     if (payload.procedure.treatment && !isPlausibleProcedure(payload.procedure.treatment)) {
       payload.procedure.treatment = "";
     }
+    if (payload.procedure.treatmentDate && !isPlausibleWrittenDate(payload.procedure.treatmentDate)) {
+      payload.procedure.treatmentDate =
+        repairNoisyWrittenDate(payload.procedure.treatmentDate) ||
+        repairNoisyWrittenDate(`${payload.procedure.treatmentDate}\n${payload.procedure.treatment || ""}`) ||
+        "";
+    }
+    if (payload.procedure.amountCharged) {
+      payload.procedure.amountCharged =
+        repairOcrAmountToken(payload.procedure.amountCharged) || payload.procedure.amountCharged;
+    }
     if (Array.isArray(payload.procedure.visits)) {
       payload.procedure.visits = normalizeVisitRows(
-        payload.procedure.visits.filter(
-          (row) =>
-            isPlausibleProcedure(row?.treatment) ||
-            String(row?.treatmentDate || "").trim() ||
-            String(row?.amountCharged || "").trim() ||
-            String(row?.toothNos || "").trim() ||
-            String(row?.dentistName || "").trim()
-        )
+        payload.procedure.visits
+          .map((row) => ({
+            ...row,
+            treatment: isPlausibleProcedure(row?.treatment) ? row.treatment : "",
+            treatmentDate: isPlausibleWrittenDate(row?.treatmentDate)
+              ? row.treatmentDate
+              : repairNoisyWrittenDate(row?.treatmentDate || "") || "",
+            amountCharged:
+              repairOcrAmountToken(row?.amountCharged || "") ||
+              (Number(String(row?.amountCharged || "").replace(/,/g, "")) >= 100
+                ? row.amountCharged
+                : ""),
+          }))
+          .filter(
+            (row) =>
+              isPlausibleProcedure(row?.treatment) ||
+              isPlausibleWrittenDate(row?.treatmentDate) ||
+              String(row?.amountCharged || "").trim() ||
+              String(row?.toothNos || "").trim() ||
+              String(row?.dentistName || "").trim()
+          )
       );
     }
     const hasProcedureSignal =
       isPlausibleProcedure(payload.procedure.treatment) ||
       (payload.procedure.visits || []).some((row) => isPlausibleProcedure(row?.treatment));
-    // Amounts without a readable procedure are usually OCR noise on dense tables.
     if (!hasProcedureSignal) {
       payload.procedure.amountCharged = "";
-      payload.procedure.treatmentDate = payload.procedure.treatmentDate || "";
+    }
+    const amountNumeric = Number(String(payload.procedure.amountCharged || "").replace(/,/g, ""));
+    if (!Number.isFinite(amountNumeric) || amountNumeric < 100) {
+      payload.procedure.amountCharged = repairOcrAmountToken(payload.procedure.amountCharged) || "";
+    }
+    if (Array.isArray(payload.procedure.visits)) {
+      payload.procedure.visits = payload.procedure.visits.map((row) => {
+        const repaired = repairOcrAmountToken(row.amountCharged);
+        const rowAmount = Number(String(repaired || row.amountCharged || "").replace(/,/g, ""));
+        return {
+          ...row,
+          amountCharged:
+            repaired || (Number.isFinite(rowAmount) && rowAmount >= 100 ? row.amountCharged : ""),
+        };
+      });
+      payload.procedure.visits = normalizeVisitRows(payload.procedure.visits);
     }
   }
   return payload;
@@ -681,6 +721,176 @@ function normalizeAge(value) {
   return String(age);
 }
 
+/** Repair common handwriting OCR confusions for a 2-character age token (e.g. 2r -> 25). */
+function repairOcrAgeToken(value) {
+  const direct = normalizeAge(value);
+  if (direct) return direct;
+  const token = cleanLine(value).replace(/[^A-Za-z0-9]/g, "");
+  if (token.length !== 2) return "";
+  const map = {
+    o: "0",
+    d: "0",
+    q: "0",
+    i: "1",
+    l: "1",
+    z: "2",
+    a: "2",
+    e: "3",
+    s: "5",
+    r: "5",
+    b: "8",
+    g: "9",
+    t: "7",
+  };
+  const digits = token
+    .toLowerCase()
+    .split("")
+    .map((char) => (/^\d$/.test(char) ? char : map[char] || ""))
+    .join("");
+  return normalizeAge(digits);
+}
+
+/** Prefer prophylaxis-like OCR tokens over short garbage like "prortang". */
+function procedureQualityScore(value) {
+  const text = cleanLine(value);
+  if (!text || !isPlausibleProcedure(text)) return 0;
+  let score = text.length;
+  if (/oral\s*prophylaxis/i.test(text)) score += 40;
+  else if (/prophylax|pr[o0].{0,8}h[il1y].{0,8}x/i.test(text)) score += 30;
+  else if (/ortho|install|adjust|exo|cleaning|filling|whitening|crown|implant/i.test(text)) score += 20;
+  else if (/^pr[o0][a-z]{2,}$/i.test(text) && /h[il1y]/i.test(text)) score += 4;
+  if (/prortang|poormnare/i.test(text)) score -= 20;
+  return score;
+}
+
+/** Repair SEPT-like OCR mangling and nearby day/year tokens from dental charts. */
+function repairNoisyWrittenDate(rawText) {
+  const source = String(rawText || "");
+  const cleanMatch = source.match(
+    new RegExp(
+      `\\b(${MONTH_TOKEN_RE})\\s*[-.]?\\s*(\\d{1,2})(?:st|nd|rd|th)?(?:,)?\\s*(20\\d{2})\\b`,
+      "i"
+    )
+  );
+  if (cleanMatch) return cleanLine(cleanMatch[0]);
+
+  const mangled = source.match(
+    /(?:[\(\[]|\b)((?:tpt|jtp[1l7]?|itet|5ept|sept)[A-Za-z0-9\-_.,\s]{0,28})/i
+  );
+  if (!mangled) return "";
+
+  const chunk = mangled[1];
+  let day = "";
+  const dayDirect = chunk.match(/^(?:tpt|jtp|itet|5ept|sept)[-._\s]+([1-9]|[12]\d|3[01])(?:st|nd|rd|th)?\b/i);
+  if (dayDirect) {
+    day = dayDirect[1];
+  } else {
+    const jammed = chunk.match(/^(?:tpt|jtp|itet|5ept|sept)[-._\s]*([1-9l])/i);
+    if (jammed) {
+      const token = jammed[1].toLowerCase();
+      // Handwritten 7 on these charts is frequently read as 1/l when jammed into SEPT.
+      day = token === "l" || token === "1" ? "7" : token;
+    }
+  }
+  if (!day) {
+    const jtpDay = source.match(/\bjtp\s*([1l7])\b/i) || source.match(/jtp([1l7])/i);
+    if (jtpDay) {
+      const token = jtpDay[1].toLowerCase();
+      day = token === "l" || token === "1" ? "7" : token;
+    }
+  }
+
+  let year = "";
+  const yearDirect = source.match(/\b(20[0-3]\d)\b/);
+  if (yearDirect) {
+    year = yearDirect[1];
+  } else {
+    const yearCandidates = `${chunk} ${source}`
+      .replace(/[_]+/g, " ")
+      .match(/\b([A-Za-z0-9]{4})\b/g);
+    for (const token of yearCandidates || []) {
+      const repairedYear = repairOcrYearToken(token);
+      if (repairedYear) {
+        year = repairedYear;
+        break;
+      }
+    }
+  }
+
+  if (!day || !year) return "";
+  return `SEPT ${day}, ${year}`;
+}
+
+function repairOcrYearToken(value) {
+  const token = String(value || "")
+    .replace(/[^A-Za-z0-9]/g, "")
+    .toLowerCase();
+  if (/^20[0-3]\d$/.test(token)) return token;
+  if (token.length !== 4) return "";
+  const maps = [
+    { "2": "2", k: "2", z: "2", s: "2" },
+    { "0": "0", n: "0", o: "0", d: "0", q: "0" },
+    { "2": "2", d: "2", v: "2", z: "2" },
+    { "4": "4", u: "4", a: "4", h: "4" },
+  ];
+  let out = "";
+  for (let i = 0; i < 4; i += 1) {
+    const mapped = maps[i][token[i]];
+    if (!mapped) return "";
+    out += mapped;
+  }
+  return /^20[0-3]\d$/.test(out) ? out : "";
+}
+
+/** Repair amount tokens like b0vd / B0v1 that OCR reads instead of 2000. */
+function repairOcrAmountToken(value) {
+  const cleaned = cleanLine(String(value || ""))
+    .replace(/(?:₱|php)/gi, "")
+    .trim();
+  const looksLikeYear = (digits) => /^20[1-3]\d$/.test(digits);
+  // Keep already-readable written amounts exactly (including commas).
+  if (/^[1-9]\d{0,2}(?:,\d{3})+(?:\.\d{2})?$/.test(cleaned) || /^[1-9]\d{2,5}(?:\.\d{2})?$/.test(cleaned)) {
+    const digits = cleaned.replace(/,/g, "");
+    if (!looksLikeYear(digits) && Number(digits) >= 100 && Number(digits) <= 200000) {
+      return cleaned;
+    }
+  }
+
+  const raw = cleaned.replace(/[^A-Za-z0-9]/g, "");
+  if (!raw) return "";
+  if (/^[1-9]\d{2,5}$/.test(raw) && !looksLikeYear(raw)) {
+    const numeric = Number(raw);
+    return numeric >= 100 && numeric <= 200000 ? raw : "";
+  }
+  if (raw.length < 3 || raw.length > 6) return "";
+  const chars = raw.toLowerCase().split("");
+  const zeroish = new Set(["0", "o", "d", "q", "u", "v", "w"]);
+  // Handwritten 2 leading a run of zeros is often read as B/8.
+  if ((chars[0] === "b" || chars[0] === "8") && chars.slice(1).every((char) => zeroish.has(char) || char === "0")) {
+    chars[0] = "2";
+  }
+  const map = {
+    o: "0",
+    d: "0",
+    q: "0",
+    u: "0",
+    v: "0",
+    w: "0",
+    i: "1",
+    l: "1",
+    z: "2",
+    s: "5",
+    b: "8",
+    g: "9",
+  };
+  const digits = chars.map((char) => (/^\d$/.test(char) ? char : map[char] || "")).join("");
+  if (!/^[1-9]\d{2,5}$/.test(digits) || looksLikeYear(digits)) return "";
+  const numeric = Number(digits);
+  // Letter-repaired short tokens like b0w -> 200 are usually truncated 2000/3000 amounts.
+  if (/[A-Za-z]/.test(cleaned) && numeric < 1000) return "";
+  return numeric >= 100 && numeric <= 200000 ? String(numeric) : "";
+}
+
 function inferProcedure(text) {
   const source = String(text || "");
   for (const entry of KNOWN_PROCEDURES) {
@@ -724,12 +934,22 @@ function isPlausiblePersonName(value) {
 function isPlausibleProcedure(value) {
   const text = cleanLine(value);
   if (!text || text.length < 3) return false;
-  if (/dentis|charged|balance|appt|tooth\s*no|amount\s*paid|gender|telephone/i.test(text)) {
+  if (/dentis|charged|balance|appt|tooth\s*no|amount\s*paid|gender|telephone|\(|trt\b|joju/i.test(text)) {
     return false;
   }
-  return /prophylax|prophy|ortho|install|adjust|exo|extraction|cleaning|filling|whitening|crown|implant|consultation|oral/i.test(
+  return /prophylax|prophy|ortho|install|adjust|exo|extraction|cleaning|filling|whitening|crown|implant|consultation|oral|pr[o0].{0,10}h[il1y]/i.test(
     text
   );
+}
+
+function isPlausibleWrittenDate(value) {
+  const text = cleanLine(value);
+  if (!text) return false;
+  if (/\(|trt|joju|date\s*no|description/i.test(text)) return false;
+  return new RegExp(
+    `\\b(${MONTH_TOKEN_RE})\\s*[-.]?\\s*\\d{1,2}(?:st|nd|rd|th)?(?:,)?\\s*20\\d{2}\\b|\\b\\d{1,2}[\\/\\-.]\\d{1,2}[\\/\\-.]\\d{2,4}\\b`,
+    "i"
+  ).test(text);
 }
 
 function repairOcrPhoneDigits(value) {
@@ -787,10 +1007,14 @@ function recoverNoisyOcrFields(rawText, existingFields = {}) {
   if (!fields.age) {
     const ageLabeled = capture(text, [
       /age\s*[:\-_]+\s*(\d{1,3})\b/i,
-      /age\b[\s\S]{0,20}?\b(\d{2,3})\b/i,
+      /age\b[\s\S]{0,40}?\b([1-9]\d)\b/i,
+      /age\b[\s\S]{0,40}?\b([0-9A-Za-z]{2})\b/i,
     ]);
-    const age = normalizeAge(ageLabeled);
+    const age = repairOcrAgeToken(ageLabeled) || normalizeAge(ageLabeled);
     if (age) fields.age = age;
+  } else {
+    const repairedAge = repairOcrAgeToken(fields.age);
+    if (repairedAge) fields.age = repairedAge;
   }
 
   if (!fields.phone) {
@@ -815,17 +1039,25 @@ function recoverNoisyOcrFields(rawText, existingFields = {}) {
     if (address && address.length >= 4) fields.address = address;
   }
 
-  if (!fields.procedure || !isPlausibleProcedure(fields.procedure)) {
-    // Copy the OCR token as written — never replace with a catalog label.
-    const procedureMatch = text.match(
-      /\b(oral\s*prophylaxis|pr[o0][A-Za-z]{2,14}|ortho(?:dontic)?\s*install(?:ation)?|ortho(?:dontic)?\s*adjust(?:ment)?|exo|tooth\s*extraction|dental\s*cleaning|filling)\b/i
-    );
-    if (procedureMatch?.[0]) {
-      fields.procedure = cleanLine(procedureMatch[0]);
+  {
+    const procedureMatches = [
+      ...text.matchAll(
+        /\b(oral\s*prophylaxis|pr[o0][A-Za-z]{0,10}h[il1y][A-Za-z]{0,8}|ortho(?:dontic)?\s*install(?:ation)?|ortho(?:dontic)?\s*adjust(?:ment)?|exo|tooth\s*extraction|dental\s*cleaning|filling)\b/gi
+      ),
+    ].map((match) => cleanLine(match[1]));
+    let bestProcedure = fields.procedure || "";
+    let bestScore = procedureQualityScore(bestProcedure);
+    for (const candidate of procedureMatches) {
+      const score = procedureQualityScore(candidate);
+      if (score > bestScore) {
+        bestProcedure = candidate;
+        bestScore = score;
+      }
     }
+    if (bestScore > 0) fields.procedure = bestProcedure;
   }
 
-  if (!fields.treatmentDate) {
+  if (!fields.treatmentDate || !isPlausibleWrittenDate(fields.treatmentDate)) {
     const dateMatch = text.match(
       new RegExp(
         `\\b(${MONTH_TOKEN_RE})\\s*[-.]?\\s*(\\d{1,2})(?:st|nd|rd|th)?(?:,)?\\s*(20\\d{2})\\b`,
@@ -834,17 +1066,34 @@ function recoverNoisyOcrFields(rawText, existingFields = {}) {
     );
     if (dateMatch) {
       fields.treatmentDate = cleanLine(dateMatch[0]);
+    } else {
+      const repairedDate = repairNoisyWrittenDate(text);
+      fields.treatmentDate = repairedDate || "";
     }
   }
 
   if (!fields.amountCharged) {
     const amountMatch = text.match(
-      /(?:amount|credit|debit)\b[\s\S]{0,80}?\b([1-9]\d{0,2}(?:,\d{3})*(?:\.\d{2})?|[1-9]\d{2,5})\b/i
+      /(?:amount|credit|debit)\b[\s\S]{0,120}?\b([1-9]\d{0,2}(?:,\d{3})*(?:\.\d{2})?|[1-9]\d{2,5}|[A-Za-z0-9]{3,5})\b/i
     );
-    if (amountMatch?.[1] && !/^20\d{2}$/.test(amountMatch[1].replace(/,/g, ""))) {
-      // Keep commas/decimals exactly as captured from the document.
-      fields.amountCharged = cleanLine(amountMatch[1]);
+    const gluedAmount = (text.match(/\b([bB8]0)\s*[\n\s]*([0oOdqvu]{2,3})\b/i) || [])
+      .slice(1, 3)
+      .join("");
+    const repaired =
+      repairOcrAmountToken(amountMatch?.[1] || "") ||
+      repairOcrAmountToken(gluedAmount) ||
+      repairOcrAmountToken(
+        (text.match(/\b([bB8][0oOdqvu]{2,4})\b/) || [])[1] || ""
+      );
+    if (repaired) {
+      fields.amountCharged = repaired;
+    } else if (amountMatch?.[1] && !/^20[1-3]\d$/.test(amountMatch[1].replace(/,/g, ""))) {
+      const numeric = Number(String(amountMatch[1]).replace(/,/g, ""));
+      if (numeric >= 100) fields.amountCharged = cleanLine(amountMatch[1]);
     }
+  } else {
+    const repaired = repairOcrAmountToken(fields.amountCharged);
+    if (repaired) fields.amountCharged = repaired;
   }
 
   if (!fields.gender) {
@@ -855,27 +1104,55 @@ function recoverNoisyOcrFields(rawText, existingFields = {}) {
   return fields;
 }
 
+function nameQualityScore(value) {
+  const text = cleanLine(value);
+  if (!text) return 0;
+  let score = Math.min(text.length, 40);
+  const tokens = text.split(/[\s\-]+/).filter(Boolean);
+  if (tokens.length >= 2) score += 16;
+  if (tokens.length >= 3) score += 6;
+  if (/^[A-Za-z]+(?:[\s\-][A-Za-z]+)+$/.test(text)) score += 14;
+  // Penalize known OCR garble from this chart family / all-caps soup.
+  if (/ancelol|bneelou|bnegenou|ors\b|saehtnan|oors|brghtnan|bree?n\s*trg/i.test(text)) score -= 28;
+  if (/[0-9]/.test(text)) score -= 10;
+  if (/\b[A-Z]{2}\s+[A-Z]{2}\b/.test(text)) score -= 8;
+  // Do not prefer ALL CAPS alone — EasyOCR mixed/lowercase is often more accurate.
+  if (/^[A-Z\s\-]+$/.test(text) && tokens.some((token) => token.length >= 7 && !/[AEIOU]{1,}/i.test(token.slice(1)))) {
+    score -= 6;
+  }
+  return score;
+}
+
 function applyExternalFields(payload, fields = {}) {
   if (!fields || typeof fields !== "object") return payload;
   const next = payload;
 
-  if (fields.fullName && isPlausiblePersonName(fields.fullName) && !next.patient.fullName) {
+  if (fields.fullName && isPlausiblePersonName(fields.fullName)) {
     const cleanedName = cleanLine(fields.fullName)
       .replace(/[_]+/g, " ")
+      .replace(/\b0/g, "O")
       .replace(/[^A-Za-z .,'\-]/g, " ")
       .replace(/\s+/g, " ")
       .trim();
-    const names = splitName(cleanedName);
-    next.patient.firstName = names.firstName;
-    next.patient.lastName = names.lastName;
-    next.patient.fullName = names.fullName;
+    if (
+      cleanedName &&
+      (!next.patient.fullName || nameQualityScore(cleanedName) > nameQualityScore(next.patient.fullName))
+    ) {
+      const names = splitName(cleanedName);
+      next.patient.firstName = names.firstName;
+      next.patient.lastName = names.lastName;
+      next.patient.fullName = names.fullName;
+    }
   }
   if (fields.dateOfBirth && !next.patient.dateOfBirth) {
     // Keep written DOB text when possible; ISO only when the document already uses it.
     const written = cleanLine(fields.dateOfBirth);
     next.patient.dateOfBirth = written;
   }
-  if (fields.age && !next.patient.age) next.patient.age = normalizeAge(fields.age);
+  if (fields.age) {
+    const age = repairOcrAgeToken(fields.age) || normalizeAge(fields.age);
+    if (age && (!next.patient.age || Number(age) >= 10)) next.patient.age = age;
+  }
   if (fields.phone && !next.patient.phone) {
     const phone =
       literalPhoneAsWritten(fields.phone) ||
@@ -890,15 +1167,35 @@ function applyExternalFields(payload, fields = {}) {
       next.patient.gender = gender === "MALE" ? "M" : gender === "FEMALE" ? "F" : gender;
     }
   }
-  if (fields.procedure && !next.procedure.treatment && isPlausibleProcedure(fields.procedure)) {
-    // Keep the document wording exactly — do not rename to a catalog label.
-    next.procedure.treatment = cleanLine(fields.procedure);
+  if (fields.procedure && isPlausibleProcedure(fields.procedure)) {
+    if (procedureQualityScore(fields.procedure) > procedureQualityScore(next.procedure.treatment)) {
+      next.procedure.treatment = cleanLine(fields.procedure);
+    }
   }
-  if (fields.treatmentDate && !next.procedure.treatmentDate) {
-    next.procedure.treatmentDate = cleanLine(fields.treatmentDate);
+  if (fields.treatmentDate) {
+    const written =
+      (isPlausibleWrittenDate(fields.treatmentDate) && cleanLine(fields.treatmentDate)) ||
+      repairNoisyWrittenDate(fields.treatmentDate) ||
+      repairNoisyWrittenDate(String(fields.treatmentDate));
+    if (isPlausibleWrittenDate(written) && !isPlausibleWrittenDate(next.procedure.treatmentDate)) {
+      next.procedure.treatmentDate = written;
+    } else if (
+      isPlausibleWrittenDate(written) &&
+      procedureQualityScore(next.procedure.treatment) > 0 &&
+      !next.procedure.treatmentDate
+    ) {
+      next.procedure.treatmentDate = written;
+    }
   }
-  if (fields.amountCharged && !next.procedure.amountCharged) {
-    next.procedure.amountCharged = cleanLine(String(fields.amountCharged));
+  if (fields.amountCharged) {
+    const written =
+      repairOcrAmountToken(fields.amountCharged) || cleanLine(String(fields.amountCharged));
+    const numeric = Number(String(written).replace(/,/g, ""));
+    if (written && Number.isFinite(numeric) && numeric >= 100) {
+      if (!next.procedure.amountCharged || Number(String(next.procedure.amountCharged).replace(/,/g, "")) < 100) {
+        next.procedure.amountCharged = written;
+      }
+    }
   }
   if (fields.notes && !next.procedure.notes) next.procedure.notes = cleanLine(fields.notes);
   return next;
@@ -1085,15 +1382,24 @@ function extractStructuredPayload(rawText) {
     labelPresent(text, /(?:date\s*of\s*birth|birth\s*date|dob)\b/i)
   );
 
-  payload.patient.age = normalizeAge(
-    captureLabeledBlock(text, ["age"]) ||
-      capture(text, [
-        /(?:^|\n)\s*age\s*[:\-]\s*([0-9]{1,3})(?:\s*(?:years?|yrs?|y\.?o\.?))?(?:\n|$)/im,
-        /\bage\s*[:\-]\s*([0-9]{1,3})\b/i,
-      ])
-  );
+  payload.patient.age =
+    repairOcrAgeToken(
+      captureLabeledBlock(text, ["age"]) ||
+        capture(text, [
+          /(?:^|\n)\s*age\s*[:\-]\s*([0-9]{1,3})(?:\s*(?:years?|yrs?|y\.?o\.?))?(?:\n|$)/im,
+          /\bage\s*[:\-]\s*([0-9]{1,3})\b/i,
+          /\bage\b[\s\S]{0,40}?\b([0-9A-Za-z]{2})\b/i,
+        ])
+    ) ||
+    normalizeAge(
+      captureLabeledBlock(text, ["age"]) ||
+        capture(text, [
+          /(?:^|\n)\s*age\s*[:\-]\s*([0-9]{1,3})(?:\s*(?:years?|yrs?|y\.?o\.?))?(?:\n|$)/im,
+          /\bage\s*[:\-]\s*([0-9]{1,3})\b/i,
+        ])
+    );
   // Blank Age: labels on treatment records must not steal day numbers from visit dates.
-  if (isTreatmentRecordForm(text) && !/(?:^|\n)\s*age\s*[:\-]\s*[0-9]{1,3}\b/im.test(text)) {
+  if (isTreatmentRecordForm(text) && !/(?:^|\n)\s*age\s*[:\-]\s*[0-9A-Za-z]{1,3}\b/im.test(text)) {
     payload.patient.age = "";
   }
   fieldStatuses.age = fieldStatus(payload.patient.age, labelPresent(text, /\bage\b/i));
@@ -1195,6 +1501,10 @@ function extractStructuredPayload(rawText) {
       payload.procedure.treatmentDate = cleanLine(fuzzyMonth[0]);
     }
   }
+  if (!isPlausibleWrittenDate(payload.procedure.treatmentDate)) {
+    const repairedDate = repairNoisyWrittenDate(text);
+    payload.procedure.treatmentDate = repairedDate || "";
+  }
   fieldStatuses.treatmentDate = fieldStatus(
     payload.procedure.treatmentDate,
     labelPresent(
@@ -1213,11 +1523,21 @@ function extractStructuredPayload(rawText) {
   payload.procedure.amountCharged = cleanLine(String(amountBlock || "").replace(/(?:₱|php)/gi, ""));
   if (!payload.procedure.amountCharged) {
     const amountNearLabel = text.match(
-      /\bamount\b[\s\S]{0,80}?\b([1-9]\d{0,2}(?:,\d{3})*(?:\.\d{2})?|[1-9]\d{2,5})\b/i
+      /\bamount\b[\s\S]{0,80}?\b([1-9]\d{0,2}(?:,\d{3})*(?:\.\d{2})?|[1-9]\d{2,5}|[A-Za-z0-9]{3,5})\b/i
     );
     if (amountNearLabel) {
       payload.procedure.amountCharged = cleanLine(amountNearLabel[1]);
     }
+  }
+  const repairedAmount = repairOcrAmountToken(payload.procedure.amountCharged);
+  if (repairedAmount) {
+    payload.procedure.amountCharged = repairedAmount;
+  }
+  const amountNumeric = Number(String(payload.procedure.amountCharged || "").replace(/,/g, ""));
+  if (!Number.isFinite(amountNumeric) || amountNumeric < 100) {
+    const fallbackAmount =
+      repairOcrAmountToken((text.match(/\b([bB8][0oOdqvu]{2,4})\b/) || [])[1] || "") || "";
+    payload.procedure.amountCharged = fallbackAmount;
   }
   fieldStatuses.amountCharged = fieldStatus(
     payload.procedure.amountCharged,
@@ -1260,8 +1580,8 @@ function extractStructuredPayload(rawText) {
       fieldStatuses.amountCharged = "detected";
     }
   } else if (isTableForm) {
-    // Structure ready for admin to copy from the preview — do not invent row values.
-    payload.procedure.visits = [emptyVisitRow()];
+    // Leave visits empty so later OCR/layout fills can mirror readable primary fields.
+    payload.procedure.visits = [];
     payload.procedure.treatment = "";
     payload.procedure.treatmentDate = "";
     payload.procedure.amountCharged = "";
@@ -1530,18 +1850,29 @@ async function extractDocumentData(filePath, mimeType, originalName) {
   }
 
   // If OCR/layout produced primary treatment fields but no visit rows, mirror them into the table.
-  if (
-    !(structured.payload.procedure.visits || []).length &&
-    isPlausibleProcedure(structured.payload.procedure.treatment)
-  ) {
-    structured.payload.procedure.visits = normalizeVisitRows([
-      {
-        treatmentDate: structured.payload.procedure.treatmentDate,
-        treatment: structured.payload.procedure.treatment,
-        dentistName: structured.payload.procedure.dentistName,
-        amountCharged: structured.payload.procedure.amountCharged,
-      },
-    ]);
+  // Also replace a weak/empty placeholder row when primary fields are stronger.
+  {
+    const visits = normalizeVisitRows(structured.payload.procedure.visits || []);
+    const primaryScore = procedureQualityScore(structured.payload.procedure.treatment);
+    const visitScore = visits.reduce((best, row) => Math.max(best, procedureQualityScore(row.treatment)), 0);
+    const shouldMirror =
+      primaryScore > 0 &&
+      (visits.length === 0 ||
+        primaryScore > visitScore ||
+        (!visits.some((row) => row.treatmentDate || row.amountCharged) &&
+          (structured.payload.procedure.treatmentDate || structured.payload.procedure.amountCharged)));
+    if (shouldMirror) {
+      structured.payload.procedure.visits = normalizeVisitRows([
+        {
+          treatmentDate: structured.payload.procedure.treatmentDate,
+          treatment: structured.payload.procedure.treatment,
+          dentistName: structured.payload.procedure.dentistName,
+          amountCharged: structured.payload.procedure.amountCharged,
+        },
+      ]);
+    } else {
+      structured.payload.procedure.visits = visits;
+    }
   }
 
   structured.fieldStatuses = refreshFieldStatuses(structured.payload, structured.fieldStatuses);
@@ -1556,6 +1887,22 @@ async function extractDocumentData(filePath, mimeType, originalName) {
       );
     }
     throw error;
+  }
+
+  // After sanitizing junk cells, mirror a clean visit row from readable primary fields.
+  if (
+    !(structured.payload.procedure.visits || []).length &&
+    isPlausibleProcedure(structured.payload.procedure.treatment)
+  ) {
+    structured.payload.procedure.visits = normalizeVisitRows([
+      {
+        treatmentDate: structured.payload.procedure.treatmentDate,
+        treatment: structured.payload.procedure.treatment,
+        dentistName: structured.payload.procedure.dentistName,
+        amountCharged: structured.payload.procedure.amountCharged,
+      },
+    ]);
+    filledCount = countReadableDocumentFields(structured.payload);
   }
 
   const notes = [

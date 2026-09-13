@@ -679,7 +679,10 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
             lastName: patient.lastName,
             email: patient.email,
             phone: patient.phone,
-            dateOfBirth: patient.dateOfBirth,
+            dateOfBirth:
+              normalizeDate(patient.dateOfBirth) ||
+              (isIsoDate(patient.dateOfBirth) ? patient.dateOfBirth : "") ||
+              null,
             gender: patient.gender,
             address: patient.address,
             notes: notesParts.join(". "),

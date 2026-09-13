@@ -87,6 +87,8 @@ export function AdminSyncPage() {
   const streamRef = useRef(null);
   const pdfInputRef = useRef(null);
   const imageInputRef = useRef(null);
+  const localPreviewRef = useRef("");
+  const serverPreviewRef = useRef("");
   const [jobs, setJobs] = useState([]);
   const [activeJob, setActiveJob] = useState(null);
   const [payload, setPayload] = useState(emptyPayload);
@@ -94,6 +96,7 @@ export function AdminSyncPage() {
   const [sourceType, setSourceType] = useState("soft_copy");
   const [localPreviewUrl, setLocalPreviewUrl] = useState("");
   const [serverPreviewUrl, setServerPreviewUrl] = useState("");
+  const [previewBroken, setPreviewBroken] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [step, setStep] = useState("choose");
   const [error, setError] = useState("");
@@ -103,11 +106,18 @@ export function AdminSyncPage() {
   const [matchInfo, setMatchInfo] = useState(null);
 
   const clearPreviews = useCallback(() => {
-    if (localPreviewUrl) URL.revokeObjectURL(localPreviewUrl);
-    if (serverPreviewUrl) URL.revokeObjectURL(serverPreviewUrl);
+    if (localPreviewRef.current) {
+      URL.revokeObjectURL(localPreviewRef.current);
+      localPreviewRef.current = "";
+    }
+    if (serverPreviewRef.current) {
+      URL.revokeObjectURL(serverPreviewRef.current);
+      serverPreviewRef.current = "";
+    }
     setLocalPreviewUrl("");
     setServerPreviewUrl("");
-  }, [localPreviewUrl, serverPreviewUrl]);
+    setPreviewBroken(false);
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -130,10 +140,10 @@ export function AdminSyncPage() {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop());
       }
-      if (localPreviewUrl) URL.revokeObjectURL(localPreviewUrl);
-      if (serverPreviewUrl) URL.revokeObjectURL(serverPreviewUrl);
+      if (localPreviewRef.current) URL.revokeObjectURL(localPreviewRef.current);
+      if (serverPreviewRef.current) URL.revokeObjectURL(serverPreviewRef.current);
     };
-  }, [localPreviewUrl, serverPreviewUrl]);
+  }, []);
 
   useEffect(() => {
     if (!cameraOpen || !streamRef.current || !videoRef.current) return;
@@ -148,12 +158,15 @@ export function AdminSyncPage() {
     try {
       const blob = await api.getAdminDocumentSyncFileBlob(jobId);
       const url = URL.createObjectURL(blob);
-      setServerPreviewUrl((current) => {
-        if (current) URL.revokeObjectURL(current);
-        return url;
-      });
+      if (serverPreviewRef.current) URL.revokeObjectURL(serverPreviewRef.current);
+      serverPreviewRef.current = url;
+      setServerPreviewUrl(url);
+      setPreviewBroken(false);
     } catch {
-      setServerPreviewUrl("");
+      // Keep any local upload preview even if the temporary server file is unavailable.
+      if (!localPreviewRef.current) {
+        setServerPreviewUrl("");
+      }
     }
   }
 
@@ -297,7 +310,11 @@ export function AdminSyncPage() {
     setError("");
     setEditing(true);
     setSourceType(nextSourceType);
-    setLocalPreviewUrl(URL.createObjectURL(file));
+    const localUrl = URL.createObjectURL(file);
+    if (localPreviewRef.current) URL.revokeObjectURL(localPreviewRef.current);
+    localPreviewRef.current = localUrl;
+    setLocalPreviewUrl(localUrl);
+    setPreviewBroken(false);
     setStep("processing");
     setBusy("scan");
     stopCamera();
@@ -529,7 +546,9 @@ export function AdminSyncPage() {
   if (!loaded && error) return <ErrorState message={error} onRetry={load} />;
   if (!loaded) return <LoadingState label="Loading document data extraction…" />;
 
-  const previewUrl = serverPreviewUrl || localPreviewUrl;
+  const previewUrl = !previewBroken
+    ? localPreviewUrl || serverPreviewUrl
+    : serverPreviewUrl || localPreviewUrl;
   const isPdfPreview =
     activeJob?.mimeType === "application/pdf" ||
     /\.pdf$/i.test(activeJob?.originalName || "");
@@ -678,13 +697,25 @@ export function AdminSyncPage() {
                 isPdfPreview ? (
                   <iframe title="Document preview" src={previewUrl} className="admin-doc-preview__frame" />
                 ) : (
-                  <img src={previewUrl} alt="Uploaded or scanned document" />
+                  <img
+                    src={previewUrl}
+                    alt="Uploaded or scanned document"
+                    onError={() => {
+                      if (!previewBroken && localPreviewUrl && serverPreviewUrl && previewUrl === localPreviewUrl) {
+                        setPreviewBroken(true);
+                        return;
+                      }
+                      setPreviewBroken(true);
+                      if (previewUrl === localPreviewUrl) setLocalPreviewUrl("");
+                      if (previewUrl === serverPreviewUrl) setServerPreviewUrl("");
+                    }}
+                  />
                 )
               ) : (
                 <p className="muted-copy">
                   {activeJob.status === "synced"
                     ? "Source document discarded after import. Only confirmed structured data was saved."
-                    : "Temporary preview unavailable for this job."}
+                    : "Temporary preview unavailable. Keep the upload selected or re-upload the photo."}
                 </p>
               )}
             </div>

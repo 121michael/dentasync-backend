@@ -205,6 +205,168 @@ async function recognizeWithTesseract(filePath, pageSegMode = "6") {
   }
 }
 
+async function extractDentalChartPanelTexts(filePath) {
+  const sharp = require("sharp");
+  const original = fs.readFileSync(filePath);
+  const image = sharp(original, { failOn: "none" }).rotate();
+  const meta = await image.metadata();
+  const width = meta.width || 1200;
+  const height = meta.height || 1600;
+  const panels = [];
+
+  const specs = [
+    {
+      key: "patient",
+      left: Math.floor(width * 0.4),
+      top: Math.floor(height * 0.04),
+      width: Math.floor(width * 0.58),
+      height: Math.floor(height * 0.4),
+    },
+    {
+      key: "treatment",
+      left: Math.floor(width * 0.02),
+      top: Math.floor(height * 0.48),
+      width: Math.floor(width * 0.96),
+      height: Math.floor(height * 0.2),
+    },
+    {
+      key: "amount",
+      left: Math.floor(width * 0.7),
+      top: Math.floor(height * 0.5),
+      width: Math.floor(width * 0.28),
+      height: Math.floor(height * 0.12),
+    },
+  ];
+
+  for (const spec of specs) {
+    if (spec.width < 40 || spec.height < 40) continue;
+    const buffer = await sharp(original, { failOn: "none" })
+      .rotate()
+      .extract({
+        left: Math.max(0, spec.left),
+        top: Math.max(0, spec.top),
+        width: Math.min(spec.width, width - Math.max(0, spec.left)),
+        height: Math.min(spec.height, height - Math.max(0, spec.top)),
+      })
+      .grayscale()
+      .normalize()
+      .linear(1.45, -30)
+      .sharpen()
+      .resize({ width: 1600, withoutEnlargement: false })
+      .png()
+      .toBuffer();
+    const tempPath = writeTempVariant(buffer, `panel-${spec.key}`);
+    try {
+      const tess = await recognizeWithTesseract(tempPath, spec.key === "amount" ? "7" : "6");
+      panels.push({ key: spec.key, text: tess.text || "", confidence: tess.confidence || 0 });
+    } finally {
+      fs.unlink(tempPath, () => {});
+    }
+  }
+
+  return panels;
+}
+
+function panelNameQuality(value) {
+  const text = String(value || "").trim();
+  if (!text) return 0;
+  let score = Math.min(text.length, 36);
+  const tokens = text.split(/[\s\-]+/).filter(Boolean);
+  if (tokens.length >= 2) score += 12;
+  if (/bneelou|bnegenou|saehtnan|brghtnan|\bors\b/i.test(text)) score -= 25;
+  if (/[0-9]/.test(text)) score -= 8;
+  if (/^[A-Za-z]+(?:[\s\-][A-Za-z]+)+$/.test(text)) score += 10;
+  return score;
+}
+
+function panelProcedureQuality(value) {
+  const text = String(value || "").trim();
+  if (!text) return 0;
+  if (/prophylax|pr[o0].{0,8}h[il1y].{0,6}x/i.test(text)) return 40 + text.length;
+  if (/oral/i.test(text)) return 30 + text.length;
+  if (/ortho|install|adjust|exo|cleaning|filling/i.test(text)) return 20 + text.length;
+  if (/^pr[o0][a-z]{2,}$/i.test(text)) return 5 + text.length;
+  return 0;
+}
+
+function mergeChartPanelFields(fields = {}, panels = []) {
+  const next = { ...(fields || {}) };
+  const patientPanel = panels.find((panel) => panel.key === "patient");
+  const treatmentPanel = panels.find((panel) => panel.key === "treatment");
+  const amountPanel = panels.find((panel) => panel.key === "amount");
+  const patientText = patientPanel?.text || "";
+  const treatmentText = treatmentPanel?.text || "";
+  const amountText = amountPanel?.text || "";
+  const combinedTreat = `${treatmentText}\n${amountText}\n${patientText}`;
+
+  const nameMatch = patientText.match(
+    /\bname\b\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9 .,\-]{2,70})/i
+  );
+  if (nameMatch?.[1]) {
+    let candidate = nameMatch[1]
+      .replace(/\s+/g, " ")
+      .replace(/\b0/g, "O")
+      .replace(/\s*-\s*/g, "-")
+      .trim();
+    candidate = candidate.replace(/[^A-Za-z .,'\-]/g, " ").replace(/\s+/g, " ").trim();
+    if (candidate.length >= 5 && panelNameQuality(candidate) > panelNameQuality(next.fullName)) {
+      next.fullName = candidate;
+    }
+  }
+
+  const ageMatch =
+    patientText.match(/\bage\b\s*[:\-]?\s*([1-9]\d)\b/i) ||
+    patientText.match(/\bage\b\s*[:\-]?\s*([0-9A-Za-z]{2})\b/i);
+  if (ageMatch?.[1] && !next.age) next.age = ageMatch[1];
+
+  const phoneMatch = patientText.match(
+    /\b(?:telephone|cellphone|phone|tel\.?)\b\s*[:\-]?\s*([0-9OIl][0-9OIl\-\s]{8,16})/i
+  );
+  if (phoneMatch?.[1] && !next.phone) {
+    next.phone = phoneMatch[1];
+  }
+
+  const addressMatch = patientText.match(/\baddress\b\s*[:\-]?\s*([A-Za-z][A-Za-z0-9 ,.\-]{3,60})/i);
+  if (addressMatch?.[1] && (!next.address || addressMatch[1].trim().length > String(next.address).length + 2)) {
+    next.address = addressMatch[1].trim();
+  }
+
+  const procedureMatches = [
+    ...combinedTreat.matchAll(
+      /\b(oral\s*prophylaxis|pr[o0][A-Za-z]{2,14}|ortho(?:dontic)?\s*install(?:ation)?|ortho(?:dontic)?\s*adjust(?:ment)?)\b/gi
+    ),
+  ].map((match) => match[1]);
+  for (const candidate of procedureMatches) {
+    if (panelProcedureQuality(candidate) > panelProcedureQuality(next.procedure)) {
+      next.procedure = candidate;
+    }
+  }
+
+  const dateMatch = combinedTreat.match(
+    /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s*[-.]?\s*\d{1,2}(?:st|nd|rd|th)?(?:,)?\s*20\d{2}\b/i
+  );
+  if (dateMatch?.[0]) next.treatmentDate = dateMatch[0];
+  else if (!next.treatmentDate) {
+    const noisyDate = combinedTreat.match(/(?:[\(\[]|\b)((?:tpt|jtp[1l7]?|itet|5ept|sept)[^\n]{0,24})/i);
+    if (noisyDate?.[1]) next.treatmentDate = noisyDate[1];
+  }
+
+  const amountCandidates = [
+    ...((`${amountText}\n${treatmentText}`.match(/\b([bB8][0oOdqvuw]{2,4})\b/g) || [])),
+    ...(amountText.match(/\b([1-9]\d{0,2}(?:,\d{3})+|[1-9]\d{3,5})\b/g) || []),
+    ...(treatmentText.match(/\b([1-9]\d{0,2}(?:,\d{3})+|[1-9]\d{3,5})\b/g) || []),
+  ];
+  if (!next.amountCharged) {
+    for (const candidate of amountCandidates) {
+      if (/^20[1-3]\d$/.test(String(candidate).replace(/,/g, ""))) continue;
+      next.amountCharged = candidate;
+      break;
+    }
+  }
+
+  return next;
+}
+
 function mergeUniqueTexts(parts) {
   const seen = new Set();
   const kept = [];
@@ -247,14 +409,24 @@ async function extractBestImageText(filePath) {
     easyFilled >= 2;
 
   if (easyStrong) {
+    let fields = easyDirect.fields && typeof easyDirect.fields === "object" ? easyDirect.fields : {};
+    let text = easyDirect.text;
+    try {
+      const panels = await extractDentalChartPanelTexts(filePath);
+      fields = mergeChartPanelFields(fields, panels);
+      const panelText = panels.map((panel) => panel.text).filter(Boolean).join("\n");
+      if (panelText) text = mergeUniqueTexts([text, panelText]);
+    } catch {
+      /* panel OCR is best-effort */
+    }
     if (easyPrepPath) fs.unlink(easyPrepPath, () => {});
     return {
-      text: easyDirect.text,
+      text,
       score: Number(easyDirect.score || 0),
       degrees: Number(easyDirect.degrees || 0),
       method: "easyocr",
       confidence: Number(easyDirect.confidence || 0),
-      fields: easyDirect.fields && typeof easyDirect.fields === "object" ? easyDirect.fields : {},
+      fields,
       uprightPath: null,
     };
   }
@@ -316,6 +488,14 @@ async function extractBestImageText(filePath) {
     // Always return the richest merged text, even if field quality stayed weak.
     best.text = mergeUniqueTexts([best.text, ...textParts]);
     best.score = Math.max(best.score, scoreDocumentText(best.text));
+    try {
+      const panels = await extractDentalChartPanelTexts(filePath);
+      best.fields = mergeChartPanelFields(best.fields || {}, panels);
+      const panelText = panels.map((panel) => panel.text).filter(Boolean).join("\n");
+      if (panelText) best.text = mergeUniqueTexts([best.text, panelText]);
+    } catch {
+      /* panel OCR is best-effort */
+    }
   } finally {
     for (const tempPath of tempPaths) {
       if (tempPath !== keepPath) {

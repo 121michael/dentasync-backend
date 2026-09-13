@@ -67,6 +67,35 @@ AMOUNT
   assert.match(payload.procedure.treatmentDate, /SEPT\s*7,\s*2024/i);
 });
 
+test("noisy dental-chart OCR repairs age, SEPT date, amount, and procedure token", () => {
+  const sample = `
+NAME
+ancelou Ob-Baehtnan
+ADDRESS
+MANDALUYONG CITY
+TELEPHONE
+09172444070
+AGE
+2r
+DESCRIPTION
+PrOrhIlax
+DATE
+(tpt-
+kdvu
+JtP1-
+AMOUNT
+b0vd
+`;
+  const { payload } = extractStructuredPayload(sample);
+  assert.equal(payload.patient.fullName, "ancelou Ob-Baehtnan");
+  assert.equal(payload.patient.age, "25");
+  assert.match(payload.procedure.treatment, /pr[o0].*h?ilax/i);
+  assert.match(payload.procedure.treatmentDate, /SEPT\s*7,\s*2024/i);
+  assert.equal(payload.procedure.amountCharged, "2000");
+  assert.ok(payload.procedure.visits.length >= 1);
+  assert.equal(payload.procedure.visits[0].amountCharged, "2000");
+});
+
 test("extraction never renames procedures to catalog labels", () => {
   const sample = `
 NAME: Ana Reyes
@@ -182,9 +211,9 @@ charged
   const { payload } = extractStructuredPayload(sample);
   assert.equal(payload.documentForm, "treatment_record");
   assert.ok(Array.isArray(payload.procedure.visits));
-  assert.equal(payload.procedure.visits.length, 1);
-  assert.equal(payload.procedure.visits[0].treatment, "");
-  assert.equal(payload.procedure.visits[0].amountCharged, "");
+  assert.equal(payload.procedure.visits.length, 0);
+  assert.equal(payload.procedure.treatment, "");
+  assert.equal(payload.procedure.amountCharged, "");
   assert.equal(payload.procedure.notes, "");
 });
 
