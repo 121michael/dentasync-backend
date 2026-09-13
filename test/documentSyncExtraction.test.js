@@ -9,6 +9,9 @@ const {
   normalizeAge,
   assessDocumentLikeness,
   parseTreatmentRecordRows,
+  countReadableDocumentFields,
+  ensureReadableExtraction,
+  DocumentValidationError,
 } = require("../services/documentSyncExtraction");
 
 test("document extraction pulls patient, age, procedure, and amount fields", () => {
@@ -165,6 +168,38 @@ charged
   assert.equal(payload.procedure.visits[0].treatment, "");
   assert.equal(payload.procedure.visits[0].amountCharged, "");
   assert.equal(payload.procedure.notes, "");
+});
+
+test("ensureReadableExtraction errors when no document fields can be read", () => {
+  const { payload } = extractStructuredPayload(`
+TREATMENT RECORD
+Name
+Age
+Gender M/F
+Date Tooth No Procedure Dentist Amount charged
+`);
+  assert.equal(countReadableDocumentFields(payload), 0);
+  assert.throws(
+    () => ensureReadableExtraction(payload),
+    (error) =>
+      error instanceof DocumentValidationError &&
+      /Unable to read the uploaded or scanned document/i.test(error.message)
+  );
+});
+
+test("ensureReadableExtraction accepts payloads with exact visit values", () => {
+  const { payload } = extractStructuredPayload(`
+TREATMENT RECORD
+Name: Ana Reyes
+Age: 28
+Gender: F
+Date | Tooth No./s | Procedure | Dentist/s | Amount charged | Amount Paid | Balance | Next Appt.
+NOV 16 2023 ORTHO INSTALLATION 5000
+`);
+  assert.ok(countReadableDocumentFields(payload) > 0);
+  assert.equal(ensureReadableExtraction(payload), countReadableDocumentFields(payload));
+  assert.equal(payload.patient.fullName, "Ana Reyes");
+  assert.equal(payload.procedure.visits[0].treatment, "ORTHO INSTALLATION");
 });
 
 test("treatment record visits stay editable table data without catalog rename", () => {

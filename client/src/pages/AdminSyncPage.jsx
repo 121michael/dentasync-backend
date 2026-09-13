@@ -304,16 +304,19 @@ export function AdminSyncPage() {
 
     try {
       const response = await api.uploadAdminDocumentSync(file, nextSourceType);
-      setActiveJob(response.job);
       const nextPayload = normalizePayload(
         response.job.editedPayload || response.job.extractedPayload || emptyPayload
       );
-      setPayload(nextPayload);
-      setEditing(true);
       const filled = [
         nextPayload?.patient?.fullName,
         nextPayload?.patient?.age,
         nextPayload?.patient?.gender,
+        nextPayload?.patient?.phone,
+        nextPayload?.patient?.dateOfBirth,
+        nextPayload?.patient?.address,
+        nextPayload?.procedure?.treatment,
+        nextPayload?.procedure?.treatmentDate,
+        nextPayload?.procedure?.amountCharged,
         ...((nextPayload?.procedure?.visits || []).flatMap((row) => [
           row?.treatmentDate,
           row?.treatment,
@@ -325,11 +328,25 @@ export function AdminSyncPage() {
           row?.nextAppt,
         ]) || []),
       ].filter((value) => String(value || "").trim()).length;
+
+      if (filled <= 0) {
+        const unreadMessage =
+          response.message ||
+          "Unable to read the uploaded or scanned document. No patient or treatment fields could be detected. Please upload a clearer scan or photo and try again.";
+        setStep("choose");
+        setError(unreadMessage);
+        pushToast(unreadMessage, "error");
+        clearPreviews();
+        await load();
+        return;
+      }
+
+      setActiveJob(response.job);
+      setPayload(nextPayload);
+      setEditing(true);
       const autoMessage =
-        filled > 0
-          ? `Document table copied — ${filled} readable value${filled === 1 ? "" : "s"} filled. Correct OCR mistakes, then Confirm & Save.`
-          : response.message ||
-            "Document detected. Copy values from the preview into the table, then Confirm & Save.";
+        response.message ||
+        `Document read successfully — populated ${filled} field${filled === 1 ? "" : "s"} with exact values from the scan. Review them, then Confirm & Save.`;
       setMessage(autoMessage);
       setStep("review");
       pushToast(autoMessage);

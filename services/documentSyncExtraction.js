@@ -12,6 +12,9 @@ const INVALID_DOCUMENT_MESSAGE =
 const UNSUPPORTED_DOCUMENT_MESSAGE =
   "Invalid document. The uploaded file does not appear to contain a readable document. Please upload a PDF, PNG, or JPEG document.";
 
+const UNREADABLE_DOCUMENT_MESSAGE =
+  "Unable to read the uploaded or scanned document. No patient or treatment fields could be detected. Please upload a clearer scan or photo and try again.";
+
 const DOCUMENT_KEYWORD_RE =
   /\b(patient|full\s*name|name|date\s*of\s*birth|dob|birth\s*date|cellphone|mobile|phone|telephone|procedure|treatment|description|dental|clinic|amount|charged|age|address|occupation|status|complaint|tooth|diagnosis|record|form|appointment|service|orthodontic|cleaning|extraction|filling|prophylaxis|debit|credit|balance)\b/i;
 
@@ -107,6 +110,62 @@ function normalizeVisitRows(rows = []) {
         row.balance ||
         row.nextAppt
     );
+}
+
+/** Count values that should appear in the Admin Sync review fields/table. */
+function countReadableDocumentFields(payload) {
+  if (!payload || typeof payload !== "object") return 0;
+  const patient = payload.patient || {};
+  const procedure = payload.procedure || {};
+  const visitValues = (Array.isArray(procedure.visits) ? procedure.visits : []).flatMap((row) => [
+    row?.treatmentDate,
+    row?.toothNos,
+    row?.treatment,
+    row?.dentistName,
+    row?.amountCharged,
+    row?.amountPaid,
+    row?.balance,
+    row?.nextAppt,
+  ]);
+  return [
+    patient.fullName,
+    patient.age,
+    patient.gender,
+    patient.phone,
+    patient.dateOfBirth,
+    patient.address,
+    procedure.treatment,
+    procedure.treatmentDate,
+    procedure.amountCharged,
+    procedure.dentistName,
+    ...visitValues,
+  ].filter((value) => String(value || "").trim()).length;
+}
+
+function ensureReadableExtraction(payload) {
+  const filledCount = countReadableDocumentFields(payload);
+  if (filledCount === 0) {
+    throw new DocumentValidationError(UNREADABLE_DOCUMENT_MESSAGE);
+  }
+  return filledCount;
+}
+
+function applyVisionVisits(payload, visits = []) {
+  const rows = normalizeVisitRows(visits);
+  if (!rows.length) return payload;
+
+  const existing = normalizeVisitRows(payload.procedure?.visits || []);
+  if (rows.length >= existing.length) {
+    payload.procedure.visits = rows;
+    const primary = pickPrimaryTreatmentRow(rows);
+    if (primary?.treatment) payload.procedure.treatment = primary.treatment;
+    if (primary?.treatmentDate) payload.procedure.treatmentDate = primary.treatmentDate;
+    if (primary?.amountCharged) payload.procedure.amountCharged = primary.amountCharged;
+    if (primary?.dentistName) payload.procedure.dentistName = primary.dentistName;
+  } else if (!existing.length) {
+    payload.procedure.visits = rows;
+  }
+  return payload;
 }
 
 function extractRawProcedureText(windowText, options = {}) {
@@ -626,13 +685,17 @@ function applyExternalFields(payload, fields = {}) {
   }
   if (fields.address && !next.patient.address) next.patient.address = cleanLine(fields.address);
   if (fields.procedure && !next.procedure.treatment) {
+    // Keep the document wording exactly — do not rename to a catalog label.
     next.procedure.treatment = cleanLine(fields.procedure);
   }
   if (fields.treatmentDate && !next.procedure.treatmentDate) {
-    next.procedure.treatmentDate = normalizeDate(fields.treatmentDate);
+    // Prefer the written date text; fall back to normalized ISO when parseable.
+    const written = cleanLine(fields.treatmentDate);
+    next.procedure.treatmentDate = normalizeDate(written) || written;
   }
   if (fields.amountCharged && !next.procedure.amountCharged) {
-    next.procedure.amountCharged = normalizeAmount(fields.amountCharged);
+    const written = cleanLine(String(fields.amountCharged));
+    next.procedure.amountCharged = normalizeAmount(written) || written;
   }
   if (fields.notes && !next.procedure.notes) next.procedure.notes = cleanLine(fields.notes);
   return next;
@@ -1015,28 +1078,15 @@ function extractStructuredPayload(rawText) {
   }
 
   // Do not invent procedure/amount/notes from OCR soup heuristics.
-  // Admin copies unreadable cells from the document preview.
+  // Unreadable documents are rejected by ensureReadableExtraction after OCR merge.
 
-  const filledCount = [
-    payload.patient.fullName,
-    payload.patient.age,
-    payload.patient.gender,
-    ...(payload.procedure.visits || []).flatMap((row) => [
-      row.treatmentDate,
-      row.treatment,
-      row.amountCharged,
-      row.toothNos,
-      row.dentistName,
-    ]),
-  ].filter(Boolean).length;
+  const filledCount = countReadableDocumentFields(payload);
 
   if (filledCount === 0) {
-    notes.push(
-      "Document detected. Copy the table from the preview into the cells below, then Confirm & Save."
-    );
+    notes.push(UNREADABLE_DOCUMENT_MESSAGE);
   } else {
     notes.push(
-      `Copied ${filledCount} readable value${filledCount === 1 ? "" : "s"} from the document. Correct any OCR mistakes, then Confirm & Save.`
+      `Copied ${filledCount} readable value${filledCount === 1 ? "" : "s"} from the document into the form. Review them, then Confirm & Save.`
     );
   }
 
@@ -1254,7 +1304,7 @@ async function extractDocumentData(filePath, mimeType, originalName) {
   }
 
   const structured = extractStructuredPayload(extracted.text);
-  // Layout-aware OCR fields and vision fields overwrite weaker regex guesses.
+  // Layout-aware OCR fields and vision fields fill empty slots with exact document values.
   structured.payload = applyExternalFields(structured.payload, extracted.fields || {});
   if (vision && vision.isDocument !== false) {
     structured.payload = applyExternalFields(structured.payload, {
@@ -1269,39 +1319,33 @@ async function extractDocumentData(filePath, mimeType, originalName) {
       notes: vision.notes,
     });
     if (Array.isArray(vision.visits) && vision.visits.length) {
-      const visitLines = vision.visits
-        .slice(0, 10)
-        .map((visit) => {
-          const bits = [visit.date, visit.procedure, visit.toothNos, visit.amount]
-            .map((value) => cleanLine(value))
-            .filter(Boolean);
-          return bits.join(" · ");
-        })
-        .filter(Boolean);
-      if (visitLines.length) {
-        const history = `Treatment record visits: ${visitLines.join("; ")}`;
-        structured.payload.procedure.notes = structured.payload.procedure.notes
-          ? `${structured.payload.procedure.notes} | ${history}`
-          : history;
-      }
+      structured.payload = applyVisionVisits(structured.payload, vision.visits);
     }
   }
+
+  // If OCR/layout produced primary treatment fields but no visit rows, mirror them into the table.
+  if (
+    !(structured.payload.procedure.visits || []).length &&
+    (structured.payload.procedure.treatment ||
+      structured.payload.procedure.treatmentDate ||
+      structured.payload.procedure.amountCharged)
+  ) {
+    structured.payload.procedure.visits = normalizeVisitRows([
+      {
+        treatmentDate: structured.payload.procedure.treatmentDate,
+        treatment: structured.payload.procedure.treatment,
+        dentistName: structured.payload.procedure.dentistName,
+        amountCharged: structured.payload.procedure.amountCharged,
+      },
+    ]);
+  }
+
   structured.fieldStatuses = refreshFieldStatuses(structured.payload, structured.fieldStatuses);
 
-  const filledCount = [
-    structured.payload.patient.fullName,
-    structured.payload.patient.phone,
-    structured.payload.patient.age,
-    structured.payload.patient.dateOfBirth,
-    structured.payload.procedure.treatment,
-    structured.payload.procedure.treatmentDate,
-    structured.payload.procedure.amountCharged,
-  ].filter(Boolean).length;
+  const filledCount = ensureReadableExtraction(structured.payload);
 
   const notes = [
-    filledCount
-      ? `Auto-filled ${filledCount} field${filledCount === 1 ? "" : "s"} from the document. Review them, then Confirm & Save.`
-      : structured.notes,
+    `Document read successfully — populated ${filledCount} field${filledCount === 1 ? "" : "s"} with exact values from the scan. Review them, then Confirm & Save.`,
     extracted.warning,
   ]
     .filter(Boolean)
@@ -1322,11 +1366,14 @@ async function extractDocumentData(filePath, mimeType, originalName) {
 module.exports = {
   INVALID_DOCUMENT_MESSAGE,
   UNSUPPORTED_DOCUMENT_MESSAGE,
+  UNREADABLE_DOCUMENT_MESSAGE,
   DocumentValidationError,
   emptyPayload,
   extractDocumentData,
   extractStructuredPayload,
   assessDocumentLikeness,
+  countReadableDocumentFields,
+  ensureReadableExtraction,
   normalizePhone,
   normalizeDate,
   normalizeAmount,

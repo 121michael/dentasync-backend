@@ -431,11 +431,13 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
         });
 
         const filled = Number(extraction.autoFilledCount || 0);
+        if (filled <= 0) {
+          throw new DocumentValidationError(
+            "Unable to read the uploaded or scanned document. No patient or treatment fields could be detected. Please upload a clearer scan or photo and try again."
+          );
+        }
         return res.status(201).json({
-          message:
-            filled > 0
-              ? `Document detected — auto-filled ${filled} field${filled === 1 ? "" : "s"}. Review them, then Confirm & Save.`
-              : "Document detected. Enter readable fields from the preview, then Confirm & Save.",
+          message: `Document read successfully — populated ${filled} field${filled === 1 ? "" : "s"} with exact values from the scan. Review them, then Confirm & Save.`,
           job: mapJob(updated.rows[0]),
           fieldStatuses: extraction.fieldStatuses || {},
           autoFilledCount: filled,
