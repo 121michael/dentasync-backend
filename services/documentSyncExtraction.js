@@ -63,7 +63,7 @@ function emptyPayload() {
       dentistName: "",
       treatmentDate: "",
       amountCharged: "",
-      clinicLocation: "Amethyst Dental Clinic",
+      clinicLocation: "",
       status: "completed",
       notes: "",
       coverageStatus: "",
@@ -743,6 +743,16 @@ function repairOcrPhoneDigits(value) {
   return normalizePhone(repaired);
 }
 
+function literalPhoneAsWritten(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (!digits) return "";
+  // Keep the document's written mobile form when possible (09XXXXXXXXX).
+  if (/^0\d{10}$/.test(digits)) return digits;
+  if (/^9\d{9}$/.test(digits)) return `0${digits}`;
+  if (/^63\d{10}$/.test(digits)) return `0${digits.slice(2)}`;
+  return normalizePhone(value);
+}
+
 function recoverNoisyOcrFields(rawText, existingFields = {}) {
   const text = String(rawText || "");
   const fields = { ...existingFields };
@@ -787,7 +797,10 @@ function recoverNoisyOcrFields(rawText, existingFields = {}) {
     const phoneLabeled = capture(text, [
       /(?:telephone|cellphone|cell\s*phone|phone|mobile|tel\.?)\s*[:\-]?\s*([A-Za-z0-9()[\]\-\s]{8,24})/i,
     ]);
-    const phone = repairOcrPhoneDigits(phoneLabeled) || extractPhoneFromText(text);
+    const phone =
+      literalPhoneAsWritten(phoneLabeled) ||
+      literalPhoneAsWritten(repairOcrPhoneDigits(phoneLabeled)) ||
+      literalPhoneAsWritten(extractPhoneFromText(text));
     if (phone) fields.phone = phone;
   }
 
@@ -803,14 +816,12 @@ function recoverNoisyOcrFields(rawText, existingFields = {}) {
   }
 
   if (!fields.procedure || !isPlausibleProcedure(fields.procedure)) {
-    if (/pr[o0].{0,10}h[iy]?l?a?x|prophylax|prophy/i.test(text)) {
-      fields.procedure = "ORAL PROPHYLAXIS";
-    } else if (/ortho.{0,10}install|installation/i.test(text)) {
-      fields.procedure = "ORTHO INSTALLATION";
-    } else if (/ortho.{0,10}adjust|adjustment/i.test(text)) {
-      fields.procedure = "ORTHO ADJUSTMENT";
-    } else if (/\bexo\b|extraction/i.test(text)) {
-      fields.procedure = "EXO";
+    // Copy the OCR token as written — never replace with a catalog label.
+    const procedureMatch = text.match(
+      /\b(oral\s*prophylaxis|pr[o0][A-Za-z]{2,14}|ortho(?:dontic)?\s*install(?:ation)?|ortho(?:dontic)?\s*adjust(?:ment)?|exo|tooth\s*extraction|dental\s*cleaning|filling)\b/i
+    );
+    if (procedureMatch?.[0]) {
+      fields.procedure = cleanLine(procedureMatch[0]);
     }
   }
 
@@ -828,11 +839,11 @@ function recoverNoisyOcrFields(rawText, existingFields = {}) {
 
   if (!fields.amountCharged) {
     const amountMatch = text.match(
-      /(?:amount|credit|debit)\b[\s\S]{0,80}?\b([1-9]\d{2,5})(?:\.00)?\b/i
+      /(?:amount|credit|debit)\b[\s\S]{0,80}?\b([1-9]\d{0,2}(?:,\d{3})*(?:\.\d{2})?|[1-9]\d{2,5})\b/i
     );
-    if (amountMatch) {
-      const amount = normalizeAmount(amountMatch[1]);
-      if (amount && !/^20\d{2}$/.test(amount)) fields.amountCharged = amount;
+    if (amountMatch?.[1] && !/^20\d{2}$/.test(amountMatch[1].replace(/,/g, ""))) {
+      // Keep commas/decimals exactly as captured from the document.
+      fields.amountCharged = cleanLine(amountMatch[1]);
     }
   }
 
@@ -860,30 +871,34 @@ function applyExternalFields(payload, fields = {}) {
     next.patient.fullName = names.fullName;
   }
   if (fields.dateOfBirth && !next.patient.dateOfBirth) {
-    next.patient.dateOfBirth = normalizeDate(fields.dateOfBirth);
+    // Keep written DOB text when possible; ISO only when the document already uses it.
+    const written = cleanLine(fields.dateOfBirth);
+    next.patient.dateOfBirth = written;
   }
   if (fields.age && !next.patient.age) next.patient.age = normalizeAge(fields.age);
   if (fields.phone && !next.patient.phone) {
-    const phone = normalizePhone(fields.phone) || repairOcrPhoneDigits(fields.phone);
+    const phone =
+      literalPhoneAsWritten(fields.phone) ||
+      literalPhoneAsWritten(repairOcrPhoneDigits(fields.phone));
     if (phone) next.patient.phone = phone;
   }
   if (fields.address && !next.patient.address) next.patient.address = cleanLine(fields.address);
   if (fields.gender && !next.patient.gender) {
     const gender = cleanLine(fields.gender).toUpperCase();
-    if (gender === "M" || gender === "F") next.patient.gender = gender;
+    if (gender === "M" || gender === "F" || gender === "MALE" || gender === "FEMALE") {
+      // Keep single-letter selections exactly as marked on many clinic forms.
+      next.patient.gender = gender === "MALE" ? "M" : gender === "FEMALE" ? "F" : gender;
+    }
   }
   if (fields.procedure && !next.procedure.treatment && isPlausibleProcedure(fields.procedure)) {
     // Keep the document wording exactly — do not rename to a catalog label.
     next.procedure.treatment = cleanLine(fields.procedure);
   }
   if (fields.treatmentDate && !next.procedure.treatmentDate) {
-    // Prefer the written date text; fall back to normalized ISO when parseable.
-    const written = cleanLine(fields.treatmentDate);
-    next.procedure.treatmentDate = normalizeDate(written) || written;
+    next.procedure.treatmentDate = cleanLine(fields.treatmentDate);
   }
   if (fields.amountCharged && !next.procedure.amountCharged) {
-    const written = cleanLine(String(fields.amountCharged));
-    next.procedure.amountCharged = normalizeAmount(written) || written;
+    next.procedure.amountCharged = cleanLine(String(fields.amountCharged));
   }
   if (fields.notes && !next.procedure.notes) next.procedure.notes = cleanLine(fields.notes);
   return next;
@@ -1055,17 +1070,16 @@ function extractStructuredPayload(rawText) {
     capture(text, [
       /(?:phone|mobile|contact|cellphone|cell\s*phone|telephone|tel\.?)\s*[:\-]?\s*([+\d()[\]\-\sA-Za-z]{7,24})/i,
     ]);
-  payload.patient.phone = normalizePhone(phoneBlock) || extractPhoneFromText(text);
+  payload.patient.phone = literalPhoneAsWritten(phoneBlock) || literalPhoneAsWritten(extractPhoneFromText(text));
   fieldStatuses.phone = fieldStatus(
     payload.patient.phone,
     labelPresent(text, /(?:phone|mobile|contact|cellphone|cell\s*phone|telephone|tel\.?)\b/i)
   );
 
-  payload.patient.dateOfBirth = normalizeDate(
-    capture(text, [
-      /(?:date\s*of\s*birth|birth\s*date|dob)\s*[:\-]\s*([0-9A-Za-z\/\-.,\s]{4,28})/i,
-    ])
-  );
+  const dobBlock = capture(text, [
+    /(?:date\s*of\s*birth|birth\s*date|dob)\s*[:\-]\s*([0-9]{1,2}[\/\-.][0-9]{1,2}[\/\-.][0-9]{2,4}|[0-9]{4}-[0-9]{2}-[0-9]{2}|[A-Za-z]{3,9}\s+\d{1,2},?\s*\d{4})/i,
+  ]);
+  payload.patient.dateOfBirth = cleanLine(dobBlock);
   fieldStatuses.dateOfBirth = fieldStatus(
     payload.patient.dateOfBirth,
     labelPresent(text, /(?:date\s*of\s*birth|birth\s*date|dob)\b/i)
@@ -1093,11 +1107,14 @@ function extractStructuredPayload(rawText) {
   // Printed forms often show "Gender: M/F" with no selection — ignore that prompt text.
   if (/gender\s*[:\-]?\s*m\s*\/?\s*f/i.test(text) && !/(?:gender|sex)\s*[:\-]\s*(male|female)\b/i.test(text)) {
     const selected = text.match(/(?:gender|sex)\s*[:\-]\s*([mf])\b(?!\s*\/)/i);
-    payload.patient.gender = selected?.[1] || "";
+    payload.patient.gender = selected?.[1] ? selected[1].toUpperCase() : "";
   }
-  if (/^m$/i.test(payload.patient.gender)) payload.patient.gender = "Male";
-  if (/^f$/i.test(payload.patient.gender)) payload.patient.gender = "Female";
-  if (!/^(male|female|other)$/i.test(payload.patient.gender || "")) {
+  // Keep M/F exactly as marked on the form (do not expand to Male/Female).
+  if (/^m$/i.test(payload.patient.gender)) payload.patient.gender = "M";
+  if (/^f$/i.test(payload.patient.gender)) payload.patient.gender = "F";
+  if (/^male$/i.test(payload.patient.gender)) payload.patient.gender = "Male";
+  if (/^female$/i.test(payload.patient.gender)) payload.patient.gender = "Female";
+  if (!/^(m|f|male|female|other)$/i.test(payload.patient.gender || "")) {
     payload.patient.gender = "";
   }
   fieldStatuses.gender = fieldStatus(
@@ -1156,7 +1173,7 @@ function extractStructuredPayload(rawText) {
       /\b((?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s*[-.]?\s*\d{1,2}(?:,)?\s*\d{4})\b/i,
       /(?:^|\n)\s*date\s*[:\-]\s*([A-Za-z]{3,9}\s*[-.]?\s*\d{1,2}(?:,)?\s*\d{4}|\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4})/im,
     ]);
-  payload.procedure.treatmentDate = normalizeDate(dateBlock);
+  payload.procedure.treatmentDate = cleanLine(dateBlock);
   // If we accidentally picked DOB, clear when an explicit treatment date exists elsewhere.
   if (
     payload.procedure.treatmentDate &&
@@ -1167,17 +1184,15 @@ function extractStructuredPayload(rawText) {
       /(?:treatment\s*date|procedure\s*date|date\s*performed)\s*[:\-]\s*([0-9A-Za-z\/\-.,\s]{4,28})/i,
       /(?:^|\n)\s*date\s*[:\-]\s*([A-Za-z]{3,9}\s*[-.]?\s*\d{1,2}(?:,)?\s*\d{4}|\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4})/im,
     ]);
-    payload.procedure.treatmentDate = normalizeDate(explicitTreatment);
+    payload.procedure.treatmentDate = cleanLine(explicitTreatment);
   }
-  // OCR noise around Sept-7, 2024 style dates (SEPT often misread as tet/trt/spt)
+  // OCR noise around Sept-7, 2024 style dates — keep the matched written snippet only.
   if (!payload.procedure.treatmentDate) {
     const fuzzyMonth = text.match(
-      /\b(?:sept?|sep|oct|nov|dec|jan|feb|mar|apr|may|jun|jul|aug)[a-z]*[^\n\d]{0,8}(\d{1,2})[^\n\d]{0,8}(20\d{2})\b/i
+      /\b(?:(?:sept?|sep|oct|nov|dec|jan|feb|mar|apr|may|jun|jul|aug)[a-z]*\s*[-.]?\s*\d{1,2}(?:,)?\s*20\d{2})\b/i
     );
     if (fuzzyMonth) {
-      payload.procedure.treatmentDate = normalizeDate(
-        `${fuzzyMonth[0].match(/[a-z]+/i)?.[0] || "sep"} ${fuzzyMonth[1]}, ${fuzzyMonth[2]}`
-      );
+      payload.procedure.treatmentDate = cleanLine(fuzzyMonth[0]);
     }
   }
   fieldStatuses.treatmentDate = fieldStatus(
@@ -1194,12 +1209,14 @@ function extractStructuredPayload(rawText) {
       /(?:amount\s*(?:of\s*treatment|charged|due)?|total|fee|cost|price|credit)\s*[:\-]?\s*([₱Php\s0-9.,]+)/i,
       /(?:₱|php)\s*([0-9][0-9,]*(?:\.\d{1,2})?)/i,
     ]);
-  payload.procedure.amountCharged = normalizeAmount(amountBlock);
+  // Keep amount text as written on the document (including commas); strip currency symbols only.
+  payload.procedure.amountCharged = cleanLine(String(amountBlock || "").replace(/(?:₱|php)/gi, ""));
   if (!payload.procedure.amountCharged) {
-    // Common dental form amounts near AMOUNT/BALANCE columns.
-    const amountNearLabel = text.match(/\bamount\b[\s\S]{0,80}?\b([1-9]\d{2,5})(?:\.00)?\b/i);
+    const amountNearLabel = text.match(
+      /\bamount\b[\s\S]{0,80}?\b([1-9]\d{0,2}(?:,\d{3})*(?:\.\d{2})?|[1-9]\d{2,5})\b/i
+    );
     if (amountNearLabel) {
-      payload.procedure.amountCharged = normalizeAmount(amountNearLabel[1]);
+      payload.procedure.amountCharged = cleanLine(amountNearLabel[1]);
     }
   }
   fieldStatuses.amountCharged = fieldStatus(
@@ -1207,9 +1224,8 @@ function extractStructuredPayload(rawText) {
     labelPresent(text, /(?:amount|total|fee|cost|price|credit)\b/i) || /(?:₱|php)\s*[0-9]/.test(text)
   );
 
-  payload.procedure.clinicLocation =
-    capture(text, [/(?:clinic|location|branch)\s*[:\-]\s*(.+)$/im]) || "Amethyst Dental Clinic";
-
+  payload.procedure.clinicLocation = capture(text, [/(?:clinic|location|branch)\s*[:\-]\s*(.+)$/im]);
+  // Do not invent a clinic location when the document did not include one.
   payload.procedure.coverageStatus = capture(text, [
     /(?:coverage|hmo|payment)\s*[:\-]\s*(.+)$/im,
   ]);

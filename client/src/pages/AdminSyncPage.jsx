@@ -36,7 +36,7 @@ const emptyPayload = {
     dentistName: "",
     treatmentDate: "",
     amountCharged: "",
-    clinicLocation: "Amethyst Dental Clinic",
+    clinicLocation: "",
     status: "completed",
     notes: "",
     coverageStatus: "",
@@ -574,10 +574,10 @@ export function AdminSyncPage() {
         <section className="admin-panel">
           <h2>Choose document source</h2>
           <p className="muted-copy">
-            Hard copy via camera, or digital PDF / PNG / JPEG. The system must read the document — if it cannot detect
-            or read patient/treatment fields, an error is shown and nothing is imported. On a successful read, fields
-            are populated immediately with the exact values found on the scan. The file is temporary and discarded after
-            import. Tip: keep the paper upright and well-lit for clearer OCR.
+            Hard copy via camera, or digital PDF / PNG / JPEG. Fields are filled with the exact text found on the
+            document — nothing is renamed or invented. If the document cannot be read, an error is shown. Existing
+            patient records are not overwritten; only new treatment rows are added. Tip: keep the paper upright and
+            well-lit for clearer OCR.
           </p>
 
           <div className="admin-sync-source-grid">

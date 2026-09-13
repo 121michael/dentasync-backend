@@ -28,11 +28,12 @@ Amount: ₱800
   assert.equal(payload.patient.fullName, "Juan Dela Cruz");
   assert.equal(payload.patient.firstName, "Juan");
   assert.equal(payload.patient.lastName, "Dela Cruz");
-  assert.equal(payload.patient.dateOfBirth, "1995-12-03");
+  assert.equal(payload.patient.dateOfBirth, "12/03/1995");
   assert.equal(payload.patient.age, "30");
-  assert.equal(payload.patient.phone, "639171234567");
+  assert.equal(payload.patient.phone, "09171234567");
   assert.equal(payload.procedure.treatment, "Dental Cleaning");
   assert.equal(payload.procedure.amountCharged, "800");
+  assert.equal(payload.procedure.treatmentDate, "08/20/2026");
   assert.equal(fieldStatuses.amountCharged, "detected");
   assert.equal(fieldStatuses.age, "detected");
   assert.ok(payload.procedure.visits.length >= 1);
@@ -59,10 +60,27 @@ AMOUNT
   const { payload } = extractStructuredPayload(sample);
   assert.equal(payload.patient.fullName, "ANGELOU OBAS-BAGHTNAN");
   assert.equal(payload.patient.address.toUpperCase(), "MANDALUYONG CITY");
-  assert.equal(payload.patient.phone, "639171234567");
+  assert.equal(payload.patient.phone, "09171234567");
   assert.equal(payload.patient.age, "25");
   assert.equal(payload.procedure.treatment, "ORAL PROPHYLAXIS");
   assert.equal(payload.procedure.amountCharged, "800");
+  assert.match(payload.procedure.treatmentDate, /SEPT\s*7,\s*2024/i);
+});
+
+test("extraction never renames procedures to catalog labels", () => {
+  const sample = `
+NAME: Ana Reyes
+DESCRIPTION
+ORTHO INSTALLATION
+DATE
+NOV 16, 2023
+AMOUNT
+5,000
+`;
+  const { payload } = extractStructuredPayload(sample);
+  assert.equal(payload.procedure.treatment, "ORTHO INSTALLATION");
+  assert.equal(payload.procedure.amountCharged, "5,000");
+  assert.match(payload.procedure.treatmentDate, /NOV\s*16,\s*2023/i);
 });
 
 test("missing amount stays empty instead of inventing a value", () => {

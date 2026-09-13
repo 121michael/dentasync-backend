@@ -286,32 +286,27 @@ def looks_like_procedure(value: str) -> bool:
     )
 
 
-def infer_procedure(text: str, value: str) -> str:
-    # Prefer the written clinic wording (exact-ish), not invented catalog labels from header soup.
+def literal_procedure(text: str, value: str) -> str:
+    """Return procedure text exactly as OCR captured it — never catalog-rename."""
     if looks_like_procedure(value):
-        cleaned = clean_value(value)
-        if re.search(r"pr[o0].{0,10}h[iy]?l?a?x|prophy|prophylax", cleaned, flags=re.I):
-            return "ORAL PROPHYLAXIS"
-        if re.search(r"ortho.{0,10}install|installation", cleaned, flags=re.I):
-            return "ORTHO INSTALLATION"
-        if re.search(r"ortho.{0,10}adjust|adjustment", cleaned, flags=re.I):
-            return "ORTHO ADJUSTMENT"
-        if re.search(r"\bexo\b|extraction", cleaned, flags=re.I):
-            return "EXO"
-        return cleaned.upper()
+        return clean_value(value)
 
     blob = text or ""
-    mapping = [
-        (r"oral\s*prophylaxis|pr[o0].{0,10}h[iy]?l?a?x|prophylax|prophy", "ORAL PROPHYLAXIS"),
-        (r"ortho(?:dontic)?\s*install|installation", "ORTHO INSTALLATION"),
-        (r"ortho(?:dontic)?\s*adjust|adjustment", "ORTHO ADJUSTMENT"),
-        (r"\bexo\b|extraction", "EXO"),
-        (r"dental\s*cleaning|\bcleaning\b", "DENTAL CLEANING"),
-        (r"\bfilling\b|\bresto\b", "DENTAL FILLING"),
+    patterns = [
+        r"oral\s*prophylaxis",
+        r"pr[o0][A-Za-z]{0,12}",
+        r"ortho(?:dontic)?\s*install(?:ation)?",
+        r"ortho(?:dontic)?\s*adjust(?:ment)?",
+        r"\bexo\b",
+        r"tooth\s*extraction|\bextraction\b",
+        r"dental\s*cleaning|\bcleaning\b",
+        r"\bfilling\b|\bresto\b",
+        r"root\s*canal|\brct\b",
     ]
-    for pattern, label in mapping:
-        if re.search(pattern, blob, flags=re.I):
-            return label
+    for pattern in patterns:
+        match = re.search(pattern, blob, flags=re.I)
+        if match:
+            return clean_value(match.group(0))
     return ""
 
 
@@ -344,7 +339,7 @@ def extract_treatment_record_fields(text: str) -> dict[str, str]:
     if not re.search(r"treatment\s*record|\bprocedure\b", blob, flags=re.I):
         return {}
 
-    procedure = infer_procedure(blob, "")
+    procedure = literal_procedure(blob, "")
     amounts = re.findall(r"\b([1-9]\d{2,5})(?:\.00)?\b", blob)
     amount = ""
     for candidate in amounts:
@@ -353,7 +348,7 @@ def extract_treatment_record_fields(text: str) -> dict[str, str]:
         value = int(candidate)
         if 100 <= value <= 200000:
             amount = candidate
-            if procedure == "ORTHO INSTALLATION" or value >= 3000:
+            if re.search(r"install", procedure or "", flags=re.I) or value >= 3000:
                 break
 
     month = re.search(
@@ -361,7 +356,8 @@ def extract_treatment_record_fields(text: str) -> dict[str, str]:
         blob,
         flags=re.I,
     )
-    treatment_date = normalize_date(month.group(0)) if month else ""
+    # Keep the written date text from the document (do not force ISO here).
+    treatment_date = clean_value(month.group(0)) if month else ""
     full_name = recover_treatment_record_name(blob)
 
     return {
@@ -379,11 +375,17 @@ def structured_from_items(items: list[dict[str, Any]], text: str) -> dict[str, s
     phone = extract_phone(find_values_for_label(items, LABELS["phone"]), text)
     age = extract_age(find_values_for_label(items, LABELS["age"]))
     procedure_value = find_values_for_label(items, LABELS["procedure"], multi=True)
-    procedure = infer_procedure(text, procedure_value)
-    treatment_date = normalize_date(find_values_for_label(items, LABELS["treatmentDate"], multi=True))
-    # Also catch handwritten month dates anywhere in description/date cells.
+    procedure = literal_procedure(text, procedure_value)
+    # Keep written date text when possible.
+    raw_date = find_values_for_label(items, LABELS["treatmentDate"], multi=True)
+    treatment_date = clean_value(raw_date) if raw_date else ""
     if not treatment_date:
-        treatment_date = normalize_date(text)
+        month = re.search(
+            r"\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s*[-.]?\s*(\d{1,2})(?:st|nd|rd|th)?(?:,)?\s*(20\d{2})\b",
+            text or "",
+            flags=re.I,
+        )
+        treatment_date = clean_value(month.group(0)) if month else ""
     amount = extract_amount(items, text)
     notes = find_values_for_label(items, LABELS["complaint"], multi=True)
 

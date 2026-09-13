@@ -166,18 +166,31 @@ function sanitizePayload(input) {
 }
 
 async function findMatchingClinicalPatient(client, patient) {
-  if (patient.email || patient.phone) {
+  const phoneCandidates = [];
+  if (patient.phone) {
+    phoneCandidates.push(patient.phone);
+    const digits = String(patient.phone).replace(/\D/g, "");
+    if (/^0\d{10}$/.test(digits)) phoneCandidates.push(`63${digits.slice(1)}`);
+    if (/^63\d{10}$/.test(digits)) phoneCandidates.push(`0${digits.slice(2)}`);
+    if (/^9\d{9}$/.test(digits)) {
+      phoneCandidates.push(`0${digits}`);
+      phoneCandidates.push(`63${digits}`);
+    }
+  }
+  const uniquePhones = [...new Set(phoneCandidates.filter(Boolean))];
+
+  if (patient.email || uniquePhones.length) {
     const byContact = await client.query(
       `SELECT id, record_code, first_name, last_name, email, phone, date_of_birth
        FROM clinic_patient_records
        WHERE COALESCE(is_archived, FALSE) = FALSE
          AND (
            ($1::text IS NOT NULL AND LOWER(email) = LOWER($1))
-           OR ($2::text IS NOT NULL AND phone = $2)
+           OR ($2::text[] IS NOT NULL AND phone = ANY($2))
          )
        ORDER BY updated_at DESC
        LIMIT 1`,
-      [patient.email || null, patient.phone || null]
+      [patient.email || null, uniquePhones.length ? uniquePhones : null]
     );
     if (byContact.rows.length) {
       return {
@@ -190,35 +203,41 @@ async function findMatchingClinicalPatient(client, patient) {
   }
 
   if (patient.firstName && patient.lastName && patient.dateOfBirth) {
-    const byIdentity = await client.query(
-      `SELECT id, record_code, first_name, last_name, email, phone, date_of_birth
-       FROM clinic_patient_records
-       WHERE COALESCE(is_archived, FALSE) = FALSE
-         AND LOWER(first_name) = LOWER($1)
-         AND LOWER(last_name) = LOWER($2)
-         AND date_of_birth = $3::date
-       ORDER BY updated_at DESC
-       LIMIT 1`,
-      [patient.firstName, patient.lastName, patient.dateOfBirth]
-    );
-    if (byIdentity.rows.length) {
-      return { record: byIdentity.rows[0], matchReason: "name_and_date_of_birth" };
+    const dobIso = normalizeDate(patient.dateOfBirth) || (isIsoDate(patient.dateOfBirth) ? patient.dateOfBirth : "");
+    if (dobIso) {
+      const byIdentity = await client.query(
+        `SELECT id, record_code, first_name, last_name, email, phone, date_of_birth
+         FROM clinic_patient_records
+         WHERE COALESCE(is_archived, FALSE) = FALSE
+           AND LOWER(first_name) = LOWER($1)
+           AND LOWER(last_name) = LOWER($2)
+           AND date_of_birth = $3::date
+         ORDER BY updated_at DESC
+         LIMIT 1`,
+        [patient.firstName, patient.lastName, dobIso]
+      );
+      if (byIdentity.rows.length) {
+        return { record: byIdentity.rows[0], matchReason: "name_and_date_of_birth" };
+      }
     }
   }
 
   if (patient.fullName && patient.dateOfBirth) {
-    const byFullName = await client.query(
-      `SELECT id, record_code, first_name, last_name, email, phone, date_of_birth
-       FROM clinic_patient_records
-       WHERE COALESCE(is_archived, FALSE) = FALSE
-         AND LOWER(TRIM(CONCAT(first_name, ' ', last_name))) = LOWER($1)
-         AND date_of_birth = $2::date
-       ORDER BY updated_at DESC
-       LIMIT 1`,
-      [patient.fullName, patient.dateOfBirth]
-    );
-    if (byFullName.rows.length) {
-      return { record: byFullName.rows[0], matchReason: "full_name_and_date_of_birth" };
+    const dobIso = normalizeDate(patient.dateOfBirth) || (isIsoDate(patient.dateOfBirth) ? patient.dateOfBirth : "");
+    if (dobIso) {
+      const byFullName = await client.query(
+        `SELECT id, record_code, first_name, last_name, email, phone, date_of_birth
+         FROM clinic_patient_records
+         WHERE COALESCE(is_archived, FALSE) = FALSE
+           AND LOWER(TRIM(CONCAT(first_name, ' ', last_name))) = LOWER($1)
+           AND date_of_birth = $2::date
+         ORDER BY updated_at DESC
+         LIMIT 1`,
+        [patient.fullName, dobIso]
+      );
+      if (byFullName.rows.length) {
+        return { record: byFullName.rows[0], matchReason: "full_name_and_date_of_birth" };
+      }
     }
   }
 
@@ -649,20 +668,7 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
       }
 
       if (clinicalRecordId) {
-        await clinicalPatients.updateClinicalRecord(
-          client,
-          clinicalRecordId,
-          {
-            firstName: patient.firstName,
-            lastName: patient.lastName,
-            email: patient.email,
-            phone: patient.phone,
-            dateOfBirth: patient.dateOfBirth,
-            gender: patient.gender,
-            address: patient.address,
-          },
-          { id: req.admin.id, role: "admin-sync" }
-        );
+        // Existing patient: only append new treatment rows — never overwrite synced demographics.
       } else {
         const notesParts = ["Imported via Admin Document Data Extraction"];
         if (patient.age) notesParts.push(`Age at import: ${patient.age}`);
@@ -809,7 +815,7 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
           `Source: ${label}`,
           `Result: Successful`,
           `Patient: ${clinicalRecordId}`,
-          createdNewPatient ? "Created new patient record" : "Updated existing patient record",
+          createdNewPatient ? "Created new patient record" : "Linked existing patient record without changing synced demographics",
           treatment?.id ? `Treatments saved: ${savedTreatments.length}` : "No treatment row (patient info only)",
           skippedDuplicates ? `Duplicates skipped: ${skippedDuplicates}` : null,
           match.matchReason ? `Match: ${match.matchReason}` : null,
