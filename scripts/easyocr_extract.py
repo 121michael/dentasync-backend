@@ -1052,8 +1052,14 @@ def main() -> int:
             ]
             crop_texts = [text]
             all_items = list(items)
-            for crop in crops:
-                enhanced = ImageOps.autocontrast(ImageEnhance.Sharpness(crop).enhance(1.4))
+            for idx, crop in enumerate(crops):
+                # Amount / treatment-row crops need stronger contrast for faint blue ink.
+                if idx >= 4:
+                    gray = ImageOps.grayscale(crop)
+                    enhanced = ImageEnhance.Contrast(ImageOps.autocontrast(gray, cutoff=1)).enhance(2.6)
+                    enhanced = ImageEnhance.Sharpness(enhanced).enhance(1.6).convert("RGB")
+                else:
+                    enhanced = ImageOps.autocontrast(ImageEnhance.Sharpness(crop).enhance(1.4))
                 crop_text, crop_items, _conf = read_image(reader, enhanced)
                 crop_fields = structured_from_items(crop_items, crop_text)
                 fields = merge_fields(fields, crop_fields)
