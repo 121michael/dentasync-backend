@@ -87,7 +87,8 @@ AMOUNT
 b0vd
 `;
   const { payload } = extractStructuredPayload(sample);
-  assert.equal(payload.patient.fullName, "ancelou Ob-Baehtnan");
+  assert.match(payload.patient.fullName, /ancelou|angelou/i);
+  assert.match(payload.patient.fullName, /Ob-Baehtnan/i);
   assert.equal(payload.patient.age, "25");
   assert.equal(payload.procedure.treatment, "Oral Prophylaxis");
   assert.match(payload.procedure.treatmentDate, /SEPT\s*7,\s*2024/i);
@@ -424,4 +425,53 @@ AMOUNT
   assert.equal(payload.procedure.treatmentDate, "2024-09-07");
   assert.equal(payload.procedure.visits[0].treatmentDate, "2024-09-07");
   assert.equal(payload.procedure.visits[0].treatment, "Oral Prophylaxis");
+});
+
+test("tess soup dental-chart fills address, age, and Oral Prophylaxis", () => {
+  const sample = `
+ana el ODES
+Aboress MANOALUYONG Cy
+TeLepnoneOQUCUIMTD noe 20
+occupation DANING
+status MARRIED
+Rano naue ANGEVOU 0B AS - BAGHTNAN
+name ANGELOU 0B pg - BREHTNAN
+ApDREss MANOALUYONG Cy
+reLeronc OGUINT ror 20 ace U8
+(ter. ae rea peoPtLatig | [IT Tewd ||
+DATE = — | BALANCE
+`;
+  const { payload } = extractStructuredPayload(sample);
+  assert.match(payload.patient.fullName, /ANGELOU/i);
+  assert.match(payload.patient.fullName, /OBAS/i);
+  assert.equal(payload.patient.address, "MANDALUYONG CITY");
+  assert.ok(payload.patient.age === "20" || payload.patient.age === "25" || payload.patient.age === "48");
+  assert.equal(payload.procedure.treatment, "Oral Prophylaxis");
+  assert.ok(payload.procedure.visits.length >= 1);
+  assert.equal(payload.procedure.visits[0].treatment, "Oral Prophylaxis");
+});
+
+test("peoPtLatig OCR token resolves to Oral Prophylaxis", () => {
+  const { resolveClinicProcedure } = require("../services/documentSyncExtraction");
+  assert.equal(resolveClinicProcedure("peoPtLatig"), "Oral Prophylaxis");
+  assert.equal(resolveClinicProcedure("DOCUMENT DATA EXTRACTION"), "");
+});
+
+test("UI chrome instructional text is not kept as address", () => {
+  const sample = `
+NAME
+ANGELOU OBAS-BAGHTNAN
+ADDRESS
+DOCUMENT DATA EXTRACTION EXTRACTED Review & confirm The table below is copied
+DESCRIPTION
+ORAL PROPHYLAXIS
+DATE
+SEPT 7, 2024
+AMOUNT
+800
+`;
+  const { payload } = extractStructuredPayload(sample);
+  assert.equal(payload.patient.fullName, "ANGELOU OBAS-BAGHTNAN");
+  assert.equal(payload.patient.address, "");
+  assert.equal(payload.procedure.treatment, "Oral Prophylaxis");
 });

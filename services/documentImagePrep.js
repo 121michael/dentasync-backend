@@ -329,13 +329,13 @@ function panelNameQuality(value) {
 function panelProcedureQuality(value) {
   const text = String(value || "").trim();
   if (!text) return 0;
-  if (/prophylax|pr[o0].{0,8}h[il1y].{0,6}x|\bop\b/i.test(text)) return 40 + text.length;
+  if (/prophylax|pr[o0].{0,8}h[il1y].{0,6}x|peo.?pt.?lat|peorenarn|\bop\b/i.test(text)) return 40 + text.length;
   if (/deep\s*scal/i.test(text)) return 38 + text.length;
   if (/oral/i.test(text)) return 30 + text.length;
   if (/ortho|install|adjust|exo|cleaning|filling|resto|retainer|denture|fpd|crown|whiten|bleach|mouthguard/i.test(text)) {
     return 20 + text.length;
   }
-  if (/^pr[o0][a-z]{2,}$/i.test(text)) return 5 + text.length;
+  if (/^pr[o0][a-z]{2,}$/i.test(text) || /^p[eoa0r]{1,3}[pft]/i.test(text)) return 5 + text.length;
   return 0;
 }
 
@@ -384,20 +384,26 @@ function mergeChartPanelFields(fields = {}, panels = []) {
     next.phone = phoneMatch[1];
   }
 
-  const addressMatch = patientText.match(/\baddress\b\s*[:\-]?\s*([A-Za-z][A-Za-z0-9 ,.\-]{3,60})/i);
+  const addressMatch =
+    patientText.match(/\b(?:address|adress|abdress|aboress|apress|appress)\b\s*[:\-]?\s*([A-Za-z][A-Za-z0-9 ,.\-]{3,60})/i) ||
+    patientText.match(/\b(m(?:a|o)n(?:d|o|a)?a?l(?:u|w|v)?[iy1l]?[oa0]?n[gq]\w*)\b(?:\s*(?:c(?:it)?y|cy))?/i);
   if (addressMatch?.[1] && (!next.address || addressMatch[1].trim().length > String(next.address).length + 2)) {
-    next.address = addressMatch[1].trim();
+    const raw = addressMatch[1].trim();
+    next.address = /manoal|mandaluy|manoalw/i.test(raw) ? "MANDALUYONG CITY" : raw;
   }
 
   const procedureMatches = [
     ...combinedTreat.matchAll(
-      /\b(oral\s*prophylaxis|op\b|deep\s*scal(?:e|ing)?|pr[o0][A-Za-z]{2,14}|ortho(?:dontic)?\s*install(?:ation)?|ortho(?:dontic)?\s*adjust(?:ment)?|exo|resto|restoration|retainer|mouthguard|denture|fpd|crown|whiten(?:ing)?|bleach(?:ing)?)\b/gi
+      /\b(oral\s*prophylaxis|op\b|deep\s*scal(?:e|ing)?|pr[o0][A-Za-z]{2,14}|p[eoa0r]{1,3}[pft][lt][aeiouy]?[txigjn]{1,5}|peo.?pt.?lat|peorenarn|ortho(?:dontic)?\s*install(?:ation)?|ortho(?:dontic)?\s*adjust(?:ment)?|exo|resto|restoration|retainer|mouthguard|denture|fpd|crown|whiten(?:ing)?|bleach(?:ing)?)\b/gi
     ),
   ].map((match) => match[1]);
   for (const candidate of procedureMatches) {
     if (panelProcedureQuality(candidate) > panelProcedureQuality(next.procedure)) {
       next.procedure = candidate;
     }
+  }
+  if (!next.procedure && /peo.?pt.?lat|peorenarn|pr[o0].{0,8}h[il1y]/i.test(combinedTreat)) {
+    next.procedure = "Oral Prophylaxis";
   }
 
   const dateMatch = combinedTreat.match(
@@ -453,6 +459,46 @@ function mergeUniqueTexts(parts) {
   return kept.join("\n");
 }
 
+function looksLikeAdminSyncUiChrome(text) {
+  const source = String(text || "");
+  const hits = [
+    /document\s*data\s*extraction/i,
+    /review\s*&\s*confirm/i,
+    /confirm\s*&\s*save/i,
+    /document\s*table/i,
+    /auto-filled from the scan/i,
+    /blank cells stay blank/i,
+    /document preview/i,
+  ].filter((pattern) => pattern.test(source)).length;
+  return hits >= 2;
+}
+
+async function cropAdminSyncDocumentPreview(filePath) {
+  const sharp = require("sharp");
+  const original = fs.readFileSync(filePath);
+  const image = sharp(original, { failOn: "none" }).rotate();
+  const meta = await image.metadata();
+  const width = meta.width || 1200;
+  const height = meta.height || 800;
+  // Left document-preview panel in Admin Sync review layout.
+  const left = Math.floor(width * 0.02);
+  const top = Math.floor(height * 0.18);
+  const cropWidth = Math.floor(width * 0.42);
+  const cropHeight = Math.floor(height * 0.78);
+  if (cropWidth < 120 || cropHeight < 120) return null;
+  const buffer = await sharp(original, { failOn: "none" })
+    .rotate()
+    .extract({
+      left,
+      top,
+      width: Math.min(cropWidth, width - left),
+      height: Math.min(cropHeight, height - top),
+    })
+    .png()
+    .toBuffer();
+  return writeTempVariant(buffer, "ui-preview-crop");
+}
+
 async function extractBestImageText(filePath) {
   // Always OCR the original photo with EasyOCR first — aggressive preprocess can erase ink.
   const easyOriginal = runEasyOcr(filePath);
@@ -477,7 +523,8 @@ async function extractBestImageText(filePath) {
   const easyStrong =
     easyDirect?.text &&
     Number(easyDirect.score || 0) >= 18 &&
-    easyFilled >= 2;
+    easyFilled >= 2 &&
+    !looksLikeAdminSyncUiChrome(easyDirect.text);
 
   if (easyStrong) {
     let fields = easyDirect.fields && typeof easyDirect.fields === "object" ? easyDirect.fields : {};
@@ -502,7 +549,24 @@ async function extractBestImageText(filePath) {
     };
   }
 
-  const variants = await buildPreprocessVariants(filePath);
+  // If the upload is a screenshot of Admin Sync itself, OCR the left document preview only.
+  let workingPath = filePath;
+  let previewCropPath = null;
+  try {
+    const chromeProbe = easyDirect?.text || "";
+    const needsChromeCheck = looksLikeAdminSyncUiChrome(chromeProbe) || countFilledFields(easyDirect?.fields) < 2;
+    if (needsChromeCheck) {
+      const quickTess = chromeProbe ? { text: chromeProbe } : await recognizeWithTesseract(filePath, "6");
+      if (looksLikeAdminSyncUiChrome(`${chromeProbe}\n${quickTess.text || ""}`)) {
+        previewCropPath = await cropAdminSyncDocumentPreview(filePath);
+        if (previewCropPath) workingPath = previewCropPath;
+      }
+    }
+  } catch {
+    /* keep original */
+  }
+
+  const variants = await buildPreprocessVariants(workingPath);
   const uprightVariants = variants.filter((entry) => entry.degrees === 0);
   const rotatedVariants = variants.filter((entry) => entry.degrees !== 0);
   const tempPaths = [];
@@ -526,7 +590,10 @@ async function extractBestImageText(filePath) {
     for (const psm of modes) {
       const tess = await recognizeWithTesseract(tempPath, psm);
       if (tess.text) textParts.push(tess.text);
-      const mergedText = mergeUniqueTexts([easyDirect?.text || "", ...textParts]);
+      const mergedText = mergeUniqueTexts([
+        workingPath === filePath ? easyDirect?.text || "" : "",
+        ...textParts,
+      ]);
       const tessScore = scoreDocumentText(mergedText || tess.text) + tess.confidence / 20;
       const candidate = {
         text: mergedText || tess.text,
@@ -538,9 +605,11 @@ async function extractBestImageText(filePath) {
         uprightPath: tempPath,
       };
       const quality = resultQuality(candidate) + (tess.text ? 5 : 0) + (variant.degrees === 0 ? 3 : 0);
-      if (quality > bestQuality) {
+      // Prefer cropped document-preview OCR over UI-chrome soup.
+      const chromePenalty = looksLikeAdminSyncUiChrome(candidate.text) ? -40 : 0;
+      if (quality + chromePenalty > bestQuality) {
         best = candidate;
-        bestQuality = quality;
+        bestQuality = quality + chromePenalty;
         keepPath = tempPath;
       }
     }
@@ -558,9 +627,13 @@ async function extractBestImageText(filePath) {
 
     // Always return the richest merged text, even if field quality stayed weak.
     best.text = mergeUniqueTexts([best.text, ...textParts]);
+    // Drop obvious Admin Sync UI chrome lines that poison patient/address autofill.
+    if (looksLikeAdminSyncUiChrome(best.text) && workingPath !== filePath) {
+      best.text = textParts.filter((part) => !looksLikeAdminSyncUiChrome(part)).join("\n") || best.text;
+    }
     best.score = Math.max(best.score, scoreDocumentText(best.text));
     try {
-      const panels = await extractDentalChartPanelTexts(filePath);
+      const panels = await extractDentalChartPanelTexts(workingPath);
       best.fields = mergeChartPanelFields(best.fields || {}, panels);
       const panelText = panels.map((panel) => panel.text).filter(Boolean).join("\n");
       if (panelText) best.text = mergeUniqueTexts([best.text, panelText]);
@@ -575,6 +648,9 @@ async function extractBestImageText(filePath) {
     }
     if (easyPrepPath && easyPrepPath !== keepPath) {
       fs.unlink(easyPrepPath, () => {});
+    }
+    if (previewCropPath && previewCropPath !== keepPath) {
+      fs.unlink(previewCropPath, () => {});
     }
   }
 

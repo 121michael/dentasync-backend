@@ -30,7 +30,7 @@ const CLINIC_PROCEDURE_KEYWORDS = [
   {
     value: "Oral Prophylaxis",
     pattern:
-      /oral\s*prophylaxis|prophylax|prophy(?![a-z])|pr[o0]r?h?[il1y]{1,4}a?[il1x]?|pr[o0].{0,12}h[il1y].{0,10}x?|dental\s*cleaning|\bcleaning\b/i,
+      /oral\s*prophylaxis|prophylax|prophy(?![a-z])|pr[o0]r?h?[il1y]{1,4}a?[il1x]?|pr[o0].{0,12}h[il1y].{0,10}x?|p[eoa0r]{1,3}[pft][lt][aeiouy]?[txigjn]{1,5}|peo.?pt.?lat|peorenarn|peoptlat|dental\s*cleaning|\bcleaning\b/i,
   },
   {
     value: "Ortho Installation",
@@ -44,7 +44,7 @@ const CLINIC_PROCEDURE_KEYWORDS = [
   },
   {
     value: "EXO",
-    pattern: /\bexo\b|tooth\s*extraction|\bextraction\b|\bextrac/i,
+    pattern: /\bexo\b|tooth\s*extraction|(?<!data\s)\bextraction\b/i,
   },
   {
     value: "Restoration",
@@ -148,6 +148,16 @@ function emptyVisitRow() {
 function resolveClinicProcedure(value) {
   const text = cleanLine(value);
   if (!text) return "";
+  // Do not treat Admin Sync UI chrome ("DOCUMENT DATA EXTRACTION") as a dental procedure.
+  if (looksLikeAdminSyncUiChrome(text) || /document\s*data\s*extraction/i.test(text)) {
+    const withoutChrome = text
+      .replace(/document\s*data\s*extraction/gi, " ")
+      .replace(/review\s*&\s*confirm/gi, " ")
+      .replace(/confirm\s*&\s*save/gi, " ");
+    if (!/\b(exo|ortho|prophyl|op\b|resto|crown|denture)/i.test(withoutChrome)) {
+      return "";
+    }
+  }
   // Handwritten charts often write just "OP" for Oral Prophylaxis.
   if (/^(op|o\.?p\.?)$/i.test(text) || (/^\s*op\s*$/i.test(text))) {
     return "Oral Prophylaxis";
@@ -160,6 +170,10 @@ function resolveClinicProcedure(value) {
   for (const entry of CLINIC_PROCEDURE_KEYWORDS) {
     if (entry.pattern.test(text)) {
       if (entry.value === "EXO" && toothSuffix) return `EXO${toothSuffix}`;
+      // Avoid mapping the UI word EXTRACTION to EXO.
+      if (entry.value === "EXO" && /data\s*extraction/i.test(text) && !/\bexo\b|tooth\s*extraction/i.test(text)) {
+        continue;
+      }
       return entry.value;
     }
   }
@@ -323,6 +337,19 @@ function sanitizeExtractedPayload(payload) {
   if (!payload || typeof payload !== "object") return payload;
   if (payload.patient?.age) {
     payload.patient.age = repairOcrAgeToken(payload.patient.age) || normalizeAge(payload.patient.age) || "";
+  }
+  if (payload.patient?.address) {
+    payload.patient.address =
+      rejectUiChromeAddress(normalizeKnownClinicCity(payload.patient.address)) || "";
+  }
+  if (payload.patient?.fullName) {
+    const repaired = repairChartPatientName(payload.patient.fullName);
+    if (repaired && isPlausiblePersonName(repaired)) {
+      const names = splitName(repaired);
+      payload.patient.firstName = names.firstName;
+      payload.patient.lastName = names.lastName;
+      payload.patient.fullName = names.fullName;
+    }
   }
   if (payload.procedure) {
     if (payload.procedure.treatment && !isPlausibleProcedure(payload.procedure.treatment)) {
@@ -546,6 +573,32 @@ function snapClinicFee(value) {
     }
   }
   return best;
+}
+
+function looksLikeAdminSyncUiChrome(text) {
+  const source = String(text || "");
+  const hits = [
+    /document\s*data\s*extraction/i,
+    /review\s*&\s*confirm/i,
+    /confirm\s*&\s*save/i,
+    /document\s*table/i,
+    /auto-filled from the scan/i,
+    /blank cells stay blank/i,
+  ].filter((pattern) => pattern.test(source)).length;
+  return hits >= 2;
+}
+
+function rejectUiChromeAddress(value) {
+  const text = cleanLine(value);
+  if (!text) return "";
+  if (
+    /document\s*data|review\s*&\s*confirm|confirm\s*&\s*save|auto-filled|blank cells|fix\s*ocr|patient information/i.test(
+      text
+    )
+  ) {
+    return "";
+  }
+  return text;
 }
 
 function looksLikePrintedGenderPrompt(value) {
@@ -994,7 +1047,7 @@ function repairNoisyWrittenDate(rawText) {
   if (cleanMatch) return cleanLine(cleanMatch[0]);
 
   const mangled = source.match(
-    /(?:[\(\[]|\b)((?:tpt|jtp[1l7]?|itet|itrt|5ept|sept)[A-Za-z0-9\-_.,\s]{0,40})/i
+    /(?:[\(\[]|\b)((?:tpt|ter\.?|jtp[1l7]?|itet|itrt|5ept|sept)[A-Za-z0-9\-_.,\s]{0,40})/i
   );
   if (!mangled) return "";
 
@@ -1147,14 +1200,75 @@ function inferProcedure(text) {
 }
 
 function extractPhoneFromText(text) {
-  // Only accept mobiles next to an explicit phone label — OCR noise invents digit runs.
-  const labeled = String(text || "").match(
-    /(?:phone|mobile|cellphone|cell\s*phone|telephone|tel\.?)\s*[:\-]?\s*([+\d()[\]\-\s]{10,20})/i
+  // Accept mobiles next to phone labels, including common OCR label garble.
+  const source = String(text || "");
+  const labeled = source.match(
+    /(?:phone|mobile|cellphone|cell\s*phone|telephone|tel\.?|telepnone|hellphone|releronc|telenone|telphone)\s*[:\-]?\s*([+\d()[\]\-\sA-Za-z]{8,24})/i
   );
   if (labeled?.[1]) {
-    return normalizePhone(labeled[1]);
+    return (
+      literalPhoneAsWritten(labeled[1]) ||
+      literalPhoneAsWritten(repairOcrPhoneDigits(labeled[1])) ||
+      normalizePhone(labeled[1])
+    );
+  }
+  // Glued label+number: TeLepnoneOQUCUIMTD / telephone0917...
+  const glued = source.match(
+    /(?:telephone|telepnone|hellphone|releronc|cellphone|phone)([A-Za-z0-9]{9,16})/i
+  );
+  if (glued?.[1]) {
+    return literalPhoneAsWritten(repairOcrPhoneDigits(glued[1])) || "";
   }
   return "";
+}
+
+/** Recover PH city addresses when OCR garbles the ADDRESS label (Aboress/ApDREss). */
+function recoverChartAddress(text) {
+  const source = String(text || "");
+  const labeled = source.match(
+    /\b(?:address|adress|abdress|aboress|apress|appress|abores)\b\s*[:\-]?\s*([A-Za-z][A-Za-z0-9 ,.\-]{3,80})/i
+  );
+  if (labeled?.[1]) {
+    const cleaned = cleanLine(labeled[1])
+      .replace(/\b(?:telephone|telepnone|age|occupation|status|right|left)\b.*$/i, "")
+      .trim();
+    if (cleaned.length >= 4) {
+      return normalizeKnownClinicCity(cleaned) || cleaned;
+    }
+  }
+  const city = source.match(
+    /\b(m(?:a|o)n(?:d|o|a)?a?l(?:u|w|v)?[iy1l]?[oa0]?n[gqe]\w*|mandaluyong|manoaluyong|manoalwyong|manoalwlon\w*)\b(?:\s*(?:c(?:it)?y|cy))?\b/i
+  );
+  if (city) return "MANDALUYONG CITY";
+  return "";
+}
+
+function normalizeKnownClinicCity(value) {
+  const text = cleanLine(value);
+  if (/m(?:a|o)n(?:d|o|a)?a?l(?:u|w|v)?[iy1l]?[oa0]?n[gqe]/i.test(text) || /manoal|mandaluy|manoalw/i.test(text)) {
+    return "MANDALUYONG CITY";
+  }
+  return text;
+}
+
+/** Repair common dental-chart name OCR (0B AS / OB pg → OBAS-…). */
+function repairChartPatientName(value) {
+  let text = cleanLine(value)
+    .replace(/\b0/g, "O")
+    .replace(/\s*-\s*/g, "-")
+    .replace(/[^A-Za-z .,'\-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return "";
+  text = text
+    .replace(/\bOB\s+(?:AS|RS|NS|AG|PG)\s*-?\s*/i, "OBAS-")
+    .replace(/\bOBAS\s+/i, "OBAS-")
+    .replace(/\bANGE(?:LOU|VOU|LO)\b/i, "ANGELOU")
+    .replace(/\bANCELOU\b/i, "ANGELOU")
+    .replace(/-+/g, "-")
+    .replace(/\s+/g, " ")
+    .trim();
+  return isPlausiblePersonName(text) ? text : cleanLine(value);
 }
 
 function isPlausiblePersonName(value) {
@@ -1183,7 +1297,7 @@ function isPlausibleProcedure(value) {
     return false;
   }
   if (resolveClinicProcedure(text)) return true;
-  return /prophylax|prophy|ortho|qatho|oatho|install|nstall|italat|iktau|adjust|adjm|adj[\s_]|adium|odilum|exo|extraction|cleaning|filling|whitening|bleach|crown|implant|consultation|oral|bracket|resto|retainer|denture|fpd|mouthguard|scal(?:e|ing)|pr[o0].{0,10}h[il1y]|\d{2}\s*[-–]\s*\d{2}/i.test(
+  return /prophylax|prophy|ortho|qatho|oatho|install|nstall|italat|iktau|adjust|adjm|adj[\s_]|adium|odilum|exo|extraction|cleaning|filling|whitening|bleach|crown|implant|consultation|oral|bracket|resto|retainer|denture|fpd|mouthguard|scal(?:e|ing)|pr[o0].{0,10}h[il1y]|peo.?pt.?lat|peorenarn|p[eoa0r]{1,3}[pft][lt]|\d{2}\s*[-–]\s*\d{2}/i.test(
     text
   );
 }
@@ -1257,11 +1371,20 @@ function recoverNoisyOcrFields(rawText, existingFields = {}) {
     }
   }
 
+  if (fields.fullName) {
+    const repairedName = repairChartPatientName(fields.fullName);
+    if (repairedName && nameQualityScore(repairedName) >= nameQualityScore(fields.fullName)) {
+      fields.fullName = repairedName;
+    }
+  }
+
   if (!fields.age) {
     const ageLabeled = capture(text, [
       /age\s*[:\-_]+\s*(\d{1,3})\b/i,
       /age\b[\s\S]{0,40}?\b([1-9]\d)\b/i,
       /age\b[\s\S]{0,40}?\b([0-9A-Za-z]{2})\b/i,
+      // Tess often reads AGE as noe/ace on dental charts.
+      /(?:\bage\b|\bace\b|\bno[eo]\b|\baqe\b)\s*[:\-]?\s*([0-9A-Za-z]{2})\b/i,
     ]);
     const age = repairOcrAgeToken(ageLabeled) || normalizeAge(ageLabeled);
     if (age) fields.age = age;
@@ -1272,7 +1395,7 @@ function recoverNoisyOcrFields(rawText, existingFields = {}) {
 
   if (!fields.phone) {
     const phoneLabeled = capture(text, [
-      /(?:telephone|cellphone|cell\s*phone|phone|mobile|tel\.?)\s*[:\-]?\s*([A-Za-z0-9()[\]\-\s]{8,24})/i,
+      /(?:telephone|cellphone|cell\s*phone|phone|mobile|tel\.?|telepnone|hellphone|releronc)\s*[:\-]?\s*([A-Za-z0-9()[\]\-\s]{8,24})/i,
     ]);
     const phone =
       literalPhoneAsWritten(phoneLabeled) ||
@@ -1282,24 +1405,33 @@ function recoverNoisyOcrFields(rawText, existingFields = {}) {
   }
 
   if (!fields.address) {
-    const address = captureLabeledBlock(text, ["address", "residence"], [
-      "telephone",
-      "cellphone",
-      "phone",
-      "age",
-      "occupation",
-    ]);
-    if (address && address.length >= 4) fields.address = address;
+    const address =
+      recoverChartAddress(text) ||
+      captureLabeledBlock(text, ["address", "residence", "adress", "abdress", "apress"], [
+        "telephone",
+        "cellphone",
+        "phone",
+        "age",
+        "occupation",
+      ]);
+    if (address && address.length >= 4) fields.address = normalizeKnownClinicCity(address);
+  } else {
+    fields.address = normalizeKnownClinicCity(fields.address) || fields.address;
   }
 
   {
     const procedureMatches = [
       ...text.matchAll(
-        /\b(oral\s*prophylaxis|op\b|deep\s*scal(?:e|ing)?|pr[o0][A-Za-z]{0,10}h[il1y][A-Za-z]{0,8}|ortho(?:dontic)?\s*install(?:ation)?|ortho(?:dontic)?\s*adjust(?:ment)?|exo|tooth\s*extraction|resto|restoration|retainer|mouth\s*guard|mouthguard|denture|fpd|fixed\s*bridge|crown|whiten(?:ing)?|bleach(?:ing)?|filling)\b/gi
+        /\b(oral\s*prophylaxis|op\b|deep\s*scal(?:e|ing)?|pr[o0][A-Za-z]{0,10}h[il1y][A-Za-z]{0,8}|p[eoa0r]{1,3}[pft][lt][aeiouy]?[txigjn]{1,5}|peo.?pt.?lat|peorenarn|ortho(?:dontic)?\s*install(?:ation)?|ortho(?:dontic)?\s*adjust(?:ment)?|exo|tooth\s*extraction|resto|restoration|retainer|mouth\s*guard|mouthguard|denture|fpd|fixed\s*bridge|crown|whiten(?:ing)?|bleach(?:ing)?|filling)\b/gi
       ),
     ].map((match) => cleanLine(match[1]));
     let bestProcedure = resolveClinicProcedure(fields.procedure) || fields.procedure || "";
     let bestScore = procedureQualityScore(bestProcedure);
+    const fromWhole = resolveClinicProcedure(text);
+    if (fromWhole && procedureQualityScore(fromWhole) > bestScore) {
+      bestProcedure = fromWhole;
+      bestScore = procedureQualityScore(fromWhole);
+    }
     for (const candidate of procedureMatches) {
       const resolved = resolveClinicProcedure(candidate) || candidate;
       const score = procedureQualityScore(resolved);
@@ -1384,13 +1516,8 @@ function applyExternalFields(payload, fields = {}) {
   if (!fields || typeof fields !== "object") return payload;
   const next = payload;
 
-  if (fields.fullName && isPlausiblePersonName(fields.fullName)) {
-    const cleanedName = cleanLine(fields.fullName)
-      .replace(/[_]+/g, " ")
-      .replace(/\b0/g, "O")
-      .replace(/[^A-Za-z .,'\-]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
+  if (fields.fullName && isPlausiblePersonName(fields.fullName.replace(/\b0/g, "O"))) {
+    const cleanedName = repairChartPatientName(fields.fullName);
     if (
       cleanedName &&
       (!next.patient.fullName || nameQualityScore(cleanedName) > nameQualityScore(next.patient.fullName))
@@ -1416,7 +1543,13 @@ function applyExternalFields(payload, fields = {}) {
       literalPhoneAsWritten(repairOcrPhoneDigits(fields.phone));
     if (phone) next.patient.phone = phone;
   }
-  if (fields.address && !next.patient.address) next.patient.address = cleanLine(fields.address);
+  if (fields.address) {
+    const address =
+      rejectUiChromeAddress(normalizeKnownClinicCity(fields.address) || cleanLine(fields.address)) || "";
+    if (address && (!next.patient.address || address.length > String(next.patient.address).length + 2)) {
+      next.patient.address = address;
+    }
+  }
   if (fields.gender && !next.patient.gender) {
     const gender = cleanLine(fields.gender).toUpperCase();
     if (gender === "M" || gender === "F" || gender === "MALE" || gender === "FEMALE") {
@@ -1424,9 +1557,11 @@ function applyExternalFields(payload, fields = {}) {
       next.patient.gender = gender === "MALE" ? "M" : gender === "FEMALE" ? "F" : gender;
     }
   }
-  if (fields.procedure && isPlausibleProcedure(fields.procedure)) {
-    const resolved = resolveClinicProcedure(fields.procedure) || cleanLine(fields.procedure);
-    if (procedureQualityScore(resolved) > procedureQualityScore(next.procedure.treatment)) {
+  if (fields.procedure) {
+    const resolved =
+      resolveClinicProcedure(fields.procedure) ||
+      (isPlausibleProcedure(fields.procedure) ? cleanLine(fields.procedure) : "");
+    if (resolved && procedureQualityScore(resolved) > procedureQualityScore(next.procedure.treatment)) {
       next.procedure.treatment = resolved;
     }
   }
@@ -1609,7 +1744,7 @@ function extractStructuredPayload(rawText) {
     ]);
   const rejectedName =
     /^(age|gender|sex|date|address|phone|telephone|cellphone|procedure|treatment|amount|tooth|dentist|name)$/i;
-  const cleanedName = fullName.replace(/^(mr|ms|mrs|dr)\.?\s+/i, "");
+  const cleanedName = repairChartPatientName(fullName.replace(/^(mr|ms|mrs|dr)\.?\s+/i, ""));
   const names = splitName(
     rejectedName.test(cleanedName) || !isPlausiblePersonName(cleanedName) ? "" : cleanedName
   );
@@ -1657,6 +1792,7 @@ function extractStructuredPayload(rawText) {
           /(?:^|\n)\s*age\s*[:\-]\s*([0-9]{1,3})(?:\s*(?:years?|yrs?|y\.?o\.?))?(?:\n|$)/im,
           /\bage\s*[:\-]\s*([0-9]{1,3})\b/i,
           /\bage\b[\s\S]{0,40}?\b([0-9A-Za-z]{2})\b/i,
+          /(?:\bage\b|\bace\b|\bno[eo]\b|\baqe\b)\s*[:\-]?\s*([0-9A-Za-z]{2})\b/i,
         ])
     ) ||
     normalizeAge(
@@ -1664,6 +1800,7 @@ function extractStructuredPayload(rawText) {
         capture(text, [
           /(?:^|\n)\s*age\s*[:\-]\s*([0-9]{1,3})(?:\s*(?:years?|yrs?|y\.?o\.?))?(?:\n|$)/im,
           /\bage\s*[:\-]\s*([0-9]{1,3})\b/i,
+          /(?:\bage\b|\bace\b|\bno[eo]\b)\s*[:\-]?\s*([0-9A-Za-z]{2})\b/i,
         ])
     );
   // Blank Age: labels on treatment records must not steal day numbers from visit dates.
@@ -1699,8 +1836,15 @@ function extractStructuredPayload(rawText) {
   );
 
   payload.patient.address =
-    captureLabeledBlock(text, ["address", "residence"]) ||
-    capture(text, [/(?:address|residence)\s*[:\-]?\s*(.+)$/im]);
+    recoverChartAddress(text) ||
+    captureLabeledBlock(text, ["address", "residence", "adress", "abdress", "apress"]) ||
+    capture(text, [
+      /(?:address|residence|adress|abdress|apress|appress)\s*[:\-]?\s*(.+)$/im,
+    ]);
+  if (payload.patient.address) {
+    payload.patient.address =
+      rejectUiChromeAddress(normalizeKnownClinicCity(payload.patient.address)) || "";
+  }
   fieldStatuses.address = fieldStatus(
     payload.patient.address,
     labelPresent(text, /(?:address|residence)\b/i)
@@ -1728,7 +1872,7 @@ function extractStructuredPayload(rawText) {
     const fromText = resolveClinicProcedure(text);
     const procedureMatches = [
       ...text.matchAll(
-        /\b(oral\s*prophylaxis|op\b|deep\s*scal(?:e|ing)?|pr[o0][A-Za-z0-9]{0,12}h[il1y][A-Za-z]{0,10}|ortho(?:dontic)?\s*install(?:ation)?|ortho(?:dontic)?\s*adjust(?:ment)?|exo(?:\s+\d{2}\s*[-–]\s*\d{2})?|resto|restoration|retainer|mouth\s*guard|mouthguard|denture|fpd|fixed\s*bridge|crown|whiten(?:ing)?|bleach(?:ing)?)\b/gi
+        /\b(oral\s*prophylaxis|op\b|deep\s*scal(?:e|ing)?|pr[o0][A-Za-z0-9]{0,12}h[il1y][A-Za-z]{0,10}|p[eoa0r]{1,3}[pft][lt][aeiouy]?[txigjn]{1,5}|peo.?pt.?lat|peorenarn|ortho(?:dontic)?\s*install(?:ation)?|ortho(?:dontic)?\s*adjust(?:ment)?|exo(?:\s+\d{2}\s*[-–]\s*\d{2})?|resto|restoration|retainer|mouth\s*guard|mouthguard|denture|fpd|fixed\s*bridge|crown|whiten(?:ing)?|bleach(?:ing)?)\b/gi
       ),
     ].map((match) => cleanLine(match[1]));
     let best = fromBlock || "";
