@@ -507,13 +507,108 @@ def clean_person_name(value: str) -> str:
     return text
 
 
+CLINIC_PROCEDURE_KEYWORDS = [
+    (
+        "Deep Scaling",
+        re.compile(r"deep\s*scal(?:e|ing)?|dee+p\s*sca", re.I),
+    ),
+    (
+        "Oral Prophylaxis",
+        re.compile(
+            r"oral\s*prophylaxis|prophylax|prophy(?![a-z])|pr[o0]r?h?[il1y]{1,4}a?[il1x]?|pr[o0].{0,12}h[il1y].{0,10}x?|dental\s*cleaning|\bcleaning\b",
+            re.I,
+        ),
+    ),
+    (
+        "Ortho Installation",
+        re.compile(
+            r"ortho(?:dontic)?\s*install|brace\s*install|installatio|nstall|italat|iktau|stalla|qatho\s*install|oatho\s*install",
+            re.I,
+        ),
+    ),
+    (
+        "Ortho Adjustment",
+        re.compile(
+            r"ortho(?:dontic)?\s*adjust|brace\s*adjust|adjustment|adjm(?:ent)?|adium|odilum|aqlum|azlut|ortho.{0,12}adj",
+            re.I,
+        ),
+    ),
+    (
+        "EXO",
+        re.compile(r"\bexo\b|tooth\s*extraction|\bextraction\b|\bextrac", re.I),
+    ),
+    (
+        "Restoration",
+        re.compile(r"\bresto\b|restor(?:ation|e|ative)?|\bfilling\b", re.I),
+    ),
+    (
+        "Retainer",
+        re.compile(r"\bretain(?:er|ers)?\b|\bretent", re.I),
+    ),
+    (
+        "Mouthguard",
+        re.compile(r"mouth\s*guard|mouthguard|nite\s*guard|night\s*guard|sports\s*guard", re.I),
+    ),
+    (
+        "Denture",
+        re.compile(r"\bdenture?s?\b|\bdentur\b|partial\s*denture|complete\s*denture", re.I),
+    ),
+    (
+        "FPD",
+        re.compile(r"\bfpd\b|fixed\s*bridge|fixedbridge|fixed\s*partial", re.I),
+    ),
+    (
+        "Crown",
+        re.compile(r"\bcrown\b|\bcrowns\b", re.I),
+    ),
+    (
+        "Teeth Whitening",
+        re.compile(r"teeth\s*whiten|tooth\s*whiten|\bwhiten(?:ing)?\b|\bbleach(?:ing)?\b", re.I),
+    ),
+    (
+        "Root Canal",
+        re.compile(r"root\s*canal|\brct\b", re.I),
+    ),
+    (
+        "Dental Implant",
+        re.compile(r"\bimplant\b", re.I),
+    ),
+    (
+        "Consultation",
+        re.compile(r"consultation|\bconsult\b", re.I),
+    ),
+]
+
+
+def resolve_clinic_procedure(value: str) -> str:
+    text = clean_value(value or "")
+    if not text:
+        return ""
+    if re.fullmatch(r"op|o\.?p\.?", text, flags=re.I):
+        return "Oral Prophylaxis"
+    if re.search(r"\bop\b", text, flags=re.I) and len(text) <= 28 and not re.search(
+        r"occupation|option|open", text, flags=re.I
+    ):
+        return "Oral Prophylaxis"
+    tooth = re.search(r"\b(\d{1,2})\s*[-–]\s*(\d{1,2})\b", text)
+    tooth_suffix = f" {tooth.group(1)}-{tooth.group(2)}" if tooth else ""
+    for label, pattern in CLINIC_PROCEDURE_KEYWORDS:
+        if pattern.search(text):
+            if label == "EXO" and tooth_suffix:
+                return f"EXO{tooth_suffix}"
+            return label
+    return ""
+
+
 def looks_like_procedure(value: str) -> bool:
     text = value or ""
     if re.search(r"charged|balance|appt|dentist|tooth\s*no|amount\s*paid|\(|trt|provenance", text, flags=re.I):
         return False
+    if resolve_clinic_procedure(text):
+        return True
     return bool(
         re.search(
-            r"prophylax|prophy|pr[o0].{0,10}h[iy1l].{0,8}x?|ortho|install|adjust|exo|extraction|cleaning|filling|whitening|crown|implant|consultation",
+            r"prophylax|prophy|pr[o0].{0,10}h[iy1l].{0,8}x?|ortho|install|adjust|exo|extraction|cleaning|filling|whitening|bleach|crown|implant|consultation|resto|retainer|denture|fpd|mouthguard|scal(?:e|ing)",
             text,
             flags=re.I,
         )
@@ -522,6 +617,18 @@ def looks_like_procedure(value: str) -> bool:
 
 def procedure_quality(value: str) -> int:
     text = value or ""
+    resolved = resolve_clinic_procedure(text)
+    if resolved:
+        score = 50 + len(resolved)
+        if re.search(r"Oral Prophylaxis|Deep Scaling", resolved, flags=re.I):
+            score += 20
+        elif re.search(r"Ortho Install", resolved, flags=re.I):
+            score += 18
+        elif re.search(r"Ortho Adjust", resolved, flags=re.I):
+            score += 16
+        elif re.match(r"EXO", resolved, flags=re.I):
+            score += 14
+        return score
     if not looks_like_procedure(text):
         return 0
     score = len(text)
@@ -529,7 +636,7 @@ def procedure_quality(value: str) -> int:
         score += 40
     elif re.search(r"prophylax|pr[o0].{0,8}h[il1y].{0,8}x", text, flags=re.I):
         score += 30
-    elif re.search(r"ortho|install|adjust|exo|cleaning|filling", text, flags=re.I):
+    elif re.search(r"ortho|install|adjust|exo|cleaning|filling|resto|retainer|denture|fpd|whitening|crown", text, flags=re.I):
         score += 20
     elif re.search(r"^pr[o0][A-Za-z]{2,}$", text, flags=re.I):
         score += 4
@@ -540,23 +647,34 @@ def procedure_quality(value: str) -> int:
 
 def literal_procedure(text: str, value: str) -> str:
     candidates = []
+    resolved_value = resolve_clinic_procedure(value)
+    if resolved_value:
+        return resolved_value
     if looks_like_procedure(value):
         candidates.append(clean_value(value))
 
     patterns = [
         r"oral\s*prophylaxis",
+        r"\bop\b",
+        r"deep\s*scal(?:e|ing)?",
         r"pr[o0][A-Za-z]{0,10}h[il1y][A-Za-z]{0,10}",
         r"ortho(?:dontic)?\s*install(?:ation)?",
         r"ortho(?:dontic)?\s*adjust(?:ment)?",
         r"\bexo\b",
         r"tooth\s*extraction|\bextraction\b",
-        r"dental\s*cleaning|\bcleaning\b",
-        r"\bfilling\b|\bresto\b",
+        r"\bresto\b|restoration|\bfilling\b",
+        r"\bretainer\b",
+        r"mouth\s*guard|mouthguard",
+        r"\bdenture\b",
+        r"\bfpd\b|fixed\s*bridge",
+        r"\bcrown\b",
+        r"whiten(?:ing)?|bleach(?:ing)?",
         r"root\s*canal|\brct\b",
     ]
     for pattern in patterns:
         for match in re.finditer(pattern, text or "", flags=re.I):
-            candidates.append(clean_value(match.group(0)))
+            resolved = resolve_clinic_procedure(match.group(0))
+            candidates.append(resolved or clean_value(match.group(0)))
 
     best = ""
     best_score = 0
@@ -566,6 +684,31 @@ def literal_procedure(text: str, value: str) -> str:
             best = candidate
             best_score = score
     return best
+
+
+def fuzzy_procedure_token(text: str) -> str:
+    resolved = resolve_clinic_procedure(text)
+    if resolved:
+        return resolved
+    raw = clean_value(text)
+    if not raw:
+        return ""
+    compact = re.sub(r"[^A-Za-z0-9\-]+", " ", raw).strip()
+    lower = compact.lower()
+    tooth = re.search(r"\b(\d{2})\s*[-–]\s*(\d{2})\b", compact)
+    if re.search(r"\bexo\b|extrac", lower) or (tooth and re.search(r"\b(50|xo|ex)\b", lower)):
+        return f"EXO {tooth.group(1)}-{tooth.group(2)}" if tooth else "EXO"
+    if tooth and len(compact) <= 14:
+        return f"EXO {tooth.group(1)}-{tooth.group(2)}"
+    if re.search(r"install|nstall|italat|iktau|stalla", lower):
+        return "Ortho Installation"
+    if re.search(r"adjust|adjm|adj |adium|odilum|aqlum|azlut|ment", lower):
+        return "Ortho Adjustment"
+    if re.search(r"bracket|brlalet|bockel|backed", lower):
+        return compact
+    if looks_like_procedure(compact):
+        return resolve_clinic_procedure(compact) or compact
+    return ""
 
 
 def recover_treatment_record_name(text: str) -> str:
@@ -647,35 +790,6 @@ def fuzzy_month_token(text: str) -> str:
     for needle, month in mapping:
         if needle in value:
             return month
-    return ""
-
-
-def fuzzy_procedure_token(text: str) -> str:
-    raw = clean_value(text)
-    if not raw:
-        return ""
-    compact = re.sub(r"[^A-Za-z0-9\-]+", " ", raw).strip()
-    lower = compact.lower()
-    tooth = re.search(r"\b(\d{2})\s*[-–]\s*(\d{2})\b", compact)
-    if re.search(r"\bexo\b|extrac", lower) or (tooth and re.search(r"\b(50|xo|ex)\b", lower)):
-        return f"EXO {tooth.group(1)}-{tooth.group(2)}" if tooth else compact
-    if tooth and len(compact) <= 14:
-        return f"EXO {tooth.group(1)}-{tooth.group(2)}"
-    if re.search(r"install|nstall|italat|iktau|stalla", lower):
-        token = re.search(r"[A-Za-z0-9]*((?:install|nstall|italat|iktau|stalla)[A-Za-z0-9]*)", compact, flags=re.I)
-        if token:
-            return clean_value(token.group(0))
-        return compact
-    if re.search(r"adjust|adjm|adj |adium|odilum|aqlum|azlut|ment", lower):
-        token = re.search(r"[A-Za-z0-9]*((?:adjust|adjm|adium|odilum|aqlum|azlut|ment)[A-Za-z0-9]*)", compact, flags=re.I)
-        if token:
-            prefix = "ORTHO " if "ortho" not in lower and "orilo" not in lower else ""
-            return clean_value(prefix + token.group(0))
-        return compact
-    if re.search(r"bracket|brlalet|bockel|backed", lower):
-        return compact
-    if looks_like_procedure(compact):
-        return compact
     return ""
 
 

@@ -16,21 +16,80 @@ const UNREADABLE_DOCUMENT_MESSAGE =
   "Unable to read the uploaded or scanned document. No patient or treatment fields could be detected. Please upload a clearer scan or photo and try again.";
 
 const DOCUMENT_KEYWORD_RE =
-  /\b(patient|full\s*name|name|date\s*of\s*birth|dob|birth\s*date|cellphone|mobile|phone|telephone|procedure|treatment|description|dental|clinic|amount|charged|age|address|occupation|status|complaint|tooth|diagnosis|record|form|appointment|service|orthodontic|cleaning|extraction|filling|prophylaxis|debit|credit|balance)\b/i;
+  /\b(patient|full\s*name|name|date\s*of\s*birth|dob|birth\s*date|cellphone|mobile|phone|telephone|procedure|treatment|description|dental|clinic|amount|charged|age|address|occupation|status|complaint|tooth|diagnosis|record|form|appointment|service|orthodontic|cleaning|extraction|filling|prophylaxis|debit|credit|balance|resto|retainer|mouthguard|denture|fpd|whitening|bleaching|crown|exo|scaling)\b/i;
 
-const KNOWN_PROCEDURES = [
-  { pattern: /oral\s*prophylaxis|prophylax|pr[o0]r?h?[il1y]{2,}a?x?|prophy(?![a-z])/i, value: "Oral Prophylaxis" },
-  { pattern: /dental\s*cleaning|\bcleaning\b|oral\s*prophy/i, value: "Dental Cleaning" },
-  { pattern: /\bexo\b|tooth\s*extraction|\bextraction\b/i, value: "Tooth Extraction" },
-  { pattern: /root\s*canal|\brct\b/i, value: "Root Canal" },
-  { pattern: /\bfilling\b|\bresto\b/i, value: "Dental Filling" },
-  { pattern: /whitening|bleaching/i, value: "Teeth Whitening" },
-  { pattern: /\bcrown\b/i, value: "Dental Crown" },
-  { pattern: /\bimplant\b/i, value: "Dental Implant" },
-  { pattern: /ortho(?:dontic)?\s*install|brace\s*install/i, value: "Orthodontic Installation" },
-  { pattern: /ortho(?:dontic)?\s*adjust|brace\s*adjust|orthodont|\bbrace/i, value: "Orthodontic Adjustment" },
-  { pattern: /consultation/i, value: "Consultation" },
+/**
+ * Usual handwritten clinic procedure keywords (PH dental charts / treatment records).
+ * Patterns include common OCR garble so faint ink can still fill the Document Table.
+ */
+const CLINIC_PROCEDURE_KEYWORDS = [
+  {
+    value: "Deep Scaling",
+    pattern: /deep\s*scal(?:e|ing)?|dee+p\s*sca/i,
+  },
+  {
+    value: "Oral Prophylaxis",
+    pattern:
+      /oral\s*prophylaxis|prophylax|prophy(?![a-z])|pr[o0]r?h?[il1y]{1,4}a?[il1x]?|pr[o0].{0,12}h[il1y].{0,10}x?|dental\s*cleaning|\bcleaning\b/i,
+  },
+  {
+    value: "Ortho Installation",
+    pattern:
+      /ortho(?:dontic)?\s*install|brace\s*install|installatio|nstall|italat|iktau|stalla|qatho\s*install|oatho\s*install/i,
+  },
+  {
+    value: "Ortho Adjustment",
+    pattern:
+      /ortho(?:dontic)?\s*adjust|brace\s*adjust|adjustment|adjm(?:ent)?|adium|odilum|aqlum|azlut|ortho.{0,12}adj/i,
+  },
+  {
+    value: "EXO",
+    pattern: /\bexo\b|tooth\s*extraction|\bextraction\b|\bextrac/i,
+  },
+  {
+    value: "Restoration",
+    pattern: /\bresto\b|restor(?:ation|e|ative)?|\bfilling\b/i,
+  },
+  {
+    value: "Retainer",
+    pattern: /\bretain(?:er|ers)?\b|\bretent/i,
+  },
+  {
+    value: "Mouthguard",
+    pattern: /mouth\s*guard|mouthguard|nite\s*guard|night\s*guard|sports\s*guard/i,
+  },
+  {
+    value: "Denture",
+    pattern: /\bdenture?s?\b|\bdentur\b|partial\s*denture|complete\s*denture/i,
+  },
+  {
+    value: "FPD",
+    pattern: /\bfpd\b|fixed\s*bridge|fixedbridge|fixed\s*partial/i,
+  },
+  {
+    value: "Crown",
+    pattern: /\bcrown\b|\bcrowns\b/i,
+  },
+  {
+    value: "Teeth Whitening",
+    pattern: /teeth\s*whiten|tooth\s*whiten|\bwhiten(?:ing)?\b|\bbleach(?:ing)?\b/i,
+  },
+  {
+    value: "Root Canal",
+    pattern: /root\s*canal|\brct\b/i,
+  },
+  {
+    value: "Dental Implant",
+    pattern: /\bimplant\b/i,
+  },
+  {
+    value: "Consultation",
+    pattern: /consultation|\bconsult\b/i,
+  },
 ];
+
+// Back-compat alias used by older helpers / noisy recovery.
+const KNOWN_PROCEDURES = CLINIC_PROCEDURE_KEYWORDS;
 
 const MONTH_TOKEN_RE =
   "(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)";
@@ -85,20 +144,46 @@ function emptyVisitRow() {
   };
 }
 
-/** Keep OCR cell text as written — no catalog rename, no calculated balance. */
+/** Resolve handwritten/OCR procedure text to usual clinic keywords when matched. */
+function resolveClinicProcedure(value) {
+  const text = cleanLine(value);
+  if (!text) return "";
+  // Handwritten charts often write just "OP" for Oral Prophylaxis.
+  if (/^(op|o\.?p\.?)$/i.test(text) || (/^\s*op\s*$/i.test(text))) {
+    return "Oral Prophylaxis";
+  }
+  if (/\bop\b/i.test(text) && text.length <= 28 && !/occupation|option|open/i.test(text)) {
+    return "Oral Prophylaxis";
+  }
+  const tooth = text.match(/\b(\d{1,2})\s*[-–]\s*(\d{1,2})\b/);
+  const toothSuffix = tooth ? ` ${tooth[1]}-${tooth[2]}` : "";
+  for (const entry of CLINIC_PROCEDURE_KEYWORDS) {
+    if (entry.pattern.test(text)) {
+      if (entry.value === "EXO" && toothSuffix) return `EXO${toothSuffix}`;
+      return entry.value;
+    }
+  }
+  return "";
+}
+
+/** Keep OCR cell text, but map known clinic procedure keywords when readable. */
 function normalizeVisitRows(rows = []) {
   if (!Array.isArray(rows)) return [];
   return rows
-    .map((row) => ({
-      treatmentDate: cleanLine(row?.treatmentDate || row?.date || ""),
-      toothNos: cleanLine(row?.toothNos || row?.toothNumber || ""),
-      treatment: cleanLine(row?.treatment || row?.procedure || ""),
-      dentistName: cleanLine(row?.dentistName || row?.dentist || ""),
-      amountCharged: cleanLine(String(row?.amountCharged ?? row?.amount ?? "")),
-      amountPaid: cleanLine(String(row?.amountPaid ?? "")),
-      balance: cleanLine(String(row?.balance ?? "")),
-      nextAppt: cleanLine(row?.nextAppt || row?.nextAppointment || ""),
-    }))
+    .map((row) => {
+      const rawTreatment = cleanLine(row?.treatment || row?.procedure || "");
+      const resolved = resolveClinicProcedure(rawTreatment);
+      return {
+        treatmentDate: cleanLine(row?.treatmentDate || row?.date || ""),
+        toothNos: cleanLine(row?.toothNos || row?.toothNumber || ""),
+        treatment: resolved || rawTreatment,
+        dentistName: cleanLine(row?.dentistName || row?.dentist || ""),
+        amountCharged: cleanLine(String(row?.amountCharged ?? row?.amount ?? "")),
+        amountPaid: cleanLine(String(row?.amountPaid ?? "")),
+        balance: cleanLine(String(row?.balance ?? "")),
+        nextAppt: cleanLine(row?.nextAppt || row?.nextAppointment || ""),
+      };
+    })
     .filter(
       (row) =>
         row.treatmentDate ||
@@ -499,12 +584,15 @@ function extractNoisyTreatmentRecordFields(rawText) {
   }
 
   let treatment = "";
-  if (/qatho\s*install|ortho\s*install|installatio/i.test(text)) {
-    treatment = "Orthodontic Installation";
+  const resolved = resolveClinicProcedure(text);
+  if (resolved) {
+    treatment = resolved;
+  } else if (/qatho\s*install|ortho\s*install|installatio/i.test(text)) {
+    treatment = "Ortho Installation";
   } else if (/\bexo\b/i.test(text)) {
-    treatment = "Tooth Extraction";
+    treatment = "EXO";
   } else if (/adjust|adj\s*wt|mitment|ortho/i.test(text)) {
-    treatment = "Orthodontic Adjustment";
+    treatment = "Ortho Adjustment";
   }
 
   // Prefer a date near the installation token; avoid latching onto a later visit month.
@@ -574,27 +662,9 @@ function isTreatmentRecordForm(text) {
 }
 
 function inferProcedureToken(chunk) {
-  const source = String(chunk || "");
-  const compact = source.toUpperCase().replace(/[^A-Z0-9]+/g, " ");
-  // Prefer installation over later EXO rows when OCR returns the whole form.
-  if (
-    /ortho\s*install|installation/i.test(source) ||
-    /ORTHO\s*INSTALL|QATHO\s*INSTALL|OATHO\s*INSTALL|ORTHOINSTALL|INSTALLATIO/i.test(compact)
-  ) {
-    return "Orthodontic Installation";
-  }
-  if (/\bEXO\b|EXTRACTION|EXTRAC/i.test(source) || /\bEXO\b/.test(compact)) {
-    return "Tooth Extraction";
-  }
-  if (
-    /ortho\s*adjust|adjustment/i.test(source) ||
-    /ORTHO\s*ADJUST|ORTHO\s*ADJM|ORM\s*ADJUST|OATH\s*ADJUST|ORLD\s*MITMENT|ORIO\s*ADJUST|ORTI\s*ADJUST|ADJUSTMENT|ADJ WT MENT|ADI WT MENT/i.test(
-      compact
-    )
-  ) {
-    return "Orthodontic Adjustment";
-  }
-  return inferProcedure(source);
+  const resolved = resolveClinicProcedure(chunk);
+  if (resolved) return resolved;
+  return inferProcedure(chunk);
 }
 
 /**
@@ -706,12 +776,11 @@ function parseTreatmentRecordRows(rawText) {
       stripTooth: Boolean(toothNos),
       stripAmount: Boolean(amountCharged),
     });
-    if (treatment && !isPlausibleProcedure(treatment)) {
-      // Keep OCR wording only when it still looks like a clinic procedure token.
-      const token = treatment.match(
-        /\b(oral\s*prophylaxis|pr[o0][A-Za-z]{0,10}h[il1y][A-Za-z]{0,10}|ortho(?:dontic)?\s*install(?:ation)?|ortho(?:dontic)?\s*adjust(?:ment)?|qatho\s*install|oatho\s*install|exo|tooth\s*extraction|extraction|dental\s*cleaning|cleaning|filling)\b/i
-      );
-      treatment = token ? cleanLine(token[0]) : "";
+    const resolved = resolveClinicProcedure(treatment) || resolveClinicProcedure(window);
+    if (resolved) {
+      treatment = resolved;
+    } else if (treatment && !isPlausibleProcedure(treatment)) {
+      treatment = "";
     }
 
     if (!treatment && !amountCharged && !toothNos) continue;
@@ -871,14 +940,24 @@ function repairOcrAgeToken(value) {
   return normalizeAge(digits);
 }
 
-/** Prefer prophylaxis-like OCR tokens over short garbage like "prortang". */
+/** Prefer known clinic procedure keywords over short OCR garbage. */
 function procedureQualityScore(value) {
   const text = cleanLine(value);
-  if (!text || !isPlausibleProcedure(text)) return 0;
+  if (!text) return 0;
+  const resolved = resolveClinicProcedure(text);
+  if (resolved) {
+    let score = 50 + resolved.length;
+    if (/Oral Prophylaxis|Deep Scaling/i.test(resolved)) score += 20;
+    if (/Ortho Install/i.test(resolved)) score += 18;
+    if (/Ortho Adjust/i.test(resolved)) score += 16;
+    if (/^EXO/i.test(resolved)) score += 14;
+    return score;
+  }
+  if (!isPlausibleProcedure(text)) return 0;
   let score = text.length;
   if (/oral\s*prophylaxis/i.test(text)) score += 40;
   else if (/prophylax|pr[o0].{0,8}h[il1y].{0,8}x/i.test(text)) score += 30;
-  else if (/ortho|install|nstall|italat|iktau|adjust|adium|exo|cleaning|filling|whitening|crown|implant/i.test(text))
+  else if (/ortho|install|nstall|italat|iktau|adjust|adium|exo|cleaning|filling|whitening|crown|implant|resto|retainer|denture|fpd|mouthguard/i.test(text))
     score += 20;
   else if (/^pr[o0][a-z]{2,}$/i.test(text) && /h[il1y]/i.test(text)) score += 4;
   if (/prortang|poormnare/i.test(text)) score -= 20;
@@ -1071,11 +1150,12 @@ function isPlausiblePersonName(value) {
 
 function isPlausibleProcedure(value) {
   const text = cleanLine(value);
-  if (!text || text.length < 3) return false;
+  if (!text || text.length < 2) return false;
   if (/dentis|charged|balance|appt|tooth\s*no|amount\s*paid|gender|telephone|\(|trt\b|joju|provenance|^(record|treatment\s*record)$/i.test(text)) {
     return false;
   }
-  return /prophylax|prophy|ortho|qatho|oatho|install|nstall|italat|iktau|adjust|adjm|adj[\s_]|adium|odilum|exo|extraction|cleaning|filling|whitening|crown|implant|consultation|oral|bracket|pr[o0].{0,10}h[il1y]|\d{2}\s*[-–]\s*\d{2}/i.test(
+  if (resolveClinicProcedure(text)) return true;
+  return /prophylax|prophy|ortho|qatho|oatho|install|nstall|italat|iktau|adjust|adjm|adj[\s_]|adium|odilum|exo|extraction|cleaning|filling|whitening|bleach|crown|implant|consultation|oral|bracket|resto|retainer|denture|fpd|mouthguard|scal(?:e|ing)|pr[o0].{0,10}h[il1y]|\d{2}\s*[-–]\s*\d{2}/i.test(
     text
   );
 }
@@ -1180,15 +1260,16 @@ function recoverNoisyOcrFields(rawText, existingFields = {}) {
   {
     const procedureMatches = [
       ...text.matchAll(
-        /\b(oral\s*prophylaxis|pr[o0][A-Za-z]{0,10}h[il1y][A-Za-z]{0,8}|ortho(?:dontic)?\s*install(?:ation)?|ortho(?:dontic)?\s*adjust(?:ment)?|exo|tooth\s*extraction|dental\s*cleaning|filling)\b/gi
+        /\b(oral\s*prophylaxis|op\b|deep\s*scal(?:e|ing)?|pr[o0][A-Za-z]{0,10}h[il1y][A-Za-z]{0,8}|ortho(?:dontic)?\s*install(?:ation)?|ortho(?:dontic)?\s*adjust(?:ment)?|exo|tooth\s*extraction|resto|restoration|retainer|mouth\s*guard|mouthguard|denture|fpd|fixed\s*bridge|crown|whiten(?:ing)?|bleach(?:ing)?|filling)\b/gi
       ),
     ].map((match) => cleanLine(match[1]));
-    let bestProcedure = fields.procedure || "";
+    let bestProcedure = resolveClinicProcedure(fields.procedure) || fields.procedure || "";
     let bestScore = procedureQualityScore(bestProcedure);
     for (const candidate of procedureMatches) {
-      const score = procedureQualityScore(candidate);
+      const resolved = resolveClinicProcedure(candidate) || candidate;
+      const score = procedureQualityScore(resolved);
       if (score > bestScore) {
-        bestProcedure = candidate;
+        bestProcedure = resolved;
         bestScore = score;
       }
     }
@@ -1307,8 +1388,9 @@ function applyExternalFields(payload, fields = {}) {
     }
   }
   if (fields.procedure && isPlausibleProcedure(fields.procedure)) {
-    if (procedureQualityScore(fields.procedure) > procedureQualityScore(next.procedure.treatment)) {
-      next.procedure.treatment = cleanLine(fields.procedure);
+    const resolved = resolveClinicProcedure(fields.procedure) || cleanLine(fields.procedure);
+    if (procedureQualityScore(resolved) > procedureQualityScore(next.procedure.treatment)) {
+      next.procedure.treatment = resolved;
     }
   }
   if (fields.treatmentDate) {
@@ -1603,27 +1685,38 @@ function extractStructuredPayload(rawText) {
   payload.procedure.treatment = treatmentBlock && !headerLike.test(treatmentBlock)
     ? treatmentBlock
     : "";
-  // Keep procedure text as OCR wrote it — do not rename to a service catalog label.
-  if (
-    looksLikeOcrSoup(payload.procedure.treatment) ||
-    /^(record|treatment\s*record)$/i.test(payload.procedure.treatment) ||
-    !isPlausibleProcedure(payload.procedure.treatment)
-  ) {
+  // Resolve usual clinic procedure keywords from handwritten / OCR text.
+  {
+    const fromBlock = resolveClinicProcedure(payload.procedure.treatment);
+    const fromText = resolveClinicProcedure(text);
     const procedureMatches = [
       ...text.matchAll(
-        /\b(oral\s*prophylaxis|pr[o0][A-Za-z0-9]{0,12}h[il1y][A-Za-z]{0,10}|ortho(?:dontic)?\s*install(?:ation)?|ortho(?:dontic)?\s*adjust(?:ment)?|exo(?:\s+\d{2}\s*[-–]\s*\d{2})?)\b/gi
+        /\b(oral\s*prophylaxis|op\b|deep\s*scal(?:e|ing)?|pr[o0][A-Za-z0-9]{0,12}h[il1y][A-Za-z]{0,10}|ortho(?:dontic)?\s*install(?:ation)?|ortho(?:dontic)?\s*adjust(?:ment)?|exo(?:\s+\d{2}\s*[-–]\s*\d{2})?|resto|restoration|retainer|mouth\s*guard|mouthguard|denture|fpd|fixed\s*bridge|crown|whiten(?:ing)?|bleach(?:ing)?)\b/gi
       ),
     ].map((match) => cleanLine(match[1]));
-    let best = "";
-    let bestScore = 0;
+    let best = fromBlock || "";
+    let bestScore = procedureQualityScore(best);
     for (const candidate of procedureMatches) {
-      const score = procedureQualityScore(candidate);
+      const resolved = resolveClinicProcedure(candidate) || candidate;
+      const score = procedureQualityScore(resolved);
       if (score > bestScore) {
-        best = candidate;
+        best = resolved;
         bestScore = score;
       }
     }
-    payload.procedure.treatment = bestScore > 0 ? best : "";
+    if (fromText && procedureQualityScore(fromText) > bestScore) {
+      best = fromText;
+      bestScore = procedureQualityScore(fromText);
+    }
+    if (bestScore > 0) {
+      payload.procedure.treatment = best;
+    } else if (
+      looksLikeOcrSoup(payload.procedure.treatment) ||
+      /^(record|treatment\s*record)$/i.test(payload.procedure.treatment) ||
+      !isPlausibleProcedure(payload.procedure.treatment)
+    ) {
+      payload.procedure.treatment = "";
+    }
   }
   fieldStatuses.treatment = fieldStatus(
     payload.procedure.treatment,
@@ -2076,6 +2169,8 @@ module.exports = {
   normalizeAmount,
   normalizeAge,
   inferProcedure,
+  resolveClinicProcedure,
+  CLINIC_PROCEDURE_KEYWORDS,
   fieldStatus,
   parseTreatmentRecordRows,
   pickPrimaryTreatmentRow,

@@ -31,16 +31,16 @@ Amount: ₱800
   assert.equal(payload.patient.dateOfBirth, "12/03/1995");
   assert.equal(payload.patient.age, "30");
   assert.equal(payload.patient.phone, "09171234567");
-  assert.equal(payload.procedure.treatment, "Dental Cleaning");
+  assert.equal(payload.procedure.treatment, "Oral Prophylaxis");
   assert.equal(payload.procedure.amountCharged, "800");
   assert.equal(payload.procedure.treatmentDate, "08/20/2026");
   assert.equal(fieldStatuses.amountCharged, "detected");
   assert.equal(fieldStatuses.age, "detected");
   assert.ok(payload.procedure.visits.length >= 1);
-  assert.equal(payload.procedure.visits[0].treatment, "Dental Cleaning");
+  assert.equal(payload.procedure.visits[0].treatment, "Oral Prophylaxis");
 });
 
-test("handwritten dental chart style labels keep OCR wording", () => {
+test("handwritten dental chart style labels resolve clinic procedures", () => {
   const sample = `
 NAME
 ANGELOU OBAS-BAGHTNAN
@@ -62,7 +62,7 @@ AMOUNT
   assert.equal(payload.patient.address.toUpperCase(), "MANDALUYONG CITY");
   assert.equal(payload.patient.phone, "09171234567");
   assert.equal(payload.patient.age, "25");
-  assert.equal(payload.procedure.treatment, "ORAL PROPHYLAXIS");
+  assert.equal(payload.procedure.treatment, "Oral Prophylaxis");
   assert.equal(payload.procedure.amountCharged, "800");
   assert.match(payload.procedure.treatmentDate, /SEPT\s*7,\s*2024/i);
 });
@@ -89,7 +89,7 @@ b0vd
   const { payload } = extractStructuredPayload(sample);
   assert.equal(payload.patient.fullName, "ancelou Ob-Baehtnan");
   assert.equal(payload.patient.age, "25");
-  assert.match(payload.procedure.treatment, /pr[o0].*h?ilax/i);
+  assert.equal(payload.procedure.treatment, "Oral Prophylaxis");
   assert.match(payload.procedure.treatmentDate, /SEPT\s*7,\s*2024/i);
   assert.equal(payload.procedure.amountCharged, "2000");
   assert.ok(payload.procedure.visits.length >= 1);
@@ -118,11 +118,11 @@ Buvd
 `;
   const { payload } = extractStructuredPayload(sample);
   assert.equal(payload.patient.age, "25");
-  assert.match(payload.procedure.treatment, /pr[o0].*h?ila/i);
+  assert.equal(payload.procedure.treatment, "Oral Prophylaxis");
   assert.match(payload.procedure.treatmentDate, /SEPT\s*7,\s*2024/i);
   assert.equal(payload.procedure.amountCharged, "2000");
   assert.ok(payload.procedure.visits.length >= 1);
-  assert.match(payload.procedure.visits[0].treatment, /pr[o0].*h?ila/i);
+  assert.equal(payload.procedure.visits[0].treatment, "Oral Prophylaxis");
   assert.equal(payload.procedure.visits[0].amountCharged, "2000");
   assert.match(payload.procedure.visits[0].treatmentDate, /SEPT\s*7,\s*2024/i);
 });
@@ -139,7 +139,7 @@ AMOUNT
 19002
 `;
   const { payload } = extractStructuredPayload(sample);
-  assert.equal(payload.procedure.treatment, "ORAL PROPHYLAXIS");
+  assert.equal(payload.procedure.treatment, "Oral Prophylaxis");
   assert.notEqual(payload.procedure.amountCharged, "19002");
 });
 
@@ -157,12 +157,37 @@ MAR 11 2025 EXO 24-44
   const { payload } = extractStructuredPayload(sample);
   assert.ok(payload.procedure.visits.length >= 3);
   const treatments = payload.procedure.visits.map((row) => row.treatment).join(" | ");
-  assert.match(treatments, /INSTALLATION/i);
-  assert.match(treatments, /ADJUSTMENT/i);
+  assert.match(treatments, /Ortho Installation/i);
+  assert.match(treatments, /Ortho Adjustment/i);
   assert.match(treatments, /EXO/i);
 });
 
-test("extraction never renames procedures to catalog labels", () => {
+test("handwritten clinic keywords resolve to usual procedure labels", () => {
+  const cases = [
+    ["OP", "Oral Prophylaxis"],
+    ["ORAL PROPHYLAXIS", "Oral Prophylaxis"],
+    ["PrOrhIlax", "Oral Prophylaxis"],
+    ["deep scaling", "Deep Scaling"],
+    ["ORTHO ADJUSTMENT", "Ortho Adjustment"],
+    ["adiumcat", "Ortho Adjustment"],
+    ["IKTAUATD", "Ortho Installation"],
+    ["EXO 24-44", "EXO 24-44"],
+    ["resto", "Restoration"],
+    ["restoration", "Restoration"],
+    ["retainer", "Retainer"],
+    ["mouthguard", "Mouthguard"],
+    ["denture", "Denture"],
+    ["FPD", "FPD"],
+    ["fixed bridge", "FPD"],
+    ["crown", "Crown"],
+    ["teeth whitening", "Teeth Whitening"],
+    ["bleaching", "Teeth Whitening"],
+  ];
+  const { resolveClinicProcedure } = require("../services/documentSyncExtraction");
+  for (const [input, expected] of cases) {
+    assert.equal(resolveClinicProcedure(input), expected, `${input} -> ${expected}`);
+  }
+
   const sample = `
 NAME: Ana Reyes
 DESCRIPTION
@@ -173,7 +198,7 @@ AMOUNT
 5,000
 `;
   const { payload } = extractStructuredPayload(sample);
-  assert.equal(payload.procedure.treatment, "ORTHO INSTALLATION");
+  assert.equal(payload.procedure.treatment, "Ortho Installation");
   assert.equal(payload.procedure.amountCharged, "5,000");
   assert.match(payload.procedure.treatmentDate, /NOV\s*16,\s*2023/i);
 });
@@ -202,7 +227,7 @@ test("face-like OCR text is rejected as non-document", () => {
   assert.equal(result.isDocument, false);
 });
 
-test("treatment record copies literal procedure text and table rows", () => {
+test("treatment record copies clinic procedure keywords and table rows", () => {
   const sample = `
 TREATMENT RECORD
 Name:
@@ -217,7 +242,7 @@ MAR 11 2025 EXO 24-44
 `;
   const { payload, fieldStatuses } = extractStructuredPayload(sample);
   assert.equal(payload.documentForm, "treatment_record");
-  assert.equal(payload.procedure.treatment, "ORTHO INSTALLATION");
+  assert.equal(payload.procedure.treatment, "Ortho Installation");
   assert.match(payload.procedure.treatmentDate, /NOV\s*16/i);
   assert.equal(payload.procedure.amountCharged, "5000");
   assert.equal(fieldStatuses.treatment, "detected");
@@ -225,8 +250,8 @@ MAR 11 2025 EXO 24-44
   assert.equal(payload.patient.gender, "");
   assert.equal(payload.patient.fullName, "");
   assert.ok(payload.procedure.visits.length >= 4);
-  assert.equal(payload.procedure.visits[0].treatment, "ORTHO INSTALLATION");
-  assert.equal(payload.procedure.visits[1].treatment, "ORTHO ADJUSTMENT");
+  assert.equal(payload.procedure.visits[0].treatment, "Ortho Installation");
+  assert.equal(payload.procedure.visits[1].treatment, "Ortho Adjustment");
   assert.equal(payload.procedure.visits[0].amountPaid, "");
   assert.equal(payload.procedure.visits[0].balance, "");
 });
@@ -244,7 +269,7 @@ Amount: 800
   assert.equal(payload.patient.gender, "");
 });
 
-test("parseTreatmentRecordRows keeps OCR wording and written dates", () => {
+test("parseTreatmentRecordRows resolves clinic keywords and written dates", () => {
   const rows = parseTreatmentRecordRows(`
 NOV 16
 2023
@@ -257,7 +282,7 @@ ORTHO ADJUSTMENT
 `);
   assert.ok(rows.length >= 2);
   assert.match(rows[0].treatmentDate, /NOV\s*16.*2023/i);
-  assert.equal(rows[0].treatment, "ORTHO INSTALLATION");
+  assert.equal(rows[0].treatment, "Ortho Installation");
   assert.equal(rows[0].amountCharged, "5,000");
 });
 
@@ -300,7 +325,7 @@ AMOUNT
   const { payload } = extractStructuredPayload(sample);
   assert.equal(payload.documentForm, "treatment_record");
   assert.ok(payload.procedure.visits.length >= 1);
-  assert.match(payload.procedure.visits[0].treatment, /ORTHO\s*INSTALLATION/i);
+  assert.equal(payload.procedure.visits[0].treatment, "Ortho Installation");
   assert.match(payload.procedure.visits[0].treatmentDate, /NOV\s*16,\s*2023/i);
   assert.equal(payload.procedure.visits[0].amountCharged, "5,000");
 });
@@ -314,7 +339,7 @@ Date Tooth No Procedure Amount charged
 `;
   const { payload } = extractStructuredPayload(sample);
   assert.ok(payload.procedure.visits.length >= 2);
-  assert.equal(payload.procedure.visits[0].treatment, "ORTHO INSTALLATION");
+  assert.equal(payload.procedure.visits[0].treatment, "Ortho Installation");
   assert.equal(payload.procedure.visits[0].amountCharged, "5000");
   assert.match(payload.procedure.visits[0].treatmentDate, /11\/16\/2023/);
 });
@@ -348,10 +373,10 @@ NOV 16 2023 ORTHO INSTALLATION 5000
   assert.ok(countReadableDocumentFields(payload) > 0);
   assert.equal(ensureReadableExtraction(payload), countReadableDocumentFields(payload));
   assert.equal(payload.patient.fullName, "Ana Reyes");
-  assert.equal(payload.procedure.visits[0].treatment, "ORTHO INSTALLATION");
+  assert.equal(payload.procedure.visits[0].treatment, "Ortho Installation");
 });
 
-test("treatment record visits stay editable table data without catalog rename", () => {
+test("treatment record visits stay editable with clinic procedure keywords", () => {
   const sample = `
 TREATMENT RECORD
 Name:
@@ -365,7 +390,7 @@ MAR 11 2025 EXO 24-44
   const { payload } = extractStructuredPayload(sample);
   assert.ok(Array.isArray(payload.procedure.visits));
   assert.ok(payload.procedure.visits.length >= 2);
-  assert.equal(payload.procedure.visits[0].treatment, "ORTHO INSTALLATION");
+  assert.equal(payload.procedure.visits[0].treatment, "Ortho Installation");
   assert.match(payload.procedure.visits[0].treatmentDate, /NOV\s*16/i);
   assert.equal(payload.procedure.visits[0].amountCharged, "5000");
   assert.equal(payload.procedure.visits[2].toothNos, "24-44");

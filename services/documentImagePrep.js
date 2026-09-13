@@ -329,9 +329,12 @@ function panelNameQuality(value) {
 function panelProcedureQuality(value) {
   const text = String(value || "").trim();
   if (!text) return 0;
-  if (/prophylax|pr[o0].{0,8}h[il1y].{0,6}x/i.test(text)) return 40 + text.length;
+  if (/prophylax|pr[o0].{0,8}h[il1y].{0,6}x|\bop\b/i.test(text)) return 40 + text.length;
+  if (/deep\s*scal/i.test(text)) return 38 + text.length;
   if (/oral/i.test(text)) return 30 + text.length;
-  if (/ortho|install|adjust|exo|cleaning|filling/i.test(text)) return 20 + text.length;
+  if (/ortho|install|adjust|exo|cleaning|filling|resto|retainer|denture|fpd|crown|whiten|bleach|mouthguard/i.test(text)) {
+    return 20 + text.length;
+  }
   if (/^pr[o0][a-z]{2,}$/i.test(text)) return 5 + text.length;
   return 0;
 }
@@ -388,7 +391,7 @@ function mergeChartPanelFields(fields = {}, panels = []) {
 
   const procedureMatches = [
     ...combinedTreat.matchAll(
-      /\b(oral\s*prophylaxis|pr[o0][A-Za-z]{2,14}|ortho(?:dontic)?\s*install(?:ation)?|ortho(?:dontic)?\s*adjust(?:ment)?)\b/gi
+      /\b(oral\s*prophylaxis|op\b|deep\s*scal(?:e|ing)?|pr[o0][A-Za-z]{2,14}|ortho(?:dontic)?\s*install(?:ation)?|ortho(?:dontic)?\s*adjust(?:ment)?|exo|resto|restoration|retainer|mouthguard|denture|fpd|crown|whiten(?:ing)?|bleach(?:ing)?)\b/gi
     ),
   ].map((match) => match[1]);
   for (const candidate of procedureMatches) {
