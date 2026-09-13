@@ -274,13 +274,27 @@ async function extractDentalChartPanelTexts(filePath) {
       left: Math.floor(width * 0.02),
       top: Math.floor(height * 0.48),
       width: Math.floor(width * 0.96),
-      height: Math.floor(height * 0.2),
+      height: Math.floor(height * 0.22),
+    },
+    {
+      key: "date",
+      left: Math.floor(width * 0.02),
+      top: Math.floor(height * 0.5),
+      width: Math.floor(width * 0.22),
+      height: Math.floor(height * 0.16),
+    },
+    {
+      key: "description",
+      left: Math.floor(width * 0.18),
+      top: Math.floor(height * 0.5),
+      width: Math.floor(width * 0.42),
+      height: Math.floor(height * 0.16),
     },
     {
       key: "amount",
-      left: Math.floor(width * 0.62),
+      left: Math.floor(width * 0.58),
       top: Math.floor(height * 0.48),
-      width: Math.floor(width * 0.34),
+      width: Math.floor(width * 0.4),
       height: Math.floor(height * 0.18),
     },
   ];
@@ -297,14 +311,15 @@ async function extractDentalChartPanelTexts(filePath) {
       })
       .grayscale()
       .normalize()
-      .linear(1.45, -30)
+      .linear(1.55, -35)
       .sharpen()
-      .resize({ width: 1600, withoutEnlargement: false })
+      .resize({ width: 1800, withoutEnlargement: false })
       .png()
       .toBuffer();
     const tempPath = writeTempVariant(buffer, `panel-${spec.key}`);
     try {
-      const tess = await recognizeWithTesseract(tempPath, spec.key === "amount" ? "7" : "6");
+      const psm = spec.key === "amount" || spec.key === "date" ? "7" : "6";
+      const tess = await recognizeWithTesseract(tempPath, psm);
       panels.push({ key: spec.key, text: tess.text || "", confidence: tess.confidence || 0 });
     } finally {
       fs.unlink(tempPath, () => {});
@@ -343,11 +358,15 @@ function mergeChartPanelFields(fields = {}, panels = []) {
   const next = { ...(fields || {}) };
   const patientPanel = panels.find((panel) => panel.key === "patient");
   const treatmentPanel = panels.find((panel) => panel.key === "treatment");
+  const descriptionPanel = panels.find((panel) => panel.key === "description");
+  const datePanel = panels.find((panel) => panel.key === "date");
   const amountPanel = panels.find((panel) => panel.key === "amount");
   const patientText = patientPanel?.text || "";
   const treatmentText = treatmentPanel?.text || "";
+  const descriptionText = descriptionPanel?.text || "";
+  const dateText = datePanel?.text || "";
   const amountText = amountPanel?.text || "";
-  const combinedTreat = `${treatmentText}\n${amountText}\n${patientText}`;
+  const combinedTreat = `${treatmentText}\n${descriptionText}\n${dateText}\n${amountText}\n${patientText}`;
 
   const nameMatch = patientText.match(
     /\bname\b\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9 .,\-]{2,70})/i
@@ -394,7 +413,7 @@ function mergeChartPanelFields(fields = {}, panels = []) {
 
   const procedureMatches = [
     ...combinedTreat.matchAll(
-      /\b(oral\s*prophylaxis|op\b|deep\s*scal(?:e|ing)?|pr[o0][A-Za-z]{2,14}|p[eoa0r]{1,3}[pft][lt][aeiouy]?[txigjn]{1,5}|peo.?pt.?lat|peorenarn|ortho(?:dontic)?\s*install(?:ation)?|ortho(?:dontic)?\s*adjust(?:ment)?|exo|resto|restoration|retainer|mouthguard|denture|fpd|crown|whiten(?:ing)?|bleach(?:ing)?)\b/gi
+      /\b(oral\s*prophylaxis|op\b|deep\s*scal(?:e|ing)?|pr[o0][A-Za-z]{2,14}|r?orhilax|irq?tial|p[eoa0r]{1,3}[pft][lt][aeiouy]?[txigjn]{1,5}|peo.?pt.?lat|peorenarn|ortho(?:dontic)?\s*install(?:ation)?|ortho(?:dontic)?\s*adjust(?:ment)?|exo|resto|restoration|retainer|mouthguard|denture|fpd|crown|whiten(?:ing)?|bleach(?:ing)?)\b/gi
     ),
   ].map((match) => match[1]);
   for (const candidate of procedureMatches) {
@@ -402,7 +421,7 @@ function mergeChartPanelFields(fields = {}, panels = []) {
       next.procedure = candidate;
     }
   }
-  if (!next.procedure && /peo.?pt.?lat|peorenarn|pr[o0].{0,8}h[il1y]/i.test(combinedTreat)) {
+  if (!next.procedure && /peo.?pt.?lat|peorenarn|r?orhilax|irq?tial|pr[o0].{0,8}h[il1y]/i.test(combinedTreat)) {
     next.procedure = "Oral Prophylaxis";
   }
 
@@ -411,7 +430,9 @@ function mergeChartPanelFields(fields = {}, panels = []) {
   );
   if (dateMatch?.[0]) next.treatmentDate = dateMatch[0];
   else if (!next.treatmentDate) {
-    const noisyDate = combinedTreat.match(/(?:[\(\[]|\b)((?:tpt|jtp[1l7]?|itet|5ept|sept)[^\n]{0,24})/i);
+    const noisyDate = combinedTreat.match(
+      /(?:[\(\[]|\b)((?:tpt|jtp[1l7]?|itet|5ept|sept|jqju|joju|jaju)[^\n]{0,28})/i
+    );
     if (noisyDate?.[1]) next.treatmentDate = noisyDate[1];
   }
 

@@ -475,3 +475,31 @@ AMOUNT
   assert.equal(payload.patient.address, "");
   assert.equal(payload.procedure.treatment, "Oral Prophylaxis");
 });
+
+test("rOrhilax and Jaju OCR fill Oral Prophylaxis and SEPT date", () => {
+  const sample = `
+NAME
+ancelou Baehtnan
+ADDRESS
+MANDALUYONG CITY
+AGE
+2r
+DESCRIPTION
+DATE
+DEBIT
+CREDIT
+(tpt- n Jaju Ia rOrhilax{ e17
+`;
+  const { payload } = extractStructuredPayload(sample);
+  assert.equal(payload.procedure.treatment, "Oral Prophylaxis");
+  assert.match(payload.procedure.treatmentDate, /SEPT\s*7,\s*2024/i);
+  assert.ok(payload.procedure.visits.length >= 1);
+  assert.equal(payload.procedure.visits[0].treatment, "Oral Prophylaxis");
+  assert.match(payload.procedure.visits[0].treatmentDate, /SEPT\s*7,\s*2024/i);
+});
+
+test("IRQtial OCR token resolves to Oral Prophylaxis", () => {
+  const { resolveClinicProcedure } = require("../services/documentSyncExtraction");
+  assert.equal(resolveClinicProcedure("IRQtial"), "Oral Prophylaxis");
+  assert.equal(resolveClinicProcedure("rOrhilax"), "Oral Prophylaxis");
+});
