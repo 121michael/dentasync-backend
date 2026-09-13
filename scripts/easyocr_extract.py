@@ -303,7 +303,7 @@ def repair_noisy_written_date(text: str) -> str:
         chunk,
         flags=re.I,
     )
-    if (day_direct:
+    if day_direct:
         day = day_direct.group(1)
         if re.match(r"^(?:tpt|jtp|itet|itrt|trt)", chunk, flags=re.I) and day.lower() in {"1", "l"}:
             day = "7"
