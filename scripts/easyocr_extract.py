@@ -207,6 +207,25 @@ def repair_ocr_age_token(value: str) -> str:
     return str(age) if 10 <= age <= 120 else ""
 
 
+def is_plausible_clinic_amount(value: str | int) -> bool:
+    try:
+        amount = int(float(str(value).replace(",", "")))
+    except Exception:
+        return False
+    if amount < 100 or amount > 20000:
+        return False
+    digits = str(amount)
+    if re.fullmatch(r"19\d{2}", digits):
+        return False
+    if re.fullmatch(r"20[1-3]\d", digits):
+        return False
+    if len(digits) >= 5 and amount > 10000:
+        return False
+    if re.fullmatch(r"\d{1,2}20\d{2}", digits):
+        return False
+    return True
+
+
 def repair_ocr_year_token(value: str) -> str:
     token = re.sub(r"[^A-Za-z0-9]", "", value or "").lower()
     if re.fullmatch(r"20[0-3]\d", token):
@@ -214,9 +233,9 @@ def repair_ocr_year_token(value: str) -> str:
     if len(token) != 4:
         return ""
     maps = [
-        {"2": "2", "k": "2", "z": "2", "s": "2"},
+        {"2": "2", "k": "2", "z": "2", "s": "2", "j": "2"},
         {"0": "0", "n": "0", "o": "0", "d": "0", "q": "0"},
-        {"2": "2", "d": "2", "v": "2", "z": "2"},
+        {"2": "2", "d": "2", "v": "2", "z": "2", "j": "2"},
         {"4": "4", "u": "4", "a": "4", "h": "4"},
     ]
     out = []
@@ -234,12 +253,8 @@ def repair_ocr_amount_token(value: str) -> str:
     if not raw:
         return ""
 
-    def looks_like_year(digits: str) -> bool:
-        return bool(re.fullmatch(r"20[1-3]\d", digits))
-
-    if re.fullmatch(r"[1-9]\d{2,5}", raw) and not looks_like_year(raw):
-        amount = int(raw)
-        return raw if 100 <= amount <= 200000 else ""
+    if re.fullmatch(r"[1-9]\d{2,5}", raw):
+        return raw if is_plausible_clinic_amount(raw) else ""
     if len(raw) < 3 or len(raw) > 6:
         return ""
     chars = list(raw.lower())
@@ -261,12 +276,12 @@ def repair_ocr_amount_token(value: str) -> str:
         "g": "9",
     }
     digits = "".join(ch if ch.isdigit() else mapping.get(ch, "") for ch in chars)
-    if not re.fullmatch(r"[1-9]\d{2,5}", digits) or looks_like_year(digits):
+    if not re.fullmatch(r"[1-9]\d{2,5}", digits):
         return ""
     amount = int(digits)
     if re.search(r"[A-Za-z]", raw) and amount < 1000:
         return ""
-    return str(amount) if 100 <= amount <= 200000 else ""
+    return str(amount) if is_plausible_clinic_amount(amount) else ""
 
 
 def repair_noisy_written_date(text: str) -> str:
@@ -275,7 +290,7 @@ def repair_noisy_written_date(text: str) -> str:
         return clean_value(clean.group(0))
 
     mangled = re.search(
-        r"(?:[\(\[]|\b)((?:tpt|jtp[1l7]?|itet|5ept|sept)[A-Za-z0-9\-_.,\s]{0,28})",
+        r"(?:[\(\[]|\b)((?:tpt|jtp[1l7]?|itet|itrt|trt|5ept|sept)[A-Za-z0-9\-_.,\s]{0,40})",
         text or "",
         flags=re.I,
     )
@@ -284,14 +299,20 @@ def repair_noisy_written_date(text: str) -> str:
     chunk = mangled.group(1)
     day = ""
     day_direct = re.match(
-        r"(?:tpt|jtp|itet|5ept|sept)[-._\s]+([1-9]|[12]\d|3[01])(?:st|nd|rd|th)?\b",
+        r"(?:tpt|jtp|itet|itrt|trt|5ept|sept)[-._\s]+([1-9]|[12]\d|3[01])(?:st|nd|rd|th)?\b",
         chunk,
         flags=re.I,
     )
-    if day_direct:
+    if (day_direct:
         day = day_direct.group(1)
+        if re.match(r"^(?:tpt|jtp|itet|itrt|trt)", chunk, flags=re.I) and day.lower() in {"1", "l"}:
+            day = "7"
     else:
-        jammed = re.match(r"(?:tpt|jtp|itet|5ept|sept)[-._\s]*([1-9l])", chunk, flags=re.I)
+        jammed = re.match(
+            r"(?:tpt|jtp|itet|itrt|trt|5ept|sept)[-._\s]*([1-9l])",
+            chunk,
+            flags=re.I,
+        )
         if jammed:
             token = jammed.group(1).lower()
             day = "7" if token in {"1", "l"} else token
@@ -299,6 +320,15 @@ def repair_noisy_written_date(text: str) -> str:
         jtp_day = re.search(r"\bjtp\s*([1l7])\b|jtp([1l7])", text or "", flags=re.I)
         if jtp_day:
             token = (jtp_day.group(1) or jtp_day.group(2) or "").lower()
+            day = "7" if token in {"1", "l"} else token
+    if not day:
+        nearby = re.search(
+            r"(?:tpt|jtp|itet|itrt|trt|5ept|sept)[\s\S]{0,40}?\b([17l])\b",
+            text or "",
+            flags=re.I,
+        )
+        if nearby:
+            token = nearby.group(1).lower()
             day = "7" if token in {"1", "l"} else token
 
     year = ""
@@ -382,58 +412,53 @@ def extract_written_date(items: list[dict[str, Any]], text: str) -> str:
 
 
 def extract_amount(items: list[dict[str, Any]], text: str) -> str:
-    direct = find_values_for_label(items, LABELS["amountCharged"])
-    digits = re.findall(r"\b([1-9]\d{0,2}(?:,\d{3})+|[1-9]\d{2,5}|[A-Za-z0-9]{3,5})(?:\.00)?\b", direct or "")
-    for raw in digits:
-        repaired = repair_ocr_amount_token(raw)
-        if repaired:
-            return repaired
-        amount = raw.replace(",", "")
-        if re.fullmatch(r"20\d{2}", amount):
-            continue
-        if re.fullmatch(r"[1-9]\d{2,5}", amount):
-            value = int(float(amount))
-            if 100 <= value <= 200000:
-                return raw
+    letter_hits: list[str] = []
+    numeric_hits: list[str] = []
 
-    box_amounts = []
+    def consider(raw: str) -> None:
+        repaired = repair_ocr_amount_token(raw)
+        if repaired and is_plausible_clinic_amount(repaired):
+            if re.search(r"[A-Za-z]", raw or ""):
+                letter_hits.append(repaired)
+            else:
+                numeric_hits.append(repaired if repaired == raw.replace(",", "") else repaired)
+            return
+        amount = (raw or "").replace(",", "")
+        if re.fullmatch(r"[1-9]\d{2,5}", amount) and is_plausible_clinic_amount(amount):
+            numeric_hits.append(amount)
+
+    direct = find_values_for_label(items, LABELS["amountCharged"])
+    for raw in re.findall(
+        r"\b([1-9]\d{0,2}(?:,\d{3})+|[1-9]\d{2,5}|[A-Za-z0-9]{3,5})(?:\.00)?\b",
+        direct or "",
+    ):
+        consider(raw)
+
     for item in items:
-        for raw in re.findall(r"\b([1-9]\d{0,2}(?:,\d{3})+|[1-9]\d{2,5}|[A-Za-z0-9]{3,5})(?:\.00)?\b", item["text"] or ""):
-            repaired = repair_ocr_amount_token(raw)
-            if repaired:
-                box_amounts.append((int(repaired), repaired, item["cy"]))
-                continue
-            amount = raw.replace(",", "")
-            if re.fullmatch(r"20\d{2}", amount):
-                continue
-            if not re.fullmatch(r"[1-9]\d{2,5}", amount):
-                continue
-            value = int(float(amount))
-            if 500 <= value <= 200000:
-                box_amounts.append((value, raw, item["cy"]))
-    if box_amounts:
-        box_amounts.sort(key=lambda row: (-row[0], -row[2]))
-        return box_amounts[0][1]
+        for raw in re.findall(
+            r"\b([1-9]\d{0,2}(?:,\d{3})+|[1-9]\d{2,5}|[A-Za-z0-9]{3,5})(?:\.00)?\b",
+            item["text"] or "",
+        ):
+            consider(raw)
 
     match = re.search(
-        r"\bamount\b[\s\S]{0,100}?\b([1-9]\d{0,2}(?:,\d{3})+|[1-9]\d{2,5}|[A-Za-z0-9]{3,5})\b",
+        r"\b(?:amount|credit|debit)\b[\s\S]{0,100}?\b([1-9]\d{0,2}(?:,\d{3})+|[1-9]\d{2,5}|[A-Za-z0-9]{3,5})\b",
         text or "",
         flags=re.I,
     )
     if match:
-        repaired = repair_ocr_amount_token(match.group(1))
-        if repaired:
-            return repaired
-        raw = match.group(1)
-        amount = raw.replace(",", "")
-        if re.fullmatch(r"[1-9]\d{2,5}", amount) and not re.fullmatch(r"20\d{2}", amount):
-            return raw
+        consider(match.group(1))
 
-    noisy = re.search(r"\b([bB8][0oOdqvu]{2,4})\b", text or "")
-    if noisy:
-        repaired = repair_ocr_amount_token(noisy.group(1))
-        if repaired:
-            return repaired
+    for noisy in re.findall(r"\b([bB8][0oOdqvuw]{2,4})\b", text or ""):
+        consider(noisy)
+
+    # Prefer letter-repaired clinic amounts (Buvd -> 2000) over glued digit junk.
+    if letter_hits:
+        return letter_hits[0]
+    if numeric_hits:
+        # Prefer typical prophylaxis fees (1000-5000) when several candidates exist.
+        preferred = [value for value in numeric_hits if 1000 <= int(value) <= 5000]
+        return preferred[0] if preferred else numeric_hits[0]
     return ""
 
 
@@ -578,7 +603,7 @@ def extract_treatment_record_fields(text: str) -> dict[str, str]:
         if re.fullmatch(r"20[1-3]\d", digits):
             continue
         value = int(float(digits))
-        if 100 <= value <= 200000:
+        if 100 <= value <= 20000:
             amount = candidate
             if re.search(r"install", procedure or "", flags=re.I) or value >= 3000:
                 break
@@ -600,6 +625,242 @@ def extract_treatment_record_fields(text: str) -> dict[str, str]:
     }
 
 
+def fuzzy_month_token(text: str) -> str:
+    value = norm(text)
+    mapping = [
+        ("jan", "JAN"),
+        ("feb", "FEB"),
+        ("mar", "MAR"),
+        ("apr", "APR"),
+        ("may", "MAY"),
+        ("mav", "MAY"),
+        ("jun", "JUNE"),
+        ("jul", "JULY"),
+        ("aug", "AUG"),
+        ("sep", "SEPT"),
+        ("oct", "OCT"),
+        ("nov", "NOV"),
+        ("dec", "DEC"),
+        ("dze", "DEC"),
+        ("dzv", "DEC"),
+    ]
+    for needle, month in mapping:
+        if needle in value:
+            return month
+    return ""
+
+
+def fuzzy_procedure_token(text: str) -> str:
+    raw = clean_value(text)
+    if not raw:
+        return ""
+    compact = re.sub(r"[^A-Za-z0-9\-]+", " ", raw).strip()
+    lower = compact.lower()
+    tooth = re.search(r"\b(\d{2})\s*[-–]\s*(\d{2})\b", compact)
+    if re.search(r"\bexo\b|extrac", lower) or (tooth and re.search(r"\b(50|xo|ex)\b", lower)):
+        return f"EXO {tooth.group(1)}-{tooth.group(2)}" if tooth else compact
+    if tooth and len(compact) <= 14:
+        return f"EXO {tooth.group(1)}-{tooth.group(2)}"
+    if re.search(r"install|nstall|italat|iktau|stalla", lower):
+        token = re.search(r"[A-Za-z0-9]*((?:install|nstall|italat|iktau|stalla)[A-Za-z0-9]*)", compact, flags=re.I)
+        if token:
+            return clean_value(token.group(0))
+        return compact
+    if re.search(r"adjust|adjm|adj |adium|odilum|aqlum|azlut|ment", lower):
+        token = re.search(r"[A-Za-z0-9]*((?:adjust|adjm|adium|odilum|aqlum|azlut|ment)[A-Za-z0-9]*)", compact, flags=re.I)
+        if token:
+            prefix = "ORTHO " if "ortho" not in lower and "orilo" not in lower else ""
+            return clean_value(prefix + token.group(0))
+        return compact
+    if re.search(r"bracket|brlalet|bockel|backed", lower):
+        return compact
+    if looks_like_procedure(compact):
+        return compact
+    return ""
+
+
+def extract_treatment_table_visits(items: list[dict[str, Any]], text: str) -> list[dict[str, str]]:
+    blob = text or ""
+    if not re.search(r"tooth|procedure|amount\s*charg|treatment\s*record", blob, flags=re.I):
+        return []
+
+    # Locate printed headers to split columns.
+    headers = {"date": None, "procedure": None, "amount": None, "tooth": None}
+    for item in items:
+        value = norm(item["text"]).strip(" :.")
+        if value in {"date"} and headers["date"] is None:
+            headers["date"] = item
+        elif value.startswith("procedure") and headers["procedure"] is None:
+            headers["procedure"] = item
+        elif ("amount" in value or value in {"charged"}) and headers["amount"] is None:
+            headers["amount"] = item
+        elif value.startswith("tooth") and headers["tooth"] is None:
+            headers["tooth"] = item
+
+    header_bottom = max((h["bottom"] for h in headers.values() if h), default=0)
+    body_items = [item for item in items if item["top"] >= header_bottom - 8]
+    if not body_items:
+        body_items = items
+
+    # Cluster into rows by vertical center.
+    body_items = sorted(body_items, key=lambda item: (item["cy"], item["cx"]))
+    rows: list[list[dict[str, Any]]] = []
+    for item in body_items:
+        if norm(item["text"]) in HEADER_WORDS or norm(item["text"]) in {
+            "amount",
+            "charged",
+            "paid",
+            "balance",
+            "appt",
+            "next",
+            "dentist",
+            "dentists",
+            "dentisus",
+            "nols",
+            "no",
+            "no.",
+        }:
+            continue
+        if not rows:
+            rows.append([item])
+            continue
+        prev = rows[-1][0]
+        if abs(item["cy"] - prev["cy"]) <= 28:
+            rows[-1].append(item)
+        else:
+            rows.append([item])
+
+    date_x = headers["date"]["cx"] if headers["date"] else None
+    proc_x = headers["procedure"]["cx"] if headers["procedure"] else None
+    amount_x = headers["amount"]["cx"] if headers["amount"] else None
+    tooth_x = headers["tooth"]["cx"] if headers["tooth"] else None
+    if proc_x is None:
+        # Fallback thirds for typical treatment-record layout.
+        width_hint = max((item["right"] for item in items), default=1000)
+        date_x = width_hint * 0.12
+        proc_x = width_hint * 0.42
+        amount_x = width_hint * 0.72
+        tooth_x = width_hint * 0.25
+
+    visits: list[dict[str, str]] = []
+    for row_items in rows:
+        date_bits = []
+        proc_bits = []
+        amount_bits = []
+        tooth_bits = []
+        for item in sorted(row_items, key=lambda entry: entry["cx"]):
+            cx = item["cx"]
+            value = clean_value(item["text"])
+            if not value:
+                continue
+            # Nearest column by x center.
+            targets = [
+                ("date", date_x),
+                ("procedure", proc_x),
+                ("amount", amount_x),
+                ("tooth", tooth_x),
+            ]
+            targets = [(name, x) for name, x in targets if x is not None]
+            if not targets:
+                continue
+            name, _ = min(targets, key=lambda pair: abs(cx - pair[1]))
+            if name == "date":
+                date_bits.append(value)
+            elif name == "procedure":
+                proc_bits.append(value)
+            elif name == "amount":
+                amount_bits.append(value)
+            elif name == "tooth":
+                tooth_bits.append(value)
+
+        date_text = clean_value(" ".join(date_bits))
+        proc_text = clean_value(" ".join(proc_bits + tooth_bits))
+        amount_text = clean_value(" ".join(amount_bits))
+
+        month = fuzzy_month_token(date_text) or fuzzy_month_token(proc_text)
+        day_match = re.search(r"\b([1-9]|[12]\d|3[01])\b", date_text)
+        year_match = re.search(r"\b(20[1-3]\d)\b", date_text) or re.search(r"\b(20[1-3]\d)\b", proc_text)
+        treatment_date = ""
+        if month and day_match and year_match:
+            treatment_date = f"{month} {day_match.group(1)}, {year_match.group(1)}"
+        elif month and year_match:
+            treatment_date = f"{month} {year_match.group(1)}"
+
+        procedure = fuzzy_procedure_token(proc_text) or literal_procedure(proc_text, proc_text)
+        tooth = ""
+        tooth_match = re.search(r"\b(\d{2})\s*[-–]\s*(\d{2})\b", proc_text)
+        if tooth_match:
+            tooth = f"{tooth_match.group(1)}-{tooth_match.group(2)}"
+
+        amount = ""
+        for raw in re.findall(r"\b([1-9]\d{0,2}(?:,\d{3})+|[1-9]\d{2,4})\b", amount_text):
+            digits = raw.replace(",", "")
+            if re.fullmatch(r"20[1-3]\d", digits):
+                continue
+            value = int(float(digits))
+            if 400 <= value <= 20000:
+                amount = raw
+                break
+        if not amount:
+            repaired = repair_ocr_amount_token(amount_text)
+            if repaired and 400 <= int(repaired) <= 20000:
+                amount = repaired
+
+        if tooth and not procedure:
+            procedure = f"EXO {tooth}"
+
+        if not procedure and not amount and not tooth and not treatment_date:
+            continue
+        # Skip header-ish leftovers.
+        if procedure and re.search(r"^(procedure|dentist|amount|date|tooth)$", procedure, flags=re.I):
+            continue
+        visits.append(
+            {
+                "treatmentDate": treatment_date,
+                "treatment": procedure,
+                "amountCharged": amount,
+                "toothNos": tooth,
+                "dentistName": "",
+                "amountPaid": "",
+                "balance": "",
+                "nextAppt": "",
+            }
+        )
+
+    # Deduplicate while preserving order.
+    seen = set()
+    unique = []
+    for visit in visits:
+        key = (
+            visit.get("treatmentDate", ""),
+            visit.get("treatment", ""),
+            visit.get("amountCharged", ""),
+            visit.get("toothNos", ""),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(visit)
+    return unique[:30]
+
+
+def extract_gender(items: list[dict[str, Any]], text: str) -> str:
+    # Handwritten selection after printed Gender: M/F prompt.
+    match = re.search(
+        r"gender\s*[:\-]?\s*m\s*[\/|lI1]?\s*f\b[\s\S]{0,40}?\b([MF])\b",
+        text or "",
+        flags=re.I,
+    )
+    if match:
+        return match.group(1).upper()
+    for item in items:
+        if re.fullmatch(r"[MF]", clean_value(item["text"] or ""), flags=re.I):
+            # Prefer marks near a gender label.
+            return clean_value(item["text"]).upper()
+    return ""
+
+
+
 def field_quality(fields: dict[str, str]) -> int:
     score = 0
     if fields.get("fullName"):
@@ -619,7 +880,7 @@ def field_quality(fields: dict[str, str]) -> int:
     return score
 
 
-def structured_from_items(items: list[dict[str, Any]], text: str) -> dict[str, str]:
+def structured_from_items(items: list[dict[str, Any]], text: str) -> dict[str, Any]:
     full_name = clean_person_name(find_values_for_label(items, LABELS["fullName"], multi=True))
     address = find_values_for_label(items, LABELS["address"], multi=True)
     phone = extract_phone(find_values_for_label(items, LABELS["phone"]), text)
@@ -629,8 +890,9 @@ def structured_from_items(items: list[dict[str, Any]], text: str) -> dict[str, s
     treatment_date = extract_written_date(items, text)
     amount = extract_amount(items, text)
     notes = find_values_for_label(items, LABELS["complaint"], multi=True)
+    gender = extract_gender(items, text)
 
-    fields = {
+    fields: dict[str, Any] = {
         "fullName": full_name,
         "address": address,
         "phone": phone,
@@ -639,6 +901,8 @@ def structured_from_items(items: list[dict[str, Any]], text: str) -> dict[str, s
         "treatmentDate": treatment_date,
         "amountCharged": amount,
         "notes": notes,
+        "gender": gender,
+        "visits": [],
     }
 
     record_fields = extract_treatment_record_fields(text)
@@ -649,6 +913,36 @@ def structured_from_items(items: list[dict[str, Any]], text: str) -> dict[str, s
         recovered = recover_treatment_record_name(text)
         if recovered:
             fields["fullName"] = recovered
+
+    visits = extract_treatment_table_visits(items, text)
+    if not visits and (
+        fields.get("procedure")
+        or fields.get("treatmentDate")
+        or fields.get("amountCharged")
+    ):
+        # Dental charts usually have one DESCRIPTION row — mirror it into visits.
+        if re.search(r"description|debit|credit|prophylax|pr[o0].{0,10}h[il1y]", text or "", flags=re.I):
+            visits = [
+                {
+                    "treatmentDate": fields.get("treatmentDate") or "",
+                    "treatment": fields.get("procedure") or "",
+                    "amountCharged": fields.get("amountCharged") or "",
+                    "toothNos": "",
+                    "dentistName": "",
+                    "amountPaid": "",
+                    "balance": "",
+                    "nextAppt": "",
+                }
+            ]
+    if visits:
+        fields["visits"] = visits
+        primary = visits[0]
+        if primary.get("treatment") and not fields.get("procedure"):
+            fields["procedure"] = primary["treatment"]
+        if primary.get("treatmentDate") and not fields.get("treatmentDate"):
+            fields["treatmentDate"] = primary["treatmentDate"]
+        if primary.get("amountCharged") and not fields.get("amountCharged"):
+            fields["amountCharged"] = primary["amountCharged"]
 
     return fields
 
@@ -684,9 +978,13 @@ def read_image(reader, image) -> tuple[str, list[dict[str, Any]], float]:
     return text, items, confidence
 
 
-def merge_fields(base: dict[str, str], extra: dict[str, str]) -> dict[str, str]:
+def merge_fields(base: dict[str, Any], extra: dict[str, Any]) -> dict[str, Any]:
     merged = dict(base or {})
     for key, value in (extra or {}).items():
+        if key == "visits":
+            if value and (not merged.get("visits") or len(value) > len(merged.get("visits") or [])):
+                merged["visits"] = value
+            continue
         if not value:
             continue
         if key == "procedure" and merged.get("procedure") and looks_like_procedure(merged["procedure"]):
@@ -697,8 +995,7 @@ def merge_fields(base: dict[str, str], extra: dict[str, str]) -> dict[str, str]:
             continue
         if not merged.get(key):
             merged[key] = value
-        elif key in {"fullName", "age", "phone", "procedure", "treatmentDate", "amountCharged"}:
-            # Prefer longer/cleaner values when both exist.
+        elif key in {"fullName", "age", "phone", "procedure", "treatmentDate", "amountCharged", "gender"}:
             if len(str(value)) > len(str(merged.get(key) or "")) + 2:
                 merged[key] = value
     return merged
@@ -740,23 +1037,84 @@ def main() -> int:
             text, items, confidence = read_image(reader, rotated)
             fields = structured_from_items(items, text)
 
-            # Crop patient block (top-right) and treatment band for denser handwriting charts.
+            # Crop patient / treatment regions, plus a dedicated treatment-table crop.
             width, height = rotated.size
             crops = [
                 rotated.crop((int(width * 0.40), int(height * 0.02), int(width * 0.99), int(height * 0.48))),
                 rotated.crop((int(width * 0.02), int(height * 0.42), int(width * 0.99), int(height * 0.78))),
+                rotated.crop((int(width * 0.01), int(height * 0.14), int(width * 0.99), int(height * 0.96))),
+                # TREATMENT RECORD gender/header strip
+                rotated.crop((int(width * 0.50), int(height * 0.06), int(width * 0.99), int(height * 0.20))),
+                # Dental-chart amount / credit cell
+                rotated.crop((int(width * 0.62), int(height * 0.48), int(width * 0.96), int(height * 0.66))),
+                # Dental-chart date + description row
+                rotated.crop((int(width * 0.02), int(height * 0.48), int(width * 0.70), int(height * 0.66))),
             ]
             crop_texts = [text]
+            all_items = list(items)
             for crop in crops:
                 enhanced = ImageOps.autocontrast(ImageEnhance.Sharpness(crop).enhance(1.4))
                 crop_text, crop_items, _conf = read_image(reader, enhanced)
                 crop_fields = structured_from_items(crop_items, crop_text)
                 fields = merge_fields(fields, crop_fields)
+                if crop_fields.get("visits") and (
+                    not fields.get("visits") or len(crop_fields["visits"]) > len(fields.get("visits") or [])
+                ):
+                    fields["visits"] = crop_fields["visits"]
+                all_items.extend(crop_items)
                 if crop_text:
                     crop_texts.append(crop_text)
 
+            # Rebuild visits from the richest item set when this looks like a TREATMENT RECORD.
+            merged_blob = "\n".join(crop_texts)
+            table_visits = extract_treatment_table_visits(all_items, merged_blob)
+            if table_visits and (
+                not fields.get("visits") or len(table_visits) >= len(fields.get("visits") or [])
+            ):
+                fields["visits"] = table_visits
+                if table_visits[0].get("treatment") and not fields.get("procedure"):
+                    fields["procedure"] = table_visits[0]["treatment"]
+                if table_visits[0].get("treatmentDate") and not fields.get("treatmentDate"):
+                    fields["treatmentDate"] = table_visits[0]["treatmentDate"]
+                if table_visits[0].get("amountCharged") and not fields.get("amountCharged"):
+                    fields["amountCharged"] = table_visits[0]["amountCharged"]
+            if not fields.get("gender"):
+                fields["gender"] = extract_gender(all_items, merged_blob)
+            # Re-run date/amount repair across the merged OCR blob for dental charts.
+            if not fields.get("treatmentDate"):
+                fields["treatmentDate"] = repair_noisy_written_date(merged_blob)
+            if not fields.get("amountCharged") or not is_plausible_clinic_amount(fields.get("amountCharged") or ""):
+                repaired_amount = extract_amount(all_items, merged_blob)
+                if repaired_amount:
+                    fields["amountCharged"] = repaired_amount
+            if not fields.get("visits") and (
+                fields.get("procedure") or fields.get("treatmentDate") or fields.get("amountCharged")
+            ):
+                fields["visits"] = [
+                    {
+                        "treatmentDate": fields.get("treatmentDate") or "",
+                        "treatment": fields.get("procedure") or "",
+                        "amountCharged": fields.get("amountCharged") or "",
+                        "toothNos": "",
+                        "dentistName": "",
+                        "amountPaid": "",
+                        "balance": "",
+                        "nextAppt": "",
+                    }
+                ]
+            elif fields.get("visits"):
+                # Backfill blank cells on the first visit from recovered primary fields.
+                first = dict(fields["visits"][0])
+                if fields.get("procedure") and not first.get("treatment"):
+                    first["treatment"] = fields["procedure"]
+                if fields.get("treatmentDate") and not first.get("treatmentDate"):
+                    first["treatmentDate"] = fields["treatmentDate"]
+                if fields.get("amountCharged") and not first.get("amountCharged"):
+                    first["amountCharged"] = fields["amountCharged"]
+                fields["visits"][0] = first
+
             merged_text = "\n".join(part for part in crop_texts if part)
-            filled = field_quality(fields)
+            filled = field_quality(fields) + min(len(fields.get("visits") or []), 8)
             score = score_text(merged_text) + filled * 14 + confidence / 20.0
             if score > best["score"]:
                 best = {

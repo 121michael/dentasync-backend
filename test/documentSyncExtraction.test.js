@@ -96,6 +96,72 @@ b0vd
   assert.equal(payload.procedure.visits[0].amountCharged, "2000");
 });
 
+test("Joju/Buvd dental-chart OCR still fills Document Table date, procedure, and amount", () => {
+  const sample = `
+NAME
+ANGELOU OBAS-BAGHTNAN
+AGE
+25
+DESCRIPTION
+TIME
+DEBIT
+CREDIT
+DATE
+AMOUNT
+BALANCE
+(tpt-
+1
+Joju
+URa
+prOrhila/i{
+Buvd
+`;
+  const { payload } = extractStructuredPayload(sample);
+  assert.equal(payload.patient.age, "25");
+  assert.match(payload.procedure.treatment, /pr[o0].*h?ila/i);
+  assert.match(payload.procedure.treatmentDate, /SEPT\s*7,\s*2024/i);
+  assert.equal(payload.procedure.amountCharged, "2000");
+  assert.ok(payload.procedure.visits.length >= 1);
+  assert.match(payload.procedure.visits[0].treatment, /pr[o0].*h?ila/i);
+  assert.equal(payload.procedure.visits[0].amountCharged, "2000");
+  assert.match(payload.procedure.visits[0].treatmentDate, /SEPT\s*7,\s*2024/i);
+});
+
+test("glued junk amounts like 19002 are rejected", () => {
+  const sample = `
+NAME
+Ana Reyes
+DESCRIPTION
+ORAL PROPHYLAXIS
+DATE
+SEPT 7, 2024
+AMOUNT
+19002
+`;
+  const { payload } = extractStructuredPayload(sample);
+  assert.equal(payload.procedure.treatment, "ORAL PROPHYLAXIS");
+  assert.notEqual(payload.procedure.amountCharged, "19002");
+});
+
+test("multi-row treatment visits are not collapsed into a single primary row", () => {
+  const sample = `
+TREATMENT RECORD
+Name: Algene Matayon
+Age: 22
+Gender: F
+Date Tooth No Procedure Amount charged
+NOV 16 2023 ORTHO INSTALLATION 5000
+DEC 21 2023 ORTHO ADJUSTMENT 1250
+MAR 11 2025 EXO 24-44
+`;
+  const { payload } = extractStructuredPayload(sample);
+  assert.ok(payload.procedure.visits.length >= 3);
+  const treatments = payload.procedure.visits.map((row) => row.treatment).join(" | ");
+  assert.match(treatments, /INSTALLATION/i);
+  assert.match(treatments, /ADJUSTMENT/i);
+  assert.match(treatments, /EXO/i);
+});
+
 test("extraction never renames procedures to catalog labels", () => {
   const sample = `
 NAME: Ana Reyes

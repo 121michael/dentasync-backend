@@ -190,19 +190,25 @@ function mirrorPrimaryTreatmentIntoVisits(payload) {
   const hasPrimary =
     isPlausibleProcedure(primary.treatment) ||
     isPlausibleWrittenDate(primary.treatmentDate) ||
-    Number(String(primary.amountCharged || "").replace(/,/g, "")) >= 100;
+    isPlausibleClinicAmount(String(primary.amountCharged || "").replace(/,/g, ""));
   if (!hasPrimary) return payload;
 
   const visits = normalizeVisitRows(primary.visits || []);
   const primaryScore = procedureQualityScore(primary.treatment);
   const visitScore = visits.reduce((best, row) => Math.max(best, procedureQualityScore(row.treatment)), 0);
 
+  // Never collapse a multi-row TREATMENT RECORD table into a single primary row.
+  if (visits.length > 1) {
+    payload.procedure.visits = visits;
+    return payload;
+  }
+
   if (visits.length === 0 || primaryScore > visitScore) {
     payload.procedure.visits = buildVisitFromPrimary(primary);
     return payload;
   }
 
-  // Fill blank visit cells from readable primary fields (common on TREATMENT RECORD OCR).
+  // Fill blank visit cells from readable primary fields (common on dental charts).
   const first = { ...visits[0] };
   let changed = false;
   if (!isPlausibleProcedure(first.treatment) && isPlausibleProcedure(primary.treatment)) {
@@ -215,7 +221,7 @@ function mirrorPrimaryTreatmentIntoVisits(payload) {
   }
   if (
     !String(first.amountCharged || "").trim() &&
-    Number(String(primary.amountCharged || "").replace(/,/g, "")) >= 100
+    isPlausibleClinicAmount(String(primary.amountCharged || "").replace(/,/g, ""))
   ) {
     first.amountCharged = primary.amountCharged;
     changed = true;
@@ -258,7 +264,7 @@ function sanitizeExtractedPayload(payload) {
               : repairNoisyWrittenDate(row?.treatmentDate || "") || "",
             amountCharged:
               repairOcrAmountToken(row?.amountCharged || "") ||
-              (Number(String(row?.amountCharged || "").replace(/,/g, "")) >= 100
+              (isPlausibleClinicAmount(String(row?.amountCharged || "").replace(/,/g, ""))
                 ? row.amountCharged
                 : ""),
           }))
@@ -278,7 +284,7 @@ function sanitizeExtractedPayload(payload) {
       payload.procedure.amountCharged = "";
     }
     const amountNumeric = Number(String(payload.procedure.amountCharged || "").replace(/,/g, ""));
-    if (!Number.isFinite(amountNumeric) || amountNumeric < 100) {
+    if (!isPlausibleClinicAmount(amountNumeric)) {
       payload.procedure.amountCharged = repairOcrAmountToken(payload.procedure.amountCharged) || "";
     }
     if (Array.isArray(payload.procedure.visits)) {
@@ -288,7 +294,7 @@ function sanitizeExtractedPayload(payload) {
         return {
           ...row,
           amountCharged:
-            repaired || (Number.isFinite(rowAmount) && rowAmount >= 100 ? row.amountCharged : ""),
+            repaired || (isPlausibleClinicAmount(rowAmount) ? row.amountCharged : ""),
         };
       });
       payload.procedure.visits = normalizeVisitRows(payload.procedure.visits);
@@ -307,19 +313,26 @@ function ensureReadableExtraction(payload) {
 }
 
 function applyVisionVisits(payload, visits = []) {
-  const rows = normalizeVisitRows(visits);
-  if (!rows.length) return payload;
+  const rows = normalizeVisitRows(visits).map((row) => ({
+    ...row,
+    amountCharged: isPlausibleClinicAmount(String(row.amountCharged || "").replace(/,/g, ""))
+      ? row.amountCharged
+      : "",
+    treatment: isPlausibleProcedure(row.treatment) ? row.treatment : row.treatment || "",
+  }));
+  const usable = rows.filter((row) => hasReadableVisitSignal(row));
+  if (!usable.length) return payload;
 
   const existing = normalizeVisitRows(payload.procedure?.visits || []);
-  if (rows.length >= existing.length) {
-    payload.procedure.visits = rows;
-    const primary = pickPrimaryTreatmentRow(rows);
+  if (usable.length >= existing.length) {
+    payload.procedure.visits = usable;
+    const primary = pickPrimaryTreatmentRow(usable);
     if (primary?.treatment) payload.procedure.treatment = primary.treatment;
     if (primary?.treatmentDate) payload.procedure.treatmentDate = primary.treatmentDate;
     if (primary?.amountCharged) payload.procedure.amountCharged = primary.amountCharged;
     if (primary?.dentistName) payload.procedure.dentistName = primary.dentistName;
   } else if (!existing.length) {
-    payload.procedure.visits = rows;
+    payload.procedure.visits = usable;
   }
   return payload;
 }
@@ -421,11 +434,13 @@ function glueSplitAmounts(text) {
 }
 
 function isPlausibleClinicAmount(value) {
-  const n = Number(value);
-  if (!Number.isFinite(n) || n < 100 || n > 200000) return false;
+  const n = Number(String(value || "").replace(/,/g, ""));
+  if (!Number.isFinite(n) || n < 100 || n > 20000) return false;
   // Reject calendar years mistaken for fees (keep plain 2000/3000 clinic amounts).
   if (/^19\d{2}$/.test(String(Math.trunc(n)))) return false;
   if (/^20[1-3]\d$/.test(String(Math.trunc(n)))) return false;
+  // Glued OCR like 19002 / 20210 from phone/date soup.
+  if (String(Math.trunc(n)).length >= 5 && n > 10000) return false;
   if (/^\d{1,2}20\d{2}$/.test(String(Math.trunc(n)))) return false; // day+year glue
   return true;
 }
@@ -727,9 +742,13 @@ function pickPrimaryTreatmentRow(rows) {
   if (!rows?.length) return null;
   // Prefer the earliest installation with an amount, else latest visit with amount, else latest visit.
   const withAmount = rows.filter((row) => row.amountCharged);
-  const installation = withAmount.find((row) => /install/i.test(row.treatment));
+  const installation =
+    rows.find((row) => /install|nstall|italat|iktau/i.test(row.treatment || "")) ||
+    withAmount.find((row) => /install/i.test(row.treatment));
   if (installation) return installation;
+  const withProcedure = rows.filter((row) => isPlausibleProcedure(row.treatment));
   if (withAmount.length) return withAmount[withAmount.length - 1];
+  if (withProcedure.length) return withProcedure[0];
   return rows[rows.length - 1];
 }
 
@@ -859,7 +878,8 @@ function procedureQualityScore(value) {
   let score = text.length;
   if (/oral\s*prophylaxis/i.test(text)) score += 40;
   else if (/prophylax|pr[o0].{0,8}h[il1y].{0,8}x/i.test(text)) score += 30;
-  else if (/ortho|install|adjust|exo|cleaning|filling|whitening|crown|implant/i.test(text)) score += 20;
+  else if (/ortho|install|nstall|italat|iktau|adjust|adium|exo|cleaning|filling|whitening|crown|implant/i.test(text))
+    score += 20;
   else if (/^pr[o0][a-z]{2,}$/i.test(text) && /h[il1y]/i.test(text)) score += 4;
   if (/prortang|poormnare/i.test(text)) score -= 20;
   return score;
@@ -877,17 +897,23 @@ function repairNoisyWrittenDate(rawText) {
   if (cleanMatch) return cleanLine(cleanMatch[0]);
 
   const mangled = source.match(
-    /(?:[\(\[]|\b)((?:tpt|jtp[1l7]?|itet|5ept|sept)[A-Za-z0-9\-_.,\s]{0,28})/i
+    /(?:[\(\[]|\b)((?:tpt|jtp[1l7]?|itet|itrt|trt|5ept|sept)[A-Za-z0-9\-_.,\s]{0,40})/i
   );
   if (!mangled) return "";
 
   const chunk = mangled[1];
   let day = "";
-  const dayDirect = chunk.match(/^(?:tpt|jtp|itet|5ept|sept)[-._\s]+([1-9]|[12]\d|3[01])(?:st|nd|rd|th)?\b/i);
+  const dayDirect = chunk.match(
+    /^(?:tpt|jtp|itet|itrt|trt|5ept|sept)[-._\s]+([1-9]|[12]\d|3[01])(?:st|nd|rd|th)?\b/i
+  );
   if (dayDirect) {
     day = dayDirect[1];
+    // Mangled SEPT tokens frequently OCR day 7 as 1/l.
+    if (/^(?:tpt|jtp|itet|itrt|trt)/i.test(chunk) && /^(?:1|l)$/i.test(day)) {
+      day = "7";
+    }
   } else {
-    const jammed = chunk.match(/^(?:tpt|jtp|itet|5ept|sept)[-._\s]*([1-9l])/i);
+    const jammed = chunk.match(/^(?:tpt|jtp|itet|itrt|trt|5ept|sept)[-._\s]*([1-9l])/i);
     if (jammed) {
       const token = jammed[1].toLowerCase();
       // Handwritten 7 on these charts is frequently read as 1/l when jammed into SEPT.
@@ -898,6 +924,16 @@ function repairNoisyWrittenDate(rawText) {
     const jtpDay = source.match(/\bjtp\s*([1l7])\b/i) || source.match(/jtp([1l7])/i);
     if (jtpDay) {
       const token = jtpDay[1].toLowerCase();
+      day = token === "l" || token === "1" ? "7" : token;
+    }
+  }
+  if (!day) {
+    // Standalone OCR of day 7 near a SEPT mangling often appears as 1 / l / 7.
+    const nearbyDay = source.match(
+      /(?:tpt|jtp|itet|itrt|trt|5ept|sept)[\s\S]{0,40}?\b([17l])\b/i
+    );
+    if (nearbyDay) {
+      const token = nearbyDay[1].toLowerCase();
       day = token === "l" || token === "1" ? "7" : token;
     }
   }
@@ -930,9 +966,9 @@ function repairOcrYearToken(value) {
   if (/^20[0-3]\d$/.test(token)) return token;
   if (token.length !== 4) return "";
   const maps = [
-    { "2": "2", k: "2", z: "2", s: "2" },
+    { "2": "2", k: "2", z: "2", s: "2", j: "2" },
     { "0": "0", n: "0", o: "0", d: "0", q: "0" },
-    { "2": "2", d: "2", v: "2", z: "2" },
+    { "2": "2", d: "2", v: "2", z: "2", j: "2" },
     { "4": "4", u: "4", a: "4", h: "4" },
   ];
   let out = "";
@@ -953,16 +989,15 @@ function repairOcrAmountToken(value) {
   // Keep already-readable written amounts exactly (including commas).
   if (/^[1-9]\d{0,2}(?:,\d{3})+(?:\.\d{2})?$/.test(cleaned) || /^[1-9]\d{2,5}(?:\.\d{2})?$/.test(cleaned)) {
     const digits = cleaned.replace(/,/g, "");
-    if (!looksLikeYear(digits) && Number(digits) >= 100 && Number(digits) <= 200000) {
+    if (isPlausibleClinicAmount(digits)) {
       return cleaned;
     }
   }
 
   const raw = cleaned.replace(/[^A-Za-z0-9]/g, "");
   if (!raw) return "";
-  if (/^[1-9]\d{2,5}$/.test(raw) && !looksLikeYear(raw)) {
-    const numeric = Number(raw);
-    return numeric >= 100 && numeric <= 200000 ? raw : "";
+  if (/^[1-9]\d{2,5}$/.test(raw)) {
+    return isPlausibleClinicAmount(raw) ? raw : "";
   }
   if (raw.length < 3 || raw.length > 6) return "";
   const chars = raw.toLowerCase().split("");
@@ -990,7 +1025,8 @@ function repairOcrAmountToken(value) {
   const numeric = Number(digits);
   // Letter-repaired short tokens like b0w -> 200 are usually truncated 2000/3000 amounts.
   if (/[A-Za-z]/.test(cleaned) && numeric < 1000) return "";
-  return numeric >= 100 && numeric <= 200000 ? String(numeric) : "";
+  if (!isPlausibleClinicAmount(numeric)) return "";
+  return String(numeric);
 }
 
 function inferProcedure(text) {
@@ -1039,7 +1075,7 @@ function isPlausibleProcedure(value) {
   if (/dentis|charged|balance|appt|tooth\s*no|amount\s*paid|gender|telephone|\(|trt\b|joju|provenance|^(record|treatment\s*record)$/i.test(text)) {
     return false;
   }
-  return /prophylax|prophy|ortho|qatho|oatho|install|adjust|exo|extraction|cleaning|filling|whitening|crown|implant|consultation|oral|pr[o0].{0,10}h[il1y]/i.test(
+  return /prophylax|prophy|ortho|qatho|oatho|install|nstall|italat|iktau|adjust|adjm|adj[\s_]|adium|odilum|exo|extraction|cleaning|filling|whitening|crown|implant|consultation|oral|bracket|pr[o0].{0,10}h[il1y]|\d{2}\s*[-–]\s*\d{2}/i.test(
     text
   );
 }
@@ -1174,7 +1210,7 @@ function recoverNoisyOcrFields(rawText, existingFields = {}) {
     }
   }
 
-  if (!fields.amountCharged) {
+  if (!fields.amountCharged || !isPlausibleClinicAmount(String(fields.amountCharged).replace(/,/g, ""))) {
     const amountMatch = text.match(
       /(?:amount|credit|debit)\b[\s\S]{0,120}?\b([1-9]\d{0,2}(?:,\d{3})*(?:\.\d{2})?|[1-9]\d{2,5}|[A-Za-z0-9]{3,5})\b/i
     );
@@ -1185,13 +1221,14 @@ function recoverNoisyOcrFields(rawText, existingFields = {}) {
       repairOcrAmountToken(amountMatch?.[1] || "") ||
       repairOcrAmountToken(gluedAmount) ||
       repairOcrAmountToken(
-        (text.match(/\b([bB8][0oOdqvu]{2,4})\b/) || [])[1] || ""
+        (text.match(/\b([bB8][0oOdqvuw]{2,4})\b/) || [])[1] || ""
       );
     if (repaired) {
       fields.amountCharged = repaired;
-    } else if (amountMatch?.[1] && !/^20[1-3]\d$/.test(amountMatch[1].replace(/,/g, ""))) {
-      const numeric = Number(String(amountMatch[1]).replace(/,/g, ""));
-      if (numeric >= 100) fields.amountCharged = cleanLine(amountMatch[1]);
+    } else if (amountMatch?.[1] && isPlausibleClinicAmount(String(amountMatch[1]).replace(/,/g, ""))) {
+      fields.amountCharged = cleanLine(amountMatch[1]);
+    } else if (!isPlausibleClinicAmount(String(fields.amountCharged || "").replace(/,/g, ""))) {
+      fields.amountCharged = "";
     }
   } else {
     const repaired = repairOcrAmountToken(fields.amountCharged);
@@ -1291,15 +1328,23 @@ function applyExternalFields(payload, fields = {}) {
   }
   if (fields.amountCharged) {
     const written =
-      repairOcrAmountToken(fields.amountCharged) || cleanLine(String(fields.amountCharged));
-    const numeric = Number(String(written).replace(/,/g, ""));
-    if (written && Number.isFinite(numeric) && numeric >= 100) {
-      if (!next.procedure.amountCharged || Number(String(next.procedure.amountCharged).replace(/,/g, "")) < 100) {
+      repairOcrAmountToken(fields.amountCharged) ||
+      (isPlausibleClinicAmount(String(fields.amountCharged).replace(/,/g, ""))
+        ? cleanLine(String(fields.amountCharged))
+        : "");
+    if (written) {
+      if (
+        !next.procedure.amountCharged ||
+        !isPlausibleClinicAmount(String(next.procedure.amountCharged).replace(/,/g, ""))
+      ) {
         next.procedure.amountCharged = written;
       }
     }
   }
   if (fields.notes && !next.procedure.notes) next.procedure.notes = cleanLine(fields.notes);
+  if (Array.isArray(fields.visits) && fields.visits.length) {
+    applyVisionVisits(next, fields.visits);
+  }
   return next;
 }
 
@@ -1514,9 +1559,11 @@ function extractStructuredPayload(rawText) {
   if (looksLikePrintedGenderPrompt(payload.patient.gender) || /m\s*\/\s*f/i.test(payload.patient.gender)) {
     payload.patient.gender = "";
   }
-  // Printed forms often show "Gender: M/F" with no selection — ignore that prompt text.
-  if (/gender\s*[:\-]?\s*m\s*\/?\s*f/i.test(text) && !/(?:gender|sex)\s*[:\-]\s*(male|female)\b/i.test(text)) {
-    const selected = text.match(/(?:gender|sex)\s*[:\-]\s*([mf])\b(?!\s*\/)/i);
+  // Printed forms often show "Gender: M/F" with a handwritten selection beside/below.
+  if (/gender\s*[:\-]?\s*m\s*[\/|lI1]?\s*f/i.test(text) && !/(?:gender|sex)\s*[:\-]\s*(male|female)\b/i.test(text)) {
+    const selected =
+      text.match(/gender\s*[:\-]?\s*m\s*[\/|lI1]?\s*f\b[\s\S]{0,40}?\b([MF])\b/i) ||
+      text.match(/(?:gender|sex)\s*[:\-]\s*([mf])\b(?!\s*\/)/i);
     payload.patient.gender = selected?.[1] ? selected[1].toUpperCase() : "";
   }
   // Keep M/F exactly as marked on the form (do not expand to Male/Female).
@@ -1559,9 +1606,24 @@ function extractStructuredPayload(rawText) {
   // Keep procedure text as OCR wrote it — do not rename to a service catalog label.
   if (
     looksLikeOcrSoup(payload.procedure.treatment) ||
-    /^(record|treatment\s*record)$/i.test(payload.procedure.treatment)
+    /^(record|treatment\s*record)$/i.test(payload.procedure.treatment) ||
+    !isPlausibleProcedure(payload.procedure.treatment)
   ) {
-    payload.procedure.treatment = "";
+    const procedureMatches = [
+      ...text.matchAll(
+        /\b(oral\s*prophylaxis|pr[o0][A-Za-z0-9]{0,12}h[il1y][A-Za-z]{0,10}|ortho(?:dontic)?\s*install(?:ation)?|ortho(?:dontic)?\s*adjust(?:ment)?|exo(?:\s+\d{2}\s*[-–]\s*\d{2})?)\b/gi
+      ),
+    ].map((match) => cleanLine(match[1]));
+    let best = "";
+    let bestScore = 0;
+    for (const candidate of procedureMatches) {
+      const score = procedureQualityScore(candidate);
+      if (score > bestScore) {
+        best = candidate;
+        bestScore = score;
+      }
+    }
+    payload.procedure.treatment = bestScore > 0 ? best : "";
   }
   fieldStatuses.treatment = fieldStatus(
     payload.procedure.treatment,
@@ -1640,10 +1702,9 @@ function extractStructuredPayload(rawText) {
   if (repairedAmount) {
     payload.procedure.amountCharged = repairedAmount;
   }
-  const amountNumeric = Number(String(payload.procedure.amountCharged || "").replace(/,/g, ""));
-  if (!Number.isFinite(amountNumeric) || amountNumeric < 100) {
+  if (!isPlausibleClinicAmount(String(payload.procedure.amountCharged || "").replace(/,/g, ""))) {
     const fallbackAmount =
-      repairOcrAmountToken((text.match(/\b([bB8][0oOdqvu]{2,4})\b/) || [])[1] || "") || "";
+      repairOcrAmountToken((text.match(/\b([bB8][0oOdqvuw]{2,4})\b/) || [])[1] || "") || "";
     payload.procedure.amountCharged = fallbackAmount;
   }
   fieldStatuses.amountCharged = fieldStatus(

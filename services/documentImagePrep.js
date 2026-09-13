@@ -356,11 +356,25 @@ function mergeChartPanelFields(fields = {}, panels = []) {
     ...(amountText.match(/\b([1-9]\d{0,2}(?:,\d{3})+|[1-9]\d{3,5})\b/g) || []),
     ...(treatmentText.match(/\b([1-9]\d{0,2}(?:,\d{3})+|[1-9]\d{3,5})\b/g) || []),
   ];
-  if (!next.amountCharged) {
+  const currentAmount = String(next.amountCharged || "").replace(/,/g, "");
+  const needsAmount =
+    !next.amountCharged ||
+    /^20[1-3]\d$/.test(currentAmount) ||
+    (currentAmount.length >= 5 && Number(currentAmount) > 10000);
+  if (needsAmount) {
     for (const candidate of amountCandidates) {
-      if (/^20[1-3]\d$/.test(String(candidate).replace(/,/g, ""))) continue;
-      next.amountCharged = candidate;
-      break;
+      const digits = String(candidate).replace(/,/g, "");
+      if (/^20[1-3]\d$/.test(digits)) continue;
+      if (digits.length >= 5 && Number(digits) > 10000) continue;
+      // Prefer letter-repaired Buvd/B0vd style tokens that map to 2000/3000.
+      if (/^[bB8][0oOdqvuw]{2,4}$/.test(candidate)) {
+        next.amountCharged = candidate;
+        break;
+      }
+      if (/^[1-9]\d{2,4}$/.test(digits) && Number(digits) >= 100 && Number(digits) <= 20000) {
+        next.amountCharged = candidate;
+        break;
+      }
     }
   }
 
