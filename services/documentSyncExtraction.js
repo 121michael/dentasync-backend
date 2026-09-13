@@ -2217,6 +2217,10 @@ function extractStructuredPayload(rawText) {
     );
   }
 
+  mirrorPrimaryTreatmentIntoVisits(payload);
+  forceFillDentalChartTreatment(payload, text, {});
+  fieldStatuses = refreshFieldStatuses(payload, fieldStatuses);
+
   return { payload, notes: notes.join(" "), fieldStatuses };
 }
 
