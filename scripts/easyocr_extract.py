@@ -290,7 +290,7 @@ def repair_noisy_written_date(text: str) -> str:
         return clean_value(clean.group(0))
 
     mangled = re.search(
-        r"(?:[\(\[]|\b)((?:tpt|jtp[1l7]?|itet|itrt|trt|5ept|sept)[A-Za-z0-9\-_.,\s]{0,40})",
+        r"(?:[\(\[]|\b)((?:tpt|jtp[1l7]?|itet|itrt|5ept|sept)[A-Za-z0-9\-_.,\s]{0,40})",
         text or "",
         flags=re.I,
     )
@@ -299,17 +299,17 @@ def repair_noisy_written_date(text: str) -> str:
     chunk = mangled.group(1)
     day = ""
     day_direct = re.match(
-        r"(?:tpt|jtp|itet|itrt|trt|5ept|sept)[-._\s]+([1-9]|[12]\d|3[01])(?:st|nd|rd|th)?\b",
+        r"(?:tpt|jtp|itet|itrt|5ept|sept)[-._\s]+([1-9]|[12]\d|3[01])(?:st|nd|rd|th)?\b",
         chunk,
         flags=re.I,
     )
     if day_direct:
         day = day_direct.group(1)
-        if re.match(r"^(?:tpt|jtp|itet|itrt|trt)", chunk, flags=re.I) and day.lower() in {"1", "l"}:
+        if re.match(r"^(?:tpt|jtp|itet|itrt)", chunk, flags=re.I) and day.lower() in {"1", "l"}:
             day = "7"
     else:
         jammed = re.match(
-            r"(?:tpt|jtp|itet|itrt|trt|5ept|sept)[-._\s]*([1-9l])",
+            r"(?:tpt|jtp|itet|itrt|5ept|sept)[-._\s]*([1-9l])",
             chunk,
             flags=re.I,
         )
@@ -323,7 +323,7 @@ def repair_noisy_written_date(text: str) -> str:
             day = "7" if token in {"1", "l"} else token
     if not day:
         nearby = re.search(
-            r"(?:tpt|jtp|itet|itrt|trt|5ept|sept)[\s\S]{0,40}?\b([17l])\b",
+            r"(?:tpt|jtp|itet|itrt|5ept|sept)[\s\S]{0,40}?\b([17l])\b",
             text or "",
             flags=re.I,
         )

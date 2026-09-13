@@ -897,23 +897,23 @@ function repairNoisyWrittenDate(rawText) {
   if (cleanMatch) return cleanLine(cleanMatch[0]);
 
   const mangled = source.match(
-    /(?:[\(\[]|\b)((?:tpt|jtp[1l7]?|itet|itrt|trt|5ept|sept)[A-Za-z0-9\-_.,\s]{0,40})/i
+    /(?:[\(\[]|\b)((?:tpt|jtp[1l7]?|itet|itrt|5ept|sept)[A-Za-z0-9\-_.,\s]{0,40})/i
   );
   if (!mangled) return "";
 
   const chunk = mangled[1];
   let day = "";
   const dayDirect = chunk.match(
-    /^(?:tpt|jtp|itet|itrt|trt|5ept|sept)[-._\s]+([1-9]|[12]\d|3[01])(?:st|nd|rd|th)?\b/i
+    /^(?:tpt|jtp|itet|itrt|5ept|sept)[-._\s]+([1-9]|[12]\d|3[01])(?:st|nd|rd|th)?\b/i
   );
   if (dayDirect) {
     day = dayDirect[1];
     // Mangled SEPT tokens frequently OCR day 7 as 1/l.
-    if (/^(?:tpt|jtp|itet|itrt|trt)/i.test(chunk) && /^(?:1|l)$/i.test(day)) {
+    if (/^(?:tpt|jtp|itet|itrt)/i.test(chunk) && /^(?:1|l)$/i.test(day)) {
       day = "7";
     }
   } else {
-    const jammed = chunk.match(/^(?:tpt|jtp|itet|itrt|trt|5ept|sept)[-._\s]*([1-9l])/i);
+    const jammed = chunk.match(/^(?:tpt|jtp|itet|itrt|5ept|sept)[-._\s]*([1-9l])/i);
     if (jammed) {
       const token = jammed[1].toLowerCase();
       // Handwritten 7 on these charts is frequently read as 1/l when jammed into SEPT.
@@ -930,7 +930,7 @@ function repairNoisyWrittenDate(rawText) {
   if (!day) {
     // Standalone OCR of day 7 near a SEPT mangling often appears as 1 / l / 7.
     const nearbyDay = source.match(
-      /(?:tpt|jtp|itet|itrt|trt|5ept|sept)[\s\S]{0,40}?\b([17l])\b/i
+      /(?:tpt|jtp|itet|itrt|5ept|sept)[\s\S]{0,40}?\b([17l])\b/i
     );
     if (nearbyDay) {
       const token = nearbyDay[1].toLowerCase();
@@ -1671,7 +1671,12 @@ function extractStructuredPayload(rawText) {
     }
   }
   if (!isPlausibleWrittenDate(payload.procedure.treatmentDate)) {
-    const repairedDate = repairNoisyWrittenDate(text);
+    // Only attempt SEPT mangling repair on dental-chart style OCR, not TREATMENT RECORD soup.
+    const looksLikeDentalChartDate =
+      /description|debit|credit|prophylax|pr[o0].{0,10}h[il1y]|(?:\(|\b)(?:tpt|jtp|itet|5ept|sept)/i.test(
+        text
+      );
+    const repairedDate = looksLikeDentalChartDate ? repairNoisyWrittenDate(text) : "";
     payload.procedure.treatmentDate = repairedDate || "";
   }
   fieldStatuses.treatmentDate = fieldStatus(
