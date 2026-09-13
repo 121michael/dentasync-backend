@@ -402,8 +402,29 @@ function forceFillDentalChartTreatment(payload, rawText = "", fields = {}) {
       .map((m) => Number(m[1]))
       .filter((n) => n >= 2500 && n <= 3600);
     if (current > 0 && current <= 1500 && near.length) {
-      payload.procedure.amountCharged = snapClinicFee(String(near[0])) || "3000";
+      const candidate = near.sort((a, b) => Math.abs(a - 3000) - Math.abs(b - 3000))[0];
+      payload.procedure.amountCharged =
+        Math.abs(candidate - 3000) <= 200 ? "3000" : snapClinicFee(String(candidate)) || String(candidate);
     }
+  }
+
+  // Keep the first visit row aligned with the best primary DATE / PROCEDURE / AMOUNT.
+  const visits = normalizeVisitRows(payload.procedure.visits || []);
+  if (visits.length <= 1) {
+    const first = { ...(visits[0] || {}) };
+    if (isPlausibleProcedure(payload.procedure.treatment)) first.treatment = payload.procedure.treatment;
+    if (isPlausibleWrittenDate(payload.procedure.treatmentDate)) {
+      first.treatmentDate = payload.procedure.treatmentDate;
+    }
+    const primaryAmount = Number(String(payload.procedure.amountCharged || "").replace(/,/g, ""));
+    const visitAmount = Number(String(first.amountCharged || "").replace(/,/g, ""));
+    if (
+      isPlausibleClinicAmount(primaryAmount) &&
+      (!isPlausibleClinicAmount(visitAmount) || (visitAmount <= 1500 && primaryAmount >= 2000))
+    ) {
+      first.amountCharged = payload.procedure.amountCharged;
+    }
+    payload.procedure.visits = normalizeVisitRows([first]);
   }
 
   return mirrorPrimaryTreatmentIntoVisits(payload);
