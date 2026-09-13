@@ -406,6 +406,40 @@ function forceFillDentalChartTreatment(payload, rawText = "", fields = {}) {
     payload.procedure.treatment = "Oral Prophylaxis";
   }
 
+  // Age + phone from dental-chart header OCR (including common letter/digit soup).
+  if (!payload.patient.age) {
+    const ageToken =
+      repairOcrAgeToken(fields.age || "") ||
+      repairOcrAgeToken(
+        (text.match(/(?:\bage\b|\bace\b|\bno[eo]\b|\baqe\b|\bacc\b)\s*[:\-]?\s*([0-9A-Za-z]{1,3})\b/i) ||
+          [])[1] || ""
+      ) ||
+      normalizeAge(
+        (text.match(/(?:\bage\b|\bace\b|\bno[eo]\b|\bacc\b)\s*[:\-]?\s*([1-9]\d)\b/i) || [])[1] || ""
+      );
+    if (ageToken) payload.patient.age = ageToken;
+  }
+  if (!payload.patient.phone) {
+    const phone =
+      literalPhoneAsWritten(fields.phone || "") ||
+      literalPhoneAsWritten(repairOcrPhoneDigits(fields.phone || "")) ||
+      extractPhoneFromText(text);
+    if (phone) payload.patient.phone = phone;
+  }
+
+  // Prefer readable prophylaxis fees including 800 when CREDIT cell is faint.
+  if (
+    /oral\s*prophylaxis/i.test(payload.procedure.treatment || "") &&
+    !isPlausibleClinicAmount(String(payload.procedure.amountCharged || "").replace(/,/g, ""))
+  ) {
+    const fee800 = text.match(/\b(800|8[oO]{2}|b00)\b/);
+    const repaired800 = repairOcrAmountToken(fee800?.[1] || "") || (fee800?.[1] === "800" ? "800" : "");
+    if (repaired800) payload.procedure.amountCharged = repaired800 === "800" || repaired800 === "b00" ? "800" : repaired800;
+    if (!payload.procedure.amountCharged && /8[o0]{2}/i.test(text)) {
+      payload.procedure.amountCharged = "800";
+    }
+  }
+
   if (!isPlausibleClinicAmount(String(payload.procedure.amountCharged || "").replace(/,/g, ""))) {
     const fromFields = repairOcrAmountToken(fields.amountCharged || "");
     let amount = fromFields || "";
@@ -1541,13 +1575,13 @@ function recoverNoisyOcrFields(rawText, existingFields = {}) {
       /age\s*[:\-_]+\s*(\d{1,3})\b/i,
       /age\b[\s\S]{0,40}?\b([1-9]\d)\b/i,
       /age\b[\s\S]{0,40}?\b([0-9A-Za-z]{2})\b/i,
-      // Tess often reads AGE as noe/ace on dental charts.
-      /(?:\bage\b|\bace\b|\bno[eo]\b|\baqe\b)\s*[:\-]?\s*([0-9A-Za-z]{2})\b/i,
+      // Tess often reads AGE as noe/ace/acc on dental charts.
+      /(?:\bage\b|\bace\b|\bno[eo]\b|\baqe\b|\bacc\b)\s*[:\-]?\s*([0-9A-Za-z]{1,3})\b/i,
     ]);
     const age = repairOcrAgeToken(ageLabeled) || normalizeAge(ageLabeled);
     if (age) fields.age = age;
   } else {
-    const repairedAge = repairOcrAgeToken(fields.age);
+    const repairedAge = repairOcrAgeToken(fields.age) || normalizeAge(fields.age);
     if (repairedAge) fields.age = repairedAge;
   }
 
@@ -1555,11 +1589,18 @@ function recoverNoisyOcrFields(rawText, existingFields = {}) {
     const phoneLabeled = capture(text, [
       /(?:telephone|cellphone|cell\s*phone|phone|mobile|tel\.?|telepnone|hellphone|releronc)\s*[:\-]?\s*([A-Za-z0-9()[\]\-\s]{8,24})/i,
     ]);
+    // Prefer digit runs that already look like PH mobiles before letter repair.
+    const digitMobile = (text.match(/\b(0\d{10}|9\d{9})\b/) || [])[1] || "";
     const phone =
+      literalPhoneAsWritten(digitMobile) ||
       literalPhoneAsWritten(phoneLabeled) ||
       literalPhoneAsWritten(repairOcrPhoneDigits(phoneLabeled)) ||
       literalPhoneAsWritten(extractPhoneFromText(text));
     if (phone) fields.phone = phone;
+  } else {
+    const repairedPhone =
+      literalPhoneAsWritten(fields.phone) || literalPhoneAsWritten(repairOcrPhoneDigits(fields.phone));
+    if (repairedPhone) fields.phone = repairedPhone;
   }
 
   if (!fields.address) {

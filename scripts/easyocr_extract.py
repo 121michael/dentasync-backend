@@ -1133,7 +1133,7 @@ def read_image(reader, image) -> tuple[str, list[dict[str, Any]], float]:
 
 
 def read_image_digits(reader, image) -> list[str]:
-    """Digit-only OCR pass for faint CREDIT/AMOUNT cells (e.g. 3000 read as Buvd)."""
+    """Digit-only OCR pass for faint CREDIT/AMOUNT cells and phone/age values."""
     import numpy as np
 
     array = np.array(image)
@@ -1146,12 +1146,69 @@ def read_image_digits(reader, image) -> list[str]:
         value = re.sub(r"\D", "", str(text or ""))
         if not value or float(conf or 0) < 0.05:
             continue
+        hits.append(value)
         snapped = snap_clinic_fee(value)
         if snapped:
             hits.append(snapped)
         elif is_plausible_clinic_amount(value):
             hits.append(value)
-    return hits
+    # Preserve order but unique.
+    seen = set()
+    unique = []
+    for value in hits:
+        if value not in seen:
+            seen.add(value)
+            unique.append(value)
+    return unique
+
+
+def crop_around_label(image, items: list[dict[str, Any]], aliases: list[str], right=260, below=80, left_pad=4):
+    """Crop the value area to the right/below a printed label for digit OCR."""
+    labels = [item for item in items if is_label_text(item["text"], aliases)]
+    if not labels:
+        return None
+    label = sorted(labels, key=lambda item: (item["cy"], item["cx"]))[0]
+    width, height = image.size
+    left = max(0, int(label["right"] - left_pad))
+    top = max(0, int(label["top"] - 8))
+    right_x = min(width, int(label["right"] + right))
+    bottom = min(height, int(label["bottom"] + below))
+    if right_x - left < 40 or bottom - top < 20:
+        return None
+    return image.crop((left, top, right_x, bottom))
+
+
+def recover_phone_from_digit_hits(digit_hits: list[str]) -> str:
+    phone_digits = []
+    for value in digit_hits:
+        digits = re.sub(r"\D", "", value)
+        if re.fullmatch(r"0\d{10}", digits) or re.fullmatch(r"9\d{9}", digits):
+            phone_digits.append(digits if digits.startswith("0") else f"0{digits}")
+    joined = re.sub(r"\D", "", "".join(digit_hits))
+    # Prefer an 11-digit 09… mobile embedded in a longer digit soup.
+    embed = re.search(r"0\d{10}", joined) or re.search(r"9\d{9}", joined)
+    if embed:
+        digits = embed.group(0)
+        phone_digits.append(digits if digits.startswith("0") else f"0{digits}")
+    if re.fullmatch(r"0\d{10}", joined) or re.fullmatch(r"9\d{9}", joined):
+        phone_digits.append(joined if joined.startswith("0") else f"0{joined}")
+    if not phone_digits:
+        return ""
+    return max(phone_digits, key=len)
+
+
+def recover_age_from_digit_hits(digit_hits: list[str]) -> str:
+    for value in digit_hits:
+        age = extract_age(value) or repair_ocr_age_token(value)
+        if age:
+            return age
+        if re.fullmatch(r"[1-9]\d", value or "") and 10 <= int(value) <= 90:
+            return value
+    joined = re.sub(r"\D", "", "".join(digit_hits))
+    match = re.search(r"[1-9]\d", joined)
+    if match and 10 <= int(match.group(0)) <= 90:
+        return match.group(0)
+    return ""
 
 
 def merge_fields(base: dict[str, Any], extra: dict[str, Any]) -> dict[str, Any]:
@@ -1225,11 +1282,15 @@ def main() -> int:
                 rotated.crop((int(width * 0.62), int(height * 0.48), int(width * 0.96), int(height * 0.66))),
                 # Dental-chart date + description row
                 rotated.crop((int(width * 0.02), int(height * 0.48), int(width * 0.70), int(height * 0.66))),
+                # Telephone value area (right of TELEPHONE label on dental charts)
+                rotated.crop((int(width * 0.58), int(height * 0.10), int(width * 0.98), int(height * 0.22))),
+                # Age value area
+                rotated.crop((int(width * 0.70), int(height * 0.16), int(width * 0.92), int(height * 0.30))),
             ]
             crop_texts = [text]
             all_items = list(items)
             for idx, crop in enumerate(crops):
-                # Amount / treatment-row crops need stronger contrast for faint blue ink.
+                # Amount / treatment-row / phone / age crops need stronger contrast for faint ink.
                 if idx >= 4:
                     gray = ImageOps.grayscale(crop)
                     enhanced = ImageEnhance.Contrast(ImageOps.autocontrast(gray, cutoff=1)).enhance(2.6)
@@ -1239,7 +1300,11 @@ def main() -> int:
                 crop_text, crop_items, _conf = read_image(reader, enhanced)
                 # Amount crop: also try digit-only OCR so 3000 is not stuck as Buvd/2000.
                 if idx == 4:
-                    digit_hits = read_image_digits(reader, enhanced)
+                    digit_hits = [
+                        value
+                        for value in read_image_digits(reader, enhanced)
+                        if snap_clinic_fee(value) or is_plausible_clinic_amount(value)
+                    ]
                     if digit_hits:
                         best_digit = str(max(int(value) for value in digit_hits))
                         crop_text = f"{crop_text}\namount {best_digit}".strip()
@@ -1255,8 +1320,44 @@ def main() -> int:
                                 "bottom": 0,
                             }
                         )
+                # Telephone crop: digit-only pass for 09XXXXXXXXX mobiles.
+                if idx == 6:
+                    digit_hits = read_image_digits(reader, enhanced)
+                    phone_digits = []
+                    for value in digit_hits:
+                        digits = re.sub(r"\D", "", value)
+                        if re.fullmatch(r"0\d{10}", digits) or re.fullmatch(r"9\d{9}", digits):
+                            phone_digits.append(digits if digits.startswith("0") else f"0{digits}")
+                    # Also join fragmented digit tokens into an 11-digit mobile.
+                    joined = re.sub(r"\D", "", "".join(digit_hits))
+                    if re.fullmatch(r"0\d{10}", joined) or re.fullmatch(r"9\d{9}", joined):
+                        phone_digits.append(joined if joined.startswith("0") else f"0{joined}")
+                    if phone_digits:
+                        best_phone = max(phone_digits, key=len)
+                        crop_text = f"{crop_text}\ntelephone {best_phone}".strip()
+                        if not fields.get("phone"):
+                            fields["phone"] = best_phone
+                # Age crop: digit-only 2-digit ages.
+                if idx == 7:
+                    digit_hits = read_image_digits(reader, enhanced)
+                    for value in digit_hits:
+                        age = extract_age(value) or repair_ocr_age_token(value)
+                        if age and not fields.get("age"):
+                            fields["age"] = age
+                            crop_text = f"{crop_text}\nage {age}".strip()
+                            break
+                    # Also accept raw 2-digit hits like "25".
+                    for value in digit_hits:
+                        if re.fullmatch(r"[1-9]\d", value or "") and not fields.get("age"):
+                            fields["age"] = value
+                            crop_text = f"{crop_text}\nage {value}".strip()
+                            break
                 crop_fields = structured_from_items(crop_items, crop_text)
                 fields = merge_fields(fields, crop_fields)
+                if crop_fields.get("phone") and not fields.get("phone"):
+                    fields["phone"] = crop_fields["phone"]
+                if crop_fields.get("age") and not fields.get("age"):
+                    fields["age"] = crop_fields["age"]
                 if crop_fields.get("amountCharged"):
                     current_amount = fields.get("amountCharged") or ""
                     candidate = snap_clinic_fee(crop_fields["amountCharged"]) or crop_fields["amountCharged"]
@@ -1296,6 +1397,30 @@ def main() -> int:
                 repaired_amount = extract_amount(all_items, merged_blob)
                 if repaired_amount:
                     fields["amountCharged"] = repaired_amount
+            if not fields.get("age"):
+                fields["age"] = extract_age_from_items(all_items, merged_blob)
+            if not fields.get("phone"):
+                fields["phone"] = extract_phone(find_values_for_label(all_items, LABELS["phone"]), merged_blob)
+
+            # Label-anchored digit crops for TELEPHONE / AGE (more accurate than fixed boxes).
+            from PIL import ImageOps, ImageEnhance
+
+            phone_crop = crop_around_label(rotated, all_items, LABELS["phone"], right=320, below=70)
+            if phone_crop is not None and not fields.get("phone"):
+                gray = ImageOps.grayscale(phone_crop)
+                enhanced = ImageEnhance.Contrast(ImageOps.autocontrast(gray, cutoff=1)).enhance(2.8).convert("RGB")
+                digit_hits = read_image_digits(reader, enhanced)
+                phone = recover_phone_from_digit_hits(digit_hits)
+                if phone:
+                    fields["phone"] = phone
+            age_crop = crop_around_label(rotated, all_items, LABELS["age"], right=140, below=60)
+            if age_crop is not None and not fields.get("age"):
+                gray = ImageOps.grayscale(age_crop)
+                enhanced = ImageEnhance.Contrast(ImageOps.autocontrast(gray, cutoff=1)).enhance(2.8).convert("RGB")
+                digit_hits = read_image_digits(reader, enhanced)
+                age = recover_age_from_digit_hits(digit_hits)
+                if age:
+                    fields["age"] = age
             if not fields.get("visits") and (
                 fields.get("procedure") or fields.get("treatmentDate") or fields.get("amountCharged")
             ):

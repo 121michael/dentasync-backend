@@ -532,3 +532,28 @@ Jaju
   assert.equal(payload.procedure.visits[0].treatment, "Oral Prophylaxis");
   assert.match(payload.procedure.visits[0].treatmentDate, /SEPT\s*7,\s*2024/i);
 });
+
+test("dental chart AGE 2r and TELEPHONE 09 digits fill patient fields", () => {
+  const sample = `
+NAME
+ANGELOU OBAS-BAGHTNAN
+ADDRESS
+MANDALUYONG CITY
+TELEPHONE
+09454141070
+AGE
+2r
+DESCRIPTION
+ORAL PROPHYLAXIS
+DATE
+SEPT 7, 2024
+AMOUNT
+800
+`;
+  const { payload } = extractStructuredPayload(sample);
+  assert.equal(payload.patient.age, "25");
+  assert.equal(payload.patient.phone, "09454141070");
+  assert.equal(payload.procedure.treatment, "Oral Prophylaxis");
+  assert.equal(payload.procedure.amountCharged, "800");
+  assert.match(payload.procedure.treatmentDate, /SEPT\s*7,\s*2024/i);
+});

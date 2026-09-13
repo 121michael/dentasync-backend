@@ -287,6 +287,28 @@ async function recognizeWithTesseract(filePath, pageSegMode = "6") {
   }
 }
 
+async function recognizeWithTesseractDigits(filePath, pageSegMode = "7", digitsOnly = false) {
+  const { createWorker } = require("tesseract.js");
+  const worker = await createWorker("eng", 1, { legacyCore: true, legacyLang: true });
+  try {
+    const params = {
+      tessedit_pageseg_mode: String(pageSegMode),
+      preserve_interword_spaces: "1",
+    };
+    if (digitsOnly) {
+      params.tessedit_char_whitelist = "0123456789";
+    }
+    await worker.setParameters(params);
+    const result = await worker.recognize(filePath);
+    return {
+      text: String(result?.data?.text || "").trim(),
+      confidence: Number(result?.data?.confidence || 0),
+    };
+  } finally {
+    await worker.terminate();
+  }
+}
+
 async function extractDentalChartPanelTexts(filePath) {
   const sharp = require("sharp");
   const original = fs.readFileSync(filePath);
@@ -332,6 +354,20 @@ async function extractDentalChartPanelTexts(filePath) {
       width: Math.floor(width * 0.4),
       height: Math.floor(height * 0.18),
     },
+    {
+      key: "phone",
+      left: Math.floor(width * 0.55),
+      top: Math.floor(height * 0.1),
+      width: Math.floor(width * 0.42),
+      height: Math.floor(height * 0.12),
+    },
+    {
+      key: "age",
+      left: Math.floor(width * 0.68),
+      top: Math.floor(height * 0.16),
+      width: Math.floor(width * 0.28),
+      height: Math.floor(height * 0.14),
+    },
   ];
 
   for (const spec of specs) {
@@ -353,8 +389,15 @@ async function extractDentalChartPanelTexts(filePath) {
       .toBuffer();
     const tempPath = writeTempVariant(buffer, `panel-${spec.key}`);
     try {
-      const psm = spec.key === "amount" || spec.key === "date" ? "7" : "6";
-      const tess = await recognizeWithTesseract(tempPath, psm);
+      const psm =
+        spec.key === "amount" || spec.key === "date" || spec.key === "age" || spec.key === "phone"
+          ? "7"
+          : "6";
+      const tess = await recognizeWithTesseractDigits(
+        tempPath,
+        psm,
+        spec.key === "phone" || spec.key === "age" || spec.key === "amount"
+      );
       panels.push({ key: spec.key, text: tess.text || "", confidence: tess.confidence || 0 });
     } finally {
       fs.unlink(tempPath, () => {});
@@ -430,12 +473,26 @@ function mergeChartPanelFields(fields = {}, panels = []) {
       next.age = candidate;
     }
   }
+  const agePanel = panels.find((panel) => panel.key === "age");
+  if (agePanel?.text && !next.age) {
+    const digits = String(agePanel.text).replace(/\D/g, "");
+    if (/^[1-9]\d$/.test(digits) && Number(digits) >= 10 && Number(digits) <= 90) {
+      next.age = digits;
+    }
+  }
 
   const phoneMatch = patientText.match(
     /\b(?:telephone|cellphone|phone|tel\.?)\b\s*[:\-]?\s*([0-9OIl][0-9OIl\-\s]{8,16})/i
   );
   if (phoneMatch?.[1] && !next.phone) {
     next.phone = phoneMatch[1];
+  }
+  const phonePanel = panels.find((panel) => panel.key === "phone");
+  if (phonePanel?.text && !next.phone) {
+    const digits = String(phonePanel.text).replace(/\D/g, "");
+    if (/^0\d{10}$/.test(digits) || /^9\d{9}$/.test(digits)) {
+      next.phone = digits.startsWith("0") ? digits : `0${digits}`;
+    }
   }
 
   const addressMatch =
