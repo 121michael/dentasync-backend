@@ -48,18 +48,54 @@ function placeholderFor(value, emptyLabel = "Unreadable") {
   return value ? undefined : emptyLabel;
 }
 
+function visitHasSignal(row = {}) {
+  return Boolean(
+    String(row.treatmentDate || "").trim() ||
+      String(row.treatment || "").trim() ||
+      String(row.amountCharged || "").trim() ||
+      String(row.toothNos || "").trim() ||
+      String(row.dentistName || "").trim() ||
+      String(row.amountPaid || "").trim() ||
+      String(row.balance || "").trim() ||
+      String(row.nextAppt || "").trim()
+  );
+}
+
+/** Always put readable primary procedure fields into the Document Table visit rows. */
+function seedVisitsFromProcedure(procedure = {}) {
+  const rawVisits = Array.isArray(procedure.visits) ? procedure.visits : [];
+  const visits = rawVisits.map((row) => ({ ...emptyVisitRow(), ...(row || {}) }));
+  const usable = visits.filter(visitHasSignal);
+  if (usable.length) {
+    // Backfill blank cells on the first row from primary fields.
+    const first = { ...usable[0] };
+    if (!first.treatment && procedure.treatment) first.treatment = procedure.treatment;
+    if (!first.treatmentDate && procedure.treatmentDate) first.treatmentDate = procedure.treatmentDate;
+    if (!first.amountCharged && procedure.amountCharged) first.amountCharged = procedure.amountCharged;
+    if (!first.dentistName && procedure.dentistName) first.dentistName = procedure.dentistName;
+    return [first, ...usable.slice(1)];
+  }
+  const seeded = {
+    ...emptyVisitRow(),
+    treatmentDate: procedure.treatmentDate || "",
+    treatment: procedure.treatment || "",
+    dentistName: procedure.dentistName || "",
+    amountCharged: procedure.amountCharged || "",
+  };
+  return visitHasSignal(seeded) ? [seeded] : [emptyVisitRow()];
+}
+
 function normalizePayload(input) {
   const next = input && typeof input === "object" ? input : {};
-  const visits = Array.isArray(next.procedure?.visits) ? next.procedure.visits : [];
+  const procedure = { ...emptyPayload.procedure, ...(next.procedure || {}) };
   return {
     ...emptyPayload,
     ...next,
     documentForm: next.documentForm || emptyPayload.documentForm,
     patient: { ...emptyPayload.patient, ...(next.patient || {}) },
     procedure: {
-      ...emptyPayload.procedure,
-      ...(next.procedure || {}),
-      visits: visits.length ? visits : [emptyVisitRow()],
+      ...procedure,
+      visits: seedVisitsFromProcedure(procedure),
     },
   };
 }
@@ -363,7 +399,7 @@ export function AdminSyncPage() {
       setEditing(true);
       const autoMessage =
         response.message ||
-        `Document read successfully — populated ${filled} field${filled === 1 ? "" : "s"} with exact values from the scan. Review them, then Confirm & Save.`;
+        `Document read successfully — auto-filled ${filled} field${filled === 1 ? "" : "s"} from the scan. Review them, then Confirm & Save.`;
       setMessage(autoMessage);
       setStep("review");
       pushToast(autoMessage);
@@ -724,15 +760,15 @@ export function AdminSyncPage() {
               <header className="doc-table-card__header">
                 <h3>Document Table</h3>
                 <p className="doc-table-card__helper">
-                  Copied from the scan/attachment. Edit a cell only to fix OCR mistakes. Leave blank cells blank — do not
-                  invent values.
+                  Auto-filled from the scan/attachment. Edit a cell only to fix OCR mistakes. Leave blank cells blank —
+                  do not invent values.
                 </p>
               </header>
 
               <section className="doc-table-card__patient" aria-label="Patient information">
                 <span className="doc-table-card__section-label">Patient Information</span>
                 <div className="doc-table-card__patient-grid">
-                  <label className="doc-table-field">
+                  <label className="doc-table-field doc-table-field--wide">
                     <span>Name</span>
                     <input
                       value={payload.patient.fullName}
@@ -757,6 +793,33 @@ export function AdminSyncPage() {
                       placeholder={placeholderFor(payload.patient.gender, "")}
                       disabled={!editing || activeJob.status === "synced"}
                       onChange={(event) => updatePatient("gender", event.target.value)}
+                    />
+                  </label>
+                  <label className="doc-table-field">
+                    <span>Phone / Cellphone</span>
+                    <input
+                      value={payload.patient.phone}
+                      placeholder={placeholderFor(payload.patient.phone, "")}
+                      disabled={!editing || activeJob.status === "synced"}
+                      onChange={(event) => updatePatient("phone", event.target.value)}
+                    />
+                  </label>
+                  <label className="doc-table-field">
+                    <span>Date of Birth</span>
+                    <input
+                      value={payload.patient.dateOfBirth}
+                      placeholder={placeholderFor(payload.patient.dateOfBirth, "")}
+                      disabled={!editing || activeJob.status === "synced"}
+                      onChange={(event) => updatePatient("dateOfBirth", event.target.value)}
+                    />
+                  </label>
+                  <label className="doc-table-field doc-table-field--wide">
+                    <span>Address</span>
+                    <input
+                      value={payload.patient.address}
+                      placeholder={placeholderFor(payload.patient.address, "")}
+                      disabled={!editing || activeJob.status === "synced"}
+                      onChange={(event) => updatePatient("address", event.target.value)}
                     />
                   </label>
                 </div>

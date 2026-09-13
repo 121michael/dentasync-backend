@@ -1164,6 +1164,10 @@ function isPlausibleWrittenDate(value) {
   const text = cleanLine(value);
   if (!text) return false;
   if (/\(|trt|joju|date\s*no|description/i.test(text)) return false;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    const parsed = new Date(`${text}T00:00:00.000Z`);
+    return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === text;
+  }
   return new RegExp(
     `\\b(${MONTH_TOKEN_RE})\\s*[-.]?\\s*\\d{1,2}(?:st|nd|rd|th)?(?:,)?\\s*20\\d{2}\\b|\\b\\d{1,2}[\\/\\-.]\\d{1,2}[\\/\\-.]\\d{2,4}\\b`,
     "i"
@@ -2135,7 +2139,7 @@ async function extractDocumentData(filePath, mimeType, originalName) {
   filledCount = countReadableDocumentFields(structured.payload);
 
   const notes = [
-    `Document read successfully — populated ${filledCount} field${filledCount === 1 ? "" : "s"} with exact values from the scan. Review them, then Confirm & Save.`,
+    `Document read successfully — auto-filled ${filledCount} field${filledCount === 1 ? "" : "s"} from the scan. Review them, then Confirm & Save.`,
     extracted.warning,
   ]
     .filter(Boolean)

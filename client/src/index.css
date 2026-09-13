@@ -3400,10 +3400,13 @@ strong {
 }
 .doc-table-card__patient-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.7fr) minmax(0, 0.55fr) minmax(0, 0.7fr);
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.55fr) minmax(0, 0.7fr) minmax(0, 1fr) minmax(0, 0.9fr);
   gap: 0.7rem;
   width: 100%;
   max-width: 100%;
+}
+.doc-table-field--wide {
+  grid-column: 1 / -1;
 }
 .doc-table-field {
   display: grid;

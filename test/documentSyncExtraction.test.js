@@ -396,3 +396,32 @@ MAR 11 2025 EXO 24-44
   assert.equal(payload.procedure.visits[2].toothNos, "24-44");
   assert.match(payload.procedure.visits[2].treatment, /EXO/i);
 });
+
+test("ISO treatment dates are kept during sanitize so autofill is not wiped", () => {
+  const { payload } = extractStructuredPayload(`
+NAME: Ana Reyes
+DESCRIPTION
+Oral Prophylaxis
+DATE
+SEPT 7, 2024
+AMOUNT
+2000
+`);
+  payload.procedure.treatmentDate = "2024-09-07";
+  payload.procedure.visits = [
+    {
+      treatmentDate: "2024-09-07",
+      treatment: "Oral Prophylaxis",
+      amountCharged: "2000",
+      toothNos: "",
+      dentistName: "",
+      amountPaid: "",
+      balance: "",
+      nextAppt: "",
+    },
+  ];
+  ensureReadableExtraction(payload);
+  assert.equal(payload.procedure.treatmentDate, "2024-09-07");
+  assert.equal(payload.procedure.visits[0].treatmentDate, "2024-09-07");
+  assert.equal(payload.procedure.visits[0].treatment, "Oral Prophylaxis");
+});
