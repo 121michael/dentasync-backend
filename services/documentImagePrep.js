@@ -46,20 +46,67 @@ function scoreDocumentText(text) {
 
 function countFilledFields(fields) {
   if (!fields || typeof fields !== "object") return 0;
-  return ["fullName", "procedure", "treatmentDate", "amountCharged", "age", "phone", "address"].filter((key) => {
-    const text = String(fields[key] || "").trim();
-    if (!text) return false;
-    if (key === "phone") {
-      const digits = text.replace(/\D/g, "");
-      if (!/^(0\d{10}|9\d{9}|63\d{10})$/.test(digits)) return false;
+  const base = ["fullName", "procedure", "treatmentDate", "amountCharged", "age", "phone", "address", "gender"].filter(
+    (key) => {
+      const text = String(fields[key] || "").trim();
+      if (!text) return false;
+      if (key === "phone") {
+        const digits = text.replace(/\D/g, "");
+        if (!/^(0\d{10}|9\d{9}|63\d{10})$/.test(digits)) return false;
+      }
+      if (key === "address" && text.length < 4) return false;
+      if (/^date of birth|^amount|^procedure|^treatment/i.test(text)) return false;
+      if (key === "procedure" && /dentis|charged|balance|appt|tooth\s*no|amount\s*paid/i.test(text)) {
+        return false;
+      }
+      if (key === "amountCharged") {
+        const digits = text.replace(/,/g, "");
+        if (/^20[1-3]\d$/.test(digits)) return false;
+        if (digits.length >= 5 && Number(digits) > 10000) return false;
+      }
+      return true;
     }
-    if (key === "address" && text.length < 4) return false;
-    if (/^date of birth|^amount|^procedure|^treatment/i.test(text)) return false;
-    if (key === "procedure" && /dentis|charged|balance|appt|tooth\s*no|amount\s*paid/i.test(text)) {
-      return false;
-    }
-    return true;
-  }).length;
+  ).length;
+  const visits = Array.isArray(fields.visits) ? fields.visits : [];
+  return base + Math.min(visits.filter((row) => String(row?.treatment || "").trim()).length, 8);
+}
+
+function mergeEasyOcrResults(primary, secondary) {
+  if (!primary && !secondary) return null;
+  if (!primary) return secondary;
+  if (!secondary) return primary;
+  const preferPrimary = resultQuality(primary) >= resultQuality(secondary);
+  const winner = preferPrimary ? primary : secondary;
+  const other = preferPrimary ? secondary : primary;
+  const fields = { ...(winner.fields || {}) };
+  const otherFields = other.fields || {};
+  for (const key of [
+    "fullName",
+    "address",
+    "phone",
+    "age",
+    "procedure",
+    "treatmentDate",
+    "amountCharged",
+    "notes",
+    "gender",
+  ]) {
+    if (!fields[key] && otherFields[key]) fields[key] = otherFields[key];
+  }
+  const winnerVisits = Array.isArray(fields.visits) ? fields.visits : [];
+  const otherVisits = Array.isArray(otherFields.visits) ? otherFields.visits : [];
+  if (otherVisits.length > winnerVisits.length) {
+    fields.visits = otherVisits;
+  } else if (!winnerVisits.length && otherVisits.length) {
+    fields.visits = otherVisits;
+  }
+  return {
+    ...winner,
+    fields,
+    text: [winner.text, other.text].filter(Boolean).join("\n"),
+    score: Math.max(Number(winner.score || 0), Number(other.score || 0)),
+    confidence: Math.max(Number(winner.confidence || 0), Number(other.confidence || 0)),
+  };
 }
 
 function resultQuality(result) {
@@ -231,10 +278,10 @@ async function extractDentalChartPanelTexts(filePath) {
     },
     {
       key: "amount",
-      left: Math.floor(width * 0.7),
-      top: Math.floor(height * 0.5),
-      width: Math.floor(width * 0.28),
-      height: Math.floor(height * 0.12),
+      left: Math.floor(width * 0.62),
+      top: Math.floor(height * 0.48),
+      width: Math.floor(width * 0.34),
+      height: Math.floor(height * 0.18),
     },
   ];
 
@@ -317,7 +364,15 @@ function mergeChartPanelFields(fields = {}, panels = []) {
   const ageMatch =
     patientText.match(/\bage\b\s*[:\-]?\s*([1-9]\d)\b/i) ||
     patientText.match(/\bage\b\s*[:\-]?\s*([0-9A-Za-z]{2})\b/i);
-  if (ageMatch?.[1] && !next.age) next.age = ageMatch[1];
+  if (ageMatch?.[1]) {
+    const candidate = String(ageMatch[1]).trim();
+    if (!next.age) {
+      next.age = candidate;
+    } else if (/^\d{2}$/.test(candidate) && Number(candidate) >= 10 && Number(candidate) <= 90) {
+      // Patient-panel age is usually more trustworthy than whole-page OCR guesses.
+      next.age = candidate;
+    }
+  }
 
   const phoneMatch = patientText.match(
     /\b(?:telephone|cellphone|phone|tel\.?)\b\s*[:\-]?\s*([0-9OIl][0-9OIl\-\s]{8,16})/i
@@ -414,8 +469,7 @@ async function extractBestImageText(filePath) {
     easyPreprocessed = null;
   }
 
-  const easyDirect =
-    resultQuality(easyOriginal) >= resultQuality(easyPreprocessed) ? easyOriginal : easyPreprocessed || easyOriginal;
+  const easyDirect = mergeEasyOcrResults(easyOriginal, easyPreprocessed);
   const easyFilled = countFilledFields(easyDirect?.fields);
   const easyStrong =
     easyDirect?.text &&
