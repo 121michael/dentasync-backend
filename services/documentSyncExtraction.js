@@ -366,10 +366,13 @@ function forceFillDentalChartTreatment(payload, rawText = "", fields = {}) {
     payload.procedure.treatment = resolved;
   } else if (!payload.procedure.treatment && resolved) {
     payload.procedure.treatment = resolved;
-  } else if (
+  }
+
+  // Only map to Oral Prophylaxis when the document OCR itself contains prophylaxis-like text.
+  if (
     !payload.procedure.treatment &&
     (looksLikeDentalChart || patientFilled) &&
-    /(?:tpt|jtp|sept|joju|jaju|jqju|r?orhilax|pr[o0].{0,8}h[il1y]|irq?tial|peo.?pt.?lat|peorenarn|prophyl)/i.test(
+    /(?:r?orhilax|pr[o0].{0,8}h[il1y]|irq?tial|peo.?pt.?lat|peorenarn|prophyl|oral\s*proph|\bop\b)/i.test(
       text
     )
   ) {
@@ -382,28 +385,6 @@ function forceFillDentalChartTreatment(payload, rawText = "", fields = {}) {
       repairNoisyWrittenDate(fields.notes || "") ||
       repairNoisyWrittenDate(text);
     if (repaired) payload.procedure.treatmentDate = repaired;
-  }
-
-  // SEPT chart date recovered but DESCRIPTION blank → Oral Prophylaxis on dental charts.
-  if (
-    !payload.procedure.treatment &&
-    isPlausibleWrittenDate(payload.procedure.treatmentDate) &&
-    /sept/i.test(payload.procedure.treatmentDate) &&
-    (looksLikeDentalChart || patientFilled) &&
-    !/\b(ortho|exo|resto|crown|denture|fpd|whitening|scal(?:e|ing))\b/i.test(text)
-  ) {
-    payload.procedure.treatment = "Oral Prophylaxis";
-  }
-
-  // Patient header filled on a dental chart but treatment still blank: last-resort OP
-  // when CREDIT/DESCRIPTION headers exist and no competing procedure tokens.
-  if (
-    !payload.procedure.treatment &&
-    patientFilled &&
-    /\b(?:description|credit|debit|amount|balance)\b/i.test(text) &&
-    !/\b(ortho|exo|resto|crown|denture|fpd|whitening|install|adjust)\b/i.test(text)
-  ) {
-    payload.procedure.treatment = "Oral Prophylaxis";
   }
 
   // Age + phone from dental-chart header OCR (including common letter/digit soup).
@@ -427,16 +408,14 @@ function forceFillDentalChartTreatment(payload, rawText = "", fields = {}) {
     if (phone) payload.patient.phone = phone;
   }
 
-  // Prefer readable prophylaxis fees including 800 when CREDIT cell is faint.
+  // Amount only from digits/OCR tokens present on the document (including 800 / 8oo repairs).
   if (
     /oral\s*prophylaxis/i.test(payload.procedure.treatment || "") &&
     !isPlausibleClinicAmount(String(payload.procedure.amountCharged || "").replace(/,/g, ""))
   ) {
-    const fee800 = text.match(/\b(800|8[oO]{2}|b00)\b/);
-    const repaired800 = repairOcrAmountToken(fee800?.[1] || "") || (fee800?.[1] === "800" ? "800" : "");
-    if (repaired800) payload.procedure.amountCharged = repaired800 === "800" || repaired800 === "b00" ? "800" : repaired800;
-    if (!payload.procedure.amountCharged && /8[o0]{2}/i.test(text)) {
-      payload.procedure.amountCharged = "800";
+    const fee800 = text.match(/\b(800|8[oO]{2})\b/);
+    if (fee800?.[1]) {
+      payload.procedure.amountCharged = /8[oO]{2}/.test(fee800[1]) ? "800" : fee800[1];
     }
   }
 
@@ -448,12 +427,18 @@ function forceFillDentalChartTreatment(payload, rawText = "", fields = {}) {
         repairOcrAmountToken((text.match(/\b([bBeE8][0oOdqvuw]{2,4})\b/) || [])[1] || "") ||
         "";
     }
-    // Handwritten 3000 often OCR's as 3171 / 3400 — snap near 3000 on prophylaxis charts.
+    // Prefer a near-document amount token (e.g. 3171 → 3000) only when digits exist on the scan.
     if (!amount && /oral\s*prophylaxis|r?orhilax|pr[o0].{0,8}h[il1y]|irq?tial/i.test(text)) {
       const near = [...text.matchAll(/\b([1-9]\d{3})\b/g)]
         .map((m) => Number(m[1]))
         .filter((n) => n >= 2500 && n <= 3600);
-      if (near.length) amount = snapClinicFee(String(near[0])) || "3000";
+      if (near.length) {
+        const candidate = near.sort((a, b) => Math.abs(a - 3000) - Math.abs(b - 3000))[0];
+        amount =
+          Math.abs(candidate - 3000) <= 200
+            ? "3000"
+            : snapClinicFee(String(candidate)) || String(candidate);
+      }
     }
     if (amount) payload.procedure.amountCharged = amount;
   } else if (
@@ -1259,8 +1244,9 @@ function repairNoisyWrittenDate(rawText) {
       day = token === "l" || token === "1" ? "7" : token;
     }
   }
-  // SEPT. 7 charts: OCR often drops the day and keeps only (tpt + Joju/Jaju year.
-  if (!day && /(?:tpt|jtp|sept|jqju|joju|jaju)/i.test(source)) {
+  // SEPT. 7 charts: OCR often drops the day beside a clear SEPT mangling ((tpt) + year.
+  // Only default day 7 when a SEPT/tpt token is present — never invent a date from year alone.
+  if (!day && /(?:tpt|jtp|itet|itrt|5ept|sept)/i.test(source)) {
     day = "7";
   }
 
@@ -2002,8 +1988,16 @@ function extractStructuredPayload(rawText) {
           /(?:\bage\b|\bace\b|\bno[eo]\b)\s*[:\-]?\s*([0-9A-Za-z]{2})\b/i,
         ])
     );
-  // Blank Age: labels on treatment records must not steal day numbers from visit dates.
-  if (isTreatmentRecordForm(text) && !/(?:^|\n)\s*age\s*[:\-]\s*[0-9A-Za-z]{1,3}\b/im.test(text)) {
+  // Blank Age: treatment-record visit dates must not become Age — but dental charts
+  // with a real AGE label (plus telephone/occupation) should keep repaired ages like 2r→25.
+  const hasDentalChartAgeHeader =
+    /\bage\b/i.test(text) &&
+    /\b(?:telephone|cellphone|occupation|address|complaint|status)\b/i.test(text);
+  if (
+    isTreatmentRecordForm(text) &&
+    !hasDentalChartAgeHeader &&
+    !/(?:^|\n)\s*age\s*[:\-]?\s*[0-9A-Za-z]{1,3}\b/im.test(text)
+  ) {
     payload.patient.age = "";
   }
   fieldStatuses.age = fieldStatus(payload.patient.age, labelPresent(text, /\bage\b/i));

@@ -629,10 +629,10 @@ export function AdminSyncPage() {
         <section className="admin-panel">
           <h2>Choose document source</h2>
           <p className="muted-copy">
-            Hard copy via camera, or digital PDF / PNG / JPEG. Fields are filled with the exact text found on the
-            document — nothing is renamed or invented. If the document cannot be read, an error is shown. Existing
-            patient records are not overwritten; only new treatment rows are added. Tip: keep the paper upright and
-            well-lit for clearer OCR.
+            Hard copy via camera, or digital PDF / PNG / JPEG. Scanning and uploads are processed for clearer
+            readability, then fields are filled only with values that match the scanned document. Blank cells stay
+            blank when a value cannot be read — nothing is invented. Existing patient records are not overwritten;
+            only new treatment rows are added. Tip: keep the paper upright and well-lit.
           </p>
 
           <div className="admin-sync-source-grid">
@@ -717,8 +717,8 @@ export function AdminSyncPage() {
               </span>
               <h2>{step === "done" ? "Document successfully imported" : "Review & confirm"}</h2>
               <p>
-                The table below is copied from the scanned/attached document. Fix OCR mistakes in the cells, then
-                confirm. Blank cells stay blank.
+                The table below is filled to match the scanned/attached document. Fix OCR mistakes in the cells, then
+                confirm. Blank cells stay blank when unread.
               </p>
               <small className="muted-copy">
                 Source: {activeJob.sourceLabel || activeJob.sourceType} · {activeJob.originalName}
@@ -760,8 +760,8 @@ export function AdminSyncPage() {
               <header className="doc-table-card__header">
                 <h3>Document Table</h3>
                 <p className="doc-table-card__helper">
-                  Auto-filled from the scan/attachment. Edit a cell only to fix OCR mistakes. Leave blank cells blank —
-                  do not invent values.
+                  Auto-filled to match the scan/attachment. Edit a cell only to fix OCR mistakes. Leave blank cells
+                  blank — do not invent values.
                 </p>
               </header>
 

@@ -456,7 +456,7 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
           );
         }
         return res.status(201).json({
-          message: `Document read successfully — populated ${filled} field${filled === 1 ? "" : "s"} with exact values from the scan. Review them, then Confirm & Save.`,
+          message: `Document read successfully — populated ${filled} field${filled === 1 ? "" : "s"} to match the scan. Review them, then Confirm & Save.`,
           job: mapJob(updated.rows[0]),
           fieldStatuses: extraction.fieldStatuses || {},
           autoFilledCount: filled,

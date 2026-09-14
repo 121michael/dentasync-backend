@@ -169,6 +169,18 @@ async function buildPreprocessVariants(filePath) {
     degrees: 0,
     buffer: await sharp(sized, { failOn: "none" }).grayscale().normalize().sharpen().png().toBuffer(),
   });
+  // Mild contrast keeps faint pencil/pen readable without blowing out ink.
+  variants.push({
+    label: "mild",
+    degrees: 0,
+    buffer: await sharp(sized, { failOn: "none" })
+      .grayscale()
+      .normalize()
+      .linear(1.2, -12)
+      .sharpen()
+      .png()
+      .toBuffer(),
+  });
   variants.push({
     label: "contrast",
     degrees: 0,
@@ -393,12 +405,23 @@ async function extractDentalChartPanelTexts(filePath) {
         spec.key === "amount" || spec.key === "date" || spec.key === "age" || spec.key === "phone"
           ? "7"
           : "6";
-      const tess = await recognizeWithTesseractDigits(
-        tempPath,
-        psm,
-        spec.key === "phone" || spec.key === "age" || spec.key === "amount"
-      );
-      panels.push({ key: spec.key, text: tess.text || "", confidence: tess.confidence || 0 });
+      // Age/phone: read both free text (for 2r-style OCR) and digits-only.
+      if (spec.key === "age" || spec.key === "phone") {
+        const free = await recognizeWithTesseract(tempPath, psm);
+        const digits = await recognizeWithTesseractDigits(tempPath, psm, true);
+        panels.push({
+          key: spec.key,
+          text: [free.text, digits.text].filter(Boolean).join("\n"),
+          confidence: Math.max(free.confidence || 0, digits.confidence || 0),
+        });
+      } else {
+        const tess = await recognizeWithTesseractDigits(
+          tempPath,
+          psm,
+          spec.key === "amount"
+        );
+        panels.push({ key: spec.key, text: tess.text || "", confidence: tess.confidence || 0 });
+      }
     } finally {
       fs.unlink(tempPath, () => {});
     }
@@ -474,10 +497,14 @@ function mergeChartPanelFields(fields = {}, panels = []) {
     }
   }
   const agePanel = panels.find((panel) => panel.key === "age");
-  if (agePanel?.text && !next.age) {
-    const digits = String(agePanel.text).replace(/\D/g, "");
-    if (/^[1-9]\d$/.test(digits) && Number(digits) >= 10 && Number(digits) <= 90) {
-      next.age = digits;
+  if (agePanel?.text) {
+    const repaired =
+      (agePanel.text.match(/\b([1-9]\d)\b/) || [])[1] ||
+      (agePanel.text.match(/\b([0-9A-Za-z]{2})\b/) || [])[1] ||
+      "";
+    // Prefer repaired tokens like 2r → later pipeline maps to 25.
+    if (repaired && (!next.age || !/^\d{2}$/.test(String(next.age)))) {
+      next.age = repaired;
     }
   }
 
@@ -649,6 +676,23 @@ async function extractBestImageText(filePath) {
       if (panelText) text = mergeUniqueTexts([text, panelText]);
     } catch {
       /* panel OCR is best-effort */
+    }
+    // Mild Tesseract pass fills phone/age/amount digits EasyOCR often misses.
+    try {
+      const mild =
+        (await buildPreprocessVariants(filePath)).find((entry) => entry.label === "mild") ||
+        (await buildPreprocessVariants(filePath)).find((entry) => entry.label === "gray");
+      if (mild?.buffer) {
+        const mildPath = writeTempVariant(mild.buffer, "mild-strong");
+        try {
+          const tess = await recognizeWithTesseract(mildPath, "6");
+          if (tess.text) text = mergeUniqueTexts([text, tess.text]);
+        } finally {
+          fs.unlink(mildPath, () => {});
+        }
+      }
+    } catch {
+      /* optional */
     }
     if (easyPrepPath) fs.unlink(easyPrepPath, () => {});
     return {
