@@ -400,7 +400,9 @@ export function AdminSyncPage() {
       const autoMessage =
         response.message ||
         `Document read successfully — auto-filled ${filled} field${filled === 1 ? "" : "s"} from the scan. Review them, then Confirm & Save.`;
-      setMessage(autoMessage);
+      const notes = String(response.job?.extractionNotes || response.extractionNotes || "");
+      const buildTag = (autoMessage.match(/autofill-build:\s*[\w.-]+/i) || notes.match(/autofill-build:\s*[\w.-]+/i) || [])[0] || "";
+      setMessage(buildTag ? `${autoMessage}${autoMessage.includes("autofill-build") ? "" : ` (${buildTag})`}` : autoMessage);
       setStep("review");
       pushToast(autoMessage);
       await loadServerPreview(response.job.id);
