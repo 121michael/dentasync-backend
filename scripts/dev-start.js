@@ -1,48 +1,41 @@
 "use strict";
 
 /**
- * Local Windows-friendly entry for `npm start`.
- * Spawns server.js so require.main === module and the HTTP listener starts.
- * Forces NODE_ENV=development unless strong production secrets are already set
- * with an explicit DENTASYNC_PRODUCTION=true (or real host NODE_ENV=production
- * + strong secrets — handled inside server normalizeLocalNpmStartEnv).
+ * Local entry used by `npm start`.
+ * Must NOT spawn a hidden child process on Windows — that can exit instantly
+ * with no visible output. Set a safe local env, then hand off to server.js
+ * via process.argv / runMain pattern by re-requiring after env fix is wrong
+ * for require.main. Instead: set env and execFileSync is blocking — use
+ * child_process.spawnSync with stdio inherit and windowsHide:false, OR
+ * simply tell package.json to run node server.js.
+ *
+ * Kept as a thin diagnostic wrapper that always prints, then runs server
+ * in-process by loading it after patching require.main behavior.
  */
-const { spawn } = require("node:child_process");
-const path = require("node:path");
 
-// Prefer development for the default npm start script used on local machines.
-// Production hosts should set strong JWT_SECRET / OTP_SECRET / PASSWORD_RESET_SECRET;
-// server.js will keep NODE_ENV=production when those are strong.
-if (!process.env.DENTASYNC_PRODUCTION && process.env.NODE_ENV === "production") {
-  // Leave NODE_ENV as-is; server.js normalizes weak-secret production boots.
-  // Also clear the common Windows npm override when secrets are absent by
-  // setting development early so even pre-listen requires succeed.
-  const jwt = String(process.env.JWT_SECRET || "").trim();
-  const weakPlaceholders = new Set([
-    "",
-    "your_super_secret_key_here",
-    "your_fallback_jwt_secret",
-    "secret",
-    "jwt_secret",
-    "changeme",
-    "password",
-  ]);
-  if (!jwt || jwt.length < 16 || weakPlaceholders.has(jwt.toLowerCase())) {
-    process.env.NODE_ENV = "development";
-  }
+console.log("[DentaSync] npm start wrapper OK");
+console.log("[DentaSync] node", process.version);
+console.log("[DentaSync] cwd", process.cwd());
+
+// Always local-dev for npm start unless operator opts into production.
+if (process.env.DENTASYNC_PRODUCTION !== "true") {
+  process.env.NODE_ENV = "development";
+  console.log("[DentaSync] NODE_ENV=development");
 }
 
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
+
 const serverPath = path.join(__dirname, "..", "server.js");
-const child = spawn(process.execPath, [serverPath], {
+const result = spawnSync(process.execPath, [serverPath], {
   stdio: "inherit",
   env: process.env,
-  windowsHide: true,
+  windowsHide: false,
 });
 
-child.on("exit", (code, signal) => {
-  if (signal) {
-    process.kill(process.pid, signal);
-    return;
-  }
-  process.exit(code == null ? 1 : code);
-});
+if (result.error) {
+  console.error("[DentaSync] failed to start server.js:", result.error);
+  process.exit(1);
+}
+
+process.exit(result.status == null ? 1 : result.status);

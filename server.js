@@ -1,9 +1,21 @@
+// Local `npm start` must never die silently on Windows. Force development before
+// dotenv/auth so template JWT_SECRET + npm's NODE_ENV=production cannot crash
+// require-time secret checks. Production deploys should use `npm run start:prod`
+// with DENTASYNC_PRODUCTION=true (or strong secrets + NODE_ENV=production).
+(function forceLocalNpmStartEnv() {
+  const lifecycle = String(process.env.npm_lifecycle_event || "");
+  // Only the local start scripts — never `start:prod`.
+  const fromNpmStart = lifecycle === "start" || lifecycle === "start:backend";
+  if (!fromNpmStart) return;
+  if (process.env.DENTASYNC_PRODUCTION === "true") return;
+  process.env.NODE_ENV = "development";
+})();
+
+console.log("[DentaSync] loading server.js ...");
+
 require("dotenv").config();
 
-// Some Windows npm versions set NODE_ENV=production for `npm start`. That forces
-// production secret checks and makes the API exit immediately when JWT_SECRET is
-// missing OR a template placeholder (e.g. your_super_secret_key_here) — while
-// `node server.js` works. Downgrade before authMiddleware runs at require-time.
+// Belt-and-suspenders: also downgrade production+weak-secret npm boots.
 const {
   normalizeLocalNpmStartEnv,
   resolveAppSecrets,
