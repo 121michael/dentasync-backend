@@ -375,10 +375,10 @@ async function extractDentalChartPanelTexts(filePath) {
     },
     {
       key: "age",
-      left: Math.floor(width * 0.68),
-      top: Math.floor(height * 0.16),
-      width: Math.floor(width * 0.28),
-      height: Math.floor(height * 0.14),
+      left: Math.floor(width * 0.62),
+      top: Math.floor(height * 0.12),
+      width: Math.floor(width * 0.36),
+      height: Math.floor(height * 0.18),
     },
   ];
 
@@ -397,20 +397,27 @@ async function extractDentalChartPanelTexts(filePath) {
         .normalize()
         .linear(linearGain, linearOffset)
         .sharpen()
-        .resize({ width: 1800, withoutEnlargement: false })
+        .resize({ width: spec.key === "age" ? 1400 : 1800, withoutEnlargement: false })
         .png()
         .toBuffer();
       return writeTempVariant(buffer, `panel-${spec.key}`);
     };
 
     // Description/procedure ink is often faint — prefer a mild pass, then a stronger one.
+    // Age digits need multiple contrasts so 25 is not misread as 35.
     const passes =
       spec.key === "description" || spec.key === "treatment"
         ? [
             [1.18, -10],
             [1.4, -28],
           ]
-        : [[1.45, -30]];
+        : spec.key === "age"
+          ? [
+              [1.2, -8],
+              [1.45, -30],
+              [1.7, -42],
+            ]
+          : [[1.45, -30]];
 
     const texts = [];
     let bestConfidence = 0;
@@ -424,8 +431,14 @@ async function extractDentalChartPanelTexts(filePath) {
         if (spec.key === "age" || spec.key === "phone") {
           const free = await recognizeWithTesseract(tempPath, psm);
           const digits = await recognizeWithTesseractDigits(tempPath, psm, true);
-          texts.push(free.text, digits.text);
-          bestConfidence = Math.max(bestConfidence, free.confidence || 0, digits.confidence || 0);
+          const digitsAlt = await recognizeWithTesseractDigits(tempPath, "8", true);
+          texts.push(free.text, digits.text, digitsAlt.text);
+          bestConfidence = Math.max(
+            bestConfidence,
+            free.confidence || 0,
+            digits.confidence || 0,
+            digitsAlt.confidence || 0
+          );
         } else if (spec.key === "description" || spec.key === "treatment" || spec.key === "patient") {
           // Free-text OCR — digits-only destroys procedure words.
           const free = await recognizeWithTesseract(tempPath, psm);
@@ -436,6 +449,11 @@ async function extractDentalChartPanelTexts(filePath) {
           const free = await recognizeWithTesseract(tempPath, psm);
           texts.push(digits.text, free.text);
           bestConfidence = Math.max(bestConfidence, digits.confidence || 0, free.confidence || 0);
+        } else if (spec.key === "date") {
+          const free = await recognizeWithTesseract(tempPath, "6");
+          const freeAlt = await recognizeWithTesseract(tempPath, "7");
+          texts.push(free.text, freeAlt.text);
+          bestConfidence = Math.max(bestConfidence, free.confidence || 0, freeAlt.confidence || 0);
         } else {
           const free = await recognizeWithTesseract(tempPath, psm);
           texts.push(free.text);
@@ -528,9 +546,20 @@ function mergeChartPanelFields(fields = {}, panels = []) {
       (agePanel.text.match(/\b([1-9]\d)\b/) || [])[1] ||
       (agePanel.text.match(/\b([0-9A-Za-z]{2})\b/) || [])[1] ||
       "";
-    // Only fill age from the panel when still empty — never overwrite a labeled AGE.
-    if (repaired && !next.age) {
-      next.age = repaired;
+    const panelAge = String(repaired || "").trim();
+    if (panelAge) {
+      // Dedicated age-crop digits usually beat a whole-page AGE misread (25 vs 35).
+      if (!next.age) {
+        next.age = panelAge;
+      } else if (
+        /^\d{2}$/.test(panelAge) &&
+        Number(panelAge) >= 10 &&
+        Number(panelAge) <= 90 &&
+        panelAge !== String(next.age).trim() &&
+        Number(agePanel.confidence || 0) >= 45
+      ) {
+        next.age = panelAge;
+      }
     }
   }
 
@@ -674,7 +703,7 @@ async function cropAdminSyncDocumentPreview(filePath) {
 
 /**
  * Crop the handwritten DATE / DESCRIPTION / AMOUNT band on a dental chart and OCR it.
- * Keep this fast: one EasyOCR on the main band + light Tesseract on column crops.
+ * Multiple bands + contrasts so Procedure/Date survive when whole-page OCR skips them.
  */
 async function extractTreatmentZoneText(filePath) {
   const sharp = require("sharp");
@@ -684,13 +713,29 @@ async function extractTreatmentZoneText(filePath) {
   const height = meta.height || 1600;
   const texts = [];
 
-  const mainZone = {
-    left: Math.floor(width * 0.02),
-    top: Math.floor(height * 0.48),
-    width: Math.floor(width * 0.96),
-    height: Math.floor(height * 0.28),
-  };
-  if (mainZone.width >= 40 && mainZone.height >= 40) {
+  const mainZones = [
+    {
+      left: Math.floor(width * 0.02),
+      top: Math.floor(height * 0.42),
+      width: Math.floor(width * 0.96),
+      height: Math.floor(height * 0.34),
+      label: "treat-zone-main",
+      gain: 1.2,
+      offset: -10,
+    },
+    {
+      left: Math.floor(width * 0.02),
+      top: Math.floor(height * 0.5),
+      width: Math.floor(width * 0.96),
+      height: Math.floor(height * 0.26),
+      label: "treat-zone-strong",
+      gain: 1.45,
+      offset: -28,
+    },
+  ];
+
+  for (const mainZone of mainZones) {
+    if (mainZone.width < 40 || mainZone.height < 40) continue;
     const buffer = await sharp(original, { failOn: "none" })
       .rotate()
       .extract({
@@ -701,20 +746,22 @@ async function extractTreatmentZoneText(filePath) {
       })
       .grayscale()
       .normalize()
-      .linear(1.2, -10)
+      .linear(mainZone.gain, mainZone.offset)
       .sharpen()
-      .resize({ width: 1800, withoutEnlargement: false })
+      .resize({ width: 2000, withoutEnlargement: false })
       .png()
       .toBuffer();
-    const tempPath = writeTempVariant(buffer, "treat-zone-main");
+    const tempPath = writeTempVariant(buffer, mainZone.label);
     try {
       const easy = runEasyOcr(tempPath);
       if (easy?.text) texts.push(easy.text);
       if (easy?.fields?.procedure) texts.push(String(easy.fields.procedure));
       if (easy?.fields?.treatmentDate) texts.push(String(easy.fields.treatmentDate));
       if (easy?.fields?.amountCharged) texts.push(String(easy.fields.amountCharged));
-      const tess = await recognizeWithTesseract(tempPath, "6");
-      if (tess.text) texts.push(tess.text);
+      for (const psm of ["6", "4", "11"]) {
+        const tess = await recognizeWithTesseract(tempPath, psm);
+        if (tess.text) texts.push(tess.text);
+      }
     } finally {
       fs.unlink(tempPath, () => {});
     }
@@ -722,16 +769,28 @@ async function extractTreatmentZoneText(filePath) {
 
   const columnZones = [
     {
-      left: Math.floor(width * 0.16),
-      top: Math.floor(height * 0.5),
-      width: Math.floor(width * 0.4),
-      height: Math.floor(height * 0.18),
+      // DATE column
+      left: Math.floor(width * 0.02),
+      top: Math.floor(height * 0.48),
+      width: Math.floor(width * 0.28),
+      height: Math.floor(height * 0.22),
+      easy: true,
     },
     {
+      // DESCRIPTION / PROCEDURE column
+      left: Math.floor(width * 0.16),
+      top: Math.floor(height * 0.48),
+      width: Math.floor(width * 0.48),
+      height: Math.floor(height * 0.24),
+      easy: true,
+    },
+    {
+      // AMOUNT / CREDIT column
       left: Math.floor(width * 0.55),
       top: Math.floor(height * 0.48),
       width: Math.floor(width * 0.42),
-      height: Math.floor(height * 0.2),
+      height: Math.floor(height * 0.22),
+      easy: false,
     },
   ];
   for (const [index, zone] of columnZones.entries()) {
@@ -746,15 +805,23 @@ async function extractTreatmentZoneText(filePath) {
       })
       .grayscale()
       .normalize()
-      .linear(1.25, -14)
+      .linear(1.28, -16)
       .sharpen()
       .resize({ width: 1600, withoutEnlargement: false })
       .png()
       .toBuffer();
     const tempPath = writeTempVariant(buffer, `treat-col-${index}`);
     try {
+      if (zone.easy) {
+        const easy = runEasyOcr(tempPath);
+        if (easy?.text) texts.push(easy.text);
+        if (easy?.fields?.procedure) texts.push(String(easy.fields.procedure));
+        if (easy?.fields?.treatmentDate) texts.push(String(easy.fields.treatmentDate));
+      }
       const tess = await recognizeWithTesseract(tempPath, "6");
       if (tess.text) texts.push(tess.text);
+      const tessAlt = await recognizeWithTesseract(tempPath, "7");
+      if (tessAlt.text) texts.push(tessAlt.text);
     } finally {
       fs.unlink(tempPath, () => {});
     }

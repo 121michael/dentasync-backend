@@ -779,13 +779,14 @@ export function AdminSyncPage() {
                       onChange={(event) => updatePatient("fullName", event.target.value)}
                     />
                   </label>
-                  <label className="doc-table-field">
+                  <label className="doc-table-field doc-table-field--age">
                     <span>Age</span>
                     <input
                       value={payload.patient.age}
                       placeholder={placeholderFor(payload.patient.age, "")}
                       disabled={!editing || activeJob.status === "synced"}
                       onChange={(event) => updatePatient("age", event.target.value)}
+                      aria-label="Age"
                     />
                   </label>
                   <label className="doc-table-field">
@@ -834,10 +835,10 @@ export function AdminSyncPage() {
                 <div className="doc-table-card__table-wrap">
                   <table className="doc-table-card__table">
                     <colgroup>
+                      <col style={{ width: "16%" }} />
+                      <col style={{ width: "8%" }} />
+                      <col style={{ width: "24%" }} />
                       <col style={{ width: "12%" }} />
-                      <col style={{ width: "9%" }} />
-                      <col style={{ width: "26%" }} />
-                      <col style={{ width: "13%" }} />
                       <col style={{ width: "10%" }} />
                       <col style={{ width: "10%" }} />
                       <col style={{ width: "10%" }} />
@@ -860,10 +861,12 @@ export function AdminSyncPage() {
                     <tbody>
                       {(payload.procedure.visits || [emptyVisitRow()]).map((visit, index) => (
                         <tr key={`visit-${index}`}>
-                          <td>
+                          <td className="is-date">
                             <input
                               value={visit.treatmentDate || ""}
                               placeholder=""
+                              title={visit.treatmentDate || ""}
+                              aria-label="Date"
                               disabled={!editing || activeJob.status === "synced"}
                               onChange={(event) => updateVisit(index, "treatmentDate", event.target.value)}
                             />

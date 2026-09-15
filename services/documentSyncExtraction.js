@@ -417,11 +417,11 @@ function forceFillDentalChartTreatment(payload, rawText = "", fields = {}) {
   }
 
   // Age + phone from dental-chart header OCR (including common letter/digit soup).
-  // Prefer the AGE-label value so weak panel/vision guesses (e.g. 35) cannot stick.
+  // Prefer AGE-on-next-line / dedicated age-panel digits over a weak whole-page misread.
   {
-    const labeledAge = extractLabeledAge(text) || repairOcrAgeToken(fields.age || "");
-    if (labeledAge) {
-      payload.patient.age = labeledAge;
+    const bestAge = pickBestDentalChartAge(text, fields.age || "", payload.patient.age || "");
+    if (bestAge) {
+      payload.patient.age = bestAge;
     } else if (!payload.patient.age) {
       const ageToken =
         repairOcrAgeToken(
@@ -1524,6 +1524,8 @@ function extractPhoneFromText(text) {
 function extractLabeledAge(text) {
   const source = String(text || "");
   const patterns = [
+    // Dental charts put the handwritten age on the line under AGE.
+    /(?:^|\n)\s*age\s*[:\-]?\s*(?:\r?\n)+\s*([0-9A-Za-z]{1,3})\b/im,
     /(?:^|\n)\s*age\s*[:\-]?\s*([0-9A-Za-z]{1,3})\b/im,
     /\bage\b\s*[:\-]?\s*([0-9A-Za-z]{1,3})\b/i,
   ];
@@ -1534,6 +1536,55 @@ function extractLabeledAge(text) {
     if (repaired) return repaired;
   }
   return "";
+}
+
+/**
+ * Rank dental-chart age candidates so a dedicated age-panel "25" can beat a
+ * whole-page misread "AGE 35", while repaired soup like "2r" still wins over a
+ * weak panel guess.
+ */
+function pickBestDentalChartAge(text = "", fieldsAge = "", currentAge = "") {
+  const source = String(text || "");
+  const candidates = [];
+
+  const push = (raw, score, sourceName) => {
+    const age = repairOcrAgeToken(raw) || normalizeAge(raw);
+    if (!age) return;
+    candidates.push({ age, score, sourceName });
+  };
+
+  const headerNextLine = source.match(
+    /(?:^|\n)\s*(?:age|ace|aqe|acc)\s*[:\-]?\s*(?:\r?\n)+\s*([0-9A-Za-z]{1,3})\b/im
+  );
+  if (headerNextLine?.[1]) push(headerNextLine[1], 82, "header-next-line");
+
+  const headerSameLine = source.match(
+    /(?:^|\n)\s*(?:age|ace|aqe|acc)\s*[:\-]?\s*([0-9A-Za-z]{1,3})\b/im
+  );
+  if (headerSameLine?.[1]) push(headerSameLine[1], 70, "header-same-line");
+
+  // Letter/digit soup like 2r / 2s is often more faithful than a later misread 35.
+  const soup = source.match(
+    /(?:^|\n)\s*(?:age|ace|aqe|acc)\s*[:\-]?\s*(?:\r?\n)*\s*([0-9][A-Za-z]|[A-Za-z][0-9])\b/im
+  );
+  if (soup?.[1]) push(soup[1], 88, "header-soup");
+
+  // Dedicated age-panel / layout crop — usually sharper than whole-page digits.
+  push(fieldsAge, 86, "panel");
+  push(currentAge, 40, "current");
+
+  const labeled = extractLabeledAge(source);
+  if (labeled) push(labeled, 60, "labeled");
+
+  if (!candidates.length) return "";
+
+  const bestByAge = new Map();
+  for (const entry of candidates) {
+    const prev = bestByAge.get(entry.age);
+    if (!prev || entry.score > prev.score) bestByAge.set(entry.age, entry);
+  }
+  return [...bestByAge.values()].sort((a, b) => b.score - a.score || Number(a.age) - Number(b.age))[0]
+    .age;
 }
 
 /**
@@ -1953,7 +2004,7 @@ function applyExternalFields(payload, fields = {}) {
   }
   if (fields.age) {
     const age = repairOcrAgeToken(fields.age) || normalizeAge(fields.age);
-    // Never overwrite a labeled AGE already read from the document with a weaker panel/vision guess.
+    // Fill empty age from panel/vision; conflicting ages are resolved later in forceFill.
     if (age && !next.patient.age) next.patient.age = age;
   }
   if (fields.phone && !next.patient.phone) {
@@ -2201,6 +2252,7 @@ function extractStructuredPayload(rawText) {
   );
 
   payload.patient.age =
+    pickBestDentalChartAge(text, "", "") ||
     extractLabeledAge(text) ||
     repairOcrAgeToken(
       captureLabeledBlock(text, ["age"]) ||
@@ -2758,15 +2810,17 @@ async function extractDocumentData(filePath, mimeType, originalName) {
       if (zoneText && zoneText.trim().length >= 4) {
         extracted.text = [extracted.text, zoneText].filter(Boolean).join("\n");
         const zoneFields = recoverNoisyOcrFields(zoneText, extracted.fields || {});
-        structured.payload = applyExternalFields(structured.payload, zoneFields);
-        forceFillDentalChartTreatment(structured.payload, extracted.text, {
+        extracted.fields = {
           ...(extracted.fields || {}),
           ...zoneFields,
           procedure: zoneFields.procedure || extracted.fields?.procedure || "",
           treatmentDate: zoneFields.treatmentDate || extracted.fields?.treatmentDate || "",
           amountCharged: zoneFields.amountCharged || extracted.fields?.amountCharged || "",
-          notes: zoneText,
-        });
+          age: zoneFields.age || extracted.fields?.age || "",
+          notes: [extracted.fields?.notes, zoneText].filter(Boolean).join("\n"),
+        };
+        structured.payload = applyExternalFields(structured.payload, extracted.fields);
+        forceFillDentalChartTreatment(structured.payload, extracted.text, extracted.fields);
       }
     } catch (error) {
       console.warn("Treatment-zone OCR pass skipped:", error.message);
@@ -2794,7 +2848,7 @@ async function extractDocumentData(filePath, mimeType, originalName) {
 
   const notes = [
     `Document read successfully — auto-filled ${filledCount} field${filledCount === 1 ? "" : "s"} from the scan. Review them, then Confirm & Save.`,
-    "autofill-build: treatment-zone-v4",
+    "autofill-build: treatment-zone-v5",
     extracted.method ? `OCR engine: ${extracted.method}.` : "",
     extracted.method === "ocr" || extracted.method === "easyocr+ocr"
       ? "Tip: for clearer treatment autofill on Windows, install EasyOCR: py -3 -m pip install easyocr pillow"
@@ -2836,6 +2890,8 @@ module.exports = {
   toReadableClinicProcedure,
   preferClinicFeeAmount,
   snapClinicFee,
+  pickBestDentalChartAge,
+  forceFillDentalChartTreatment,
   CLINIC_PROCEDURE_KEYWORDS,
   fieldStatus,
   parseTreatmentRecordRows,

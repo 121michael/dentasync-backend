@@ -775,3 +775,62 @@ CREDIT
   assert.equal(payload.procedure.visits[0].amountCharged, "3000");
   assert.equal(payload.procedure.visits[0].amountPaid, "");
 });
+
+test("age panel 25 beats misread whole-page AGE 35", () => {
+  const {
+    pickBestDentalChartAge,
+    extractStructuredPayload,
+    forceFillDentalChartTreatment,
+  } = require("../services/documentSyncExtraction");
+
+  assert.equal(pickBestDentalChartAge("AGE\n35\nDESCRIPTION\nOP", "25", "35"), "25");
+  assert.equal(pickBestDentalChartAge("AGE\n2r\nDESCRIPTION\nOP", "35", "35"), "25");
+  assert.equal(pickBestDentalChartAge("AGE\n25\nDESCRIPTION\nOP", "", ""), "25");
+
+  const sample = `
+NAME
+ANGELOU OBAS-BAGHTNAN
+ADDRESS
+MANDALUYONG CITY
+TELEPHONE
+09456449510
+AGE
+35
+DESCRIPTION
+ORAL PROPHYLAXIS
+DATE
+SEPT 7, 2024
+CREDIT
+800
+`;
+  const { payload } = extractStructuredPayload(sample);
+  forceFillDentalChartTreatment(payload, sample, { age: "25", procedure: "ORAL PROPHYLAXIS" });
+  assert.equal(payload.patient.age, "25");
+  assert.equal(payload.procedure.treatment, "Oral Prophylaxis");
+  assert.match(payload.procedure.treatmentDate, /SEPT\s*7/i);
+  assert.equal(payload.procedure.visits[0].treatment, "Oral Prophylaxis");
+  assert.match(payload.procedure.visits[0].treatmentDate, /SEPT\s*7/i);
+});
+
+test("repaired AGE soup 2r stays 25 even when panel guesses 35", () => {
+  const { extractStructuredPayload, forceFillDentalChartTreatment } = require("../services/documentSyncExtraction");
+  const sample = `
+NAME
+ANGELOU OBAS-BAGHTNAN
+ADDRESS
+MANDALUYONG CITY
+AGE
+2r
+DESCRIPTION
+ORAL PROPHYLAXIS
+DATE
+SEPT 7, 2024
+AMOUNT
+800
+`;
+  const { payload } = extractStructuredPayload(sample);
+  forceFillDentalChartTreatment(payload, sample, { age: "35" });
+  assert.equal(payload.patient.age, "25");
+  assert.equal(payload.procedure.treatment, "Oral Prophylaxis");
+  assert.match(payload.procedure.treatmentDate, /SEPT\s*7/i);
+});

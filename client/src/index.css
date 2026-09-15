@@ -3400,7 +3400,7 @@ strong {
 }
 .doc-table-card__patient-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.55fr) minmax(0, 0.7fr) minmax(0, 1fr) minmax(0, 0.9fr);
+  grid-template-columns: minmax(0, 1.35fr) minmax(5rem, 0.8fr) minmax(0, 0.7fr) minmax(0, 1.05fr) minmax(0, 0.95fr);
   gap: 0.7rem;
   width: 100%;
   max-width: 100%;
@@ -3433,6 +3433,12 @@ strong {
   font: inherit;
   font-size: 0.88rem;
   transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+.doc-table-field--age input {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-align: center;
 }
 .doc-table-field input:focus {
   outline: none;
@@ -3539,6 +3545,17 @@ strong {
   overflow: visible;
   text-overflow: clip;
   line-height: 1.35;
+}
+.doc-table-card__table td.is-date {
+  min-width: 7.5rem;
+}
+.doc-table-card__table td.is-date input {
+  font-size: 0.88rem;
+  font-weight: 600;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.3;
 }
 .doc-table-card__table tbody tr:hover input {
   background: color-mix(in srgb, #fff 70%, transparent);
