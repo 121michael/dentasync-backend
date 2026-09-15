@@ -817,12 +817,19 @@ function snapClinicFee(value) {
 
 /** Keep only clear clinic fee amounts (exact rounds or near-miss snaps). */
 function preferClinicFeeAmount(value) {
-  const raw = String(value || "").replace(/,/g, "").trim();
+  const original = cleanLine(value);
+  const raw = original.replace(/,/g, "").trim();
   if (!raw) return "";
   const n = Number(raw);
   if (!Number.isFinite(n)) return repairOcrAmountToken(raw) || "";
   const exact = [500, 800, 1000, 1200, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 6000, 7000, 8000, 10000];
-  if (exact.includes(Math.trunc(n))) return String(Math.trunc(n));
+  if (exact.includes(Math.trunc(n))) {
+    // Preserve written comma formatting from the document when present.
+    if (/^\d{1,3}(,\d{3})+$/.test(original.replace(/\s/g, ""))) {
+      return original.replace(/\s/g, "");
+    }
+    return String(Math.trunc(n));
+  }
   const repaired = repairOcrAmountToken(raw);
   if (repaired) return repaired;
   return snapClinicFee(raw) || "";
