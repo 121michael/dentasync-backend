@@ -31,7 +31,7 @@ const CLINIC_PROCEDURE_KEYWORDS = [
     value: "Oral Prophylaxis",
     // Keep this catalog broad so common handwriting OCR soup maps to a readable clinic label.
     pattern:
-      /oral\s*prophylaxis|prophylax|prophy(?![a-z])|pr[o0]r?h?[il1y]{1,4}a?[il1x]?|pr[o0].{0,12}h[il1y].{0,10}x?|r?orhilax|orhilax|pr[o0]rhila|prorhil|irq?tial|irqtial|p[eoa0r]{1,3}[pft][lt][aeiouy]?[txigjn]{1,5}|peo.?pt.?lat|peorenarn|peoptlat|pr[o0]rh|oral\s*pr[o0]|dental\s*cleaning|\bcleaning\b/i,
+      /oral\s*prophylaxis|prophylax|prophy(?![a-z])|pr[o0]r?h?[il1y]{1,4}a?[il1x]?|pr[o0].{0,12}h[il1y].{0,10}x?|r?orhilax|orhilax|pr[o0]rhila|prorhil|irq?tial|irqtial|p[eoa0r]{1,3}[pft][lt][aeiouy]?[txigjn]{1,5}|peo.?pt.?lat|peorenarn|peoptlat|fr[lc]e?r?alani|frcrklati|frleralani|rot[il1]al|r[o0]t[il1]al|pr[o0]rh|oral\s*pr[o0]|dental\s*cleaning|\bcleaning\b/i,
   },
   {
     value: "Ortho Installation",
@@ -92,7 +92,7 @@ const CLINIC_PROCEDURE_KEYWORDS = [
 
 /** Shared OCR token detector for Oral Prophylaxis (must match document text, not invent). */
 const ORAL_PROPHYLAXIS_OCR_RE =
-  /(?:oral\s*prophylaxis|prophylax|prophy(?![a-z])|r?orhilax|orhilax|pr[o0]rhila|prorhil|pr[o0].{0,12}h[il1y].{0,10}x?|irq?tial|irqtial|peo.?pt.?lat|peorenarn|peoptlat|p[eoa0r]{1,3}[pft][lt][aeiouy]?[txigjn]{1,5}|oral\s*pr[o0]|dental\s*cleaning|\bcleaning\b|\bop\b)/i;
+  /(?:oral\s*prophylaxis|prophylax|prophy(?![a-z])|r?orhilax|orhilax|pr[o0]rhila|prorhil|pr[o0].{0,12}h[il1y].{0,10}x?|irq?tial|irqtial|peo.?pt.?lat|peorenarn|peoptlat|p[eoa0r]{1,3}[pft][lt][aeiouy]?[txigjn]{1,5}|fr[lc]e?r?alani|frcrklati|frleralani|rot[il1]al|r[o0]t[il1]al|\[?rot[il1]al|oral\s*pr[o0]|dental\s*cleaning|\bcleaning\b|\bop\b)/i;
 
 // Back-compat alias used by older helpers / noisy recovery.
 const KNOWN_PROCEDURES = CLINIC_PROCEDURE_KEYWORDS;
@@ -549,7 +549,22 @@ function forceFillDentalChartTreatment(payload, rawText = "", fields = {}) {
     // Mirror visit cells back to primary so both stay organized the same way.
     if (first.treatment) payload.procedure.treatment = first.treatment;
     if (first.treatmentDate) payload.procedure.treatmentDate = first.treatmentDate;
-    if (first.amountCharged) payload.procedure.amountCharged = first.amountCharged;
+    if (first.amountCharged) {
+      first.amountCharged = preferClinicFeeAmount(first.amountCharged) || first.amountCharged;
+      payload.procedure.amountCharged = first.amountCharged;
+    } else if (payload.procedure.amountCharged) {
+      payload.procedure.amountCharged =
+        preferClinicFeeAmount(payload.procedure.amountCharged) || "";
+      if (payload.procedure.amountCharged) first.amountCharged = payload.procedure.amountCharged;
+    }
+
+    // Drop OCR-soup dentist guesses on single-row dental charts (e.g. "Dr PATI").
+    if (first.dentistName && !/^dr\.?\s+[A-Za-z]{3,}(?:\s+[A-Za-z]{2,})?$/i.test(first.dentistName)) {
+      first.dentistName = "";
+    }
+    if (first.dentistName && /pati|auto|fill|confirm|preview/i.test(first.dentistName)) {
+      first.dentistName = "";
+    }
 
     payload.procedure.visits = normalizeVisitRows([first]);
   }
@@ -587,7 +602,9 @@ function sanitizeExtractedPayload(payload) {
     }
     if (payload.procedure.amountCharged) {
       payload.procedure.amountCharged =
-        repairOcrAmountToken(payload.procedure.amountCharged) || payload.procedure.amountCharged;
+        preferClinicFeeAmount(payload.procedure.amountCharged) ||
+        repairOcrAmountToken(payload.procedure.amountCharged) ||
+        "";
     }
     if (Array.isArray(payload.procedure.visits)) {
       payload.procedure.visits = normalizeVisitRows(
@@ -599,10 +616,9 @@ function sanitizeExtractedPayload(payload) {
               ? row.treatmentDate
               : repairNoisyWrittenDate(row?.treatmentDate || "") || "",
             amountCharged:
+              preferClinicFeeAmount(row?.amountCharged || "") ||
               repairOcrAmountToken(row?.amountCharged || "") ||
-              (isPlausibleClinicAmount(String(row?.amountCharged || "").replace(/,/g, ""))
-                ? row.amountCharged
-                : ""),
+              "",
           }))
           .filter((row) => hasReadableVisitSignal(row))
       );
@@ -797,6 +813,19 @@ function snapClinicFee(value) {
     }
   }
   return best;
+}
+
+/** Keep only clear clinic fee amounts (exact rounds or near-miss snaps). */
+function preferClinicFeeAmount(value) {
+  const raw = String(value || "").replace(/,/g, "").trim();
+  if (!raw) return "";
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return repairOcrAmountToken(raw) || "";
+  const exact = [500, 800, 1000, 1200, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 6000, 7000, 8000, 10000];
+  if (exact.includes(Math.trunc(n))) return String(Math.trunc(n));
+  const repaired = repairOcrAmountToken(raw);
+  if (repaired) return repaired;
+  return snapClinicFee(raw) || "";
 }
 
 function looksLikeAdminSyncUiChrome(text) {
@@ -1537,9 +1566,13 @@ function extractDentalChartVisitRow(rawText = "") {
     })();
 
   let amountCharged = "";
-  const fee800 = text.match(/\b(800|8[oO]{2})\b/);
-  if (fee800?.[1]) {
-    amountCharged = /8[oO]{2}/.test(fee800[1]) ? "800" : fee800[1];
+  const feeExact = text.match(/\b(500|800|1000|1200|1500|2000|2500|3000|3500|4000|4500|5000)\b/);
+  if (feeExact?.[1]) {
+    amountCharged = feeExact[1];
+  }
+  if (!amountCharged) {
+    const fee800 = text.match(/\b(8[oO]{2})\b/);
+    if (fee800?.[1]) amountCharged = "800";
   }
   if (!amountCharged) {
     amountCharged =
@@ -1549,16 +1582,14 @@ function extractDentalChartVisitRow(rawText = "") {
     const near = [...text.matchAll(/\b([1-9]\d{2,4})\b/g)]
       .map((m) => Number(m[1]))
       .filter((n) => isPlausibleClinicAmount(n) && n >= 100 && n <= 20000 && !/^20[1-3]\d$/.test(String(n)));
-    // Prefer common prophylaxis fees on this clinic form (800 / 2000 / 3000).
-    const preferred = near.find((n) => n === 800 || n === 2000 || n === 3000);
+    // Prefer common prophylaxis fees on this clinic form (500 / 800 / 2000 / 3000).
+    const preferred = near.find((n) => [500, 800, 2000, 3000].includes(n));
     if (preferred) amountCharged = String(preferred);
     else if (near.length) {
-      const candidate = near.sort((a, b) => {
-        const score = (n) =>
-          Math.min(Math.abs(n - 800), Math.abs(n - 2000), Math.abs(n - 3000));
-        return score(a) - score(b);
-      })[0];
-      amountCharged = snapClinicFee(String(candidate)) || String(candidate);
+      const snapped = near
+        .map((n) => ({ n, snap: snapClinicFee(String(n)) }))
+        .find((entry) => entry.snap);
+      if (snapped) amountCharged = snapped.snap;
     }
   }
 
@@ -2731,6 +2762,7 @@ async function extractDocumentData(filePath, mimeType, originalName) {
 
   const notes = [
     `Document read successfully — auto-filled ${filledCount} field${filledCount === 1 ? "" : "s"} from the scan. Review them, then Confirm & Save.`,
+    "autofill-build: treatment-zone-v3",
     extracted.method ? `OCR engine: ${extracted.method}.` : "",
     extracted.method === "ocr" || extracted.method === "easyocr+ocr"
       ? "Tip: for clearer treatment autofill on Windows, install EasyOCR: py -3 -m pip install easyocr pillow"

@@ -698,3 +698,32 @@ CREDIT
   assert.equal(payload.procedure.visits[0].treatment, "Oral Prophylaxis");
   assert.equal(payload.procedure.visits[0].amountCharged, "800");
 });
+
+test("hard EasyOCR procedure garble still maps to Oral Prophylaxis in the Procedure column", () => {
+  const { resolveClinicProcedure } = require("../services/documentSyncExtraction");
+  for (const token of ["FRLERALANI", "FRCrKLATI", "ROt1al", "[ROt1al", "frleralani"]) {
+    assert.equal(resolveClinicProcedure(token), "Oral Prophylaxis", token);
+  }
+  const sample = `
+NAME
+ANGELOU OBAS-BAGHTNAN
+ADDRESS
+MANDALUYONG CITY
+AGE
+35
+TELEPHONE
+09456449510
+DESCRIPTION
+FRCrKLATI
+DATE
+SEPT 7, 2024
+CREDIT
+800
+`;
+  const { payload } = extractStructuredPayload(sample);
+  assert.equal(payload.procedure.treatment, "Oral Prophylaxis");
+  assert.equal(payload.procedure.visits[0].treatment, "Oral Prophylaxis");
+  assert.equal(payload.procedure.visits[0].amountCharged, "800");
+  assert.match(payload.procedure.visits[0].treatmentDate, /SEPT\s*7/i);
+  assert.equal(payload.patient.phone, "09456449510");
+});

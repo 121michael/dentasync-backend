@@ -637,9 +637,11 @@ function looksLikeAdminSyncUiChrome(text) {
     /review\s*&\s*confirm/i,
     /confirm\s*&\s*save/i,
     /document\s*table/i,
-    /auto-filled from the scan/i,
+    /auto-filled/i,
     /blank cells stay blank/i,
     /document preview/i,
+    /patient information/i,
+    /\+?\s*add row/i,
   ].filter((pattern) => pattern.test(source)).length;
   return hits >= 2;
 }
@@ -668,6 +670,97 @@ async function cropAdminSyncDocumentPreview(filePath) {
     .png()
     .toBuffer();
   return writeTempVariant(buffer, "ui-preview-crop");
+}
+
+/**
+ * Crop the handwritten DATE / DESCRIPTION / AMOUNT band on a dental chart and OCR it.
+ * Keep this fast: one EasyOCR on the main band + light Tesseract on column crops.
+ */
+async function extractTreatmentZoneText(filePath) {
+  const sharp = require("sharp");
+  const original = fs.readFileSync(filePath);
+  const meta = await sharp(original, { failOn: "none" }).rotate().metadata();
+  const width = meta.width || 1200;
+  const height = meta.height || 1600;
+  const texts = [];
+
+  const mainZone = {
+    left: Math.floor(width * 0.02),
+    top: Math.floor(height * 0.48),
+    width: Math.floor(width * 0.96),
+    height: Math.floor(height * 0.28),
+  };
+  if (mainZone.width >= 40 && mainZone.height >= 40) {
+    const buffer = await sharp(original, { failOn: "none" })
+      .rotate()
+      .extract({
+        left: Math.max(0, mainZone.left),
+        top: Math.max(0, mainZone.top),
+        width: Math.min(mainZone.width, width - Math.max(0, mainZone.left)),
+        height: Math.min(mainZone.height, height - Math.max(0, mainZone.top)),
+      })
+      .grayscale()
+      .normalize()
+      .linear(1.2, -10)
+      .sharpen()
+      .resize({ width: 1800, withoutEnlargement: false })
+      .png()
+      .toBuffer();
+    const tempPath = writeTempVariant(buffer, "treat-zone-main");
+    try {
+      const easy = runEasyOcr(tempPath);
+      if (easy?.text) texts.push(easy.text);
+      if (easy?.fields?.procedure) texts.push(String(easy.fields.procedure));
+      if (easy?.fields?.treatmentDate) texts.push(String(easy.fields.treatmentDate));
+      if (easy?.fields?.amountCharged) texts.push(String(easy.fields.amountCharged));
+      const tess = await recognizeWithTesseract(tempPath, "6");
+      if (tess.text) texts.push(tess.text);
+    } finally {
+      fs.unlink(tempPath, () => {});
+    }
+  }
+
+  const columnZones = [
+    {
+      left: Math.floor(width * 0.16),
+      top: Math.floor(height * 0.5),
+      width: Math.floor(width * 0.4),
+      height: Math.floor(height * 0.18),
+    },
+    {
+      left: Math.floor(width * 0.55),
+      top: Math.floor(height * 0.48),
+      width: Math.floor(width * 0.42),
+      height: Math.floor(height * 0.2),
+    },
+  ];
+  for (const [index, zone] of columnZones.entries()) {
+    if (zone.width < 40 || zone.height < 40) continue;
+    const buffer = await sharp(original, { failOn: "none" })
+      .rotate()
+      .extract({
+        left: Math.max(0, zone.left),
+        top: Math.max(0, zone.top),
+        width: Math.min(zone.width, width - Math.max(0, zone.left)),
+        height: Math.min(zone.height, height - Math.max(0, zone.top)),
+      })
+      .grayscale()
+      .normalize()
+      .linear(1.25, -14)
+      .sharpen()
+      .resize({ width: 1600, withoutEnlargement: false })
+      .png()
+      .toBuffer();
+    const tempPath = writeTempVariant(buffer, `treat-col-${index}`);
+    try {
+      const tess = await recognizeWithTesseract(tempPath, "6");
+      if (tess.text) texts.push(tess.text);
+    } finally {
+      fs.unlink(tempPath, () => {});
+    }
+  }
+
+  return mergeUniqueTexts(texts);
 }
 
 async function extractBestImageText(filePath) {
@@ -707,6 +800,19 @@ async function extractBestImageText(filePath) {
       if (panelText) text = mergeUniqueTexts([text, panelText]);
     } catch {
       /* panel OCR is best-effort */
+    }
+    // Always OCR the treatment table band — whole-page EasyOCR often skips DESCRIPTION.
+    try {
+      const zoneText = await extractTreatmentZoneText(filePath);
+      if (zoneText) {
+        text = mergeUniqueTexts([text, zoneText]);
+        fields = mergeChartPanelFields(fields, [
+          { key: "treatment", text: zoneText, confidence: 60 },
+          { key: "description", text: zoneText, confidence: 60 },
+        ]);
+      }
+    } catch {
+      /* zone OCR is best-effort */
     }
     // Mild Tesseract pass fills phone/age/amount digits EasyOCR often misses.
     try {
@@ -827,6 +933,18 @@ async function extractBestImageText(filePath) {
       if (panelText) best.text = mergeUniqueTexts([best.text, panelText]);
     } catch {
       /* panel OCR is best-effort */
+    }
+    try {
+      const zoneText = await extractTreatmentZoneText(workingPath);
+      if (zoneText) {
+        best.text = mergeUniqueTexts([best.text, zoneText]);
+        best.fields = mergeChartPanelFields(best.fields || {}, [
+          { key: "treatment", text: zoneText, confidence: 60 },
+          { key: "description", text: zoneText, confidence: 60 },
+        ]);
+      }
+    } catch {
+      /* zone OCR is best-effort */
     }
   } finally {
     for (const tempPath of tempPaths) {
