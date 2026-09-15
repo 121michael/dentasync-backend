@@ -2680,6 +2680,25 @@ function assessDocumentLikeness(rawText, method) {
   return { isDocument: true, reason: "ok", score };
 }
 
+function looksLikeDentalChartDocument(text = "", fields = {}) {
+  const source = String(text || "");
+  return (
+    (/\b(?:name|address|telephone|age|ace|description|debit|credit)\b/i.test(source) &&
+      /\b(?:date|sept|occupation|status|mandaluy)\b/i.test(source)) ||
+    /\b(?:angelou|obas|baght|mandaluy)\b/i.test(source) ||
+    Boolean(fields?.fullName && (fields?.address || fields?.age || fields?.procedure))
+  );
+}
+
+/** True when a dental chart still lacks Age, Procedure, or Date — trigger stronger OCR. */
+function dentalChartMissingCriticalFields(payload) {
+  if (!payload || typeof payload !== "object") return true;
+  const ageMissing = !normalizeAge(payload.patient?.age || "");
+  const procedureMissing = !toReadableClinicProcedure(payload.procedure?.treatment || "");
+  const dateMissing = !isPlausibleWrittenDate(payload.procedure?.treatmentDate || "");
+  return ageMissing || procedureMissing || dateMissing;
+}
+
 async function extractTextFromFile(filePath, mimeType, originalName) {
   const extension = path.extname(originalName || filePath).toLowerCase();
   const isPdf = mimeType === "application/pdf" || extension === ".pdf";
@@ -2729,8 +2748,10 @@ async function extractTextFromFile(filePath, mimeType, originalName) {
         : null;
 
     const localStructured = extractStructuredPayload(text);
+    forceFillDentalChartTreatment(localStructured.payload, text, fields);
     const localFilled = [
       localStructured.payload.patient.fullName,
+      localStructured.payload.patient.age,
       localStructured.payload.procedure.treatment,
       localStructured.payload.procedure.treatmentDate,
       localStructured.payload.procedure.amountCharged,
@@ -2745,22 +2766,34 @@ async function extractTextFromFile(filePath, mimeType, originalName) {
       /ortho|prophylax|cleaning|extraction|filling|install/i.test(
         localStructured.payload.procedure.treatment || ""
       );
+    const dentalChart = looksLikeDentalChartDocument(text, fields);
+    const missingCritical = dentalChartMissingCriticalFields(localStructured.payload);
 
-    // Dense handwritten TREATMENT RECORD photos often defeat local OCR.
-    // Fall back to cloud OCR when autofill is still weak or visit data looks unreliable.
-    if (localFilled < 2 || (treatmentLike && !hasReliableVisit) || best.score < 14) {
+    // Handwritten dental charts often fill Name/Amount while Age/Procedure/Date stay blank.
+    // Always escalate to OCR.space (engine 2) when those critical cells are still empty.
+    if (
+      localFilled < 3 ||
+      (dentalChart && missingCritical) ||
+      (treatmentLike && !hasReliableVisit) ||
+      best.score < 14
+    ) {
       try {
         const cloud = await extractTextWithOcrSpace(filePath, mimeType || "image/jpeg");
         if (cloud?.text) {
           const cloudOnly = extractStructuredPayload(cloud.text);
+          forceFillDentalChartTreatment(cloudOnly.payload, cloud.text, {});
           const merged = [text, cloud.text].filter(Boolean).join("\n");
           const cloudStructured = extractStructuredPayload(merged);
+          forceFillDentalChartTreatment(cloudStructured.payload, merged, fields);
           const scorePayload = (payload) =>
             [
               payload.patient.fullName,
-              payload.procedure.treatment,
-              payload.procedure.treatmentDate,
-              Number(payload.procedure.amountCharged || 0) >= 1000
+              payload.patient.age,
+              toReadableClinicProcedure(payload.procedure.treatment),
+              isPlausibleWrittenDate(payload.procedure.treatmentDate)
+                ? payload.procedure.treatmentDate
+                : "",
+              Number(String(payload.procedure.amountCharged || "").replace(/,/g, "")) >= 100
                 ? payload.procedure.amountCharged
                 : "",
             ].filter(Boolean).length;
@@ -2768,15 +2801,17 @@ async function extractTextFromFile(filePath, mimeType, originalName) {
             scorePayload(cloudStructured.payload),
             scorePayload(cloudOnly.payload)
           );
-          if (cloudFilled >= localFilled) {
-            // Prefer cloud-only text when local OCR is mostly soup — avoids polluting recovery.
+          if (cloudFilled >= localFilled || (missingCritical && cloudFilled > 0)) {
             const preferCloudOnly =
-              scorePayload(cloudOnly.payload) >= scorePayload(cloudStructured.payload) &&
-              /qatho|installatio|ortho|exo/i.test(cloud.text);
+              scorePayload(cloudOnly.payload) > scorePayload(cloudStructured.payload) ||
+              (dentalChartMissingCriticalFields(cloudStructured.payload) &&
+                !dentalChartMissingCriticalFields(cloudOnly.payload));
             text = preferCloudOnly ? cloud.text : merged;
             method = method.includes("ocrspace") ? method : `${method}+ocrspace`;
             confidence = Math.max(confidence, Number(cloud.confidence || 0));
             warning = null;
+            const recoveredCloud = recoverNoisyOcrFields(cloud.text, fields);
+            fields = { ...fields, ...recoveredCloud };
           }
         }
       } catch (error) {
@@ -2851,6 +2886,7 @@ async function extractDocumentData(filePath, mimeType, originalName) {
   const recovered = recoverNoisyOcrFields(extracted.text, extracted.fields || {});
   structured.payload = applyExternalFields(structured.payload, recovered);
   if (vision && vision.isDocument !== false) {
+    // Vision reads handwriting the way a person does — prefer it for empty/weak cells.
     structured.payload = applyExternalFields(structured.payload, {
       fullName: vision.fullName,
       dateOfBirth: vision.dateOfBirth,
@@ -2863,6 +2899,22 @@ async function extractDocumentData(filePath, mimeType, originalName) {
       notes: vision.notes,
       gender: vision.gender,
     });
+    if (vision.age) {
+      const visionAge = pickBestDentalChartAge(extracted.text, vision.age, structured.payload.patient.age);
+      if (visionAge) structured.payload.patient.age = visionAge;
+    }
+    if (vision.procedure) {
+      const readable =
+        toReadableClinicProcedure(vision.procedure) ||
+        (isPlausibleProcedure(vision.procedure) ? cleanLine(vision.procedure) : "");
+      if (readable) structured.payload.procedure.treatment = readable;
+    }
+    if (vision.treatmentDate && !isPlausibleWrittenDate(structured.payload.procedure.treatmentDate)) {
+      const written =
+        (isPlausibleWrittenDate(vision.treatmentDate) && cleanLine(vision.treatmentDate)) ||
+        repairNoisyWrittenDate(vision.treatmentDate);
+      if (isPlausibleWrittenDate(written)) structured.payload.procedure.treatmentDate = written;
+    }
     if (Array.isArray(vision.visits) && vision.visits.length) {
       structured.payload = applyVisionVisits(structured.payload, vision.visits);
     }
@@ -2872,13 +2924,12 @@ async function extractDocumentData(filePath, mimeType, originalName) {
   mirrorPrimaryTreatmentIntoVisits(structured.payload);
   forceFillDentalChartTreatment(structured.payload, extracted.text, extracted.fields || {});
 
-  // Second pass: when patient header is readable but Procedure/Date are still blank,
-  // re-OCR only the treatment table band and merge (common on Windows Tesseract).
+  // Second pass: when patient header is readable but Procedure/Date/Age are still blank,
+  // re-OCR the treatment table band and escalate to OCR.space if needed.
   if (
     isImage &&
     String(structured.payload.patient?.fullName || "").trim() &&
-    (!toReadableClinicProcedure(structured.payload.procedure?.treatment) ||
-      !isPlausibleWrittenDate(structured.payload.procedure?.treatmentDate))
+    dentalChartMissingCriticalFields(structured.payload)
   ) {
     try {
       const zoneText = await extractTreatmentZoneText(filePath);
@@ -2899,6 +2950,24 @@ async function extractDocumentData(filePath, mimeType, originalName) {
       }
     } catch (error) {
       console.warn("Treatment-zone OCR pass skipped:", error.message);
+    }
+
+    if (dentalChartMissingCriticalFields(structured.payload)) {
+      try {
+        const cloud = await extractTextWithOcrSpace(filePath, mimeType || "image/jpeg");
+        if (cloud?.text) {
+          extracted.text = [extracted.text, cloud.text].filter(Boolean).join("\n");
+          extracted.method = String(extracted.method || "").includes("ocrspace")
+            ? extracted.method
+            : `${extracted.method || "ocr"}+ocrspace`;
+          const cloudFields = recoverNoisyOcrFields(cloud.text, extracted.fields || {});
+          extracted.fields = { ...(extracted.fields || {}), ...cloudFields };
+          structured.payload = applyExternalFields(structured.payload, cloudFields);
+          forceFillDentalChartTreatment(structured.payload, extracted.text, extracted.fields);
+        }
+      } catch (error) {
+        console.warn("Critical-field OCR.space pass skipped:", error.message);
+      }
     }
   }
 
@@ -2923,10 +2992,15 @@ async function extractDocumentData(filePath, mimeType, originalName) {
 
   const notes = [
     `Document read successfully — auto-filled ${filledCount} field${filledCount === 1 ? "" : "s"} from the scan. Review them, then Confirm & Save.`,
-    "autofill-build: treatment-zone-v6",
+    "autofill-build: treatment-zone-v7",
     extracted.method ? `OCR engine: ${extracted.method}.` : "",
+    vision
+      ? "Vision assist: on."
+      : process.env.GEMINI_API_KEY
+        ? ""
+        : "Tip: set GEMINI_API_KEY for handwriting vision (reads Age/Procedure/Date like a person). OCR.space is used when those fields are still blank.",
     extracted.method === "ocr" || extracted.method === "easyocr+ocr"
-      ? "Tip: for clearer treatment autofill on Windows, install EasyOCR: py -3 -m pip install easyocr pillow"
+      ? "Tip: for clearer local OCR on Windows, install EasyOCR: py -3 -m pip install easyocr pillow"
       : "",
     extracted.warning,
   ]
@@ -2967,6 +3041,8 @@ module.exports = {
   snapClinicFee,
   pickBestDentalChartAge,
   forceFillDentalChartTreatment,
+  dentalChartMissingCriticalFields,
+  looksLikeDentalChartDocument,
   CLINIC_PROCEDURE_KEYWORDS,
   fieldStatus,
   parseTreatmentRecordRows,
