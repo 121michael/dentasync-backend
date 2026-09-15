@@ -834,3 +834,27 @@ AMOUNT
   assert.equal(payload.procedure.treatment, "Oral Prophylaxis");
   assert.match(payload.procedure.treatmentDate, /SEPT\s*7/i);
 });
+
+test("Jqju year token alone with DATE fills SEPT 7, 2024", () => {
+  const sample = `
+NAME
+ANGELOU OBAS-BAGHTNAN
+ADDRESS
+MANDALUYONG CITY
+AGE
+2r
+DATE
+Jqju
+DESCRIPTION
+FRlrK1L4
+CREDIT
+3000
+`;
+  const { payload } = extractStructuredPayload(sample);
+  assert.equal(payload.patient.age, "25");
+  assert.equal(payload.procedure.treatment, "Oral Prophylaxis");
+  assert.match(payload.procedure.treatmentDate, /SEPT\s*7,\s*2024/i);
+  assert.equal(payload.procedure.amountCharged, "3000");
+  assert.equal(payload.procedure.visits[0].treatment, "Oral Prophylaxis");
+  assert.match(payload.procedure.visits[0].treatmentDate, /SEPT\s*7,\s*2024/i);
+});

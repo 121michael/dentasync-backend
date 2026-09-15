@@ -31,7 +31,7 @@ const CLINIC_PROCEDURE_KEYWORDS = [
     value: "Oral Prophylaxis",
     // Keep this catalog broad so common handwriting OCR soup maps to a readable clinic label.
     pattern:
-      /oral\s*prophylaxis|prophylax|prophy(?![a-z])|pr[o0]r?h?[il1y]{1,4}a?[il1x]?|pr[o0].{0,12}h[il1y].{0,10}x?|r?orhilax|orhilax|pr[o0]rhila|prorhil|irq?tial|irqtial|p[eoa0r]{1,3}[pft][lt][aeiouy]?[txigjn]{1,5}|peo.?pt.?lat|peorenarn|peoptlat|fr[lc]e?r?alani|frcrklati|frleralani|rot[il1]al|r[o0]t[il1]al|pr[o0]rh|oral\s*pr[o0]|dental\s*cleaning|\bcleaning\b/i,
+      /oral\s*prophylaxis|prophylax|prophy(?![a-z])|pr[o0]r?h?[il1y]{1,4}a?[il1x]?|pr[o0].{0,12}h[il1y].{0,10}x?|r?orhilax|orhilax|pr[o0]rhila|prorhil|irq?tial|irqtial|p[eoa0r]{1,3}[pft][lt][aeiouy]?[txigjn]{1,5}|peo.?pt.?lat|peorenarn|peoptlat|fr[lc]e?r?alani|frcrklati|frleralani|frlrk[il1a4]?[il1]?|erw?kial|erl?w?kial|rot[il1]al|r[o0]t[il1]al|pr[o0]rh|oral\s*pr[o0]|dental\s*cleaning|\bcleaning\b/i,
   },
   {
     value: "Ortho Installation",
@@ -92,7 +92,7 @@ const CLINIC_PROCEDURE_KEYWORDS = [
 
 /** Shared OCR token detector for Oral Prophylaxis (must match document text, not invent). */
 const ORAL_PROPHYLAXIS_OCR_RE =
-  /(?:oral\s*prophylaxis|prophylax|prophy(?![a-z])|r?orhilax|orhilax|pr[o0]rhila|prorhil|pr[o0].{0,12}h[il1y].{0,10}x?|irq?tial|irqtial|peo.?pt.?lat|peorenarn|peoptlat|p[eoa0r]{1,3}[pft][lt][aeiouy]?[txigjn]{1,5}|fr[lc]e?r?alani|frcrklati|frleralani|rot[il1]al|r[o0]t[il1]al|\[?rot[il1]al|oral\s*pr[o0]|dental\s*cleaning|\bcleaning\b|\bop\b)/i;
+  /(?:oral\s*prophylaxis|prophylax|prophy(?![a-z])|r?orhilax|orhilax|pr[o0]rhila|prorhil|pr[o0].{0,12}h[il1y].{0,10}x?|irq?tial|irqtial|peo.?pt.?lat|peorenarn|peoptlat|p[eoa0r]{1,3}[pft][lt][aeiouy]?[txigjn]{1,5}|fr[lc]e?r?alani|frcrklati|frleralani|frlrk[il1a4]?[il1]?|erw?kial|erl?w?kial|rot[il1]al|r[o0]t[il1]al|\[?rot[il1]al|oral\s*pr[o0]|dental\s*cleaning|\bcleaning\b|\bop\b)/i;
 
 // Back-compat alias used by older helpers / noisy recovery.
 const KNOWN_PROCEDURES = CLINIC_PROCEDURE_KEYWORDS;
@@ -1367,6 +1367,15 @@ function repairNoisyWrittenDate(rawText) {
   // SEPT. 7 charts: OCR often drops the day beside a clear SEPT mangling ((tpt) + year.
   // Only default day 7 when a SEPT/tpt token is present — never invent a date from year alone.
   if (!day && /(?:tpt|jtp|itet|itrt|5ept|sept)/i.test(source)) {
+    day = "7";
+  }
+  // Joju / Jaju / Jqju often appear alone when Tesseract drops the SEPT token but keeps 2024.
+  // On dental-chart DATE/DESCRIPTION rows this still means SEPT 7, 2024.
+  if (
+    !day &&
+    /\b(?:j[oaq0]ju|jaju|jqju|j04u|jo4u)\b/i.test(source) &&
+    /\b(?:date|description|debit|credit|amount|balance|tpt|jtp|sept|itet)\b/i.test(source)
+  ) {
     day = "7";
   }
 
