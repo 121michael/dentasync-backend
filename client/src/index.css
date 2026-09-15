@@ -3488,13 +3488,14 @@ strong {
   padding: 0.55rem 0.4rem;
   background: color-mix(in srgb, var(--amethyst-100, #ede4f7) 78%, #fff);
   color: color-mix(in srgb, var(--amethyst-800, #4c1d75) 70%, var(--text));
-  font-size: 0.58rem;
+  font-size: 0.68rem;
   font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  white-space: normal;
+  line-height: 1.2;
+  overflow: visible;
+  text-overflow: clip;
   border-bottom-color: color-mix(in srgb, var(--amethyst-300, #c4b5fd) 40%, var(--border));
 }
 .doc-table-card__table tbody tr {

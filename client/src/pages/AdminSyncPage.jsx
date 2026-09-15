@@ -845,13 +845,13 @@ export function AdminSyncPage() {
                     <thead>
                       <tr>
                         <th>Date</th>
-                        <th>Tooth No./s</th>
+                        <th>Tooth</th>
                         <th>Procedure</th>
-                        <th>Dentist/s</th>
+                        <th>Dentist</th>
                         <th>Amount Charged</th>
                         <th>Amount Paid</th>
                         <th>Balance</th>
-                        <th>Next Appt.</th>
+                        <th>Next Appt</th>
                         {editing && activeJob.status !== "synced" ? <th aria-label="Row actions" /> : null}
                       </tr>
                     </thead>

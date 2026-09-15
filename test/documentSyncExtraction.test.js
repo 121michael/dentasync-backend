@@ -727,3 +727,51 @@ CREDIT
   assert.match(payload.procedure.visits[0].treatmentDate, /SEPT\s*7/i);
   assert.equal(payload.patient.phone, "09456449510");
 });
+
+test("amount-only OCR soup snaps 3100 to 3000 and does not invent a blank procedure", () => {
+  const sample = `
+NAME
+ANGELOU OBAS-BAGHTNAN
+ADDRESS
+MANDALUYONG CITY
+AGE
+35
+AMOUNT
+3100
+CREDIT
+3100
+`;
+  const { payload } = extractStructuredPayload(sample);
+  assert.equal(payload.procedure.treatment, "");
+  assert.equal(payload.procedure.amountCharged, "3000");
+  assert.equal(payload.procedure.visits[0].amountCharged, "3000");
+  assert.equal(payload.procedure.visits[0].treatment, "");
+});
+
+test("when prophylaxis text exists with 3100 fee, Procedure Date and Amount Charged all fill", () => {
+  const sample = `
+NAME
+ANGELOU OBAS-BAGHTNAN
+ADDRESS
+MANDALUYONG CITY
+TELEPHONE
+09154441570
+AGE
+25
+DESCRIPTION
+ORAL PROPHYLAXIS
+DATE
+SEPT 7, 2024
+CREDIT
+3100
+`;
+  const { payload } = extractStructuredPayload(sample);
+  assert.equal(payload.patient.age, "25");
+  assert.equal(payload.patient.phone, "09154441570");
+  assert.equal(payload.procedure.treatment, "Oral Prophylaxis");
+  assert.match(payload.procedure.treatmentDate, /SEPT\s*7/i);
+  assert.equal(payload.procedure.amountCharged, "3000");
+  assert.equal(payload.procedure.visits[0].treatment, "Oral Prophylaxis");
+  assert.equal(payload.procedure.visits[0].amountCharged, "3000");
+  assert.equal(payload.procedure.visits[0].amountPaid, "");
+});

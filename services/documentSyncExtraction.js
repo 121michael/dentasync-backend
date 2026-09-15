@@ -2,7 +2,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const { extractBestImageText, scoreDocumentText } = require("./documentImagePrep");
+const { extractBestImageText, scoreDocumentText, extractTreatmentZoneText } = require("./documentImagePrep");
 const { extractFieldsWithGemini } = require("./documentVisionExtraction");
 const { extractTextWithOcrSpace } = require("./cloudOcrExtraction");
 
@@ -550,11 +550,10 @@ function forceFillDentalChartTreatment(payload, rawText = "", fields = {}) {
     if (first.treatment) payload.procedure.treatment = first.treatment;
     if (first.treatmentDate) payload.procedure.treatmentDate = first.treatmentDate;
     if (first.amountCharged) {
-      first.amountCharged = preferClinicFeeAmount(first.amountCharged) || first.amountCharged;
+      first.amountCharged = preferClinicFeeAmount(first.amountCharged) || "";
       payload.procedure.amountCharged = first.amountCharged;
     } else if (payload.procedure.amountCharged) {
-      payload.procedure.amountCharged =
-        preferClinicFeeAmount(payload.procedure.amountCharged) || "";
+      payload.procedure.amountCharged = preferClinicFeeAmount(payload.procedure.amountCharged) || "";
       if (payload.procedure.amountCharged) first.amountCharged = payload.procedure.amountCharged;
     }
 
@@ -641,12 +640,10 @@ function sanitizeExtractedPayload(payload) {
     }
     if (Array.isArray(payload.procedure.visits)) {
       payload.procedure.visits = payload.procedure.visits.map((row) => {
-        const repaired = repairOcrAmountToken(row.amountCharged);
-        const rowAmount = Number(String(repaired || row.amountCharged || "").replace(/,/g, ""));
+        const preferred = preferClinicFeeAmount(row.amountCharged);
         return {
           ...row,
-          amountCharged:
-            repaired || (isPlausibleClinicAmount(rowAmount) ? row.amountCharged : ""),
+          amountCharged: preferred || "",
         };
       });
       payload.procedure.visits = normalizeVisitRows(payload.procedure.visits);
@@ -797,14 +794,15 @@ function isPlausibleClinicAmount(value) {
   return true;
 }
 
-/** Snap near-miss OCR fees (3070, 2980) to common clinic round amounts. */
+/** Snap near-miss OCR fees (3070, 2980, 3100) to common clinic round amounts. */
 function snapClinicFee(value) {
   const n = Number(String(value || "").replace(/,/g, ""));
   if (!Number.isFinite(n) || n < 400 || n > 20000) return "";
   const rounds = [500, 800, 1000, 1200, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 6000, 7000, 8000, 10000];
   if (rounds.includes(Math.trunc(n))) return String(Math.trunc(n));
   let best = "";
-  let bestDist = 81;
+  // Allow ~120 so OCR 3100 / 2900 near 3000 still snaps.
+  let bestDist = 121;
   for (const round of rounds) {
     const dist = Math.abs(n - round);
     if (dist < bestDist) {
@@ -821,7 +819,11 @@ function preferClinicFeeAmount(value) {
   const raw = original.replace(/,/g, "").trim();
   if (!raw) return "";
   const n = Number(raw);
-  if (!Number.isFinite(n)) return repairOcrAmountToken(raw) || "";
+  if (!Number.isFinite(n)) {
+    const repaired = repairOcrAmountToken(raw);
+    if (!repaired) return "";
+    return preferClinicFeeAmount(repaired);
+  }
   const exact = [500, 800, 1000, 1200, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 6000, 7000, 8000, 10000];
   if (exact.includes(Math.trunc(n))) {
     // Preserve written comma formatting from the document when present.
@@ -830,8 +832,7 @@ function preferClinicFeeAmount(value) {
     }
     return String(Math.trunc(n));
   }
-  const repaired = repairOcrAmountToken(raw);
-  if (repaired) return repaired;
+  // Near-miss OCR like 3100 / 2900 → 3000. Never keep non-round junk fees.
   return snapClinicFee(raw) || "";
 }
 
@@ -2000,15 +2001,11 @@ function applyExternalFields(payload, fields = {}) {
   }
   if (fields.amountCharged) {
     const written =
+      preferClinicFeeAmount(fields.amountCharged) ||
       repairOcrAmountToken(fields.amountCharged) ||
-      (isPlausibleClinicAmount(String(fields.amountCharged).replace(/,/g, ""))
-        ? cleanLine(String(fields.amountCharged))
-        : "");
+      "";
     if (written) {
-      if (
-        !next.procedure.amountCharged ||
-        !isPlausibleClinicAmount(String(next.procedure.amountCharged).replace(/,/g, ""))
-      ) {
+      if (!next.procedure.amountCharged || !preferClinicFeeAmount(next.procedure.amountCharged)) {
         next.procedure.amountCharged = written;
       }
     }
@@ -2748,6 +2745,34 @@ async function extractDocumentData(filePath, mimeType, originalName) {
   mirrorPrimaryTreatmentIntoVisits(structured.payload);
   forceFillDentalChartTreatment(structured.payload, extracted.text, extracted.fields || {});
 
+  // Second pass: when patient header is readable but Procedure/Date are still blank,
+  // re-OCR only the treatment table band and merge (common on Windows Tesseract).
+  if (
+    isImage &&
+    String(structured.payload.patient?.fullName || "").trim() &&
+    (!toReadableClinicProcedure(structured.payload.procedure?.treatment) ||
+      !isPlausibleWrittenDate(structured.payload.procedure?.treatmentDate))
+  ) {
+    try {
+      const zoneText = await extractTreatmentZoneText(filePath);
+      if (zoneText && zoneText.trim().length >= 4) {
+        extracted.text = [extracted.text, zoneText].filter(Boolean).join("\n");
+        const zoneFields = recoverNoisyOcrFields(zoneText, extracted.fields || {});
+        structured.payload = applyExternalFields(structured.payload, zoneFields);
+        forceFillDentalChartTreatment(structured.payload, extracted.text, {
+          ...(extracted.fields || {}),
+          ...zoneFields,
+          procedure: zoneFields.procedure || extracted.fields?.procedure || "",
+          treatmentDate: zoneFields.treatmentDate || extracted.fields?.treatmentDate || "",
+          amountCharged: zoneFields.amountCharged || extracted.fields?.amountCharged || "",
+          notes: zoneText,
+        });
+      }
+    } catch (error) {
+      console.warn("Treatment-zone OCR pass skipped:", error.message);
+    }
+  }
+
   structured.fieldStatuses = refreshFieldStatuses(structured.payload, structured.fieldStatuses);
 
   let filledCount = 0;
@@ -2769,7 +2794,7 @@ async function extractDocumentData(filePath, mimeType, originalName) {
 
   const notes = [
     `Document read successfully — auto-filled ${filledCount} field${filledCount === 1 ? "" : "s"} from the scan. Review them, then Confirm & Save.`,
-    "autofill-build: treatment-zone-v3",
+    "autofill-build: treatment-zone-v4",
     extracted.method ? `OCR engine: ${extracted.method}.` : "",
     extracted.method === "ocr" || extracted.method === "easyocr+ocr"
       ? "Tip: for clearer treatment autofill on Windows, install EasyOCR: py -3 -m pip install easyocr pillow"
@@ -2809,6 +2834,8 @@ module.exports = {
   inferProcedure,
   resolveClinicProcedure,
   toReadableClinicProcedure,
+  preferClinicFeeAmount,
+  snapClinicFee,
   CLINIC_PROCEDURE_KEYWORDS,
   fieldStatus,
   parseTreatmentRecordRows,

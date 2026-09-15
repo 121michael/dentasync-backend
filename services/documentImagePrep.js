@@ -967,6 +967,7 @@ module.exports = {
   scoreDocumentText,
   prepareOrientedVariants: buildPreprocessVariants,
   extractBestImageText,
+  extractTreatmentZoneText,
   runEasyOcr,
   countFilledFields,
 };
