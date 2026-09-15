@@ -62,28 +62,16 @@ function visitHasSignal(row = {}) {
 }
 
 /** Always put readable primary procedure fields into the Document Table visit rows. */
-function looksLikeWeakProcedure(value) {
-  const text = String(value || "").trim();
-  if (!text) return true;
-  if (/[^A-Za-z0-9\s.\-\/]/.test(text)) return true;
-  if (text.length <= 4 && !/^(op|exo|fpd|rct)$/i.test(text)) return true;
-  if (/^(pr[o0]|ura|trt|time|debit|credit)$/i.test(text)) return true;
-  if (!/[aeiou]/i.test(text) && text.length >= 5) return true;
-  return false;
-}
-
 function seedVisitsFromProcedure(procedure = {}) {
   const rawVisits = Array.isArray(procedure.visits) ? procedure.visits : [];
   const visits = rawVisits.map((row) => ({ ...emptyVisitRow(), ...(row || {}) }));
   const usable = visits.filter(visitHasSignal);
   if (usable.length) {
-    // Backfill blank / OCR-soup cells on the first row from primary fields.
+    // Dental charts are single-row: always organize Date / Procedure / Amount from primary.
     const first = { ...usable[0] };
-    if (procedure.treatment && (!first.treatment || looksLikeWeakProcedure(first.treatment))) {
-      first.treatment = procedure.treatment;
-    }
-    if (procedure.treatmentDate && !first.treatmentDate) first.treatmentDate = procedure.treatmentDate;
-    if (procedure.amountCharged && !first.amountCharged) first.amountCharged = procedure.amountCharged;
+    if (procedure.treatment) first.treatment = procedure.treatment;
+    if (procedure.treatmentDate) first.treatmentDate = procedure.treatmentDate;
+    if (procedure.amountCharged) first.amountCharged = procedure.amountCharged;
     if (procedure.dentistName && !first.dentistName) first.dentistName = procedure.dentistName;
     return [first, ...usable.slice(1)];
   }
@@ -845,10 +833,10 @@ export function AdminSyncPage() {
                   <table className="doc-table-card__table">
                     <colgroup>
                       <col style={{ width: "12%" }} />
-                      <col style={{ width: "11%" }} />
-                      <col style={{ width: "22%" }} />
-                      <col style={{ width: "14%" }} />
-                      <col style={{ width: "11%" }} />
+                      <col style={{ width: "9%" }} />
+                      <col style={{ width: "26%" }} />
+                      <col style={{ width: "13%" }} />
+                      <col style={{ width: "10%" }} />
                       <col style={{ width: "10%" }} />
                       <col style={{ width: "10%" }} />
                       <col style={{ width: "10%" }} />

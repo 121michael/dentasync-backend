@@ -417,17 +417,22 @@ function forceFillDentalChartTreatment(payload, rawText = "", fields = {}) {
   }
 
   // Age + phone from dental-chart header OCR (including common letter/digit soup).
-  if (!payload.patient.age) {
-    const ageToken =
-      repairOcrAgeToken(fields.age || "") ||
-      repairOcrAgeToken(
-        (text.match(/(?:\bage\b|\bace\b|\bno[eo]\b|\baqe\b|\bacc\b)\s*[:\-]?\s*([0-9A-Za-z]{1,3})\b/i) ||
-          [])[1] || ""
-      ) ||
-      normalizeAge(
-        (text.match(/(?:\bage\b|\bace\b|\bno[eo]\b|\bacc\b)\s*[:\-]?\s*([1-9]\d)\b/i) || [])[1] || ""
-      );
-    if (ageToken) payload.patient.age = ageToken;
+  // Prefer the AGE-label value so weak panel/vision guesses (e.g. 35) cannot stick.
+  {
+    const labeledAge = extractLabeledAge(text) || repairOcrAgeToken(fields.age || "");
+    if (labeledAge) {
+      payload.patient.age = labeledAge;
+    } else if (!payload.patient.age) {
+      const ageToken =
+        repairOcrAgeToken(
+          (text.match(/(?:\bage\b|\bace\b|\bno[eo]\b|\baqe\b|\bacc\b)\s*[:\-]?\s*([0-9A-Za-z]{1,3})\b/i) ||
+            [])[1] || ""
+        ) ||
+        normalizeAge(
+          (text.match(/(?:\bage\b|\bace\b|\bno[eo]\b|\bacc\b)\s*[:\-]?\s*([1-9]\d)\b/i) || [])[1] || ""
+        );
+      if (ageToken) payload.patient.age = ageToken;
+    }
   }
   if (!payload.patient.phone) {
     const phone =
@@ -488,23 +493,64 @@ function forceFillDentalChartTreatment(payload, rawText = "", fields = {}) {
   }
 
   // Keep the first visit row aligned with the best primary DATE / PROCEDURE / AMOUNT.
+  // If primary is still empty, recover a dental-chart row from the whole page text.
+  const chartRow = extractDentalChartVisitRow(text);
+  if (chartRow) {
+    if (!payload.procedure.treatment && chartRow.treatment) {
+      payload.procedure.treatment = chartRow.treatment;
+    }
+    if (!isPlausibleWrittenDate(payload.procedure.treatmentDate) && chartRow.treatmentDate) {
+      payload.procedure.treatmentDate = chartRow.treatmentDate;
+    }
+    if (
+      !isPlausibleClinicAmount(String(payload.procedure.amountCharged || "").replace(/,/g, "")) &&
+      chartRow.amountCharged
+    ) {
+      payload.procedure.amountCharged = chartRow.amountCharged;
+    }
+  }
+
   const visits = normalizeVisitRows(payload.procedure.visits || []);
   if (visits.length <= 1) {
-    const first = { ...(visits[0] || {}) };
-    if (isPlausibleProcedure(payload.procedure.treatment) || toReadableClinicProcedure(payload.procedure.treatment)) {
-      first.treatment = toReadableClinicProcedure(payload.procedure.treatment) || payload.procedure.treatment;
-    }
-    if (isPlausibleWrittenDate(payload.procedure.treatmentDate)) {
-      first.treatmentDate = payload.procedure.treatmentDate;
-    }
+    const first = {
+      treatmentDate: "",
+      toothNos: "",
+      treatment: "",
+      dentistName: "",
+      amountCharged: "",
+      ...(visits[0] || {}),
+    };
+    // Explicit column placement: Date → treatmentDate, Procedure → treatment, Amount → amountCharged.
+    const readableTreatment =
+      toReadableClinicProcedure(payload.procedure.treatment) ||
+      toReadableClinicProcedure(first.treatment) ||
+      (chartRow && chartRow.treatment) ||
+      "";
+    if (readableTreatment) first.treatment = readableTreatment;
+
+    const readableDate = isPlausibleWrittenDate(payload.procedure.treatmentDate)
+      ? payload.procedure.treatmentDate
+      : isPlausibleWrittenDate(first.treatmentDate)
+        ? first.treatmentDate
+        : (chartRow && chartRow.treatmentDate) || "";
+    if (readableDate) first.treatmentDate = readableDate;
+
     const primaryAmount = Number(String(payload.procedure.amountCharged || "").replace(/,/g, ""));
     const visitAmount = Number(String(first.amountCharged || "").replace(/,/g, ""));
-    if (
-      isPlausibleClinicAmount(primaryAmount) &&
-      (!isPlausibleClinicAmount(visitAmount) || (visitAmount <= 1500 && primaryAmount >= 2000))
-    ) {
-      first.amountCharged = payload.procedure.amountCharged;
+    const chartAmount = Number(String((chartRow && chartRow.amountCharged) || "").replace(/,/g, ""));
+    if (isPlausibleClinicAmount(primaryAmount)) {
+      if (!isPlausibleClinicAmount(visitAmount) || (visitAmount <= 1500 && primaryAmount >= 2000)) {
+        first.amountCharged = payload.procedure.amountCharged;
+      }
+    } else if (!isPlausibleClinicAmount(visitAmount) && isPlausibleClinicAmount(chartAmount)) {
+      first.amountCharged = chartRow.amountCharged;
     }
+
+    // Mirror visit cells back to primary so both stay organized the same way.
+    if (first.treatment) payload.procedure.treatment = first.treatment;
+    if (first.treatmentDate) payload.procedure.treatmentDate = first.treatmentDate;
+    if (first.amountCharged) payload.procedure.amountCharged = first.amountCharged;
+
     payload.procedure.visits = normalizeVisitRows([first]);
   }
 
@@ -1425,7 +1471,105 @@ function extractPhoneFromText(text) {
   if (glued?.[1]) {
     return literalPhoneAsWritten(repairOcrPhoneDigits(glued[1])) || "";
   }
+  // Dental charts often put a clean 09XXXXXXXXX on its own line under TELEPHONE.
+  const standalone = source.match(/\b(0?9[\dOIl]{9})\b/i);
+  if (standalone?.[1]) {
+    return (
+      literalPhoneAsWritten(standalone[1]) ||
+      literalPhoneAsWritten(repairOcrPhoneDigits(standalone[1])) ||
+      ""
+    );
+  }
   return "";
+}
+
+/** Prefer the age written next to the AGE label over stray page digits / weak panel OCR. */
+function extractLabeledAge(text) {
+  const source = String(text || "");
+  const patterns = [
+    /(?:^|\n)\s*age\s*[:\-]?\s*([0-9A-Za-z]{1,3})\b/im,
+    /\bage\b\s*[:\-]?\s*([0-9A-Za-z]{1,3})\b/i,
+  ];
+  for (const pattern of patterns) {
+    const match = source.match(pattern);
+    if (!match?.[1]) continue;
+    const repaired = repairOcrAgeToken(match[1]) || normalizeAge(match[1]);
+    if (repaired) return repaired;
+  }
+  return "";
+}
+
+/**
+ * Pull DATE / DESCRIPTION / AMOUNT from a dental-chart page even when column
+ * headers (TIME/DEBIT/CREDIT) sit between the labels and the handwritten row.
+ * Places values into the correct Document Table columns.
+ */
+function extractDentalChartVisitRow(rawText = "") {
+  const text = String(rawText || "");
+  if (!text.trim()) return null;
+  const looksLikeChart =
+    /\b(?:name|address|telephone|age|description|debit|credit|occupation|status)\b/i.test(text) ||
+    ORAL_PROPHYLAXIS_OCR_RE.test(text) ||
+    /(?:sept|tpt|jaju|joju)/i.test(text);
+  if (!looksLikeChart) return null;
+
+  const treatment =
+    toReadableClinicProcedure(
+      (text.match(
+        /\b(oral\s*prophylaxis|op\b|pr[o0][A-Za-z0-9/{}]{2,18}|r?orhilax|irq?tial|peo.?pt.?lat|peorenarn|deep\s*scal(?:e|ing)?|ortho(?:dontic)?\s*install(?:ation)?|ortho(?:dontic)?\s*adjust(?:ment)?|exo(?:\s+\d{2}\s*[-–]\s*\d{2})?)\b/i
+      ) || [])[1] || ""
+    ) ||
+    (ORAL_PROPHYLAXIS_OCR_RE.test(text) ? "Oral Prophylaxis" : "") ||
+    resolveClinicProcedure(text);
+
+  const treatmentDate =
+    (() => {
+      const clean = text.match(
+        /\b((?:jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*\.?\s*[-.]?\s*\d{1,2}(?:st|nd|rd|th)?(?:,)?\s*20\d{2})\b/i
+      );
+      if (clean?.[1]) return normalizeWrittenClinicDate(clean[1]);
+      return normalizeWrittenClinicDate(
+        repairNoisyWrittenDate(text) ||
+          repairNoisyWrittenDate(
+            (text.match(/(?:[\(\[]|\b)((?:tpt|jtp|itet|5ept|sept|joju|jaju)[^\n]{0,36})/i) || [])[1] || ""
+          )
+      );
+    })();
+
+  let amountCharged = "";
+  const fee800 = text.match(/\b(800|8[oO]{2})\b/);
+  if (fee800?.[1]) {
+    amountCharged = /8[oO]{2}/.test(fee800[1]) ? "800" : fee800[1];
+  }
+  if (!amountCharged) {
+    amountCharged =
+      repairOcrAmountToken((text.match(/\b([bBeE8][0oOdqvuw]{2,4})\b/) || [])[1] || "") || "";
+  }
+  if (!amountCharged) {
+    const near = [...text.matchAll(/\b([1-9]\d{2,4})\b/g)]
+      .map((m) => Number(m[1]))
+      .filter((n) => isPlausibleClinicAmount(n) && n >= 100 && n <= 20000 && !/^20[1-3]\d$/.test(String(n)));
+    // Prefer common prophylaxis fees on this clinic form (800 / 2000 / 3000).
+    const preferred = near.find((n) => n === 800 || n === 2000 || n === 3000);
+    if (preferred) amountCharged = String(preferred);
+    else if (near.length) {
+      const candidate = near.sort((a, b) => {
+        const score = (n) =>
+          Math.min(Math.abs(n - 800), Math.abs(n - 2000), Math.abs(n - 3000));
+        return score(a) - score(b);
+      })[0];
+      amountCharged = snapClinicFee(String(candidate)) || String(candidate);
+    }
+  }
+
+  if (!treatment && !treatmentDate && !amountCharged) return null;
+  return {
+    treatmentDate: treatmentDate || "",
+    treatment: treatment || "",
+    amountCharged: amountCharged || "",
+    toothNos: "",
+    dentistName: "",
+  };
 }
 
 /** Recover PH city addresses when OCR garbles the ADDRESS label (Aboress/ApDREss). */
@@ -1526,9 +1670,22 @@ function isPlausibleWrittenDate(value) {
     return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === text;
   }
   return new RegExp(
-    `\\b(${MONTH_TOKEN_RE})\\s*[-.]?\\s*\\d{1,2}(?:st|nd|rd|th)?(?:,)?\\s*20\\d{2}\\b|\\b\\d{1,2}[\\/\\-.]\\d{1,2}[\\/\\-.]\\d{2,4}\\b`,
+    `\\b(${MONTH_TOKEN_RE})\\.?\\s*[-.]?\\s*\\d{1,2}(?:st|nd|rd|th)?(?:,)?\\s*20\\d{2}\\b|\\b\\d{1,2}[\\/\\-.]\\d{1,2}[\\/\\-.]\\d{2,4}\\b`,
     "i"
   ).test(text);
+}
+
+/** Normalize "SEPT. 7, 2024" → "SEPT 7, 2024" for consistent Document Table placement. */
+function normalizeWrittenClinicDate(value) {
+  const text = cleanLine(value);
+  if (!text) return "";
+  return text
+    .replace(
+      /\b(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec)\./gi,
+      "$1"
+    )
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function repairOcrPhoneDigits(value) {
@@ -1757,7 +1914,8 @@ function applyExternalFields(payload, fields = {}) {
   }
   if (fields.age) {
     const age = repairOcrAgeToken(fields.age) || normalizeAge(fields.age);
-    if (age && (!next.patient.age || Number(age) >= 10)) next.patient.age = age;
+    // Never overwrite a labeled AGE already read from the document with a weaker panel/vision guess.
+    if (age && !next.patient.age) next.patient.age = age;
   }
   if (fields.phone && !next.patient.phone) {
     const phone =
@@ -2008,12 +2166,12 @@ function extractStructuredPayload(rawText) {
   );
 
   payload.patient.age =
+    extractLabeledAge(text) ||
     repairOcrAgeToken(
       captureLabeledBlock(text, ["age"]) ||
         capture(text, [
           /(?:^|\n)\s*age\s*[:\-]\s*([0-9]{1,3})(?:\s*(?:years?|yrs?|y\.?o\.?))?(?:\n|$)/im,
           /\bage\s*[:\-]\s*([0-9]{1,3})\b/i,
-          /\bage\b[\s\S]{0,40}?\b([0-9A-Za-z]{2})\b/i,
           /(?:\bage\b|\bace\b|\bno[eo]\b|\baqe\b)\s*[:\-]?\s*([0-9A-Za-z]{2})\b/i,
         ])
     ) ||
@@ -2149,10 +2307,10 @@ function extractStructuredPayload(rawText) {
     captureLabeledBlock(text, ["date"]) ||
     capture(text, [
       /(?:treatment\s*date|procedure\s*date|date\s*performed|date\s*of\s*service|visit\s*date)\s*[:\-]\s*([0-9A-Za-z\/\-.,\s]{4,28})/i,
-      /\b((?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s*[-.]?\s*\d{1,2}(?:,)?\s*\d{4})\b/i,
-      /(?:^|\n)\s*date\s*[:\-]\s*([A-Za-z]{3,9}\s*[-.]?\s*\d{1,2}(?:,)?\s*\d{4}|\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4})/im,
+      /\b((?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s*[-.]?\s*\d{1,2}(?:,)?\s*\d{4})\b/i,
+      /(?:^|\n)\s*date\s*[:\-]\s*([A-Za-z]{3,9}\.?\s*[-.]?\s*\d{1,2}(?:,)?\s*\d{4}|\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4})/im,
     ]);
-  payload.procedure.treatmentDate = cleanLine(dateBlock);
+  payload.procedure.treatmentDate = normalizeWrittenClinicDate(dateBlock);
   // If we accidentally picked DOB, clear when an explicit treatment date exists elsewhere.
   if (
     payload.procedure.treatmentDate &&
@@ -2161,17 +2319,17 @@ function extractStructuredPayload(rawText) {
   ) {
     const explicitTreatment = capture(text, [
       /(?:treatment\s*date|procedure\s*date|date\s*performed)\s*[:\-]\s*([0-9A-Za-z\/\-.,\s]{4,28})/i,
-      /(?:^|\n)\s*date\s*[:\-]\s*([A-Za-z]{3,9}\s*[-.]?\s*\d{1,2}(?:,)?\s*\d{4}|\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4})/im,
+      /(?:^|\n)\s*date\s*[:\-]\s*([A-Za-z]{3,9}\.?\s*[-.]?\s*\d{1,2}(?:,)?\s*\d{4}|\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4})/im,
     ]);
-    payload.procedure.treatmentDate = cleanLine(explicitTreatment);
+    payload.procedure.treatmentDate = normalizeWrittenClinicDate(explicitTreatment);
   }
   // OCR noise around Sept-7, 2024 style dates — keep the matched written snippet only.
   if (!payload.procedure.treatmentDate) {
     const fuzzyMonth = text.match(
-      /\b(?:(?:sept?|sep|oct|nov|dec|jan|feb|mar|apr|may|jun|jul|aug)[a-z]*\s*[-.]?\s*\d{1,2}(?:,)?\s*20\d{2})\b/i
+      /\b(?:(?:sept?|sep|oct|nov|dec|jan|feb|mar|apr|may|jun|jul|aug)[a-z]*\.?\s*[-.]?\s*\d{1,2}(?:,)?\s*20\d{2})\b/i
     );
     if (fuzzyMonth) {
-      payload.procedure.treatmentDate = cleanLine(fuzzyMonth[0]);
+      payload.procedure.treatmentDate = normalizeWrittenClinicDate(fuzzyMonth[0]);
     }
   }
   if (!isPlausibleWrittenDate(payload.procedure.treatmentDate)) {
@@ -2256,24 +2414,44 @@ function extractStructuredPayload(rawText) {
       payload.procedure.amountCharged = primary.amountCharged;
       fieldStatuses.amountCharged = "detected";
     }
-  } else if (
-    payload.procedure.treatment ||
-    payload.procedure.treatmentDate ||
-    payload.procedure.amountCharged
-  ) {
-    // Table or chart: if labeled fields were readable, always put them in the Document Table.
-    payload.procedure.visits = buildVisitFromPrimary(payload.procedure);
-    if (isTableForm && !payload.procedure.visits.length) {
-      fieldStatuses.treatment = fieldStatuses.treatment || "unable_to_read";
-      fieldStatuses.treatmentDate = fieldStatuses.treatmentDate || "unable_to_read";
-      fieldStatuses.amountCharged = fieldStatuses.amountCharged || "unable_to_read";
+  } else {
+    // Single-row dental chart: recover DATE / PROCEDURE / AMOUNT into the correct columns.
+    const chartRow = extractDentalChartVisitRow(text);
+    if (chartRow) {
+      if (!payload.procedure.treatment && chartRow.treatment) {
+        payload.procedure.treatment = chartRow.treatment;
+        fieldStatuses.treatment = "detected";
+      }
+      if (!isPlausibleWrittenDate(payload.procedure.treatmentDate) && chartRow.treatmentDate) {
+        payload.procedure.treatmentDate = chartRow.treatmentDate;
+        fieldStatuses.treatmentDate = "detected";
+      }
+      if (
+        !isPlausibleClinicAmount(String(payload.procedure.amountCharged || "").replace(/,/g, "")) &&
+        chartRow.amountCharged
+      ) {
+        payload.procedure.amountCharged = chartRow.amountCharged;
+        fieldStatuses.amountCharged = "detected";
+      }
     }
-  } else if (isTableForm) {
-    // Truly unreadable table — leave empty for the admin to fill from the preview.
-    payload.procedure.visits = [];
-    fieldStatuses.treatment = "unable_to_read";
-    fieldStatuses.treatmentDate = "unable_to_read";
-    fieldStatuses.amountCharged = "unable_to_read";
+    if (
+      payload.procedure.treatment ||
+      payload.procedure.treatmentDate ||
+      payload.procedure.amountCharged
+    ) {
+      payload.procedure.visits = buildVisitFromPrimary(payload.procedure);
+      if (isTableForm && !payload.procedure.visits.length) {
+        fieldStatuses.treatment = fieldStatuses.treatment || "unable_to_read";
+        fieldStatuses.treatmentDate = fieldStatuses.treatmentDate || "unable_to_read";
+        fieldStatuses.amountCharged = fieldStatuses.amountCharged || "unable_to_read";
+      }
+    } else if (isTableForm) {
+      // Truly unreadable table — leave empty for the admin to fill from the preview.
+      payload.procedure.visits = [];
+      fieldStatuses.treatment = "unable_to_read";
+      fieldStatuses.treatmentDate = "unable_to_read";
+      fieldStatuses.amountCharged = "unable_to_read";
+    }
   }
 
   // Do not invent procedure/amount/notes from OCR soup heuristics.

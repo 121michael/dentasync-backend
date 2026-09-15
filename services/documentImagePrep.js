@@ -524,11 +524,12 @@ function mergeChartPanelFields(fields = {}, panels = []) {
   const agePanel = panels.find((panel) => panel.key === "age");
   if (agePanel?.text) {
     const repaired =
+      (agePanel.text.match(/\bage\b\s*[:\-]?\s*([0-9A-Za-z]{1,3})\b/i) || [])[1] ||
       (agePanel.text.match(/\b([1-9]\d)\b/) || [])[1] ||
       (agePanel.text.match(/\b([0-9A-Za-z]{2})\b/) || [])[1] ||
       "";
-    // Prefer repaired tokens like 2r → later pipeline maps to 25.
-    if (repaired && (!next.age || !/^\d{2}$/.test(String(next.age)))) {
+    // Only fill age from the panel when still empty — never overwrite a labeled AGE.
+    if (repaired && !next.age) {
       next.age = repaired;
     }
   }

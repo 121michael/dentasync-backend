@@ -633,3 +633,68 @@ b0vd
   assert.equal(payload.procedure.visits[0].treatment, "Oral Prophylaxis");
   assert.equal(payload.procedure.visits[0].amountCharged, "2000");
 });
+
+test("screenshot dental chart places Date Procedure Amount in correct columns", () => {
+  const sample = `
+NAME
+ANGELOU OBAS-BAGHTNAN
+ADDRESS
+MANDALUYONG CITY
+TELEPHONE
+09456449510
+AGE
+25
+OCCUPATION
+DINING STAFF
+STATUS
+MARRIED
+DATE NO TIME DESCRIPTION DEBIT CREDIT BALANCE
+SEPT 7, 2024
+ORAL PROPHYLAXIS
+3000
+`;
+  const { payload } = extractStructuredPayload(sample);
+  assert.equal(payload.patient.fullName, "ANGELOU OBAS-BAGHTNAN");
+  assert.equal(payload.patient.age, "25");
+  assert.equal(payload.patient.phone, "09456449510");
+  assert.equal(payload.patient.address.toUpperCase(), "MANDALUYONG CITY");
+  assert.equal(payload.procedure.treatment, "Oral Prophylaxis");
+  assert.match(payload.procedure.treatmentDate, /SEPT\s*7,?\s*2024/i);
+  assert.equal(payload.procedure.amountCharged, "3000");
+  assert.equal(payload.procedure.visits.length, 1);
+  assert.equal(payload.procedure.visits[0].treatment, "Oral Prophylaxis");
+  assert.match(payload.procedure.visits[0].treatmentDate, /SEPT\s*7,?\s*2024/i);
+  assert.equal(payload.procedure.visits[0].amountCharged, "3000");
+  // Procedure must not be misplaced into tooth/dentist columns.
+  assert.equal(payload.procedure.visits[0].toothNos, "");
+  assert.equal(payload.procedure.visits[0].dentistName, "");
+});
+
+test("labeled AGE 25 is not overwritten and phone is recovered under TELEPHONE", () => {
+  const sample = `
+NAME
+ANGELOU OBAS-BAGHTNAN
+ADDRESS
+MANDALUYONG CITY
+TELEPHONE
+09154441570
+AGE
+25
+OCCUPATION
+DINING STAFF
+DESCRIPTION
+ORAL PROPHYLAXIS
+DATE
+SEPT. 7, 2024
+CREDIT
+800
+`;
+  const { payload } = extractStructuredPayload(sample);
+  assert.equal(payload.patient.age, "25");
+  assert.equal(payload.patient.phone, "09154441570");
+  assert.equal(payload.procedure.treatment, "Oral Prophylaxis");
+  assert.match(payload.procedure.treatmentDate, /SEPT\s*7,?\s*2024/i);
+  assert.equal(payload.procedure.amountCharged, "800");
+  assert.equal(payload.procedure.visits[0].treatment, "Oral Prophylaxis");
+  assert.equal(payload.procedure.visits[0].amountCharged, "800");
+});
