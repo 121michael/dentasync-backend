@@ -1,4 +1,22 @@
 require("dotenv").config();
+
+// Some Windows npm versions set NODE_ENV=production for `npm start`. That forces
+// production secret checks and makes the API exit immediately when JWT_SECRET is
+// unset — while `node server.js` works. Keep local `npm start` in development
+// unless the operator explicitly configured production secrets / FORCE_SECURE_SECRETS.
+(function normalizeNpmStartEnv() {
+  const nodeEnv = String(process.env.NODE_ENV || "").toLowerCase();
+  if (process.env.npm_lifecycle_event !== "start") return;
+  if (nodeEnv !== "production") return;
+  if (process.env.FORCE_SECURE_SECRETS === "true") return;
+  const jwt = String(process.env.JWT_SECRET || "").trim();
+  if (jwt && jwt.length >= 16) return;
+  process.env.NODE_ENV = "development";
+  console.warn(
+    "⚠️ npm start had NODE_ENV=production without a strong JWT_SECRET; using development mode so the API can boot. Set JWT_SECRET (16+ chars) and NODE_ENV=production for production."
+  );
+})();
+
 const express = require("express");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
