@@ -909,3 +909,27 @@ CREDIT
   assert.equal(payload.procedure.visits[0].amountCharged, "3000");
   assert.equal(payload.procedure.visits[0].amountPaid, "");
 });
+
+test("dental chart with only name+amount still flags missing Age Procedure Date", () => {
+  const {
+    emptyPayload,
+    dentalChartMissingCriticalFields,
+    looksLikeDentalChartDocument,
+  } = require("../services/documentSyncExtraction");
+  const payload = emptyPayload();
+  payload.patient.fullName = "ANGELOU OBAS-BAGHTNAN";
+  payload.patient.address = "MANDALUYONG CITY";
+  payload.procedure.amountCharged = "3000";
+  assert.equal(dentalChartMissingCriticalFields(payload), true);
+  assert.equal(
+    looksLikeDentalChartDocument(
+      "NAME\nANGELOU\nADDRESS\nMANDALUYONG\nAGE\nDATE\nDESCRIPTION\nCREDIT",
+      { fullName: "ANGELOU", address: "MANDALUYONG" }
+    ),
+    true
+  );
+  payload.patient.age = "25";
+  payload.procedure.treatment = "Oral Prophylaxis";
+  payload.procedure.treatmentDate = "SEPT 7, 2024";
+  assert.equal(dentalChartMissingCriticalFields(payload), false);
+});
