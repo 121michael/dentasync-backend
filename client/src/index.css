@@ -3512,19 +3512,32 @@ strong {
   max-width: 100%;
   min-width: 0;
   box-sizing: border-box;
-  min-height: 1.85rem;
-  padding: 0.24rem 0.35rem;
+  min-height: 1.95rem;
+  padding: 0.28rem 0.4rem;
   border: 1px solid transparent;
   border-radius: 7px;
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 0.76rem;
-  line-height: 1.25;
+  font-size: 0.84rem;
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: 0.01em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   transition: border-color 0.14s ease, box-shadow 0.14s ease, background 0.14s ease;
+}
+.doc-table-card__table td.is-procedure {
+  min-width: 9.5rem;
+}
+.doc-table-card__table td.is-procedure input {
+  font-size: 0.9rem;
+  font-weight: 600;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.35;
 }
 .doc-table-card__table tbody tr:hover input {
   background: color-mix(in srgb, #fff 70%, transparent);

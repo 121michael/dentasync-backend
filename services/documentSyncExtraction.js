@@ -29,8 +29,9 @@ const CLINIC_PROCEDURE_KEYWORDS = [
   },
   {
     value: "Oral Prophylaxis",
+    // Keep this catalog broad so common handwriting OCR soup maps to a readable clinic label.
     pattern:
-      /oral\s*prophylaxis|prophylax|prophy(?![a-z])|pr[o0]r?h?[il1y]{1,4}a?[il1x]?|pr[o0].{0,12}h[il1y].{0,10}x?|r?orhilax|orhilax|irq?tial|irqtial|p[eoa0r]{1,3}[pft][lt][aeiouy]?[txigjn]{1,5}|peo.?pt.?lat|peorenarn|peoptlat|dental\s*cleaning|\bcleaning\b/i,
+      /oral\s*prophylaxis|prophylax|prophy(?![a-z])|pr[o0]r?h?[il1y]{1,4}a?[il1x]?|pr[o0].{0,12}h[il1y].{0,10}x?|r?orhilax|orhilax|pr[o0]rhila|prorhil|irq?tial|irqtial|p[eoa0r]{1,3}[pft][lt][aeiouy]?[txigjn]{1,5}|peo.?pt.?lat|peorenarn|peoptlat|pr[o0]rh|oral\s*pr[o0]|dental\s*cleaning|\bcleaning\b/i,
   },
   {
     value: "Ortho Installation",
@@ -43,8 +44,9 @@ const CLINIC_PROCEDURE_KEYWORDS = [
       /ortho(?:dontic)?\s*adjust|brace\s*adjust|adjustment|adjm(?:ent)?|adium|odilum|aqlum|azlut|ortho.{0,12}adj/i,
   },
   {
+    // Never map Admin Sync UI "EXTRACTION" chrome to EXO — require EXO or tooth extraction.
     value: "EXO",
-    pattern: /\bexo\b|tooth\s*extraction|(?<!data\s)\bextraction\b/i,
+    pattern: /\bexo\b|tooth\s*extraction/i,
   },
   {
     value: "Restoration",
@@ -87,6 +89,10 @@ const CLINIC_PROCEDURE_KEYWORDS = [
     pattern: /consultation|\bconsult\b/i,
   },
 ];
+
+/** Shared OCR token detector for Oral Prophylaxis (must match document text, not invent). */
+const ORAL_PROPHYLAXIS_OCR_RE =
+  /(?:oral\s*prophylaxis|prophylax|prophy(?![a-z])|r?orhilax|orhilax|pr[o0]rhila|prorhil|pr[o0].{0,12}h[il1y].{0,10}x?|irq?tial|irqtial|peo.?pt.?lat|peorenarn|peoptlat|p[eoa0r]{1,3}[pft][lt][aeiouy]?[txigjn]{1,5}|oral\s*pr[o0]|dental\s*cleaning|\bcleaning\b|\bop\b)/i;
 
 // Back-compat alias used by older helpers / noisy recovery.
 const KNOWN_PROCEDURES = CLINIC_PROCEDURE_KEYWORDS;
@@ -158,6 +164,10 @@ function resolveClinicProcedure(value) {
       return "";
     }
   }
+  // Bare UI word EXTRACTION (without tooth context) is not a clinic procedure.
+  if (/^extraction$/i.test(text) || /^data\s*extraction$/i.test(text)) {
+    return "";
+  }
   // Handwritten charts often write just "OP" for Oral Prophylaxis.
   if (/^(op|o\.?p\.?)$/i.test(text) || (/^\s*op\s*$/i.test(text))) {
     return "Oral Prophylaxis";
@@ -170,12 +180,29 @@ function resolveClinicProcedure(value) {
   for (const entry of CLINIC_PROCEDURE_KEYWORDS) {
     if (entry.pattern.test(text)) {
       if (entry.value === "EXO" && toothSuffix) return `EXO${toothSuffix}`;
-      // Avoid mapping the UI word EXTRACTION to EXO.
-      if (entry.value === "EXO" && /data\s*extraction/i.test(text) && !/\bexo\b|tooth\s*extraction/i.test(text)) {
+      if (entry.value === "EXO" && /extraction/i.test(text) && !/\bexo\b|tooth\s*extraction/i.test(text)) {
         continue;
       }
       return entry.value;
     }
+  }
+  return "";
+}
+
+/**
+ * Map OCR soup to a human-readable clinic procedure label.
+ * Returns "" when unread / not a known procedure (never invent from blank text).
+ */
+function toReadableClinicProcedure(value) {
+  const text = cleanLine(value);
+  if (!text) return "";
+  if (/^extraction$/i.test(text) || /data\s*extraction|document\s*data/i.test(text)) return "";
+  const resolved = resolveClinicProcedure(text);
+  if (resolved) return resolved;
+  if (looksLikeOcrSoup(text)) return "";
+  if (!isPlausibleProcedure(text)) return "";
+  if (/^[A-Za-z][A-Za-z0-9 .,'\-\/]{2,48}$/.test(text) && /[aeiou]/i.test(text)) {
+    return text;
   }
   return "";
 }
@@ -186,11 +213,11 @@ function normalizeVisitRows(rows = []) {
   return rows
     .map((row) => {
       const rawTreatment = cleanLine(row?.treatment || row?.procedure || "");
-      const resolved = resolveClinicProcedure(rawTreatment);
+      const resolved = toReadableClinicProcedure(rawTreatment);
       return {
         treatmentDate: cleanLine(row?.treatmentDate || row?.date || ""),
         toothNos: cleanLine(row?.toothNos || row?.toothNumber || ""),
-        treatment: resolved || rawTreatment,
+        treatment: resolved,
         dentistName: cleanLine(row?.dentistName || row?.dentist || ""),
         amountCharged: cleanLine(String(row?.amountCharged ?? row?.amount ?? "")),
         amountPaid: cleanLine(String(row?.amountPaid ?? "")),
@@ -353,8 +380,8 @@ function forceFillDentalChartTreatment(payload, rawText = "", fields = {}) {
       /\b(?:date|no\.?|description|debit|credit|amount|balance|sept|tpt|jaju|joju)\b/i.test(text));
 
   const resolved =
-    resolveClinicProcedure(fields.procedure || "") ||
-    resolveClinicProcedure(payload.procedure.treatment || "") ||
+    toReadableClinicProcedure(fields.procedure || "") ||
+    toReadableClinicProcedure(payload.procedure.treatment || "") ||
     resolveClinicProcedure(text);
 
   // Prefer Oral Prophylaxis over false EXO from UI "EXTRACTION" on dental charts.
@@ -366,15 +393,17 @@ function forceFillDentalChartTreatment(payload, rawText = "", fields = {}) {
     payload.procedure.treatment = resolved;
   } else if (!payload.procedure.treatment && resolved) {
     payload.procedure.treatment = resolved;
+  } else if (payload.procedure.treatment) {
+    // Always upgrade OCR soup (PrOrhIlax) to a readable clinic label when resolvable.
+    const readable = toReadableClinicProcedure(payload.procedure.treatment);
+    if (readable) payload.procedure.treatment = readable;
   }
 
   // Only map to Oral Prophylaxis when the document OCR itself contains prophylaxis-like text.
   if (
     !payload.procedure.treatment &&
     (looksLikeDentalChart || patientFilled) &&
-    /(?:r?orhilax|pr[o0].{0,8}h[il1y]|irq?tial|peo.?pt.?lat|peorenarn|prophyl|oral\s*proph|\bop\b)/i.test(
-      text
-    )
+    ORAL_PROPHYLAXIS_OCR_RE.test(text)
   ) {
     payload.procedure.treatment = "Oral Prophylaxis";
   }
@@ -462,7 +491,9 @@ function forceFillDentalChartTreatment(payload, rawText = "", fields = {}) {
   const visits = normalizeVisitRows(payload.procedure.visits || []);
   if (visits.length <= 1) {
     const first = { ...(visits[0] || {}) };
-    if (isPlausibleProcedure(payload.procedure.treatment)) first.treatment = payload.procedure.treatment;
+    if (isPlausibleProcedure(payload.procedure.treatment) || toReadableClinicProcedure(payload.procedure.treatment)) {
+      first.treatment = toReadableClinicProcedure(payload.procedure.treatment) || payload.procedure.treatment;
+    }
     if (isPlausibleWrittenDate(payload.procedure.treatmentDate)) {
       first.treatmentDate = payload.procedure.treatmentDate;
     }
@@ -499,8 +530,8 @@ function sanitizeExtractedPayload(payload) {
     }
   }
   if (payload.procedure) {
-    if (payload.procedure.treatment && !isPlausibleProcedure(payload.procedure.treatment)) {
-      payload.procedure.treatment = "";
+    if (payload.procedure.treatment) {
+      payload.procedure.treatment = toReadableClinicProcedure(payload.procedure.treatment);
     }
     if (payload.procedure.treatmentDate && !isPlausibleWrittenDate(payload.procedure.treatmentDate)) {
       payload.procedure.treatmentDate =
@@ -517,7 +548,7 @@ function sanitizeExtractedPayload(payload) {
         payload.procedure.visits
           .map((row) => ({
             ...row,
-            treatment: isPlausibleProcedure(row?.treatment) ? row.treatment : "",
+            treatment: toReadableClinicProcedure(row?.treatment),
             treatmentDate: isPlausibleWrittenDate(row?.treatmentDate)
               ? row.treatmentDate
               : repairNoisyWrittenDate(row?.treatmentDate || "") || "",
@@ -757,11 +788,17 @@ function looksLikePrintedGenderPrompt(value) {
 function looksLikeOcrSoup(value) {
   const text = cleanLine(value);
   if (!text) return false;
+  // Known clinic keywords are readable even when the OCR token is messy.
+  if (resolveClinicProcedure(text)) return false;
   if (text.length > 48) return true;
   if ((text.match(/\b20\d{2}\b/g) || []).length >= 2) return true;
   if (/QATHO|ORLD|ORIO|ORTI|DRIN|DEDI|WT mEnt|INSTALLATIO IT|ORLD|MITMENT/i.test(text)) return true;
   // Long unbroken OCR gibberish tokens (handwriting misreads).
-  if (/[A-Za-z]{10,}/.test(text) && !/\b(?:orthodontic|installation|adjustment|extraction|prophylaxis)\b/i.test(text)) {
+  if (
+    /[A-Za-z]{10,}/.test(text) &&
+    !/\b(?:orthodontic|installation|adjustment|extraction|prophylaxis)\b/i.test(text) &&
+    !ORAL_PROPHYLAXIS_OCR_RE.test(text)
+  ) {
     return true;
   }
   return false;
@@ -2061,17 +2098,17 @@ function extractStructuredPayload(rawText) {
     : "";
   // Resolve usual clinic procedure keywords from handwritten / OCR text.
   {
-    const fromBlock = resolveClinicProcedure(payload.procedure.treatment);
+    const fromBlock = toReadableClinicProcedure(payload.procedure.treatment);
     const fromText = resolveClinicProcedure(text);
     const procedureMatches = [
       ...text.matchAll(
-        /\b(oral\s*prophylaxis|op\b|deep\s*scal(?:e|ing)?|pr[o0][A-Za-z0-9]{0,12}h[il1y][A-Za-z]{0,10}|r?orhilax|irq?tial|p[eoa0r]{1,3}[pft][lt][aeiouy]?[txigjn]{1,5}|peo.?pt.?lat|peorenarn|ortho(?:dontic)?\s*install(?:ation)?|ortho(?:dontic)?\s*adjust(?:ment)?|exo(?:\s+\d{2}\s*[-–]\s*\d{2})?|resto|restoration|retainer|mouth\s*guard|mouthguard|denture|fpd|fixed\s*bridge|crown|whiten(?:ing)?|bleach(?:ing)?)\b/gi
+        /\b(oral\s*prophylaxis|op\b|deep\s*scal(?:e|ing)?|pr[o0][A-Za-z0-9]{0,12}h[il1y][A-Za-z]{0,10}|r?orhilax|pr[o0]rhila|irq?tial|p[eoa0r]{1,3}[pft][lt][aeiouy]?[txigjn]{1,5}|peo.?pt.?lat|peorenarn|ortho(?:dontic)?\s*install(?:ation)?|ortho(?:dontic)?\s*adjust(?:ment)?|exo(?:\s+\d{2}\s*[-–]\s*\d{2})?|resto|restoration|retainer|mouth\s*guard|mouthguard|denture|fpd|fixed\s*bridge|crown|whiten(?:ing)?|bleach(?:ing)?)\b/gi
       ),
     ].map((match) => cleanLine(match[1]));
     let best = fromBlock || "";
     let bestScore = procedureQualityScore(best);
     for (const candidate of procedureMatches) {
-      const resolved = resolveClinicProcedure(candidate) || candidate;
+      const resolved = toReadableClinicProcedure(candidate) || resolveClinicProcedure(candidate);
       const score = procedureQualityScore(resolved);
       if (score > bestScore) {
         best = resolved;
@@ -2082,13 +2119,13 @@ function extractStructuredPayload(rawText) {
       best = fromText;
       bestScore = procedureQualityScore(fromText);
     }
+    if (!best && ORAL_PROPHYLAXIS_OCR_RE.test(text)) {
+      best = "Oral Prophylaxis";
+      bestScore = procedureQualityScore(best);
+    }
     if (bestScore > 0) {
       payload.procedure.treatment = best;
-    } else if (
-      looksLikeOcrSoup(payload.procedure.treatment) ||
-      /^(record|treatment\s*record)$/i.test(payload.procedure.treatment) ||
-      !isPlausibleProcedure(payload.procedure.treatment)
-    ) {
+    } else {
       payload.procedure.treatment = "";
     }
   }
@@ -2554,6 +2591,7 @@ module.exports = {
   normalizeAge,
   inferProcedure,
   resolveClinicProcedure,
+  toReadableClinicProcedure,
   CLINIC_PROCEDURE_KEYWORDS,
   fieldStatus,
   parseTreatmentRecordRows,

@@ -62,17 +62,29 @@ function visitHasSignal(row = {}) {
 }
 
 /** Always put readable primary procedure fields into the Document Table visit rows. */
+function looksLikeWeakProcedure(value) {
+  const text = String(value || "").trim();
+  if (!text) return true;
+  if (/[^A-Za-z0-9\s.\-\/]/.test(text)) return true;
+  if (text.length <= 4 && !/^(op|exo|fpd|rct)$/i.test(text)) return true;
+  if (/^(pr[o0]|ura|trt|time|debit|credit)$/i.test(text)) return true;
+  if (!/[aeiou]/i.test(text) && text.length >= 5) return true;
+  return false;
+}
+
 function seedVisitsFromProcedure(procedure = {}) {
   const rawVisits = Array.isArray(procedure.visits) ? procedure.visits : [];
   const visits = rawVisits.map((row) => ({ ...emptyVisitRow(), ...(row || {}) }));
   const usable = visits.filter(visitHasSignal);
   if (usable.length) {
-    // Backfill blank cells on the first row from primary fields.
+    // Backfill blank / OCR-soup cells on the first row from primary fields.
     const first = { ...usable[0] };
-    if (!first.treatment && procedure.treatment) first.treatment = procedure.treatment;
-    if (!first.treatmentDate && procedure.treatmentDate) first.treatmentDate = procedure.treatmentDate;
-    if (!first.amountCharged && procedure.amountCharged) first.amountCharged = procedure.amountCharged;
-    if (!first.dentistName && procedure.dentistName) first.dentistName = procedure.dentistName;
+    if (procedure.treatment && (!first.treatment || looksLikeWeakProcedure(first.treatment))) {
+      first.treatment = procedure.treatment;
+    }
+    if (procedure.treatmentDate && !first.treatmentDate) first.treatmentDate = procedure.treatmentDate;
+    if (procedure.amountCharged && !first.amountCharged) first.amountCharged = procedure.amountCharged;
+    if (procedure.dentistName && !first.dentistName) first.dentistName = procedure.dentistName;
     return [first, ...usable.slice(1)];
   }
   const seeded = {
@@ -873,9 +885,11 @@ export function AdminSyncPage() {
                               onChange={(event) => updateVisit(index, "toothNos", event.target.value)}
                             />
                           </td>
-                          <td>
+                          <td className="is-procedure">
                             <input
                               value={visit.treatment || ""}
+                              title={visit.treatment || ""}
+                              aria-label="Procedure"
                               disabled={!editing || activeJob.status === "synced"}
                               onChange={(event) => updateVisit(index, "treatment", event.target.value)}
                             />

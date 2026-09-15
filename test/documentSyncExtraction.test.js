@@ -580,3 +580,56 @@ AMOUNT
   assert.equal(payload.procedure.amountCharged, "800");
   assert.match(payload.procedure.treatmentDate, /SEPT\s*7,\s*2024/i);
 });
+
+test("OCR procedure soup becomes the readable Oral Prophylaxis label", () => {
+  const { resolveClinicProcedure, toReadableClinicProcedure } = require("../services/documentSyncExtraction");
+  const tokens = [
+    "PrOrhIlax",
+    "prOrhila/i{",
+    "rOrhilax",
+    "IRQtial",
+    "peoPtLatig",
+    "peorenarn",
+    "OP",
+  ];
+  for (const token of tokens) {
+    assert.equal(resolveClinicProcedure(token), "Oral Prophylaxis", token);
+    assert.equal(toReadableClinicProcedure(token), "Oral Prophylaxis", token);
+  }
+  assert.equal(resolveClinicProcedure("EXTRACTION"), "");
+  assert.equal(toReadableClinicProcedure("EXTRACTION"), "");
+  assert.equal(resolveClinicProcedure("DOCUMENT DATA EXTRACTION"), "");
+});
+
+test("full noisy chart fills readable procedure plus age phone date amount", () => {
+  const sample = `
+NAME
+ANGELOU OBAS-BAGHTNAN
+ADDRESS
+MANDALUYONG CITY
+TELEPHONE
+09172444070
+AGE
+2r
+DESCRIPTION
+TIME
+DEBIT
+CREDIT
+prOrhila/i{
+DATE
+(tpt-
+1
+Joju
+AMOUNT
+b0vd
+`;
+  const { payload } = extractStructuredPayload(sample);
+  assert.equal(payload.patient.age, "25");
+  assert.equal(payload.patient.phone, "09172444070");
+  assert.equal(payload.procedure.treatment, "Oral Prophylaxis");
+  assert.match(payload.procedure.treatmentDate, /SEPT\s*7,\s*2024/i);
+  assert.equal(payload.procedure.amountCharged, "2000");
+  assert.ok(payload.procedure.visits.length >= 1);
+  assert.equal(payload.procedure.visits[0].treatment, "Oral Prophylaxis");
+  assert.equal(payload.procedure.visits[0].amountCharged, "2000");
+});

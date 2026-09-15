@@ -555,7 +555,7 @@ CLINIC_PROCEDURE_KEYWORDS = [
     (
         "Oral Prophylaxis",
         re.compile(
-            r"oral\s*prophylaxis|prophylax|prophy(?![a-z])|pr[o0]r?h?[il1y]{1,4}a?[il1x]?|pr[o0].{0,12}h[il1y].{0,10}x?|dental\s*cleaning|\bcleaning\b",
+            r"oral\s*prophylaxis|prophylax|prophy(?![a-z])|pr[o0]r?h?[il1y]{1,4}a?[il1x]?|pr[o0].{0,12}h[il1y].{0,10}x?|r?orhilax|orhilax|pr[o0]rhila|prorhil|irq?tial|irqtial|p[eoa0r]{1,3}[pft][lt][aeiouy]?[txigjn]{1,5}|peo.?pt.?lat|peorenarn|peoptlat|pr[o0]rh|oral\s*pr[o0]|dental\s*cleaning|\bcleaning\b",
             re.I,
         ),
     ),
@@ -575,7 +575,7 @@ CLINIC_PROCEDURE_KEYWORDS = [
     ),
     (
         "EXO",
-        re.compile(r"\bexo\b|tooth\s*extraction|\bextraction\b|\bextrac", re.I),
+        re.compile(r"\bexo\b|tooth\s*extraction", re.I),
     ),
     (
         "Restoration",

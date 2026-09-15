@@ -384,47 +384,72 @@ async function extractDentalChartPanelTexts(filePath) {
 
   for (const spec of specs) {
     if (spec.width < 40 || spec.height < 40) continue;
-    const buffer = await sharp(original, { failOn: "none" })
-      .rotate()
-      .extract({
-        left: Math.max(0, spec.left),
-        top: Math.max(0, spec.top),
-        width: Math.min(spec.width, width - Math.max(0, spec.left)),
-        height: Math.min(spec.height, height - Math.max(0, spec.top)),
-      })
-      .grayscale()
-      .normalize()
-      .linear(1.55, -35)
-      .sharpen()
-      .resize({ width: 1800, withoutEnlargement: false })
-      .png()
-      .toBuffer();
-    const tempPath = writeTempVariant(buffer, `panel-${spec.key}`);
-    try {
-      const psm =
-        spec.key === "amount" || spec.key === "date" || spec.key === "age" || spec.key === "phone"
-          ? "7"
-          : "6";
-      // Age/phone: read both free text (for 2r-style OCR) and digits-only.
-      if (spec.key === "age" || spec.key === "phone") {
-        const free = await recognizeWithTesseract(tempPath, psm);
-        const digits = await recognizeWithTesseractDigits(tempPath, psm, true);
-        panels.push({
-          key: spec.key,
-          text: [free.text, digits.text].filter(Boolean).join("\n"),
-          confidence: Math.max(free.confidence || 0, digits.confidence || 0),
-        });
-      } else {
-        const tess = await recognizeWithTesseractDigits(
-          tempPath,
-          psm,
-          spec.key === "amount"
-        );
-        panels.push({ key: spec.key, text: tess.text || "", confidence: tess.confidence || 0 });
+    const buildPanel = async (linearGain, linearOffset) => {
+      const buffer = await sharp(original, { failOn: "none" })
+        .rotate()
+        .extract({
+          left: Math.max(0, spec.left),
+          top: Math.max(0, spec.top),
+          width: Math.min(spec.width, width - Math.max(0, spec.left)),
+          height: Math.min(spec.height, height - Math.max(0, spec.top)),
+        })
+        .grayscale()
+        .normalize()
+        .linear(linearGain, linearOffset)
+        .sharpen()
+        .resize({ width: 1800, withoutEnlargement: false })
+        .png()
+        .toBuffer();
+      return writeTempVariant(buffer, `panel-${spec.key}`);
+    };
+
+    // Description/procedure ink is often faint — prefer a mild pass, then a stronger one.
+    const passes =
+      spec.key === "description" || spec.key === "treatment"
+        ? [
+            [1.18, -10],
+            [1.4, -28],
+          ]
+        : [[1.45, -30]];
+
+    const texts = [];
+    let bestConfidence = 0;
+    for (const [gain, offset] of passes) {
+      const tempPath = await buildPanel(gain, offset);
+      try {
+        const psm =
+          spec.key === "amount" || spec.key === "date" || spec.key === "age" || spec.key === "phone"
+            ? "7"
+            : "6";
+        if (spec.key === "age" || spec.key === "phone") {
+          const free = await recognizeWithTesseract(tempPath, psm);
+          const digits = await recognizeWithTesseractDigits(tempPath, psm, true);
+          texts.push(free.text, digits.text);
+          bestConfidence = Math.max(bestConfidence, free.confidence || 0, digits.confidence || 0);
+        } else if (spec.key === "description" || spec.key === "treatment" || spec.key === "patient") {
+          // Free-text OCR — digits-only destroys procedure words.
+          const free = await recognizeWithTesseract(tempPath, psm);
+          texts.push(free.text);
+          bestConfidence = Math.max(bestConfidence, free.confidence || 0);
+        } else if (spec.key === "amount") {
+          const digits = await recognizeWithTesseractDigits(tempPath, psm, true);
+          const free = await recognizeWithTesseract(tempPath, psm);
+          texts.push(digits.text, free.text);
+          bestConfidence = Math.max(bestConfidence, digits.confidence || 0, free.confidence || 0);
+        } else {
+          const free = await recognizeWithTesseract(tempPath, psm);
+          texts.push(free.text);
+          bestConfidence = Math.max(bestConfidence, free.confidence || 0);
+        }
+      } finally {
+        fs.unlink(tempPath, () => {});
       }
-    } finally {
-      fs.unlink(tempPath, () => {});
     }
+    panels.push({
+      key: spec.key,
+      text: [...new Set(texts.filter(Boolean))].join("\n"),
+      confidence: bestConfidence,
+    });
   }
 
   return panels;
@@ -540,8 +565,13 @@ function mergeChartPanelFields(fields = {}, panels = []) {
       next.procedure = candidate;
     }
   }
-  if (!next.procedure && /peo.?pt.?lat|peorenarn|r?orhilax|irq?tial|pr[o0].{0,8}h[il1y]/i.test(combinedTreat)) {
+  if (!next.procedure && /peo.?pt.?lat|peorenarn|r?orhilax|irq?tial|pr[o0].{0,8}h[il1y]|pr[o0]rhila|oral\s*proph|\bop\b/i.test(combinedTreat)) {
     next.procedure = "Oral Prophylaxis";
+  } else if (next.procedure) {
+    // Prefer the readable clinic label over raw OCR soup in panel fields.
+    if (/peo.?pt.?lat|peorenarn|r?orhilax|irq?tial|pr[o0].{0,8}h[il1y]|pr[o0]rhila|oral\s*proph|prophyl|\bop\b|cleaning/i.test(String(next.procedure))) {
+      next.procedure = "Oral Prophylaxis";
+    }
   }
 
   const dateMatch = combinedTreat.match(
