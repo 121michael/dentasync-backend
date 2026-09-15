@@ -5,6 +5,7 @@ const test = require("node:test");
 
 const {
   isWeakSecret,
+  normalizeLocalNpmStartEnv,
   resolveAppSecrets,
   parseAllowedOrigins,
   createCorsOptions,
@@ -14,6 +15,40 @@ test("rejects known weak and short secrets", () => {
   assert.equal(isWeakSecret("your_super_secret_key_here"), true);
   assert.equal(isWeakSecret("short"), true);
   assert.equal(isWeakSecret("a-sufficiently-long-production-secret"), false);
+});
+
+test("npm start with production + template JWT_SECRET downgrades to development", () => {
+  const env = {
+    NODE_ENV: "production",
+    npm_lifecycle_event: "start",
+    JWT_SECRET: "your_super_secret_key_here",
+  };
+  const result = normalizeLocalNpmStartEnv(env);
+  assert.equal(result.changed, true);
+  assert.equal(env.NODE_ENV, "development");
+});
+
+test("npm start keeps production when secrets are strong", () => {
+  const env = {
+    NODE_ENV: "production",
+    npm_lifecycle_event: "start",
+    JWT_SECRET: "production-jwt-secret-value",
+    OTP_SECRET: "production-otp-secret-value",
+    PASSWORD_RESET_SECRET: "production-reset-secret-value",
+  };
+  const result = normalizeLocalNpmStartEnv(env);
+  assert.equal(result.changed, false);
+  assert.equal(env.NODE_ENV, "production");
+});
+
+test("plain node server.js does not auto-downgrade production", () => {
+  const env = {
+    NODE_ENV: "production",
+    JWT_SECRET: "your_super_secret_key_here",
+  };
+  const result = normalizeLocalNpmStartEnv(env);
+  assert.equal(result.changed, false);
+  assert.equal(env.NODE_ENV, "production");
 });
 
 test("production requires strong JWT, OTP, and password-reset secrets", () => {
