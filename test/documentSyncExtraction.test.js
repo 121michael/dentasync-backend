@@ -858,3 +858,54 @@ CREDIT
   assert.equal(payload.procedure.visits[0].treatment, "Oral Prophylaxis");
   assert.match(payload.procedure.visits[0].treatmentDate, /SEPT\s*7,\s*2024/i);
 });
+
+test("UI chrome does not wipe AGE 25 and FRCrRAL4T fills Procedure", () => {
+  const {
+    extractStructuredPayload,
+    forceFillDentalChartTreatment,
+    pickBestDentalChartAge,
+  } = require("../services/documentSyncExtraction");
+  assert.equal(
+    pickBestDentalChartAge(
+      "NAME\nANGELOU\nAGE\n25\nDATE\nJqju\nDESCRIPTION\nFRCrRAL4T",
+      "71",
+      ""
+    ),
+    "25"
+  );
+  const sample = `
+DOCUMENT DATA EXTRACTION
+Review & Confirm
+Document Table
+Tooth
+Procedure
+Amount Charged
+NAME
+ANGELOU OBAS-BAGHTNAN
+ADDRESS
+MANDALUYONG CITY
+TELEPHONE
+09204441070
+AGE
+25
+DATE
+Jqju
+DESCRIPTION
+FRCrRAL4T
+CREDIT
+3000
+`;
+  const { payload } = extractStructuredPayload(sample);
+  forceFillDentalChartTreatment(payload, sample, {
+    age: "71",
+    procedure: "FRCrRAL4T",
+    amountCharged: "3000",
+  });
+  assert.equal(payload.patient.age, "25");
+  assert.equal(payload.procedure.treatment, "Oral Prophylaxis");
+  assert.match(payload.procedure.treatmentDate, /SEPT\s*7,\s*2024/i);
+  assert.equal(payload.procedure.amountCharged, "3000");
+  assert.equal(payload.procedure.visits[0].treatment, "Oral Prophylaxis");
+  assert.equal(payload.procedure.visits[0].amountCharged, "3000");
+  assert.equal(payload.procedure.visits[0].amountPaid, "");
+});

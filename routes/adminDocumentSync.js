@@ -455,11 +455,15 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
             "Unable to read the uploaded or scanned document. No patient or treatment fields could be detected. Please upload a clearer scan or photo and try again."
           );
         }
+        const buildTag =
+          (String(extraction.extractionNotes || "").match(/autofill-build:\s*[\w.-]+/i) || [])[0] ||
+          "autofill-build: treatment-zone-v6";
         return res.status(201).json({
-          message: `Document read successfully — populated ${filled} field${filled === 1 ? "" : "s"} to match the scan. Review them, then Confirm & Save.`,
+          message: `Document read successfully — populated ${filled} field${filled === 1 ? "" : "s"} to match the scan. Review them, then Confirm & Save. (${buildTag})`,
           job: mapJob(updated.rows[0]),
           fieldStatuses: extraction.fieldStatuses || {},
           autoFilledCount: filled,
+          extractionNotes: extraction.extractionNotes || "",
         });
       } catch (error) {
         const isValidation =

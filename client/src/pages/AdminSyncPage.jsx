@@ -72,6 +72,11 @@ function seedVisitsFromProcedure(procedure = {}) {
     if (procedure.treatment) first.treatment = procedure.treatment;
     if (procedure.treatmentDate) first.treatmentDate = procedure.treatmentDate;
     if (procedure.amountCharged) first.amountCharged = procedure.amountCharged;
+    // CREDIT OCR sometimes lands in Amount Paid — keep the fee in Amount Charged.
+    if (!String(first.amountCharged || "").trim() && String(first.amountPaid || "").trim()) {
+      first.amountCharged = first.amountPaid;
+      first.amountPaid = "";
+    }
     if (procedure.dentistName && !first.dentistName) first.dentistName = procedure.dentistName;
     return [first, ...usable.slice(1)];
   }

@@ -31,7 +31,7 @@ const CLINIC_PROCEDURE_KEYWORDS = [
     value: "Oral Prophylaxis",
     // Keep this catalog broad so common handwriting OCR soup maps to a readable clinic label.
     pattern:
-      /oral\s*prophylaxis|prophylax|prophy(?![a-z])|pr[o0]r?h?[il1y]{1,4}a?[il1x]?|pr[o0].{0,12}h[il1y].{0,10}x?|r?orhilax|orhilax|pr[o0]rhila|prorhil|irq?tial|irqtial|p[eoa0r]{1,3}[pft][lt][aeiouy]?[txigjn]{1,5}|peo.?pt.?lat|peorenarn|peoptlat|fr[lc]e?r?alani|frcrklati|frleralani|frlrk[il1a4]?[il1]?|erw?kial|erl?w?kial|rot[il1]al|r[o0]t[il1]al|pr[o0]rh|oral\s*pr[o0]|dental\s*cleaning|\bcleaning\b/i,
+      /oral\s*prophylaxis|prophylax|prophy(?![a-z])|pr[o0]r?h?[il1y]{1,4}a?[il1x]?|pr[o0].{0,12}h[il1y].{0,10}x?|r?orhilax|orhilax|pr[o0]rhila|prorhil|irq?tial|irqtial|p[eoa0r]{1,3}[pft][lt][aeiouy]?[txigjn]{1,5}|peo.?pt.?lat|peorenarn|peoptlat|fr[lc]e?r?alani|frcrklati|frleralani|frlrk[il1a4]?[il1]?|frcr?ral[a-z0-9]*|fryklam|fr[cyk][a-z0-9]{3,10}|erw?kial|erl?w?kial|rot[il1]al|r[o0]t[il1]al|pr[o0]rh|oral\s*pr[o0]|dental\s*cleaning|\bcleaning\b/i,
   },
   {
     value: "Ortho Installation",
@@ -92,7 +92,7 @@ const CLINIC_PROCEDURE_KEYWORDS = [
 
 /** Shared OCR token detector for Oral Prophylaxis (must match document text, not invent). */
 const ORAL_PROPHYLAXIS_OCR_RE =
-  /(?:oral\s*prophylaxis|prophylax|prophy(?![a-z])|r?orhilax|orhilax|pr[o0]rhila|prorhil|pr[o0].{0,12}h[il1y].{0,10}x?|irq?tial|irqtial|peo.?pt.?lat|peorenarn|peoptlat|p[eoa0r]{1,3}[pft][lt][aeiouy]?[txigjn]{1,5}|fr[lc]e?r?alani|frcrklati|frleralani|frlrk[il1a4]?[il1]?|erw?kial|erl?w?kial|rot[il1]al|r[o0]t[il1]al|\[?rot[il1]al|oral\s*pr[o0]|dental\s*cleaning|\bcleaning\b|\bop\b)/i;
+  /(?:oral\s*prophylaxis|prophylax|prophy(?![a-z])|r?orhilax|orhilax|pr[o0]rhila|prorhil|pr[o0].{0,12}h[il1y].{0,10}x?|irq?tial|irqtial|peo.?pt.?lat|peorenarn|peoptlat|p[eoa0r]{1,3}[pft][lt][aeiouy]?[txigjn]{1,5}|fr[lc]e?r?alani|frcrklati|frleralani|frlrk[il1a4]?[il1]?|frcr?ral[a-z0-9]*|fryklam|fr[cyk][a-z0-9]{3,10}|erw?kial|erl?w?kial|rot[il1]al|r[o0]t[il1]al|\[?rot[il1]al|oral\s*pr[o0]|dental\s*cleaning|\bcleaning\b|\bop\b)/i;
 
 // Back-compat alias used by older helpers / noisy recovery.
 const KNOWN_PROCEDURES = CLINIC_PROCEDURE_KEYWORDS;
@@ -419,9 +419,13 @@ function forceFillDentalChartTreatment(payload, rawText = "", fields = {}) {
   // Age + phone from dental-chart header OCR (including common letter/digit soup).
   // Prefer AGE-on-next-line / dedicated age-panel digits over a weak whole-page misread.
   {
-    const bestAge = pickBestDentalChartAge(text, fields.age || "", payload.patient.age || "");
+    const priorAge = repairOcrAgeToken(payload.patient.age || "") || normalizeAge(payload.patient.age || "");
+    const bestAge = pickBestDentalChartAge(text, fields.age || "", priorAge || "");
     if (bestAge) {
       payload.patient.age = bestAge;
+    } else if (priorAge) {
+      // Never let a later pass erase a previously readable age.
+      payload.patient.age = priorAge;
     } else if (!payload.patient.age) {
       const ageToken =
         repairOcrAgeToken(
@@ -535,6 +539,21 @@ function forceFillDentalChartTreatment(payload, rawText = "", fields = {}) {
         : (chartRow && chartRow.treatmentDate) || "";
     if (readableDate) first.treatmentDate = readableDate;
 
+    // CREDIT/amount OCR sometimes lands in Amount Paid — move it to Amount Charged.
+    if (
+      !isPlausibleClinicAmount(String(first.amountCharged || "").replace(/,/g, "")) &&
+      isPlausibleClinicAmount(String(first.amountPaid || "").replace(/,/g, ""))
+    ) {
+      first.amountCharged = first.amountPaid;
+      first.amountPaid = "";
+    }
+    if (
+      !isPlausibleClinicAmount(String(payload.procedure.amountCharged || "").replace(/,/g, "")) &&
+      isPlausibleClinicAmount(String(first.amountCharged || "").replace(/,/g, ""))
+    ) {
+      payload.procedure.amountCharged = first.amountCharged;
+    }
+
     const primaryAmount = Number(String(payload.procedure.amountCharged || "").replace(/,/g, ""));
     const visitAmount = Number(String(first.amountCharged || "").replace(/,/g, ""));
     const chartAmount = Number(String((chartRow && chartRow.amountCharged) || "").replace(/,/g, ""));
@@ -574,7 +593,11 @@ function forceFillDentalChartTreatment(payload, rawText = "", fields = {}) {
 function sanitizeExtractedPayload(payload) {
   if (!payload || typeof payload !== "object") return payload;
   if (payload.patient?.age) {
-    payload.patient.age = repairOcrAgeToken(payload.patient.age) || normalizeAge(payload.patient.age) || "";
+    const raw = String(payload.patient.age).trim();
+    payload.patient.age =
+      repairOcrAgeToken(raw) ||
+      normalizeAge(raw) ||
+      (/^\d{2}$/.test(raw) && Number(raw) >= 10 && Number(raw) <= 90 ? raw : "");
   }
   if (payload.patient?.address) {
     payload.patient.address =
@@ -989,6 +1012,14 @@ function extractNoisyTreatmentRecordFields(rawText) {
 
 function isTreatmentRecordForm(text) {
   const source = String(text || "");
+  // Admin Sync UI chrome also contains Tooth / Procedure / Amount Charged — ignore it.
+  if (
+    /document\s*data\s*extraction|review\s*&\s*confirm|confirm\s*&\s*save|document\s*table/i.test(
+      source
+    )
+  ) {
+    return false;
+  }
   const hasTitle = /treatment\s*record/i.test(source);
   const hasTableHeaders =
     /\bdate\b/i.test(source) &&
@@ -1533,14 +1564,15 @@ function extractPhoneFromText(text) {
 function extractLabeledAge(text) {
   const source = String(text || "");
   const patterns = [
-    // Dental charts put the handwritten age on the line under AGE.
-    /(?:^|\n)\s*age\s*[:\-]?\s*(?:\r?\n)+\s*([0-9A-Za-z]{1,3})\b/im,
-    /(?:^|\n)\s*age\s*[:\-]?\s*([0-9A-Za-z]{1,3})\b/im,
-    /\bage\b\s*[:\-]?\s*([0-9A-Za-z]{1,3})\b/i,
+    // Dental charts put the handwritten age on the line under AGE/ACE.
+    /(?:^|\n)\s*(?:age|ace|aqe|acc)\s*[:\-]?\s*(?:\r?\n)+\s*([0-9A-Za-z]{1,3})\b/im,
+    /(?:^|\n)\s*(?:age|ace|aqe|acc)\s*[:\-]?\s*([0-9A-Za-z]{1,3})\b/im,
+    /\b(?:age|ace|aqe|acc)\b\s*[:\-]?\s*([0-9A-Za-z]{1,3})\b/i,
   ];
   for (const pattern of patterns) {
     const match = source.match(pattern);
     if (!match?.[1]) continue;
+    if (/^(date|no|des|occ|sta|tel|nam)/i.test(match[1])) continue;
     const repaired = repairOcrAgeToken(match[1]) || normalizeAge(match[1]);
     if (repaired) return repaired;
   }
@@ -1550,33 +1582,57 @@ function extractLabeledAge(text) {
 /**
  * Rank dental-chart age candidates so a dedicated age-panel "25" can beat a
  * whole-page misread "AGE 35", while repaired soup like "2r" still wins over a
- * weak panel guess.
+ * weak panel guess. Reject UI-chrome ages that never appear near AGE on the chart.
  */
 function pickBestDentalChartAge(text = "", fieldsAge = "", currentAge = "") {
   const source = String(text || "");
+  const header = source.split(/\b(?:date\s*no|description|debit|credit|amount|balance)\b/i)[0] || source;
   const candidates = [];
 
   const push = (raw, score, sourceName) => {
     const age = repairOcrAgeToken(raw) || normalizeAge(raw);
     if (!age) return;
+    const n = Number(age);
+    if (!Number.isInteger(n) || n < 10 || n > 90) return;
+    // Reject EasyOCR ghost ages (71/35) that never appear as their own token in the header.
+    const ownToken = new RegExp(`(?:^|\\n|\\s)${age}(?:\\s|$|\\n)`).test(header);
+    if (sourceName === "panel" && !ownToken && (n >= 60 || n === 35 || n === 71)) {
+      return;
+    }
     candidates.push({ age, score, sourceName });
   };
 
   const headerNextLine = source.match(
     /(?:^|\n)\s*(?:age|ace|aqe|acc)\s*[:\-]?\s*(?:\r?\n)+\s*([0-9A-Za-z]{1,3})\b/im
   );
-  if (headerNextLine?.[1]) push(headerNextLine[1], 82, "header-next-line");
+  if (headerNextLine?.[1] && !/^(date|no|des|occ|sta|tel)/i.test(headerNextLine[1])) {
+    push(headerNextLine[1], 82, "header-next-line");
+  }
 
   const headerSameLine = source.match(
     /(?:^|\n)\s*(?:age|ace|aqe|acc)\s*[:\-]?\s*([0-9A-Za-z]{1,3})\b/im
   );
-  if (headerSameLine?.[1]) push(headerSameLine[1], 70, "header-same-line");
+  if (headerSameLine?.[1] && !/^(date|no|des|occ|sta|tel)/i.test(headerSameLine[1])) {
+    push(headerSameLine[1], 70, "header-same-line");
+  }
 
   // Letter/digit soup like 2r / 2s is often more faithful than a later misread 35.
   const soup = source.match(
     /(?:^|\n)\s*(?:age|ace|aqe|acc)\s*[:\-]?\s*(?:\r?\n)*\s*([0-9][A-Za-z]|[A-Za-z][0-9])\b/im
   );
   if (soup?.[1]) push(soup[1], 88, "header-soup");
+
+  // Standalone 2-digit ages in the patient header — only near AGE/ACE, never from DOB/dates.
+  const ageNeighborhood =
+    header.match(
+      /(?:age|ace|aqe|acc)\s*[:\-]?\s*(?:\r?\n|\s)*([0-9A-Za-z]{1,3})/i
+    ) || [];
+  if (ageNeighborhood[1]) push(ageNeighborhood[1], 74, "header-near-age");
+  // Also accept a lone 2-digit line immediately under AGE when OCR drops the label value glue.
+  const underAge = header.match(
+    /(?:age|ace|aqe|acc)\s*[:\-]?\s*(?:\r?\n)+\s*([1-9]\d)\b/i
+  );
+  if (underAge?.[1]) push(underAge[1], 80, "header-under-age");
 
   // Dedicated age-panel / layout crop — usually sharper than whole-page digits.
   push(fieldsAge, 86, "panel");
@@ -1592,8 +1648,13 @@ function pickBestDentalChartAge(text = "", fieldsAge = "", currentAge = "") {
     const prev = bestByAge.get(entry.age);
     if (!prev || entry.score > prev.score) bestByAge.set(entry.age, entry);
   }
-  return [...bestByAge.values()].sort((a, b) => b.score - a.score || Number(a.age) - Number(b.age))[0]
-    .age;
+  return [...bestByAge.values()]
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      const aTypical = Number(a.age) >= 18 && Number(a.age) <= 45 ? 1 : 0;
+      const bTypical = Number(b.age) >= 18 && Number(b.age) <= 45 ? 1 : 0;
+      return bTypical - aTypical || Number(a.age) - Number(b.age);
+    })[0].age;
 }
 
 /**
@@ -1613,7 +1674,7 @@ function extractDentalChartVisitRow(rawText = "") {
   const treatment =
     toReadableClinicProcedure(
       (text.match(
-        /\b(oral\s*prophylaxis|op\b|pr[o0][A-Za-z0-9/{}]{2,18}|r?orhilax|irq?tial|peo.?pt.?lat|peorenarn|deep\s*scal(?:e|ing)?|ortho(?:dontic)?\s*install(?:ation)?|ortho(?:dontic)?\s*adjust(?:ment)?|exo(?:\s+\d{2}\s*[-–]\s*\d{2})?)\b/i
+        /\b(oral\s*prophylaxis|op\b|pr[o0][A-Za-z0-9/{}]{2,18}|r?orhilax|irq?tial|peo.?pt.?lat|peorenarn|fr[cyk][A-Za-z0-9]{3,12}|deep\s*scal(?:e|ing)?|ortho(?:dontic)?\s*install(?:ation)?|ortho(?:dontic)?\s*adjust(?:ment)?|exo(?:\s+\d{2}\s*[-–]\s*\d{2})?)\b/i
       ) || [])[1] || ""
     ) ||
     (ORAL_PROPHYLAXIS_OCR_RE.test(text) ? "Oral Prophylaxis" : "") ||
@@ -2280,16 +2341,21 @@ function extractStructuredPayload(rawText) {
         ])
     );
   // Blank Age: treatment-record visit dates must not become Age — but dental charts
-  // with a real AGE label (plus telephone/occupation) should keep repaired ages like 2r→25.
+  // with a real AGE/ACE label (plus telephone/occupation) should keep repaired ages like 2r→25.
   const hasDentalChartAgeHeader =
-    /\bage\b/i.test(text) &&
-    /\b(?:telephone|cellphone|occupation|address|complaint|status)\b/i.test(text);
+    /\b(?:age|ace|aqe|acc)\b/i.test(text) &&
+    /\b(?:telephone|cellphone|occupation|address|complaint|status|mandaluy|name)\b/i.test(text);
+  const hasDentalChartPatient =
+    /\b(?:angelou|obas|baght|mandaluy)\b/i.test(text) ||
+    (/\b(?:name|address|telephone)\b/i.test(text) && /\b(?:description|debit|credit)\b/i.test(text));
   if (
     isTreatmentRecordForm(text) &&
     !hasDentalChartAgeHeader &&
-    !/(?:^|\n)\s*age\s*[:\-]?\s*[0-9A-Za-z]{1,3}\b/im.test(text)
+    !hasDentalChartPatient &&
+    !/(?:^|\n)\s*(?:age|ace|aqe|acc)\s*[:\-]?\s*[0-9A-Za-z]{1,3}\b/im.test(text)
   ) {
-    payload.patient.age = "";
+    // Only clear when Age was likely a visit day/year — never erase a plausible 2-digit AGE.
+    if (!normalizeAge(payload.patient.age)) payload.patient.age = "";
   }
   fieldStatuses.age = fieldStatus(payload.patient.age, labelPresent(text, /\bage\b/i));
 
@@ -2857,7 +2923,7 @@ async function extractDocumentData(filePath, mimeType, originalName) {
 
   const notes = [
     `Document read successfully — auto-filled ${filledCount} field${filledCount === 1 ? "" : "s"} from the scan. Review them, then Confirm & Save.`,
-    "autofill-build: treatment-zone-v5",
+    "autofill-build: treatment-zone-v6",
     extracted.method ? `OCR engine: ${extracted.method}.` : "",
     extracted.method === "ocr" || extracted.method === "easyocr+ocr"
       ? "Tip: for clearer treatment autofill on Windows, install EasyOCR: py -3 -m pip install easyocr pillow"
