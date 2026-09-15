@@ -5,3 +5,4 @@ uploads/
 client/dist/
 eng.traineddata
 dentasync-start.log
+scripts/__pycache__/
