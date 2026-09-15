@@ -1,3 +1,3 @@
 @echo off
-REM Alias kept for older instructions — use start.bat
+REM Same as start.bat — do not use npm.cmd start on Windows.
 call "%~dp0start.bat"

@@ -13,6 +13,18 @@
 
 console.log("[DentaSync] loading server.js ...");
 
+try {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  fs.appendFileSync(
+    path.join(__dirname, "dentasync-start.log"),
+    `server_boot=${new Date().toISOString()} node=${process.version} cwd=${process.cwd()} NODE_ENV=${process.env.NODE_ENV || ""} npm_lifecycle_event=${process.env.npm_lifecycle_event || ""}\n`,
+    "utf8"
+  );
+} catch (_) {
+  // ignore log write failures
+}
+
 require("dotenv").config();
 
 // Belt-and-suspenders: also downgrade production+weak-secret npm boots.
