@@ -164,6 +164,8 @@ export const api = {
     request(`/staff/queue/${queueEntryId}`, { method: "PATCH", body }),
   getStaffAppointments: (tab = "today") =>
     request(`/staff/appointments?tab=${encodeURIComponent(tab)}`),
+  lookupStaffRfid: (rfidTag) =>
+    request(`/staff/rfid-lookup?rfidTag=${encodeURIComponent(rfidTag)}`),
   getStaffAppointment: (appointmentId) => request(`/staff/appointments/${appointmentId}`),
   updateStaffAppointment: (appointmentId, body) =>
     request(`/staff/appointments/${appointmentId}`, { method: "PATCH", body }),

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Eye, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
+import { Eye, Nfc, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
@@ -26,7 +26,10 @@ export function StaffAppointmentsPage() {
   const [rescheduleForm, setRescheduleForm] = useState({ appointmentDate: "", appointmentTime: "" });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
+  const [rfidCode, setRfidCode] = useState("");
+  const [rfidBusy, setRfidBusy] = useState(false);
   const focusHandledRef = useRef("");
+  const rfidInputRef = useRef(null);
 
   const load = useCallback(async () => {
     try {
@@ -42,6 +45,66 @@ export function StaffAppointmentsPage() {
     const timer = window.setInterval(load, 30000);
     return () => window.clearInterval(timer);
   }, [load]);
+
+  useEffect(() => {
+    window.setTimeout(() => rfidInputRef.current?.focus(), 80);
+  }, [tab]);
+
+  async function lookupRfid(event) {
+    event.preventDefault();
+    const tag = String(rfidCode || "").trim();
+    if (!tag) {
+      pushToast("Tap a patient RFID card on the reader.", "error");
+      return;
+    }
+
+    setRfidBusy(true);
+    try {
+      const response = await api.lookupStaffRfid(tag);
+      const appointment = response.appointment;
+      if (!appointment) {
+        pushToast(
+          response.message ||
+            `${response.patient?.fullName || "Patient"} has no active appointment to show.`,
+          "error"
+        );
+        setRfidCode("");
+        return;
+      }
+
+      const status = String(appointment.status || "").toLowerCase();
+      let nextTab = "today";
+      if (status === "pending") nextTab = "pending";
+      else if (status === "confirmed") nextTab = "confirmed";
+      else if (status === "completed") nextTab = "completed";
+      else if (status === "cancelled" || status === "no_show") nextTab = "cancelled";
+      else if (status === "checked_in") nextTab = "today";
+
+      setTab(nextTab);
+      setSearchParams({ tab: nextTab }, { replace: true });
+      setHighlightId(appointment.id);
+
+      try {
+        const detailed = await api.getStaffAppointment(appointment.id);
+        setDetail(detailed.appointment || appointment);
+      } catch {
+        setDetail(appointment);
+      }
+
+      pushToast(
+        response.message ||
+          `${response.patient?.fullName || appointment.patientName}'s appointment is ready.`
+      );
+      setRfidCode("");
+      await load();
+    } catch (lookupError) {
+      pushToast(lookupError.message, "error");
+      setRfidCode("");
+    } finally {
+      setRfidBusy(false);
+      window.setTimeout(() => rfidInputRef.current?.focus(), 50);
+    }
+  }
 
   useEffect(() => {
     const urlTab = searchParams.get("tab");
@@ -200,12 +263,32 @@ export function StaffAppointmentsPage() {
           <div>
             <span className="eyebrow">Scheduling desk</span>
             <h2>Appointment Management</h2>
-            <p>Confirm, reschedule, and cancel appointments. Patient notifications are sent automatically.</p>
+            <p>
+              Tap a patient RFID card to open their appointment instantly — no typing required.
+              Confirm, reschedule, and cancel as needed.
+            </p>
           </div>
           <button className="button button--secondary" onClick={load}>
             <RefreshCw size={16} /> Refresh
           </button>
         </div>
+
+        <form className="admin-toolbar staff-rfid-lookup" onSubmit={lookupRfid}>
+          <label className="admin-search">
+            <Nfc size={17} />
+            <input
+              ref={rfidInputRef}
+              value={rfidCode}
+              onChange={(event) => setRfidCode(event.target.value)}
+              placeholder="Waiting for RFID tap to open appointment…"
+              autoComplete="off"
+              disabled={rfidBusy}
+            />
+          </label>
+          <button className="button button--primary button--compact" disabled={rfidBusy || !rfidCode.trim()}>
+            {rfidBusy ? "Looking up…" : "Open from RFID"}
+          </button>
+        </form>
 
         <div className="admin-tabs" role="tablist">
           {TABS.map((item) => (

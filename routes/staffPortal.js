@@ -529,6 +529,51 @@ function createStaffPortalRouter({
     }
   });
 
+  router.get("/rfid-lookup", async (req, res) => {
+    const rfidTag =
+      staffCheckIn.stringValue(req.query.rfidTag, 120) ||
+      staffCheckIn.stringValue(req.query.tag, 120) ||
+      staffCheckIn.stringValue(req.query.code, 120);
+    if (!rfidTag) {
+      return res.status(400).json({ message: "Tap a patient RFID card to look up the appointment." });
+    }
+
+    const client = await db.connect();
+    try {
+      const patient = await staffCheckIn.findPatient(client, { rfidTag });
+      if (!patient) {
+        return res.status(404).json({
+          message: "RFID not recognized. Ask Admin to assign this card to the patient account.",
+        });
+      }
+
+      const rows = await staffCheckIn.findAppointmentsForRfidLookup(client, patient.id);
+      const appointments = rows.map(mapAppointment);
+      const primary = appointments[0] || null;
+
+      return res.json({
+        message: primary
+          ? "Patient appointment found from RFID tap."
+          : "Patient found, but no active appointment is available.",
+        patient: {
+          id: patient.id,
+          fullName: `${patient.first_name || ""} ${patient.last_name || ""}`.trim() || "Patient",
+          email: patient.email || null,
+          phone: patient.phone || null,
+          verified: Boolean(patient.is_verified),
+          rfidTag,
+        },
+        appointment: primary,
+        appointments,
+      });
+    } catch (error) {
+      console.error("Staff RFID appointment lookup error:", error.message);
+      return res.status(500).json({ message: "Unable to look up the appointment from RFID." });
+    } finally {
+      client.release();
+    }
+  });
+
   router.get("/appointments", async (req, res) => {
     const tab = stringValue(req.query.tab, 40)?.toLowerCase() || "today";
     const clinicTz = process.env.CLINIC_TIMEZONE || "Asia/Manila";

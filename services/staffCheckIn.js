@@ -274,6 +274,38 @@ async function resolveAppointmentForCheckIn(client, patient, { allowWalkIn = fal
   return { appointment, walkInCreated: true };
 }
 
+async function findAppointmentsForRfidLookup(client, patientId) {
+  if (!patientId) return [];
+  const clinicTz = process.env.CLINIC_TIMEZONE || "Asia/Manila";
+  const result = await client.query(
+    `SELECT appointment.*,
+            CONCAT_WS(' ', patient.first_name, patient.last_name) AS patient_name,
+            patient.phone AS patient_phone,
+            patient.email AS patient_email
+     FROM patient_portal_appointments AS appointment
+     JOIN users AS patient ON patient.id::text = appointment.user_id::text
+     WHERE appointment.user_id::text = $1::text
+       AND LOWER(appointment.status) NOT IN ('cancelled', 'no_show')
+     ORDER BY
+       CASE
+         WHEN appointment.appointment_date = (CURRENT_TIMESTAMP AT TIME ZONE $2)::date THEN 0
+         WHEN appointment.appointment_date > (CURRENT_TIMESTAMP AT TIME ZONE $2)::date THEN 1
+         ELSE 2
+       END,
+       CASE LOWER(appointment.status)
+         WHEN 'confirmed' THEN 0
+         WHEN 'pending' THEN 1
+         WHEN 'checked_in' THEN 2
+         ELSE 3
+       END,
+       appointment.appointment_date ASC,
+       appointment.appointment_time ASC
+     LIMIT 10`,
+    [String(patientId), clinicTz]
+  );
+  return result.rows;
+}
+
 async function findActiveQueueForPatient(client, patientId) {
   if (!patientId) return null;
   const result = await client.query(
@@ -475,6 +507,7 @@ module.exports = {
   diagnoseMissingCheckInAppointment,
   resolveAppointmentForCheckIn,
   createWalkInAppointmentForPatient,
+  findAppointmentsForRfidLookup,
   findActiveQueueForPatient,
   performStaffCheckIn,
   stringValue,
