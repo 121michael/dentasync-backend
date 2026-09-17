@@ -20,7 +20,10 @@ export function AdminRfidPage() {
       setRows(users);
       setDraftTags(
         Object.fromEntries(
-          users.map((user) => [user.id || user.userId, user.rfidTag || user.rfid_tag || ""])
+          users.map((user) => {
+            const id = String(user.id || user.userId || "");
+            return [id, user.rfidTag || user.rfid_tag || ""];
+          })
         )
       );
       setError("");
@@ -34,8 +37,12 @@ export function AdminRfidPage() {
   }, [load]);
 
   async function assignTag(user) {
-    const userId = user.id || user.userId;
-    const rfidTag = String(draftTags[userId] || "").trim();
+    const userId = String(user.id || user.userId || "").trim();
+    const rfidTag = String(draftTags[userId] || draftTags[user.id] || draftTags[user.userId] || "").trim();
+    if (!userId) {
+      pushToast("Patient id missing. Refresh the page and try again.", "error");
+      return;
+    }
     if (!rfidTag) {
       pushToast("Enter an RFID tag before assigning.", "error");
       return;
@@ -53,7 +60,11 @@ export function AdminRfidPage() {
   }
 
   async function clearTag(user) {
-    const userId = user.id || user.userId;
+    const userId = String(user.id || user.userId || "").trim();
+    if (!userId) {
+      pushToast("Patient id missing. Refresh the page and try again.", "error");
+      return;
+    }
     const ok = await confirm({
       title: "Clear RFID tag",
       message: `Remove the RFID assignment for ${user.fullName || user.name || user.email}?`,
@@ -123,10 +134,10 @@ export function AdminRfidPage() {
               </thead>
               <tbody>
                 {rows.map((user) => {
-                  const userId = user.id || user.userId;
+                  const userId = String(user.id || user.userId || "");
                   const current = user.rfidTag || user.rfid_tag || "";
                   return (
-                    <tr key={userId}>
+                    <tr key={userId || user.email}>
                       <td>
                         <strong>{user.fullName || user.name || "Patient"}</strong>
                         <small>{user.email || user.phone || userId}</small>

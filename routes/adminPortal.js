@@ -2784,7 +2784,13 @@ function createAdminPortalRouter({
   });
 
   router.put("/rfid", async (req, res) => {
-    const userId = stringValue(req.body?.userId, 120);
+    // Clients may send numeric userId (Postgres id); coerce before stringValue.
+    const userId = stringValue(
+      req.body?.userId != null || req.body?.user_id != null
+        ? String(req.body?.userId ?? req.body?.user_id)
+        : null,
+      120
+    );
     const rfidTag = stringValue(req.body?.rfidTag || req.body?.rfid_tag, 120);
 
     if (!userId || !rfidTag) {
