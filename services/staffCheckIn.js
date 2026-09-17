@@ -318,6 +318,37 @@ async function findActiveQueueForPatient(client, patientId) {
   return result.rows[0] || null;
 }
 
+async function allocateQueueToken(client, position) {
+  const clinicTz = process.env.CLINIC_TIMEZONE || "Asia/Manila";
+  const dayResult = await client.query(
+    `SELECT TO_CHAR((CURRENT_TIMESTAMP AT TIME ZONE $1), 'YYMMDD') AS day_code`,
+    [clinicTz]
+  );
+  const dayCode = dayResult.rows[0]?.day_code || "000000";
+  const base = `A-${dayCode}-${String(position).padStart(3, "0")}`;
+
+  const existing = await client.query(
+    `SELECT 1 FROM patient_portal_queue_entries WHERE token = $1 LIMIT 1`,
+    [base]
+  );
+  if (!existing.rows.length) {
+    return base;
+  }
+
+  for (let attempt = 1; attempt <= 50; attempt += 1) {
+    const candidate = `A-${dayCode}-${String(position).padStart(3, "0")}-${attempt}`;
+    const clash = await client.query(
+      `SELECT 1 FROM patient_portal_queue_entries WHERE token = $1 LIMIT 1`,
+      [candidate]
+    );
+    if (!clash.rows.length) {
+      return candidate;
+    }
+  }
+
+  return `A-${dayCode}-${Date.now()}`;
+}
+
 async function performStaffCheckIn(client, { appointment, staff, notifyClinicStaff, checkInMethod = "rfid" }) {
   const existingForPatient = await findActiveQueueForPatient(client, appointment.user_id);
   if (existingForPatient) {
@@ -334,7 +365,7 @@ async function performStaffCheckIn(client, { appointment, staff, notifyClinicSta
      WHERE DATE(checked_in_at) = CURRENT_DATE`
   );
   const position = Number(positionResult.rows[0].next_position);
-  const token = `A-${String(position + 100).padStart(3, "0")}`;
+  const token = await allocateQueueToken(client, position);
 
   const aheadResult = await client.query(
     `SELECT appointment.service_id, appointment.service_name
@@ -372,6 +403,27 @@ async function performStaffCheckIn(client, { appointment, staff, notifyClinicSta
          RETURNING id, token, position, status, estimated_wait_minutes, checked_in_at`,
         [String(appointment.user_id), appointment.id, token, position, estimatedWaitMinutes]
       );
+    } else if (insertError.code === "23505") {
+      // Extremely rare race: allocate a fresh token and retry once.
+      const retryToken = await allocateQueueToken(client, position + Math.floor(Math.random() * 90) + 10);
+      try {
+        queueResult = await client.query(
+          `INSERT INTO patient_portal_queue_entries (
+             user_id, appointment_id, token, position, status, estimated_wait_minutes, check_in_method
+           ) VALUES ($1, $2, $3, $4, 'waiting', $5, $6)
+           RETURNING id, token, position, status, estimated_wait_minutes, checked_in_at, check_in_method`,
+          [String(appointment.user_id), appointment.id, retryToken, position, estimatedWaitMinutes, method]
+        );
+      } catch (retryError) {
+        if (retryError.code !== "42703") throw retryError;
+        queueResult = await client.query(
+          `INSERT INTO patient_portal_queue_entries (
+             user_id, appointment_id, token, position, status, estimated_wait_minutes
+           ) VALUES ($1, $2, $3, $4, 'waiting', $5)
+           RETURNING id, token, position, status, estimated_wait_minutes, checked_in_at`,
+          [String(appointment.user_id), appointment.id, retryToken, position, estimatedWaitMinutes]
+        );
+      }
     } else {
       throw insertError;
     }
