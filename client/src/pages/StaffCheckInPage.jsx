@@ -17,9 +17,39 @@ function formatCountdown(totalSeconds) {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
+function checkInToVerified(entry) {
+  if (!entry) return null;
+  return {
+    verified: true,
+    method: "rfid",
+    message: "Patient checked in successfully.",
+    patient: {
+      id: entry.patientId,
+      fullName: entry.patientName,
+    },
+    appointment: {
+      id: entry.appointment?.id,
+      service: entry.appointment?.treatment,
+      dentist: entry.appointment?.dentist,
+      date: entry.appointment?.date,
+      time: entry.appointment?.time,
+    },
+    queue: {
+      id: entry.id,
+      token: entry.token,
+      queueNumber: entry.token || entry.queueNumber,
+      status: entry.status,
+      waitMinutes: entry.waitMinutes,
+      checkedInAt: entry.timestamp,
+    },
+  };
+}
+
 export function StaffCheckInPage() {
   const { pushToast } = useStaffUi();
   const rfidInputRef = useRef(null);
+  const seenCheckInIdsRef = useRef(new Set());
+  const bootstrappedLogRef = useRef(false);
   const [mode, setMode] = useState("rfid");
   const [rfidCode, setRfidCode] = useState("");
   const [verified, setVerified] = useState(null);
@@ -33,12 +63,29 @@ export function StaffCheckInPage() {
   const loadLog = useCallback(async () => {
     try {
       const response = await api.getStaffCheckIns();
-      setCheckIns(response.checkIns || []);
+      const rows = response.checkIns || [];
+      setCheckIns(rows);
       setError("");
+
+      if (!bootstrappedLogRef.current) {
+        rows.forEach((row) => seenCheckInIdsRef.current.add(String(row.id)));
+        bootstrappedLogRef.current = true;
+        return;
+      }
+
+      const fresh = rows.find((row) => !seenCheckInIdsRef.current.has(String(row.id)));
+      if (fresh) {
+        rows.forEach((row) => seenCheckInIdsRef.current.add(String(row.id)));
+        setVerified(checkInToVerified(fresh));
+        setScannerState("success");
+        setError("");
+        pushToast(`${fresh.patientName} checked in · Queue ${fresh.token || fresh.queueNumber}`);
+        window.setTimeout(() => setScannerState("ready"), 1600);
+      }
     } catch (loadError) {
       setError(loadError.message);
     }
-  }, []);
+  }, [pushToast]);
 
   const loadQrSession = useCallback(async () => {
     try {
@@ -52,7 +99,7 @@ export function StaffCheckInPage() {
   useEffect(() => {
     loadLog();
     loadQrSession();
-    const timer = window.setInterval(loadLog, 25000);
+    const timer = window.setInterval(loadLog, 3000);
     return () => window.clearInterval(timer);
   }, [loadLog, loadQrSession]);
 
@@ -78,6 +125,18 @@ export function StaffCheckInPage() {
     const timer = window.setInterval(tick, 1000);
     return () => window.clearInterval(timer);
   }, [qrSession]);
+
+  // USB keyboard-wedge readers often paste the UID without pressing Enter.
+  useEffect(() => {
+    const tag = String(rfidCode || "").trim();
+    if (busy || mode !== "rfid") return undefined;
+    if (!/^[A-Fa-f0-9]{6,20}$/.test(tag)) return undefined;
+    const timer = window.setTimeout(() => {
+      runRfidCheckIn(tag);
+    }, 350);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rfidCode, busy, mode]);
 
   async function runRfidCheckIn(rawTag) {
     const tag = String(rawTag || "").trim();

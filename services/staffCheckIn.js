@@ -358,11 +358,12 @@ async function allocateQueueToken(client, position) {
   );
   const dayCode = dayResult.rows[0]?.day_code || "000000";
   const seq = String(Math.max(1, Number(position) || 1)).padStart(3, "0");
+  const crypto = require("crypto");
 
   for (let attempt = 0; attempt < 40; attempt += 1) {
-    const suffix = Math.random().toString(36).slice(2, 6).toUpperCase();
-    const candidate =
-      attempt === 0 ? `A-${dayCode}-${seq}` : `A-${dayCode}-${seq}-${suffix}`;
+    const suffix = crypto.randomBytes(3).toString("hex").toUpperCase();
+    // Always include a random suffix — never reuse A-101 / A-YYMMDD-001 style tokens.
+    const candidate = `A-${dayCode}-${seq}-${suffix}`;
     const clash = await client.query(
       `SELECT 1 FROM patient_portal_queue_entries WHERE token = $1 LIMIT 1`,
       [candidate]
@@ -372,7 +373,7 @@ async function allocateQueueToken(client, position) {
     }
   }
 
-  return `A-${dayCode}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  return `A-${dayCode}-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
 }
 
 async function performStaffCheckIn(client, { appointment, staff, notifyClinicStaff, checkInMethod = "rfid" }) {
