@@ -149,6 +149,8 @@ export const api = {
   getStaffDashboard: () => request("/staff/dashboard"),
   getStaffCheckIns: () => request("/staff/check-ins"),
   staffCheckIn: (body) => request("/staff/check-in", { method: "POST", body }),
+  getStaffRfidEvents: (sinceId = 0) =>
+    request(`/staff/rfid-events?sinceId=${encodeURIComponent(sinceId)}`),
   getStaffWalkInQrSession: () => request("/staff/check-in/qr-session"),
   createStaffWalkInQrSession: () => request("/staff/check-in/qr-session", { method: "POST" }),
   revokeStaffWalkInQrSession: (sessionId) =>

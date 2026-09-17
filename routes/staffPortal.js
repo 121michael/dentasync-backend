@@ -6,6 +6,7 @@ const express = require("express");
 const clinicalPatients = require("../services/clinicalPatients");
 const staffCheckIn = require("../services/staffCheckIn");
 const staffWalkInQr = require("../services/staffWalkInQr");
+const staffRfidEvents = require("../services/staffRfidEvents");
 
 const QUEUE_STATUS_MAP = {
   checked_in: "checked_in",
@@ -1509,6 +1510,13 @@ function createStaffPortalRouter({
         if (!patient) {
           await client.query("ROLLBACK");
           transactionOpen = false;
+          if (method === "rfid") {
+            staffRfidEvents.recordRfidEvent({
+              rfidTag,
+              status: "failed",
+              message: "RFID not recognized. Ask Admin to assign this card to the patient account.",
+            });
+          }
           return res.status(404).json({
             message:
               method === "rfid"
@@ -1519,6 +1527,17 @@ function createStaffPortalRouter({
         if (!patient.is_verified) {
           await client.query("ROLLBACK");
           transactionOpen = false;
+          if (method === "rfid") {
+            staffRfidEvents.recordRfidEvent({
+              rfidTag,
+              status: "failed",
+              message: "Patient account is not verified yet.",
+              patient: {
+                id: patient.id,
+                fullName: `${patient.first_name || ""} ${patient.last_name || ""}`.trim(),
+              },
+            });
+          }
           return res.status(403).json({
             message: "Patient account is not verified yet.",
             patient: {
@@ -1542,10 +1561,23 @@ function createStaffPortalRouter({
           }
           await client.query("ROLLBACK");
           transactionOpen = false;
+          const message = diagnosis?.hint
+            ? `No eligible appointment found for this patient today. ${diagnosis.hint}`
+            : "No eligible appointment found for this patient today.";
+          if (method === "rfid") {
+            staffRfidEvents.recordRfidEvent({
+              rfidTag,
+              status: "failed",
+              message,
+              patient: {
+                id: patient.id,
+                fullName: `${patient.first_name || ""} ${patient.last_name || ""}`.trim(),
+                phone: patient.phone,
+              },
+            });
+          }
           return res.status(404).json({
-            message: diagnosis?.hint
-              ? `No eligible appointment found for this patient today. ${diagnosis.hint}`
-              : "No eligible appointment found for this patient today.",
+            message,
             patient: {
               id: patient.id,
               fullName: `${patient.first_name || ""} ${patient.last_name || ""}`.trim(),
@@ -1577,7 +1609,7 @@ function createStaffPortalRouter({
           .catch((smsError) => console.warn("Staff check-in SMS failed:", smsError.message));
       }
 
-      return res.status(checkIn.alreadyCheckedIn ? 200 : 201).json({
+      const successPayload = {
         message: checkIn.alreadyCheckedIn
           ? "Patient already checked in."
           : walkInCreated
@@ -1609,12 +1641,32 @@ function createStaffPortalRouter({
           waitMinutes: Number(checkIn.queueEntry.estimated_wait_minutes || 0),
           checkedInAt: checkIn.queueEntry.checked_in_at || new Date().toISOString(),
         },
-      });
+      };
+
+      if (method === "rfid") {
+        staffRfidEvents.recordRfidEvent({
+          rfidTag,
+          status: "success",
+          message: successPayload.message,
+          patient: successPayload.patient,
+          appointment: successPayload.appointment,
+          queue: successPayload.queue,
+        });
+      }
+
+      return res.status(checkIn.alreadyCheckedIn ? 200 : 201).json(successPayload);
     } catch (error) {
       if (transactionOpen) {
         await client.query("ROLLBACK");
       }
       console.error("Staff check-in error:", error.message);
+      if (method === "rfid") {
+        staffRfidEvents.recordRfidEvent({
+          rfidTag,
+          status: "failed",
+          message: error.message || "Unable to complete patient check-in.",
+        });
+      }
       return res.status(500).json({
         message: error.message?.includes("estimated_cost")
           ? "Unable to create walk-in appointment for check-in."
@@ -1624,6 +1676,14 @@ function createStaffPortalRouter({
     } finally {
       client.release();
     }
+  });
+
+  router.get("/rfid-events", async (req, res) => {
+    const sinceId = Number.parseInt(String(req.query.sinceId || "0"), 10) || 0;
+    return res.json({
+      latest: staffRfidEvents.latestRfidEvent(),
+      events: staffRfidEvents.listRfidEvents({ sinceId, limit: 20 }),
+    });
   });
 
   router.get("/check-in/qr-session", async (req, res) => {

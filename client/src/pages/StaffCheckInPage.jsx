@@ -45,11 +45,24 @@ function checkInToVerified(entry) {
   };
 }
 
+function eventToVerified(event) {
+  if (!event || event.status !== "success") return null;
+  return {
+    verified: true,
+    method: "rfid",
+    message: event.message || "Patient checked in successfully.",
+    patient: event.patient,
+    appointment: event.appointment,
+    queue: event.queue,
+  };
+}
+
 export function StaffCheckInPage() {
   const { pushToast } = useStaffUi();
   const rfidInputRef = useRef(null);
   const seenCheckInIdsRef = useRef(new Set());
   const bootstrappedLogRef = useRef(false);
+  const lastEventIdRef = useRef(0);
   const [mode, setMode] = useState("rfid");
   const [rfidCode, setRfidCode] = useState("");
   const [verified, setVerified] = useState(null);
@@ -59,13 +72,13 @@ export function StaffCheckInPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [scannerState, setScannerState] = useState("ready");
+  const [listeningHint, setListeningHint] = useState("Hold the patient card on the ESP32 RFID reader.");
 
   const loadLog = useCallback(async () => {
     try {
       const response = await api.getStaffCheckIns();
       const rows = response.checkIns || [];
       setCheckIns(rows);
-      setError("");
 
       if (!bootstrappedLogRef.current) {
         rows.forEach((row) => seenCheckInIdsRef.current.add(String(row.id)));
@@ -87,6 +100,36 @@ export function StaffCheckInPage() {
     }
   }, [pushToast]);
 
+  const pollRfidEvents = useCallback(async () => {
+    try {
+      const response = await api.getStaffRfidEvents(lastEventIdRef.current);
+      const events = response.events || [];
+      if (!events.length) return;
+
+      const newest = events[0];
+      lastEventIdRef.current = Math.max(lastEventIdRef.current, ...events.map((event) => Number(event.id) || 0));
+
+      if (newest.status === "success") {
+        setVerified(eventToVerified(newest));
+        setScannerState("success");
+        setError("");
+        setListeningHint("Check-in complete. Ready for the next card.");
+        pushToast(newest.message || "Patient checked in from RFID tap.");
+        await loadLog();
+        window.setTimeout(() => setScannerState("ready"), 1800);
+        return;
+      }
+
+      setScannerState("error");
+      setError(newest.message || "RFID tap failed.");
+      setListeningHint(newest.message || "RFID tap failed. Try again.");
+      pushToast(newest.message || "RFID tap failed.", "error");
+      window.setTimeout(() => setScannerState("ready"), 2200);
+    } catch {
+      // Keep listening even if the live feed briefly fails.
+    }
+  }, [loadLog, pushToast]);
+
   const loadQrSession = useCallback(async () => {
     try {
       const response = await api.getStaffWalkInQrSession();
@@ -99,9 +142,14 @@ export function StaffCheckInPage() {
   useEffect(() => {
     loadLog();
     loadQrSession();
-    const timer = window.setInterval(loadLog, 3000);
-    return () => window.clearInterval(timer);
-  }, [loadLog, loadQrSession]);
+    const logTimer = window.setInterval(loadLog, 4000);
+    const eventTimer = window.setInterval(pollRfidEvents, 1500);
+    pollRfidEvents();
+    return () => {
+      window.clearInterval(logTimer);
+      window.clearInterval(eventTimer);
+    };
+  }, [loadLog, loadQrSession, pollRfidEvents]);
 
   useEffect(() => {
     if (mode === "rfid") {
@@ -126,27 +174,25 @@ export function StaffCheckInPage() {
     return () => window.clearInterval(timer);
   }, [qrSession]);
 
-  // USB keyboard-wedge readers often paste the UID without pressing Enter.
+  // Hidden capture for USB keyboard-wedge readers only (not for typing by staff).
   useEffect(() => {
     const tag = String(rfidCode || "").trim();
     if (busy || mode !== "rfid") return undefined;
     if (!/^[A-Fa-f0-9]{6,20}$/.test(tag)) return undefined;
     const timer = window.setTimeout(() => {
       runRfidCheckIn(tag);
-    }, 350);
+    }, 250);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rfidCode, busy, mode]);
 
   async function runRfidCheckIn(rawTag) {
     const tag = String(rawTag || "").trim();
-    if (!tag) {
-      setError("Tap a patient RFID card on the reader.");
-      return;
-    }
+    if (!tag) return;
     setBusy(true);
     setError("");
     setScannerState("scanning");
+    setListeningHint("Card detected. Checking appointment…");
     try {
       const response = await api.staffCheckIn({ method: "rfid", rfidTag: tag });
       setVerified({ ...response, method: "rfid" });
@@ -161,6 +207,7 @@ export function StaffCheckInPage() {
         ? `${checkInError.message}${checkInError.message.includes(detail) ? "" : ` (${detail})`}`
         : checkInError.message;
       setError(message);
+      setListeningHint(message);
       pushToast(message, "error");
       setRfidCode("");
     } finally {
@@ -170,11 +217,6 @@ export function StaffCheckInPage() {
         rfidInputRef.current?.focus();
       }, 1600);
     }
-  }
-
-  async function submitRfid(event) {
-    event.preventDefault();
-    await runRfidCheckIn(rfidCode);
   }
 
   async function generateQr() {
@@ -219,7 +261,10 @@ export function StaffCheckInPage() {
           <div>
             <span className="eyebrow">Walk-in arrival</span>
             <h2>Patient Check-In</h2>
-            <p>Welcome patients as they enter the clinic. Tap the patient RFID card — their appointment appears automatically and they join the queue. QR is for patients without a card.</p>
+            <p>
+              No typing. Patient holds their RFID card on the clinic reader (ESP32). Appointment and
+              queue number appear here automatically.
+            </p>
           </div>
           <button className="button button--secondary" onClick={loadLog}>
             <RefreshCw size={16} /> Refresh Log
@@ -227,8 +272,8 @@ export function StaffCheckInPage() {
         </div>
 
         <div className="staff-checkin-hero">
-          <h3>Welcome. Please check in.</h3>
-          <p>Patient taps RFID if they have a card. If not, staff shows a temporary QR for the patient to scan.</p>
+          <h3>Hold card on the RFID reader</h3>
+          <p>Staff does not type a name or UID. The physical reader sends the tap to DentaSync.</p>
         </div>
 
         <div className="admin-tabs" role="tablist" aria-label="Check-in method">
@@ -251,17 +296,17 @@ export function StaffCheckInPage() {
         {mode === "rfid" ? (
           <div className="staff-checkin-grid">
             <article className={`staff-scanner-card staff-scanner-card--${scannerState}`}>
-              <Nfc size={34} />
-              <h3>Tap your RFID card</h3>
-              <p>
+              <Nfc size={42} />
+              <h3>
                 {scannerState === "scanning"
-                  ? "Verifying patient and appointment…"
+                  ? "Reading card…"
                   : scannerState === "success"
-                    ? "Check-in recorded. Queue number issued."
+                    ? "Check-in complete"
                     : scannerState === "error"
-                      ? "RFID check-in failed. Try again or use QR."
-                      : "Patient: hold your RFID card on the reader. Staff does not need to type a name."}
-              </p>
+                      ? "Tap failed"
+                      : "Listening for card tap"}
+              </h3>
+              <p>{listeningHint}</p>
               <div className={`staff-rfid-status staff-rfid-status--${scannerState}`}>
                 <ShieldCheck size={16} />
                 <span>
@@ -272,29 +317,21 @@ export function StaffCheckInPage() {
                       ? "Success"
                       : scannerState === "error"
                         ? "Error"
-                        : "Ready"}
+                        : "Ready — tap the ESP32 reader"}
                 </span>
               </div>
-              <form className="admin-form" onSubmit={submitRfid}>
-                <label className="field">
-                  <span className="sr-only">RFID tag</span>
-                  <input
-                    ref={rfidInputRef}
-                    value={rfidCode}
-                    onChange={(event) => setRfidCode(event.target.value)}
-                    placeholder="Waiting for RFID tap…"
-                    autoComplete="off"
-                    autoFocus
-                    disabled={busy}
-                  />
-                </label>
-                <button className="button button--primary" disabled={busy || !rfidCode.trim()}>
-                  {busy ? "Checking in…" : "Complete RFID Check-In"}
-                </button>
-              </form>
+              {/* Hidden capture only for USB keyboard-wedge readers. Staff should not type here. */}
+              <input
+                ref={rfidInputRef}
+                className="sr-only"
+                value={rfidCode}
+                onChange={(event) => setRfidCode(event.target.value)}
+                autoComplete="off"
+                autoFocus
+                aria-label="Hidden RFID capture"
+              />
               <p className="muted-copy">
-                USB RFID reader: tap into this box. ESP32 reader: tap the board — successful check-ins
-                appear here automatically within a few seconds. Cards are assigned by Admin.
+                Tap the physical ESP32 + MFRC522 reader. Do not type in this screen.
               </p>
             </article>
             <VerifiedPanel verified={verified} />
@@ -328,7 +365,10 @@ export function StaffCheckInPage() {
                 The QR contains only a secure temporary token — never patient passwords or clinical data.
               </p>
             </article>
-            <VerifiedPanel verified={verified} emptyHint="Successful QR check-ins appear in the log and notifications as patients redeem the code." />
+            <VerifiedPanel
+              verified={verified}
+              emptyHint="Successful QR check-ins appear in the log and notifications as patients redeem the code."
+            />
           </div>
         )}
       </section>
@@ -386,8 +426,11 @@ function VerifiedPanel({ verified, emptyHint }) {
   if (!verified?.verified) {
     return (
       <article className="staff-verified-card staff-verified-card--idle">
-        <h3>Awaiting check-in</h3>
-        <p>{emptyHint || "Successful RFID check-ins show patient, appointment, and queue details here."}</p>
+        <h3>Awaiting card tap</h3>
+        <p>
+          {emptyHint ||
+            "When the patient taps the ESP32 reader, their appointment and queue number appear here. No typing."}
+        </p>
       </article>
     );
   }
