@@ -68,6 +68,16 @@ function displayQueueStatus(status) {
   return status;
 }
 
+function clinicTimezone() {
+  return process.env.CLINIC_TIMEZONE || "Asia/Manila";
+}
+
+/** Same clinic-local "today" used by RFID check-in. */
+function clinicTodayQueueSql(alias = "queue") {
+  const tz = clinicTimezone().replace(/'/g, "''");
+  return `(${alias}.checked_in_at AT TIME ZONE '${tz}')::date = (CURRENT_TIMESTAMP AT TIME ZONE '${tz}')::date`;
+}
+
 function ageFromDob(value) {
   if (!value) return null;
   const dob = new Date(value);
@@ -178,6 +188,34 @@ function dentistScopeClause(alias, dentist) {
   };
 }
 
+async function repairOrphanWalkInQueueForDentist(db, dentist) {
+  const catalogId = stringValue(dentist.catalog_dentist_id, 80);
+  if (!catalogId) return;
+  const fullName = `${dentist.first_name || ""} ${dentist.last_name || ""}`.trim();
+  const dentistName = fullName ? `Dr. ${fullName}` : catalogId;
+  const tz = clinicTimezone();
+  try {
+    await db.query(
+      `UPDATE patient_portal_appointments AS appointment
+       SET dentist_id = $1,
+           dentist_name = CASE
+             WHEN appointment.dentist_name IS NULL OR BTRIM(appointment.dentist_name) = '' OR appointment.dentist_name = 'Clinic Walk-in'
+               THEN $2
+             ELSE appointment.dentist_name
+           END,
+           updated_at = CURRENT_TIMESTAMP
+       FROM patient_portal_queue_entries AS queue
+       WHERE queue.appointment_id = appointment.id
+         AND (queue.checked_in_at AT TIME ZONE $3)::date = (CURRENT_TIMESTAMP AT TIME ZONE $3)::date
+         AND queue.status IN ('checked_in', 'waiting', 'preparing', 'dentist')
+         AND appointment.dentist_id LIKE 'walk-in-%'`,
+      [catalogId, dentistName, tz]
+    );
+  } catch (error) {
+    console.warn("Walk-in queue dentist repair skipped:", error.message);
+  }
+}
+
 function requireDentistAccount(db) {
   return async (req, res, next) => {
     const tokenUserId = req.user?.id;
@@ -255,7 +293,7 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
            JOIN patient_portal_appointments AS appointment
              ON appointment.id = queue.appointment_id
            WHERE ${scope.sql}
-             AND DATE(queue.checked_in_at) = CURRENT_DATE
+             AND ${clinicTodayQueueSql("queue")}
              AND queue.status IN ('checked_in', 'waiting', 'preparing')`,
           scope.params
         ),
@@ -265,7 +303,7 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
            JOIN patient_portal_appointments AS appointment
              ON appointment.id = queue.appointment_id
            WHERE ${scope.sql}
-             AND DATE(queue.checked_in_at) = CURRENT_DATE
+             AND ${clinicTodayQueueSql("queue")}
              AND queue.status = 'completed'`,
           scope.params
         ),
@@ -291,7 +329,7 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
              ON appointment.id = queue.appointment_id
            JOIN users AS patient ON patient.id::text = queue.user_id
            WHERE ${scope.sql}
-             AND DATE(queue.checked_in_at) = CURRENT_DATE
+             AND ${clinicTodayQueueSql("queue")}
              AND queue.status IN ('dentist', 'checked_in', 'waiting', 'preparing')
            ORDER BY
              CASE queue.status
@@ -344,6 +382,7 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
     }
 
     try {
+      await repairOrphanWalkInQueueForDentist(db, req.dentist);
       const result = await db.query(
         `SELECT
            queue.id,
@@ -366,7 +405,7 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
            ON appointment.id = queue.appointment_id
          JOIN users AS patient ON patient.id::text = queue.user_id
          WHERE ${scope.sql}
-           AND DATE(queue.checked_in_at) = CURRENT_DATE
+           AND ${clinicTodayQueueSql("queue")}
            AND ${statusFilter}
          ORDER BY queue.position ASC`,
         scope.params
@@ -381,7 +420,7 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
          JOIN patient_portal_appointments AS appointment
            ON appointment.id = queue.appointment_id
          WHERE ${scope.sql}
-           AND DATE(queue.checked_in_at) = CURRENT_DATE`,
+           AND ${clinicTodayQueueSql("queue")}`,
         scope.params
       );
 
@@ -437,7 +476,7 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
          JOIN patient_portal_appointments AS appointment
            ON appointment.id = queue.appointment_id
          WHERE ${scope.sql}
-           AND DATE(queue.checked_in_at) = CURRENT_DATE
+           AND ${clinicTodayQueueSql("queue")}
            AND queue.status IN ('checked_in', 'waiting', 'preparing')
          ORDER BY
            CASE queue.status
@@ -472,7 +511,7 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
          FROM patient_portal_appointments AS appointment
          WHERE appointment.id = queue.appointment_id
            AND ${scope.sql}
-           AND DATE(queue.checked_in_at) = CURRENT_DATE
+           AND ${clinicTodayQueueSql("queue")}
            AND queue.status = 'dentist'
            AND queue.id <> $${scope.params.length + 1}`,
         [...scope.params, queueId]

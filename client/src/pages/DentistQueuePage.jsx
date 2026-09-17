@@ -275,7 +275,7 @@ export function DentistQueuePage() {
         ) : (
           <EmptyState
             title="No records found."
-            detail="Patients in this queue tab will appear after check-in or treatment progress."
+            detail="After staff RFID or desk check-in, patients appear under In Line for your dentist schedule. Use Call Next to move them to On Going."
           />
         )}
       </section>

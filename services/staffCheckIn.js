@@ -202,6 +202,97 @@ async function diagnoseMissingCheckInAppointment(client, patient) {
   };
 }
 
+async function resolveWalkInDentist(client) {
+  const catalogDentists = [
+    { id: "dr-sarah-cruz", name: "Dr. Sarah Cruz" },
+    { id: "dr-sarah-mitchell", name: "Dr. Sarah Mitchell" },
+    { id: "dr-james-reyes", name: "Dr. James Reyes" },
+    { id: "dr-ana-santos", name: "Dr. Ana Santos" },
+  ];
+
+  try {
+    const linked = await client.query(
+      `SELECT profile.catalog_dentist_id,
+              CONCAT_WS(' ', account.first_name, account.last_name) AS full_name
+       FROM admin_portal_dentist_profiles AS profile
+       JOIN users AS account ON account.id = profile.user_id
+       WHERE COALESCE(profile.catalog_dentist_id, '') <> ''
+         AND COALESCE(account.is_archived, FALSE) = FALSE
+         AND LOWER(COALESCE(account.status, 'active')) = 'active'
+       ORDER BY account.id ASC
+       LIMIT 1`
+    );
+    if (linked.rows[0]?.catalog_dentist_id) {
+      const catalogId = String(linked.rows[0].catalog_dentist_id);
+      const catalog = catalogDentists.find((item) => item.id === catalogId);
+      const fullName = linked.rows[0].full_name || "";
+      return {
+        dentistId: catalogId,
+        dentistName: catalog?.name || (fullName ? `Dr. ${fullName}` : "Clinic Dentist"),
+      };
+    }
+  } catch {
+    // Fall through to catalog defaults when dentist profiles are unavailable.
+  }
+
+  return catalogDentists[0];
+}
+
+async function nextOpenWalkInSlot(client, dentistId, appointmentDate, preferredTime) {
+  let candidate = preferredTime;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const conflict = await client.query(
+      `SELECT id
+       FROM patient_portal_appointments
+       WHERE dentist_id = $1
+         AND appointment_date = $2
+         AND appointment_time = $3::time
+         AND status NOT IN ('cancelled', 'no_show')
+       LIMIT 1`,
+      [dentistId, appointmentDate, candidate]
+    );
+    if (!conflict.rows.length) {
+      return candidate;
+    }
+    const bumped = await client.query(
+      `SELECT TO_CHAR(($1::time + ($2 || ' seconds')::interval), 'HH24:MI:SS') AS next_time`,
+      [candidate, String(attempt + 1)]
+    );
+    candidate = bumped.rows[0]?.next_time || candidate;
+  }
+  return candidate;
+}
+
+async function ensureAppointmentLinkedToCatalogDentist(client, appointment) {
+  if (!appointment) return appointment;
+  const dentistId = String(appointment.dentist_id || "");
+  if (dentistId && !dentistId.startsWith("walk-in-")) {
+    return appointment;
+  }
+  const dentist = await resolveWalkInDentist(client);
+  const slot = await nextOpenWalkInSlot(
+    client,
+    dentist.dentistId,
+    appointment.appointment_date,
+    appointment.appointment_time || "09:00:00"
+  );
+  const updated = await client.query(
+    `UPDATE patient_portal_appointments
+     SET dentist_id = $1,
+         dentist_name = $2,
+         appointment_time = $3::time,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = $4
+     RETURNING *`,
+    [dentist.dentistId, dentist.dentistName, slot, appointment.id]
+  );
+  const row = updated.rows[0] || appointment;
+  row.patient_name = appointment.patient_name;
+  row.patient_phone = appointment.patient_phone;
+  row.patient_email = appointment.patient_email;
+  return row;
+}
+
 async function createWalkInAppointmentForPatient(client, patient) {
   const clinicTz = process.env.CLINIC_TIMEZONE || "Asia/Manila";
   const clock = await client.query(
@@ -210,29 +301,14 @@ async function createWalkInAppointmentForPatient(client, patient) {
     [clinicTz]
   );
   const appointmentDate = clock.rows[0].clinic_today;
-  const appointmentTime = clock.rows[0].clinic_time;
-
-  let dentistId = `walk-in-${patient.id}-${Date.now()}`;
-  let dentistName = "Clinic Walk-in";
-  try {
-    const dentist = await client.query(
-      `SELECT id, CONCAT_WS(' ', first_name, last_name) AS full_name
-       FROM users
-       WHERE LOWER(role) = 'dentist'
-         AND COALESCE(is_archived, FALSE) = FALSE
-         AND LOWER(COALESCE(status, 'active')) = 'active'
-       ORDER BY id ASC
-       LIMIT 1`
-    );
-    if (dentist.rows[0]) {
-      dentistName = dentist.rows[0].full_name || dentistName;
-      // Keep a unique dentist_id per walk-in so the active-slot unique index
-      // does not block multiple walk-ins in the same second.
-      dentistId = `walk-in-${patient.id}-${Date.now()}`;
-    }
-  } catch {
-    // Catalog fallback is fine when dentist users are unavailable.
-  }
+  const preferredTime = clock.rows[0].clinic_time;
+  const dentist = await resolveWalkInDentist(client);
+  const appointmentTime = await nextOpenWalkInSlot(
+    client,
+    dentist.dentistId,
+    appointmentDate,
+    preferredTime
+  );
 
   const inserted = await client.query(
     `INSERT INTO patient_portal_appointments (
@@ -245,8 +321,8 @@ async function createWalkInAppointmentForPatient(client, patient) {
      RETURNING *`,
     [
       String(patient.id),
-      dentistId,
-      dentistName,
+      dentist.dentistId,
+      dentist.dentistName,
       appointmentDate,
       appointmentTime,
       800,
@@ -263,8 +339,9 @@ async function createWalkInAppointmentForPatient(client, patient) {
 }
 
 async function resolveAppointmentForCheckIn(client, patient, { allowWalkIn = false } = {}) {
-  const existing = await findAppointmentForCheckIn(client, { patientId: patient.id });
+  let existing = await findAppointmentForCheckIn(client, { patientId: patient.id });
   if (existing) {
+    existing = await ensureAppointmentLinkedToCatalogDentist(client, existing);
     return { appointment: existing, walkInCreated: false };
   }
   if (!allowWalkIn) {
