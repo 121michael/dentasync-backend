@@ -325,18 +325,12 @@ async function allocateQueueToken(client, position) {
     [clinicTz]
   );
   const dayCode = dayResult.rows[0]?.day_code || "000000";
-  const base = `A-${dayCode}-${String(position).padStart(3, "0")}`;
+  const seq = String(Math.max(1, Number(position) || 1)).padStart(3, "0");
 
-  const existing = await client.query(
-    `SELECT 1 FROM patient_portal_queue_entries WHERE token = $1 LIMIT 1`,
-    [base]
-  );
-  if (!existing.rows.length) {
-    return base;
-  }
-
-  for (let attempt = 1; attempt <= 50; attempt += 1) {
-    const candidate = `A-${dayCode}-${String(position).padStart(3, "0")}-${attempt}`;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const suffix = Math.random().toString(36).slice(2, 6).toUpperCase();
+    const candidate =
+      attempt === 0 ? `A-${dayCode}-${seq}` : `A-${dayCode}-${seq}-${suffix}`;
     const clash = await client.query(
       `SELECT 1 FROM patient_portal_queue_entries WHERE token = $1 LIMIT 1`,
       [candidate]
@@ -346,7 +340,7 @@ async function allocateQueueToken(client, position) {
     }
   }
 
-  return `A-${dayCode}-${Date.now()}`;
+  return `A-${dayCode}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 async function performStaffCheckIn(client, { appointment, staff, notifyClinicStaff, checkInMethod = "rfid" }) {
