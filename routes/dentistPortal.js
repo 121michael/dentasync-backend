@@ -695,7 +695,7 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
        FROM patient_portal_queue_entries AS queue
        LEFT JOIN patient_portal_appointments AS appointment
          ON appointment.id = queue.appointment_id
-       WHERE DATE(queue.checked_in_at) = CURRENT_DATE
+       WHERE ${clinicTodayQueueSql("queue")}
          AND queue.status IN ('checked_in', 'waiting', 'preparing')
          AND queue.position > $1
        ORDER BY queue.position ASC`,
@@ -708,7 +708,7 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
          FROM patient_portal_queue_entries AS queue
          LEFT JOIN patient_portal_appointments AS appointment
            ON appointment.id = queue.appointment_id
-         WHERE DATE(queue.checked_in_at) = CURRENT_DATE
+         WHERE ${clinicTodayQueueSql("queue")}
            AND queue.status NOT IN ('completed', 'no_show')
            AND queue.position < $1
          ORDER BY queue.position ASC`,
