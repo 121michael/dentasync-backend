@@ -91,14 +91,16 @@ async function findPatient(client, { patientId, rfidTag, code, phone, email }) {
 }
 
 async function findAppointmentForCheckIn(client, { appointmentId, patientId }) {
+  const clinicTz = process.env.CLINIC_TIMEZONE || "Asia/Manila";
+
   if (appointmentId) {
     const byId = await client.query(
       `SELECT appointment.*, CONCAT_WS(' ', patient.first_name, patient.last_name) AS patient_name,
               patient.phone AS patient_phone, patient.email AS patient_email
        FROM patient_portal_appointments AS appointment
-       JOIN users AS patient ON patient.id::text = appointment.user_id
+       JOIN users AS patient ON patient.id::text = appointment.user_id::text
        WHERE appointment.id = $1
-         AND appointment.status IN ('confirmed', 'checked_in', 'pending')
+         AND LOWER(appointment.status) IN ('confirmed', 'checked_in', 'pending')
        LIMIT 1`,
       [appointmentId]
     );
@@ -111,10 +113,10 @@ async function findAppointmentForCheckIn(client, { appointmentId, patientId }) {
     `SELECT appointment.*, CONCAT_WS(' ', patient.first_name, patient.last_name) AS patient_name,
             patient.phone AS patient_phone, patient.email AS patient_email
      FROM patient_portal_appointments AS appointment
-     JOIN users AS patient ON patient.id::text = appointment.user_id
-     WHERE appointment.user_id = $1
-       AND appointment.appointment_date = CURRENT_DATE
-       AND appointment.status IN ('confirmed', 'checked_in', 'pending')
+     JOIN users AS patient ON patient.id::text = appointment.user_id::text
+     WHERE appointment.user_id::text = $1::text
+       AND appointment.appointment_date = (CURRENT_TIMESTAMP AT TIME ZONE $2)::date
+       AND LOWER(appointment.status) IN ('confirmed', 'checked_in', 'pending')
      ORDER BY
        CASE
          WHEN EXISTS (
@@ -125,16 +127,79 @@ async function findAppointmentForCheckIn(client, { appointmentId, patientId }) {
          ) THEN 1
          ELSE 0
        END,
-       CASE appointment.status
+       CASE LOWER(appointment.status)
          WHEN 'confirmed' THEN 0
          WHEN 'pending' THEN 1
          ELSE 2
        END,
        appointment.appointment_time ASC
      LIMIT 1`,
-    [String(patientId)]
+    [String(patientId), clinicTz]
   );
   return today.rows[0] || null;
+}
+
+async function diagnoseMissingCheckInAppointment(client, patient) {
+  const clinicTz = process.env.CLINIC_TIMEZONE || "Asia/Manila";
+  const patientId = String(patient?.id || "");
+  const fullName = `${patient?.first_name || ""} ${patient?.last_name || ""}`.trim();
+
+  const todayResult = await client.query(
+    `SELECT (CURRENT_TIMESTAMP AT TIME ZONE $1)::date::text AS clinic_today`,
+    [clinicTz]
+  );
+  const clinicToday = todayResult.rows[0]?.clinic_today || null;
+
+  const ownAppointments = await client.query(
+    `SELECT id, service_name, dentist_name, appointment_date::text AS appointment_date,
+            TO_CHAR(appointment_time, 'HH24:MI') AS appointment_time, status
+     FROM patient_portal_appointments
+     WHERE user_id::text = $1::text
+     ORDER BY appointment_date DESC, appointment_time DESC
+     LIMIT 5`,
+    [patientId]
+  );
+
+  const sameNameToday = await client.query(
+    `SELECT patient.id AS patient_id,
+            CONCAT_WS(' ', patient.first_name, patient.last_name) AS full_name,
+            appointment.id AS appointment_id,
+            appointment.appointment_date::text AS appointment_date,
+            appointment.status
+     FROM patient_portal_appointments AS appointment
+     JOIN users AS patient ON patient.id::text = appointment.user_id::text
+     WHERE LOWER(CONCAT_WS(' ', patient.first_name, patient.last_name)) = LOWER($1)
+       AND patient.id::text <> $2::text
+       AND appointment.appointment_date = $3::date
+       AND LOWER(appointment.status) IN ('confirmed', 'checked_in', 'pending')
+     LIMIT 5`,
+    [fullName || "__none__", patientId, clinicToday]
+  );
+
+  const hintParts = [];
+  if (sameNameToday.rows.length) {
+    const otherIds = sameNameToday.rows.map((row) => row.patient_id).join(", ");
+    hintParts.push(
+      `Another "${fullName}" account (id ${otherIds}) has today's appointment. Assign RFID to that patient id, or move the appointment.`
+    );
+  } else if (ownAppointments.rows.length) {
+    const latest = ownAppointments.rows[0];
+    hintParts.push(
+      `This patient (id ${patientId}) has appointment on ${latest.appointment_date} status=${latest.status}, but clinic today is ${clinicToday}.`
+    );
+  } else {
+    hintParts.push(
+      `Patient id ${patientId} has no appointments. Create one for ${clinicToday} on this exact account.`
+    );
+  }
+
+  return {
+    clinicToday,
+    clinicTimezone: clinicTz,
+    recentAppointments: ownAppointments.rows,
+    sameNamePatientsWithTodayAppointment: sameNameToday.rows,
+    hint: hintParts.join(" "),
+  };
 }
 
 async function findActiveQueueForPatient(client, patientId) {
@@ -289,6 +354,7 @@ module.exports = {
   parseQrPayload,
   findPatient,
   findAppointmentForCheckIn,
+  diagnoseMissingCheckInAppointment,
   findActiveQueueForPatient,
   performStaffCheckIn,
   stringValue,

@@ -1483,15 +1483,24 @@ function createStaffPortalRouter({
           patientId: patient.id,
         });
         if (!appointment) {
+          let diagnosis = null;
+          try {
+            diagnosis = await staffCheckIn.diagnoseMissingCheckInAppointment(client, patient);
+          } catch (diagnoseError) {
+            console.warn("Check-in diagnosis failed:", diagnoseError.message);
+          }
           await client.query("ROLLBACK");
           transactionOpen = false;
           return res.status(404).json({
-            message: "No eligible appointment found for this patient today.",
+            message: diagnosis?.hint
+              ? `No eligible appointment found for this patient today. ${diagnosis.hint}`
+              : "No eligible appointment found for this patient today.",
             patient: {
               id: patient.id,
               fullName: `${patient.first_name || ""} ${patient.last_name || ""}`.trim(),
               phone: patient.phone,
             },
+            diagnosis,
           });
         }
       }
