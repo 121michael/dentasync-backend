@@ -2351,9 +2351,8 @@ function createPatientPortalRouter({
       transactionOpen = true;
       await client.query("SELECT pg_advisory_xact_lock(hashtext('patient_portal_queue'))");
 
-      const appointment = await staffCheckIn.findAppointmentForCheckIn(client, { patientId: userId });
+      let appointment = await staffCheckIn.findAppointmentForCheckIn(client, { patientId: userId });
       if (!appointment) {
-        // Look up patient row for walk-in auto-create.
         const patientResult = await client.query(
           `SELECT id, first_name, last_name, email, phone, role, status, is_verified, rfid_tag
            FROM users
@@ -2377,13 +2376,11 @@ function createPatientPortalRouter({
             message: "No eligible appointment found for check-in today.",
           });
         }
-        var walkInAppointment = resolved.appointment;
-      } else {
-        var walkInAppointment = appointment;
+        appointment = resolved.appointment;
       }
 
       const checkIn = await staffCheckIn.performStaffCheckIn(client, {
-        appointment: walkInAppointment,
+        appointment,
         staff: null,
         notifyClinicStaff,
         checkInMethod: "qr",
@@ -2398,7 +2395,7 @@ function createPatientPortalRouter({
           [
             validity.session.id,
             String(userId),
-            walkInAppointment.id,
+            appointment.id,
             checkIn.queueEntry.id,
           ]
         );
@@ -2427,10 +2424,10 @@ function createPatientPortalRouter({
         method: "qr",
         alreadyCheckedIn: checkIn.alreadyCheckedIn,
         patient: {
-          id: walkInAppointment.user_id,
-          fullName: walkInAppointment.patient_name || "Patient",
+          id: appointment.user_id,
+          fullName: appointment.patient_name || "Patient",
         },
-        appointment: mapAppointment(walkInAppointment),
+        appointment: mapAppointment(appointment),
         queue: {
           id: checkIn.queueEntry.id,
           token: checkIn.queueEntry.token,

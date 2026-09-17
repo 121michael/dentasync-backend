@@ -97,8 +97,12 @@ export function StaffCheckInPage() {
       await loadLog();
     } catch (checkInError) {
       setScannerState("error");
-      setError(checkInError.message);
-      pushToast(checkInError.message, "error");
+      const detail = checkInError?.data?.detail || checkInError?.data?.diagnosis?.hint;
+      const message = detail
+        ? `${checkInError.message}${checkInError.message.includes(detail) ? "" : ` (${detail})`}`
+        : checkInError.message;
+      setError(message);
+      pushToast(message, "error");
       setRfidCode("");
     } finally {
       setBusy(false);

@@ -212,7 +212,7 @@ async function createWalkInAppointmentForPatient(client, patient) {
   const appointmentDate = clock.rows[0].clinic_today;
   const appointmentTime = clock.rows[0].clinic_time;
 
-  let dentistId = "walk-in-desk";
+  let dentistId = `walk-in-${patient.id}-${Date.now()}`;
   let dentistName = "Clinic Walk-in";
   try {
     const dentist = await client.query(
@@ -225,8 +225,10 @@ async function createWalkInAppointmentForPatient(client, patient) {
        LIMIT 1`
     );
     if (dentist.rows[0]) {
-      dentistId = String(dentist.rows[0].id);
       dentistName = dentist.rows[0].full_name || dentistName;
+      // Keep a unique dentist_id per walk-in so the active-slot unique index
+      // does not block multiple walk-ins in the same second.
+      dentistId = `walk-in-${patient.id}-${Date.now()}`;
     }
   } catch {
     // Catalog fallback is fine when dentist users are unavailable.
@@ -235,10 +237,10 @@ async function createWalkInAppointmentForPatient(client, patient) {
   const inserted = await client.query(
     `INSERT INTO patient_portal_appointments (
        user_id, service_id, service_name, dentist_id, dentist_name,
-       appointment_date, appointment_time, coverage_type, notes, status
+       appointment_date, appointment_time, coverage_type, estimated_cost, notes, status
      ) VALUES (
        $1, 'general-consultation', 'Walk-in Consultation', $2, $3,
-       $4, $5::time, 'self_pay', $6, 'confirmed'
+       $4, $5::time, 'self_pay', $6, $7, 'confirmed'
      )
      RETURNING *`,
     [
@@ -247,6 +249,7 @@ async function createWalkInAppointmentForPatient(client, patient) {
       dentistName,
       appointmentDate,
       appointmentTime,
+      800,
       "Auto-created from RFID walk-in check-in.",
     ]
   );
