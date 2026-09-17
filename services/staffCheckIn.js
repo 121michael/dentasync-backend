@@ -202,6 +202,75 @@ async function diagnoseMissingCheckInAppointment(client, patient) {
   };
 }
 
+async function createWalkInAppointmentForPatient(client, patient) {
+  const clinicTz = process.env.CLINIC_TIMEZONE || "Asia/Manila";
+  const clock = await client.query(
+    `SELECT (CURRENT_TIMESTAMP AT TIME ZONE $1)::date AS clinic_today,
+            TO_CHAR((CURRENT_TIMESTAMP AT TIME ZONE $1), 'HH24:MI:SS') AS clinic_time`,
+    [clinicTz]
+  );
+  const appointmentDate = clock.rows[0].clinic_today;
+  const appointmentTime = clock.rows[0].clinic_time;
+
+  let dentistId = "walk-in-desk";
+  let dentistName = "Clinic Walk-in";
+  try {
+    const dentist = await client.query(
+      `SELECT id, CONCAT_WS(' ', first_name, last_name) AS full_name
+       FROM users
+       WHERE LOWER(role) = 'dentist'
+         AND COALESCE(is_archived, FALSE) = FALSE
+         AND LOWER(COALESCE(status, 'active')) = 'active'
+       ORDER BY id ASC
+       LIMIT 1`
+    );
+    if (dentist.rows[0]) {
+      dentistId = String(dentist.rows[0].id);
+      dentistName = dentist.rows[0].full_name || dentistName;
+    }
+  } catch {
+    // Catalog fallback is fine when dentist users are unavailable.
+  }
+
+  const inserted = await client.query(
+    `INSERT INTO patient_portal_appointments (
+       user_id, service_id, service_name, dentist_id, dentist_name,
+       appointment_date, appointment_time, coverage_type, notes, status
+     ) VALUES (
+       $1, 'general-consultation', 'Walk-in Consultation', $2, $3,
+       $4, $5::time, 'self_pay', $6, 'confirmed'
+     )
+     RETURNING *`,
+    [
+      String(patient.id),
+      dentistId,
+      dentistName,
+      appointmentDate,
+      appointmentTime,
+      "Auto-created from RFID walk-in check-in.",
+    ]
+  );
+
+  const appointment = inserted.rows[0];
+  appointment.patient_name = `${patient.first_name || ""} ${patient.last_name || ""}`.trim();
+  appointment.patient_phone = patient.phone || null;
+  appointment.patient_email = patient.email || null;
+  appointment._walkInCreated = true;
+  return appointment;
+}
+
+async function resolveAppointmentForCheckIn(client, patient, { allowWalkIn = false } = {}) {
+  const existing = await findAppointmentForCheckIn(client, { patientId: patient.id });
+  if (existing) {
+    return { appointment: existing, walkInCreated: false };
+  }
+  if (!allowWalkIn) {
+    return { appointment: null, walkInCreated: false };
+  }
+  const appointment = await createWalkInAppointmentForPatient(client, patient);
+  return { appointment, walkInCreated: true };
+}
+
 async function findActiveQueueForPatient(client, patientId) {
   if (!patientId) return null;
   const result = await client.query(
@@ -355,6 +424,8 @@ module.exports = {
   findPatient,
   findAppointmentForCheckIn,
   diagnoseMissingCheckInAppointment,
+  resolveAppointmentForCheckIn,
+  createWalkInAppointmentForPatient,
   findActiveQueueForPatient,
   performStaffCheckIn,
   stringValue,

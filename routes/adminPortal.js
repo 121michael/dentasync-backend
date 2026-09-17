@@ -2839,6 +2839,7 @@ function createAdminPortalRouter({
 
       const row = result.rows[0];
       return res.json({
+        message: `RFID tag ${rfidTag} assigned.`,
         assignment: {
           userId: row.id,
           firstName: row.first_name || "",

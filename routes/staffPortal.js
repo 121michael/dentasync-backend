@@ -531,6 +531,7 @@ function createStaffPortalRouter({
 
   router.get("/appointments", async (req, res) => {
     const tab = stringValue(req.query.tab, 40)?.toLowerCase() || "today";
+    const clinicTz = process.env.CLINIC_TIMEZONE || "Asia/Manila";
     try {
       let whereSql = "TRUE";
       if (tab === "pending") {
@@ -538,7 +539,7 @@ function createStaffPortalRouter({
       } else if (tab === "confirmed") {
         whereSql = `appointment.status = 'confirmed'`;
       } else if (tab === "today") {
-        whereSql = `appointment.appointment_date = CURRENT_DATE AND appointment.status NOT IN ('cancelled')`;
+        whereSql = `appointment.appointment_date = (CURRENT_TIMESTAMP AT TIME ZONE '${clinicTz.replace(/'/g, "''")}')::date AND appointment.status NOT IN ('cancelled')`;
       } else if (tab === "completed") {
         whereSql = `appointment.status = 'completed'`;
       } else if (tab === "cancelled") {
@@ -568,9 +569,10 @@ function createStaffPortalRouter({
              patient.email AS patient_email
            FROM patient_portal_appointments AS appointment
            JOIN users AS patient ON patient.id::text = appointment.user_id
-           WHERE appointment.appointment_date = CURRENT_DATE
+           WHERE appointment.appointment_date = (CURRENT_TIMESTAMP AT TIME ZONE $1)::date
              AND appointment.status IN ('confirmed', 'checked_in', 'completed', 'pending')
-           ORDER BY appointment.appointment_time ASC`
+           ORDER BY appointment.appointment_time ASC`,
+          [clinicTz]
         ),
         db.query(
           `SELECT
@@ -1434,6 +1436,7 @@ function createStaffPortalRouter({
       await client.query("SELECT pg_advisory_xact_lock(hashtext('patient_portal_queue'))");
 
       let appointment = null;
+      let walkInCreated = false;
       if (appointmentId) {
         appointment = await staffCheckIn.findAppointmentForCheckIn(client, { appointmentId });
       }
@@ -1479,9 +1482,12 @@ function createStaffPortalRouter({
             },
           });
         }
-        appointment = await staffCheckIn.findAppointmentForCheckIn(client, {
-          patientId: patient.id,
+        const allowWalkIn = method === "rfid" || method === "manual" || method === "walk_in";
+        const resolved = await staffCheckIn.resolveAppointmentForCheckIn(client, patient, {
+          allowWalkIn,
         });
+        appointment = resolved.appointment;
+        walkInCreated = Boolean(resolved.walkInCreated);
         if (!appointment) {
           let diagnosis = null;
           try {
@@ -1529,8 +1535,11 @@ function createStaffPortalRouter({
       return res.status(checkIn.alreadyCheckedIn ? 200 : 201).json({
         message: checkIn.alreadyCheckedIn
           ? "Patient already checked in."
-          : "Patient checked in successfully.",
+          : walkInCreated
+            ? "Walk-in patient checked in successfully."
+            : "Patient checked in successfully.",
         method,
+        walkInCreated: Boolean(walkInCreated),
         verified: true,
         patient: {
           id: appointment.user_id,

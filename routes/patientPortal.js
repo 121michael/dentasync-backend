@@ -2353,15 +2353,37 @@ function createPatientPortalRouter({
 
       const appointment = await staffCheckIn.findAppointmentForCheckIn(client, { patientId: userId });
       if (!appointment) {
-        await client.query("ROLLBACK");
-        transactionOpen = false;
-        return res.status(404).json({
-          message: "No eligible appointment found for check-in today.",
+        // Look up patient row for walk-in auto-create.
+        const patientResult = await client.query(
+          `SELECT id, first_name, last_name, email, phone, role, status, is_verified, rfid_tag
+           FROM users
+           WHERE id::text = $1
+           LIMIT 1`,
+          [String(userId)]
+        );
+        const patient = patientResult.rows[0];
+        if (!patient) {
+          await client.query("ROLLBACK");
+          transactionOpen = false;
+          return res.status(404).json({ message: "Patient account not found." });
+        }
+        const resolved = await staffCheckIn.resolveAppointmentForCheckIn(client, patient, {
+          allowWalkIn: true,
         });
+        if (!resolved.appointment) {
+          await client.query("ROLLBACK");
+          transactionOpen = false;
+          return res.status(404).json({
+            message: "No eligible appointment found for check-in today.",
+          });
+        }
+        var walkInAppointment = resolved.appointment;
+      } else {
+        var walkInAppointment = appointment;
       }
 
       const checkIn = await staffCheckIn.performStaffCheckIn(client, {
-        appointment,
+        appointment: walkInAppointment,
         staff: null,
         notifyClinicStaff,
         checkInMethod: "qr",
@@ -2376,7 +2398,7 @@ function createPatientPortalRouter({
           [
             validity.session.id,
             String(userId),
-            appointment.id,
+            walkInAppointment.id,
             checkIn.queueEntry.id,
           ]
         );
@@ -2405,10 +2427,10 @@ function createPatientPortalRouter({
         method: "qr",
         alreadyCheckedIn: checkIn.alreadyCheckedIn,
         patient: {
-          id: appointment.user_id,
-          fullName: appointment.patient_name || "Patient",
+          id: walkInAppointment.user_id,
+          fullName: walkInAppointment.patient_name || "Patient",
         },
-        appointment: mapAppointment(appointment),
+        appointment: mapAppointment(walkInAppointment),
         queue: {
           id: checkIn.queueEntry.id,
           token: checkIn.queueEntry.token,

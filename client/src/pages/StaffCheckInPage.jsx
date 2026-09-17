@@ -156,7 +156,7 @@ export function StaffCheckInPage() {
           <div>
             <span className="eyebrow">Walk-in arrival</span>
             <h2>Patient Check-In</h2>
-            <p>Welcome patients as they enter the clinic. RFID is primary; QR is for patients without a card.</p>
+            <p>Welcome patients as they enter the clinic. RFID is primary; QR is for patients without a card. Walk-ins without a booking are checked in automatically.</p>
           </div>
           <button className="button button--secondary" onClick={loadLog}>
             <RefreshCw size={16} /> Refresh Log
