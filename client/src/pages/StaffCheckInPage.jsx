@@ -292,7 +292,10 @@ export function StaffCheckInPage() {
                   {busy ? "Checking in…" : "Complete RFID Check-In"}
                 </button>
               </form>
-              <p className="muted-copy">RFID cards are assigned by Admin. Check-in never creates a new RFID.</p>
+              <p className="muted-copy">
+                USB RFID reader: tap into this box. ESP32 reader: tap the board — successful check-ins
+                appear here automatically within a few seconds. Cards are assigned by Admin.
+              </p>
             </article>
             <VerifiedPanel verified={verified} />
           </div>
