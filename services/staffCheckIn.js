@@ -200,16 +200,29 @@ async function diagnoseMissingCheckInAppointment(client, patient) {
   };
 }
 
+const DEFAULT_WALK_IN_DENTIST_ID = "dr-sarah-cruz";
+const DEFAULT_WALK_IN_DENTIST_NAME = "Dr. Sarah Cruz";
+
 function defaultWalkInDentist() {
   return {
-    dentistId: "dr-sarah-cruz",
-    dentistName: "Dr. Sarah Cruz",
+    dentistId: DEFAULT_WALK_IN_DENTIST_ID,
+    dentistName: DEFAULT_WALK_IN_DENTIST_NAME,
+  };
+}
+
+function normalizeWalkInDentist(dentist) {
+  const fallback = defaultWalkInDentist();
+  const dentistId = String(dentist?.dentistId || dentist?.id || "").trim();
+  const dentistName = String(dentist?.dentistName || dentist?.name || "").trim();
+  return {
+    dentistId: dentistId || fallback.dentistId,
+    dentistName: dentistName || fallback.dentistName,
   };
 }
 
 async function resolveWalkInDentist(client) {
   const catalogDentists = [
-    { id: "dr-sarah-cruz", name: "Dr. Sarah Cruz" },
+    { id: DEFAULT_WALK_IN_DENTIST_ID, name: DEFAULT_WALK_IN_DENTIST_NAME },
     { id: "dr-sarah-mitchell", name: "Dr. Sarah Mitchell" },
     { id: "dr-james-reyes", name: "Dr. James Reyes" },
     { id: "dr-ana-santos", name: "Dr. Ana Santos" },
@@ -234,10 +247,10 @@ async function resolveWalkInDentist(client) {
       if (catalogId) {
         const catalog = catalogDentists.find((item) => item.id === catalogId);
         const fullName = linked.rows[0].full_name || "";
-        return {
+        return normalizeWalkInDentist({
           dentistId: catalogId,
           dentistName: catalog?.name || (fullName ? `Dr. ${fullName}` : "Clinic Dentist"),
-        };
+        });
       }
     }
   } catch {
@@ -278,25 +291,29 @@ async function ensureAppointmentLinkedToCatalogDentist(client, appointment) {
   if (currentDentistId && !currentDentistId.startsWith("walk-in-")) {
     return appointment;
   }
-  const dentist = await resolveWalkInDentist(client);
-  const fallback = defaultWalkInDentist();
-  const catalogDentistId = dentist.dentistId || fallback.dentistId;
-  const catalogDentistName = dentist.dentistName || fallback.dentistName;
+  const dentist = normalizeWalkInDentist(await resolveWalkInDentist(client));
   const slot = await nextOpenWalkInSlot(
     client,
-    catalogDentistId,
+    dentist.dentistId,
     appointment.appointment_date,
     appointment.appointment_time || "09:00:00"
   );
   const updated = await client.query(
     `UPDATE patient_portal_appointments
-     SET dentist_id = $1,
-         dentist_name = $2,
+     SET dentist_id = COALESCE(NULLIF(BTRIM($1), ''), $5),
+         dentist_name = COALESCE(NULLIF(BTRIM($2), ''), $6),
          appointment_time = $3::time,
          updated_at = CURRENT_TIMESTAMP
      WHERE id = $4
      RETURNING *`,
-    [catalogDentistId, catalogDentistName, slot, appointment.id]
+    [
+      dentist.dentistId,
+      dentist.dentistName,
+      slot,
+      appointment.id,
+      DEFAULT_WALK_IN_DENTIST_ID,
+      DEFAULT_WALK_IN_DENTIST_NAME,
+    ]
   );
   const row = updated.rows[0] || appointment;
   row.patient_name = appointment.patient_name;
@@ -314,13 +331,10 @@ async function createWalkInAppointmentForPatient(client, patient) {
   );
   const appointmentDate = clock.rows[0].clinic_today;
   const preferredTime = clock.rows[0].clinic_time;
-  const dentist = await resolveWalkInDentist(client);
-  const fallback = defaultWalkInDentist();
-  const dentistId = dentist.dentistId || fallback.dentistId;
-  const dentistName = dentist.dentistName || fallback.dentistName;
+  const dentist = normalizeWalkInDentist(await resolveWalkInDentist(client));
   const appointmentTime = await nextOpenWalkInSlot(
     client,
-    dentistId,
+    dentist.dentistId,
     appointmentDate,
     preferredTime
   );
@@ -330,18 +344,22 @@ async function createWalkInAppointmentForPatient(client, patient) {
        user_id, service_id, service_name, dentist_id, dentist_name,
        appointment_date, appointment_time, coverage_type, estimated_cost, notes, status
      ) VALUES (
-       $1, 'general-consultation', 'Walk-in Consultation', $2, $3,
+       $1, 'general-consultation', 'Walk-in Consultation',
+       COALESCE(NULLIF(BTRIM($2), ''), $8),
+       COALESCE(NULLIF(BTRIM($3), ''), $9),
        $4, $5::time, 'self_pay', $6, $7, 'confirmed'
      )
      RETURNING *`,
     [
       String(patient.id),
-      dentistId,
-      dentistName,
+      dentist.dentistId,
+      dentist.dentistName,
       appointmentDate,
       appointmentTime,
       800,
       "Auto-created from RFID walk-in check-in.",
+      DEFAULT_WALK_IN_DENTIST_ID,
+      DEFAULT_WALK_IN_DENTIST_NAME,
     ]
   );
 
