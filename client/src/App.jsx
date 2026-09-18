@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Outlet, Route, Routes, useNavigate } from "react-router-dom";
 import { AuthProvider } from "./auth";
 import { LoadingState } from "./components/UI";
+import { GlobalLoadingOverlay } from "./components/GlobalLoadingOverlay";
 import { PortalLayout } from "./components/PortalLayout";
 import { StaffLayout } from "./components/StaffLayout";
 import { AdminLayout } from "./components/AdminLayout";
@@ -198,6 +199,7 @@ function App() {
     <AuthProvider>
       <BrowserRouter>
         <PortalRoutes />
+        <GlobalLoadingOverlay />
       </BrowserRouter>
     </AuthProvider>
   );

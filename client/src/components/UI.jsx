@@ -1,12 +1,8 @@
 import { AlertCircle, ArrowRight, Sparkles } from "lucide-react";
+import { ToothLoader } from "./ToothLoader";
 
 export function LoadingState({ label = "Preparing your care overview" }) {
-  return (
-    <div className="loading-state" role="status">
-      <span className="loading-orb" />
-      <p>{label}</p>
-    </div>
-  );
+  return <ToothLoader compact label={label} className="loading-state tooth-loader--page" />;
 }
 
 export function ErrorState({ message, onRetry }) {

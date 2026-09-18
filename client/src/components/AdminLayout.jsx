@@ -115,9 +115,9 @@ export function AdminLayout() {
     async function loadStatus() {
       try {
         const [status, dashboard, notifications] = await Promise.all([
-          api.getAdminStatus(),
-          api.getAdminDashboard().catch(() => null),
-          api.getAdminNotifications().catch(() => null),
+          api.getAdminStatus({ silent: true }),
+          api.getAdminDashboard({ silent: true }).catch(() => null),
+          api.getAdminNotifications({ silent: true }).catch(() => null),
         ]);
         if (!active) return;
         setSystemStatus(status);

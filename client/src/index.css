@@ -903,6 +903,147 @@ strong {
   to { transform: rotate(360deg); }
 }
 
+/* Global tooth-shaped loader (Amethyst Dental) */
+.tooth-loader {
+  display: grid;
+  place-items: center;
+  justify-items: center;
+}
+
+.tooth-loader--overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 75;
+  pointer-events: all;
+}
+
+.tooth-loader__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(35, 17, 56, 0.48);
+  backdrop-filter: blur(3px);
+}
+
+:root[data-theme="dark"] .tooth-loader__backdrop {
+  background: rgba(8, 4, 16, 0.62);
+}
+
+.tooth-loader__content {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  justify-items: center;
+  gap: 0.75rem;
+  padding: 1.4rem 1.6rem 1.2rem;
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--surface-solid) 92%, white);
+  box-shadow: 0 18px 50px rgba(35, 17, 56, 0.22);
+  border: 1px solid color-mix(in srgb, var(--amethyst-200) 70%, transparent);
+  min-width: min(220px, 84vw);
+}
+
+.tooth-loader--inline .tooth-loader__content {
+  background: transparent;
+  box-shadow: none;
+  border: 0;
+  padding: 0.4rem;
+}
+
+.tooth-loader__glow {
+  position: absolute;
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--amethyst-500) 28%, transparent), transparent 70%);
+  top: 18px;
+  pointer-events: none;
+  animation: tooth-glow 1.8s ease-in-out infinite;
+}
+
+.tooth-loader__icon {
+  position: relative;
+  z-index: 1;
+  display: block;
+  animation: tooth-breathe 1.6s ease-in-out infinite;
+  filter: drop-shadow(0 8px 14px rgba(115, 59, 170, 0.28));
+}
+
+.tooth-loader__outline {
+  fill: var(--amethyst-600);
+}
+
+.tooth-loader__shade {
+  fill: color-mix(in srgb, var(--amethyst-400) 55%, white);
+  opacity: 0.55;
+}
+
+.tooth-loader__grooves {
+  stroke: color-mix(in srgb, var(--amethyst-950) 55%, var(--amethyst-600));
+  stroke-width: 1.15;
+  stroke-linecap: round;
+  opacity: 0.45;
+}
+
+.tooth-loader__label {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 0.92rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.tooth-loader--inline .tooth-loader__label {
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 0.84rem;
+}
+
+.tooth-loader__dots {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+  min-height: 0.55rem;
+}
+
+.tooth-loader__dots i {
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 50%;
+  background: var(--amethyst-500);
+  opacity: 0.35;
+  animation: tooth-dot 1.2s ease-in-out infinite;
+}
+
+.tooth-loader__dots i:nth-child(2) { animation-delay: 0.15s; }
+.tooth-loader__dots i:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes tooth-breathe {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-5px) scale(1.06); }
+}
+
+@keyframes tooth-glow {
+  0%, 100% { opacity: 0.55; transform: scale(0.92); }
+  50% { opacity: 1; transform: scale(1.08); }
+}
+
+@keyframes tooth-dot {
+  0%, 80%, 100% { opacity: 0.3; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-2px); }
+}
+
+@media (max-width: 640px) {
+  .tooth-loader__content {
+    padding: 1.15rem 1.25rem 1rem;
+    border-radius: 18px;
+  }
+
+  .tooth-loader__icon {
+    width: 58px;
+    height: 58px;
+  }
+}
+
 .empty-state {
   display: grid;
   min-height: 220px;

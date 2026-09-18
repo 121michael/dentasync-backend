@@ -13,9 +13,9 @@ export function StaffDashboardPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (options = {}) => {
     try {
-      setData(await api.getStaffDashboard());
+      setData(await api.getStaffDashboard(options));
       setError("");
     } catch (loadError) {
       setError(loadError.message);
@@ -24,7 +24,7 @@ export function StaffDashboardPage() {
 
   useEffect(() => {
     load();
-    const timer = window.setInterval(load, 20000);
+    const timer = window.setInterval(() => load({ silent: true }), 20000);
     return () => window.clearInterval(timer);
   }, [load]);
 

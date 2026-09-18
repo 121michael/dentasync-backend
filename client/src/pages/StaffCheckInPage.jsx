@@ -74,9 +74,9 @@ export function StaffCheckInPage() {
   const [scannerState, setScannerState] = useState("ready");
   const [listeningHint, setListeningHint] = useState("Hold the patient card on the ESP32 RFID reader.");
 
-  const loadLog = useCallback(async () => {
+  const loadLog = useCallback(async (options = {}) => {
     try {
-      const response = await api.getStaffCheckIns();
+      const response = await api.getStaffCheckIns({ silent: true, ...options });
       const rows = response.checkIns || [];
       setCheckIns(rows);
 

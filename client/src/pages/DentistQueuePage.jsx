@@ -56,9 +56,9 @@ export function DentistQueuePage() {
   const [pendingStart, setPendingStart] = useState(null);
   const [startForm, setStartForm] = useState(emptyStartForm());
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (options = {}) => {
     try {
-      setData(await api.getDentistQueue(tab));
+      setData(await api.getDentistQueue(tab, options));
       setError("");
     } catch (loadError) {
       setError(loadError.message);
@@ -67,7 +67,7 @@ export function DentistQueuePage() {
 
   useEffect(() => {
     load();
-    const timer = window.setInterval(load, 12000);
+    const timer = window.setInterval(() => load({ silent: true }), 12000);
     return () => window.clearInterval(timer);
   }, [load]);
 

@@ -47,7 +47,7 @@ export function PortalLayout({ theme, onToggleTheme }) {
 
   const refreshAlerts = useCallback(async () => {
     try {
-      const dashboard = await api.getDashboard();
+      const dashboard = await api.getDashboard({ silent: true });
       setUnreadCount(Number(dashboard.unreadNotifications || 0));
     } catch {
       // Keep the last known badge state if the poll fails briefly.

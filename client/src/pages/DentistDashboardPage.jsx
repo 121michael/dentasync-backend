@@ -12,9 +12,9 @@ export function DentistDashboardPage() {
   const [success, setSuccess] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (options = {}) => {
     try {
-      setData(await api.getDentistDashboard());
+      setData(await api.getDentistDashboard(options));
       setError("");
     } catch (loadError) {
       setError(loadError.message);
@@ -23,7 +23,7 @@ export function DentistDashboardPage() {
 
   useEffect(() => {
     load();
-    const timer = window.setInterval(load, 20000);
+    const timer = window.setInterval(() => load({ silent: true }), 20000);
     return () => window.clearInterval(timer);
   }, [load]);
 

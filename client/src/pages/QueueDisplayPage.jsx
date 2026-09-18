@@ -12,9 +12,9 @@ export function QueueDisplayPage() {
   const [error, setError] = useState("");
   const [clock, setClock] = useState(() => new Date());
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (options = {}) => {
     try {
-      const response = await api.getPublicQueueDisplay();
+      const response = await api.getPublicQueueDisplay(options);
       setData(response);
       setError("");
     } catch (loadError) {
@@ -24,7 +24,7 @@ export function QueueDisplayPage() {
 
   useEffect(() => {
     load();
-    const poll = window.setInterval(load, 8000);
+    const poll = window.setInterval(() => load({ silent: true }), 8000);
     const tick = window.setInterval(() => setClock(new Date()), 1000);
     return () => {
       window.clearInterval(poll);

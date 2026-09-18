@@ -96,7 +96,7 @@ export function StaffLayout() {
 
   const refreshAlerts = useCallback(async () => {
     try {
-      const dashboard = await api.getStaffDashboard();
+      const dashboard = await api.getStaffDashboard({ silent: true });
       setAlerts({
         unreadNotifications: Number(dashboard.metrics?.unreadNotifications || 0),
         pendingAppointments: Number(dashboard.metrics?.pendingRequests || 0),

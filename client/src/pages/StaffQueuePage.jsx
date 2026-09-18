@@ -37,11 +37,11 @@ export function StaffQueuePage() {
   const [focusKey, setFocusKey] = useState(() => searchParams.get("focus") || "");
   const focusedRowRef = useRef(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (options = {}) => {
     try {
       const [queueResponse, summaryResponse] = await Promise.all([
-        api.getStaffQueue(),
-        api.getStaffQueueSummary().catch(() => null),
+        api.getStaffQueue(options),
+        api.getStaffQueueSummary(options).catch(() => null),
       ]);
       setQueue(queueResponse.queue || []);
       setSummary(summaryResponse);
@@ -53,7 +53,7 @@ export function StaffQueuePage() {
 
   useEffect(() => {
     load();
-    const timer = window.setInterval(load, 12000);
+    const timer = window.setInterval(() => load({ silent: true }), 12000);
     return () => window.clearInterval(timer);
   }, [load]);
 

@@ -17,12 +17,12 @@ export function QueuePage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (options = {}) => {
     setError("");
     try {
       const [queueResponse, appointmentResponse] = await Promise.all([
-        api.getQueue(),
-        api.getAppointments(),
+        api.getQueue(options),
+        api.getAppointments(options),
       ]);
       setQueueData(queueResponse);
       setAppointments(
@@ -37,7 +37,7 @@ export function QueuePage() {
 
   useEffect(() => {
     load();
-    const interval = window.setInterval(load, 12000);
+    const interval = window.setInterval(() => load({ silent: true }), 12000);
     return () => window.clearInterval(interval);
   }, [load]);
 

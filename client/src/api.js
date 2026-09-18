@@ -1,3 +1,8 @@
+import {
+  beginApiLoading,
+  endApiLoading,
+} from "./loadingStore";
+
 const API_BASE = import.meta.env.VITE_API_URL || "/api";
 
 export class ApiError extends Error {
@@ -13,9 +18,17 @@ function accessToken() {
   return localStorage.getItem("amethyst_access_token");
 }
 
-async function request(path, { method = "GET", body, headers = {}, authenticated = true } = {}) {
+function shouldTrackLoading(path, { silent = false } = {}) {
+  if (silent) return false;
+  // Session hydrate already has its own LoadingState in route guards.
+  if (path === "/auth/me") return false;
+  return true;
+}
+
+async function request(path, { method = "GET", body, headers = {}, authenticated = true, silent = false } = {}) {
   const requestHeaders = { ...headers };
   const token = accessToken();
+  const track = shouldTrackLoading(path, { silent });
 
   if (authenticated && token) {
     requestHeaders.Authorization = `Bearer ${token}`;
@@ -25,42 +38,53 @@ async function request(path, { method = "GET", body, headers = {}, authenticated
     requestHeaders["Content-Type"] = "application/json";
   }
 
-  const response = await fetch(`${API_BASE}${path}`, {
-    method,
-    headers: requestHeaders,
-    body: body instanceof FormData ? body : body ? JSON.stringify(body) : undefined,
-  });
+  if (track) beginApiLoading();
+  try {
+    const response = await fetch(`${API_BASE}${path}`, {
+      method,
+      headers: requestHeaders,
+      body: body instanceof FormData ? body : body ? JSON.stringify(body) : undefined,
+    });
 
-  const contentType = response.headers.get("content-type") || "";
-  const data = contentType.includes("application/json") ? await response.json() : null;
+    const contentType = response.headers.get("content-type") || "";
+    const data = contentType.includes("application/json") ? await response.json() : null;
 
-  if (!response.ok) {
-    throw new ApiError(data?.message || "Something went wrong. Please try again.", response.status, data);
+    if (!response.ok) {
+      throw new ApiError(data?.message || "Something went wrong. Please try again.", response.status, data);
+    }
+
+    return data;
+  } finally {
+    if (track) endApiLoading();
   }
-
-  return data;
 }
 
-async function download(path, filename) {
+async function download(path, filename, { silent = false } = {}) {
   const token = accessToken();
-  const response = await fetch(`${API_BASE}${path}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
+  const track = shouldTrackLoading(path, { silent });
+  if (track) beginApiLoading();
+  try {
+    const response = await fetch(`${API_BASE}${path}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
 
-  if (!response.ok) {
-    const data = await response.json().catch(() => null);
-    throw new ApiError(data?.message || "Unable to download the document.", response.status, data);
+    if (!response.ok) {
+      const data = await response.json().catch(() => null);
+      throw new ApiError(data?.message || "Unable to download the document.", response.status, data);
+    }
+
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(objectUrl);
+  } finally {
+    if (track) endApiLoading();
   }
-
-  const blob = await response.blob();
-  const objectUrl = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = objectUrl;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(objectUrl);
 }
 
 export const api = {
@@ -73,15 +97,15 @@ export const api = {
   resetPassword: (body) =>
     request("/auth/reset-password", { method: "POST", body, authenticated: false }),
   getCurrentUser: () => request("/auth/me"),
-  getDashboard: () => request("/patient/dashboard"),
+  getDashboard: (options = {}) => request("/patient/dashboard", options),
   getCatalog: () => request("/patient/catalog"),
-  getAppointments: () => request("/patient/appointments"),
+  getAppointments: (options = {}) => request("/patient/appointments", options),
   createAppointment: (body) => request("/patient/appointments", { method: "POST", body }),
   cancelAppointment: (appointmentId) =>
     request(`/patient/appointments/${appointmentId}/cancel`, { method: "PATCH" }),
-  getQueue: () => request("/patient/queue"),
-  getPublicQueueDisplay: () =>
-    request("/public/queue-display", { authenticated: false }),
+  getQueue: (options = {}) => request("/patient/queue", options),
+  getPublicQueueDisplay: (options = {}) =>
+    request("/public/queue-display", { authenticated: false, ...options }),
   checkIn: (appointmentId) =>
     request("/patient/queue/check-in", { method: "POST", body: { appointmentId } }),
   askClinicAssistant: ({ message, question, image } = {}) => {
@@ -146,12 +170,13 @@ export const api = {
   getNotifications: () => request("/patient/notifications"),
   markNotificationRead: (notificationId) =>
     request(`/patient/notifications/${notificationId}/read`, { method: "PATCH" }),
-  getStaffDashboard: () => request("/staff/dashboard"),
-  getStaffCheckIns: () => request("/staff/check-ins"),
+  getStaffDashboard: (options = {}) => request("/staff/dashboard", options),
+  getStaffCheckIns: (options = {}) => request("/staff/check-ins", options),
   staffCheckIn: (body) => request("/staff/check-in", { method: "POST", body }),
-  getStaffRfidEvents: (sinceId = 0) =>
-    request(`/staff/rfid-events?sinceId=${encodeURIComponent(sinceId)}`),
-  getStaffWalkInQrSession: () => request("/staff/check-in/qr-session"),
+  getStaffRfidEvents: (sinceId = 0, options = {}) =>
+    request(`/staff/rfid-events?sinceId=${encodeURIComponent(sinceId)}`, { silent: true, ...options }),
+  getStaffWalkInQrSession: (options = {}) =>
+    request("/staff/check-in/qr-session", { silent: true, ...options }),
   createStaffWalkInQrSession: () => request("/staff/check-in/qr-session", { method: "POST" }),
   revokeStaffWalkInQrSession: (sessionId) =>
     request(`/staff/check-in/qr-session/${sessionId}/revoke`, { method: "POST" }),
@@ -159,8 +184,8 @@ export const api = {
     request(`/public/walk-in-check-in/${encodeURIComponent(token)}`, { authenticated: false }),
   redeemWalkInQr: (token) =>
     request("/patient/walk-in-check-in", { method: "POST", body: { token } }),
-  getStaffQueue: () => request("/staff/queue"),
-  getStaffQueueSummary: () => request("/staff/queue/summary"),
+  getStaffQueue: (options = {}) => request("/staff/queue", options),
+  getStaffQueueSummary: (options = {}) => request("/staff/queue/summary", options),
   resetStaffQueue: () => request("/staff/queue/reset", { method: "POST" }),
   updateStaffQueue: (queueEntryId, body) =>
     request(`/staff/queue/${queueEntryId}`, { method: "PATCH", body }),
@@ -205,9 +230,9 @@ export const api = {
   updateStaffPassword: (body) => request("/staff/profile/password", { method: "POST", body }),
   downloadStaffExport: (report) =>
     download(`/staff/export/${encodeURIComponent(report)}`, `${report}-log.csv`),
-  getDentistDashboard: () => request("/dentist/dashboard"),
-  getDentistQueue: (tab = "ongoing") =>
-    request(`/dentist/queue?tab=${encodeURIComponent(tab)}`),
+  getDentistDashboard: (options = {}) => request("/dentist/dashboard", options),
+  getDentistQueue: (tab = "ongoing", options = {}) =>
+    request(`/dentist/queue?tab=${encodeURIComponent(tab)}`, options),
   callNextDentistPatient: () => request("/dentist/queue/call-next", { method: "POST" }),
   updateDentistQueue: (queueEntryId, body) =>
     request(`/dentist/queue/${queueEntryId}`, { method: "PATCH", body }),
@@ -221,8 +246,8 @@ export const api = {
   getDentistPatientXrays: (patientId) => request(`/dentist/patients/${patientId}/xrays`),
   getDentistProfile: () => request("/dentist/profile"),
   updateDentistProfile: (body) => request("/dentist/profile", { method: "PUT", body }),
-  getAdminDashboard: () => request("/admin/dashboard"),
-  getAdminStatus: () => request("/admin/status"),
+  getAdminDashboard: (options = {}) => request("/admin/dashboard", options),
+  getAdminStatus: (options = {}) => request("/admin/status", options),
   getAdminPatients: (params = {}) => {
     const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value || value === 0));
     return request(`/admin/patients${search.size ? `?${search}` : ""}`);
@@ -343,7 +368,7 @@ export const api = {
     }
     return response.blob();
   },
-  getAdminNotifications: () => request("/admin/notifications"),
+  getAdminNotifications: (options = {}) => request("/admin/notifications", options),
   markAdminNotificationRead: (id) => request(`/admin/notifications/${id}/read`, { method: "PATCH" }),
   markAllAdminNotificationsRead: () => request("/admin/notifications/read-all", { method: "PATCH" }),
   listAdminRfidAssignments: (search = "") =>
