@@ -260,7 +260,7 @@ export function StaffPatientsPage() {
                     <td>
                       <strong>{patient.fullName || patient.patientName}</strong>
                       <small>
-                        <code>{patient.recordCode || patient.id}</code>
+                        <code>{patient.patientId || patient.recordCode || patient.id}</code>
                       </small>
                     </td>
                     <td>{formatAgeSex(patient)}</td>
@@ -400,6 +400,10 @@ export function StaffPatientsPage() {
             <p>
               <small>Record code</small>
               <strong>{detail.recordCode || detail.id}</strong>
+            </p>
+            <p>
+              <small>Patient ID</small>
+              <strong>{detail.patientId || detail.recordCode || detail.id}</strong>
             </p>
           </div>
 

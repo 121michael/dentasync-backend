@@ -56,6 +56,7 @@ function profileToForm(profile) {
     dentalConcerns: profile.dental_concerns || "",
     hmoProvider: profile.hmo_provider || "",
     hmoMemberNumber: profile.hmo_member_number || "",
+    patientCategory: profile.patientCategory || profile.patient_category || "regular",
   };
 }
 
@@ -182,7 +183,9 @@ export function ProfilePage({ theme, onThemeChange }) {
           <span className="membership-card__avatar">{initials(form.firstName, form.lastName)}</span>
           <div>
             <strong>{`${form.firstName} ${form.lastName}`.trim() || "Amethyst patient"}</strong>
-            <small>Patient ID · {profile.id || "Secure portal account"}</small>
+            <small>
+              Patient ID · {profile.patientId || profile.id || "Issued at registration"}
+            </small>
           </div>
         </div>
         <div className="membership-card__bottom">
@@ -220,6 +223,7 @@ export function ProfilePage({ theme, onThemeChange }) {
               <label className="field"><span>Mobile number</span><input name="phone" value={form.phone} onChange={updateForm} required /></label>
               <label className="field"><span>Date of birth</span><input name="dateOfBirth" type="date" value={form.dateOfBirth} onChange={updateForm} /></label>
               <label className="field"><span>Gender</span><select name="gender" value={form.gender} onChange={updateForm}><option value="">Prefer not to say</option><option>Female</option><option>Male</option><option>Non-binary</option><option>Prefer to self-describe</option></select></label>
+              <label className="field"><span>Patient category</span><select name="patientCategory" value={form.patientCategory} onChange={updateForm}><option value="regular">Regular Patient</option><option value="senior">Senior Citizen</option><option value="pediatric">Pediatric Patient</option><option value="pwd">PWD</option></select></label>
               <label className="field field--full"><span>Address</span><input name="address" value={form.address} onChange={updateForm} /></label>
             </div>
           </section>

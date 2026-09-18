@@ -133,6 +133,8 @@ function mapClinicalRecord(row, extras = {}) {
     address: row.address || "",
     notes: row.notes || "",
     linkedUserId: row.linked_user_id || null,
+    patientId: row.patient_id || null,
+    patientCategory: row.patient_category || null,
     nextAppointmentDate: row.next_appointment_date || null,
     nextAppointmentTime: row.next_appointment_time || null,
     staffVerificationStatus: row.staff_verification_status || "pending",
@@ -228,9 +230,12 @@ async function enrichRecordsFromLinkedProfiles(db, records) {
          account.last_name,
          account.email,
          account.phone,
+         account.patient_id,
+         account.patient_category AS user_patient_category,
          COALESCE(profile.date_of_birth, profile.birth_date) AS date_of_birth,
          profile.gender,
-         profile.address
+         profile.address,
+         profile.patient_category AS profile_patient_category
        FROM users AS account
        LEFT JOIN patient_portal_profiles AS profile
          ON profile.user_id::text = account.id::text
@@ -299,6 +304,12 @@ async function enrichRecordsFromLinkedProfiles(db, records) {
       age,
       ageSex: formatAgeSex(age, gender),
       address: stringValue(account.address, 500) || record.address,
+      patientId: account.patient_id || record.patientId || null,
+      patientCategory:
+        account.user_patient_category ||
+        account.profile_patient_category ||
+        record.patientCategory ||
+        null,
       profileLocked: true,
       accountLinked: true,
     };
@@ -580,6 +591,7 @@ async function updateTreatmentAmountPaid(db, recordId, treatmentId, amountPaidRa
 }
 
 async function createClinicalRecord(db, input, actor = {}) {
+  const patientIds = require("./patientIds");
   const firstName = stringValue(input.firstName, 80);
   const lastName = stringValue(input.lastName, 80);
   const email = normalizeEmail(input.email);
@@ -588,6 +600,7 @@ async function createClinicalRecord(db, input, actor = {}) {
   const gender = stringValue(input.gender, 40);
   const address = stringValue(input.address, 500);
   const notes = stringValue(input.notes, 2000);
+  const category = patientIds.normalizeCategory(input.patientCategory || input.category || "regular");
 
   if (!firstName || !lastName) {
     const error = new Error("First name and last name are required.");
@@ -601,11 +614,13 @@ async function createClinicalRecord(db, input, actor = {}) {
   }
 
   let linkedUserId = null;
+  let patientId = null;
+  let patientCategory = category;
   if (email || phone) {
     try {
       const linked = await withSavepoint(db, "link_clinical_user", async () =>
         db.query(
-          `SELECT id
+          `SELECT id, patient_id, patient_category
            FROM users
            WHERE LOWER(role) = 'patient'
              AND COALESCE(is_archived, FALSE) = FALSE
@@ -618,6 +633,10 @@ async function createClinicalRecord(db, input, actor = {}) {
         )
       );
       linkedUserId = linked.rows[0]?.id || null;
+      patientId = linked.rows[0]?.patient_id || null;
+      if (linked.rows[0]?.patient_category) {
+        patientCategory = patientIds.normalizeCategory(linked.rows[0].patient_category);
+      }
     } catch (error) {
       if (error?.code !== "42703") throw error;
       const linked = await db.query(
@@ -635,27 +654,69 @@ async function createClinicalRecord(db, input, actor = {}) {
     }
   }
 
-  const result = await db.query(
-    `INSERT INTO clinic_patient_records (
-       record_code, first_name, last_name, email, phone, date_of_birth, gender,
-       address, notes, linked_user_id, created_by, created_by_role, updated_by
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $11)
-     RETURNING *`,
-    [
-      generateRecordCode(),
-      firstName,
-      lastName,
-      email,
-      phone,
-      dateOfBirth,
-      gender,
-      address,
-      notes,
-      linkedUserId ? String(linkedUserId) : null,
-      actor.id ? String(actor.id) : null,
-      actor.role || null,
-    ]
-  );
+  if (!patientId) {
+    try {
+      const issued = await patientIds.allocatePatientId(db, {
+        category: patientCategory,
+        createdAt: new Date(),
+      });
+      patientId = issued.patientId;
+      patientCategory = issued.category;
+    } catch (idError) {
+      console.warn("Clinical patient ID allocation skipped:", idError.message);
+    }
+  }
+
+  let result;
+  try {
+    result = await db.query(
+      `INSERT INTO clinic_patient_records (
+         record_code, first_name, last_name, email, phone, date_of_birth, gender,
+         address, notes, linked_user_id, patient_id, patient_category,
+         created_by, created_by_role, updated_by
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $13)
+       RETURNING *`,
+      [
+        generateRecordCode(),
+        firstName,
+        lastName,
+        email,
+        phone,
+        dateOfBirth,
+        gender,
+        address,
+        notes,
+        linkedUserId ? String(linkedUserId) : null,
+        patientId,
+        patientCategory,
+        actor.id ? String(actor.id) : null,
+        actor.role || null,
+      ]
+    );
+  } catch (error) {
+    if (error?.code !== "42703") throw error;
+    result = await db.query(
+      `INSERT INTO clinic_patient_records (
+         record_code, first_name, last_name, email, phone, date_of_birth, gender,
+         address, notes, linked_user_id, created_by, created_by_role, updated_by
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $11)
+       RETURNING *`,
+      [
+        generateRecordCode(),
+        firstName,
+        lastName,
+        email,
+        phone,
+        dateOfBirth,
+        gender,
+        address,
+        notes,
+        linkedUserId ? String(linkedUserId) : null,
+        actor.id ? String(actor.id) : null,
+        actor.role || null,
+      ]
+    );
+  }
 
   return mapClinicalRecord(result.rows[0]);
 }
@@ -1293,6 +1354,8 @@ async function linkClinicalRecordsToUser(db, user) {
     const result = await db.query(
       `UPDATE clinic_patient_records
        SET linked_user_id = $1,
+           patient_id = COALESCE(clinic_patient_records.patient_id, $4),
+           patient_category = COALESCE(clinic_patient_records.patient_category, $5),
            updated_at = CURRENT_TIMESTAMP
        WHERE COALESCE(is_archived, FALSE) = FALSE
          AND (
@@ -1304,10 +1367,40 @@ async function linkClinicalRecordsToUser(db, user) {
            OR ($3::text IS NOT NULL AND phone = $3)
          )
        RETURNING id`,
-      [String(user.id), email, phone]
+      [
+        String(user.id),
+        email,
+        phone,
+        user.patient_id || user.patientId || null,
+        user.patient_category || user.patientCategory || null,
+      ]
     );
     return result.rows.length;
   } catch (error) {
+    if (error?.code === "42703") {
+      try {
+        const result = await db.query(
+          `UPDATE clinic_patient_records
+           SET linked_user_id = $1,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE COALESCE(is_archived, FALSE) = FALSE
+             AND (
+               linked_user_id IS NULL
+               OR linked_user_id = $1
+             )
+             AND (
+               ($2::text IS NOT NULL AND LOWER(email) = $2)
+               OR ($3::text IS NOT NULL AND phone = $3)
+             )
+           RETURNING id`,
+          [String(user.id), email, phone]
+        );
+        return result.rows.length;
+      } catch (fallbackError) {
+        if (fallbackError?.code === "42P01") return 0;
+        throw fallbackError;
+      }
+    }
     if (error?.code === "42P01") {
       return 0;
     }

@@ -1178,6 +1178,8 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
           return {
             id: record.id,
             recordCode: record.recordCode,
+            patientId: record.patientId || record.recordCode || null,
+            patientCategory: record.patientCategory || null,
             firstName: record.firstName,
             lastName: record.lastName,
             fullName: record.fullName,
@@ -1360,6 +1362,8 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
             clinicalPatients.formatAgeSex(detail.record.age, detail.record.gender),
           accountStatus: detail.record.linkedUserId ? "linked_account" : "clinical_record",
           isClinicalRecord: true,
+          patientId: detail.record.patientId || detail.record.recordCode || null,
+          patientCategory: detail.record.patientCategory || null,
           profileLocked: Boolean(detail.record.profileLocked || detail.record.linkedUserId),
           accountLinked: Boolean(detail.record.accountLinked || detail.record.linkedUserId),
           linkedUserId: detail.record.linkedUserId || null,

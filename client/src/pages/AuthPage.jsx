@@ -42,6 +42,7 @@ export function AuthPage() {
     phone: "",
     password: "",
     otp: "",
+    patientCategory: "regular",
   });
 
   function safeNextPath() {
@@ -122,6 +123,7 @@ export function AuthPage() {
         phone: form.phone,
         password: form.password,
         role: "patient",
+        patientCategory: form.patientCategory || "regular",
       });
       savePendingOtp({
         email: form.email,
@@ -314,6 +316,22 @@ export function AuthPage() {
                     required
                   />
                 </span>
+              </label>
+            )}
+            {isRegistration && (
+              <label className="field">
+                <span>Patient category</span>
+                <select
+                  name="patientCategory"
+                  value={form.patientCategory}
+                  onChange={updateForm}
+                  required
+                >
+                  <option value="regular">Regular Patient (A)</option>
+                  <option value="senior">Senior Citizen (S)</option>
+                  <option value="pediatric">Pediatric Patient (P)</option>
+                  <option value="pwd">Person with Disability / PWD (W)</option>
+                </select>
               </label>
             )}
             <label className="field">

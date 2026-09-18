@@ -8,6 +8,7 @@ const {
   normalizeOtp,
 } = require("../services/otpService");
 const { linkClinicalRecordsToUser } = require("../services/clinicalPatients");
+const patientIds = require("../services/patientIds");
 
 const RESETTABLE_ROLES = ["admin", "dentist", "staff", "patient"];
 const INACTIVE_ACCOUNT_STATUSES = ["inactive", "disabled", "suspended"];
@@ -20,6 +21,8 @@ const formatUserPayload = (user) => {
 
   return {
     id: user.id,
+    patientId: user.patient_id || null,
+    patientCategory: user.patient_category || null,
     firstName,
     lastName,
     fullName,
@@ -145,10 +148,12 @@ function createAuthRouter({
 
   // --- 1. PATIENT REGISTRATION AND FIRST OTP ---
   router.post("/register", authAbuseLimiter, async (req, res) => {
-    const { firstName, lastName, fullName, email, phone, password, role } = req.body;
+    const { firstName, lastName, fullName, email, phone, password, role, patientCategory, category } =
+      req.body;
     const normalizedEmail = normalizeEmail(email);
     const normalizedPhone = normalizePhone(phone);
     const requestedRole = (role || "patient").toLowerCase();
+    const categoryValue = patientIds.normalizeCategory(patientCategory || category || "regular");
 
     if (!normalizedEmail || !normalizedPhone || !password) {
       return res.status(400).json({
@@ -196,30 +201,60 @@ function createAuthRouter({
 
       if (archivedPatient) {
         // Soft-deleted patients keep email/phone; reclaim the row on re-register.
-        const restored = await db.query(
-          `UPDATE users
-           SET first_name = $1,
-               last_name = $2,
-               email = $3,
-               phone = $4,
-               password_hash = $5,
-               role = 'patient',
-               is_verified = FALSE,
-               status = 'Pending',
-               is_archived = FALSE,
-               archived_at = NULL,
-               archived_by = NULL
-           WHERE id = $6
-           RETURNING id, first_name, last_name, email, phone, role, status, is_verified`,
-          [
-            computedFirstName,
-            computedLastName,
-            normalizedEmail,
-            normalizedPhone,
-            hashedPassword,
-            archivedPatient.id,
-          ]
-        );
+        let restored;
+        try {
+          restored = await db.query(
+            `UPDATE users
+             SET first_name = $1,
+                 last_name = $2,
+                 email = $3,
+                 phone = $4,
+                 password_hash = $5,
+                 role = 'patient',
+                 is_verified = FALSE,
+                 status = 'Pending',
+                 is_archived = FALSE,
+                 archived_at = NULL,
+                 archived_by = NULL
+             WHERE id = $6
+             RETURNING id, first_name, last_name, email, phone, role, status, is_verified,
+                       patient_id, patient_category`,
+            [
+              computedFirstName,
+              computedLastName,
+              normalizedEmail,
+              normalizedPhone,
+              hashedPassword,
+              archivedPatient.id,
+            ]
+          );
+        } catch (restoreError) {
+          if (restoreError?.code !== "42703") throw restoreError;
+          restored = await db.query(
+            `UPDATE users
+             SET first_name = $1,
+                 last_name = $2,
+                 email = $3,
+                 phone = $4,
+                 password_hash = $5,
+                 role = 'patient',
+                 is_verified = FALSE,
+                 status = 'Pending',
+                 is_archived = FALSE,
+                 archived_at = NULL,
+                 archived_by = NULL
+             WHERE id = $6
+             RETURNING id, first_name, last_name, email, phone, role, status, is_verified`,
+            [
+              computedFirstName,
+              computedLastName,
+              normalizedEmail,
+              normalizedPhone,
+              hashedPassword,
+              archivedPatient.id,
+            ]
+          );
+        }
         userRow = restored.rows[0];
       } else if (existingUser.rows.length > 0) {
         return res.status(409).json({
@@ -242,6 +277,46 @@ function createAuthRouter({
         userRow = userResult.rows[0];
       }
 
+      // Issue stable clinic Patient ID (A/S/P/W + year + sequence). Keep existing ID on reclaim.
+      if (userRow?.id && !userRow.patient_id) {
+        try {
+          const issued = await patientIds.allocatePatientId(db, {
+            category: categoryValue,
+            createdAt: new Date(),
+          });
+          const updated = await db.query(
+            `UPDATE users
+             SET patient_id = COALESCE(patient_id, $1),
+                 patient_category = COALESCE(patient_category, $2)
+             WHERE id = $3
+             RETURNING id, first_name, last_name, email, phone, role, status, is_verified,
+                       patient_id, patient_category`,
+            [issued.patientId, issued.category, userRow.id]
+          );
+          if (updated.rows[0]) userRow = updated.rows[0];
+        } catch (idError) {
+          if (idError?.code !== "42703") {
+            console.warn("Patient ID allocation skipped:", idError.message);
+          }
+        }
+      }
+
+      try {
+        // Seed portal profile category when table supports it (Patient ID stays on users).
+        await db.query(
+          `INSERT INTO patient_portal_profiles (user_id, patient_category)
+           VALUES ($1, $2)
+           ON CONFLICT (user_id) DO UPDATE
+             SET patient_category = COALESCE(patient_portal_profiles.patient_category, EXCLUDED.patient_category),
+                 updated_at = CURRENT_TIMESTAMP`,
+          [String(userRow.id), categoryValue]
+        );
+      } catch (profileError) {
+        if (profileError?.code !== "42P01" && profileError?.code !== "42703") {
+          console.warn("Patient category profile seed skipped:", profileError.message);
+        }
+      }
+
       try {
         const request = await otpService.issueOtp(userRow);
         return res.status(201).json({
@@ -249,6 +324,8 @@ function createAuthRouter({
           requiresOtp: true,
           requestId: request.requestId,
           expiresAt: request.expiresAt,
+          patientId: userRow.patient_id || null,
+          patientCategory: userRow.patient_category || categoryValue,
         });
       } catch (error) {
         if (error instanceof OtpDeliveryError) {

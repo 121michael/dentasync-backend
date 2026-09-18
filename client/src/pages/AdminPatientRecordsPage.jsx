@@ -144,7 +144,7 @@ export function AdminPatientRecordsPage() {
               <tbody>
                 {records.map((item) => (
                   <tr key={item.id}>
-                    <td><code>{item.recordCode || item.id}</code></td>
+                    <td><code>{item.patientId || item.recordCode || item.id}</code></td>
                     <td>
                       <strong>{item.fullName}</strong>
                       <small>{item.email || "No linked portal account"}</small>
@@ -177,7 +177,7 @@ export function AdminPatientRecordsPage() {
         <AdminModal title="Patient Record" onClose={() => setDetail(null)} wide>
           <div className="admin-detail-grid">
             <p><small>Patient</small><strong>{record.fullName}</strong></p>
-            <p><small>Patient ID</small><strong>{record.recordCode || record.id}</strong></p>
+            <p><small>Patient ID</small><strong>{record.patientId || record.recordCode || record.id}</strong></p>
             <p><small>Date of Birth</small><strong>{formatHistoryDate(record.dateOfBirth)}</strong></p>
             <p><small>Sex</small><strong>{record.gender || "—"}</strong></p>
             <p><small>Contact</small><strong>{record.phone || "—"}</strong></p>

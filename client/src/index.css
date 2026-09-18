@@ -5126,12 +5126,31 @@ strong {
   pointer-events: none;
 }
 
-.dentist-treatment-form__panel.is-open {
-  max-height: 1200px;
-  opacity: 1;
-  transform: translateY(0);
-  pointer-events: auto;
-  margin-top: 0.35rem;
+.fdi-pick-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0 0 0.75rem;
+}
+
+.fdi-pick-chip {
+  border: 1px solid #c4b5e0;
+  background: #f4edff;
+  color: #4c1d75;
+  border-radius: 999px;
+  padding: 0.2rem 0.65rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.fdi-chart-shell--pick .fdi-tooth.is-selected .fdi-tooth__selection {
+  stroke: #7c3aed;
+  stroke-width: 2.4;
+  opacity: 0.95;
+}
+
+.fdi-chart-shell--pick .fdi-chart-layout {
+  grid-template-columns: 1fr;
 }
 
 .fdi-readonly-block {

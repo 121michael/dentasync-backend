@@ -27,11 +27,19 @@ export function DentalChart({
   readOnly = false,
   refreshKey = 0,
   loadChartApi,
+  pickMode = false,
+  selectedTeeth = [],
+  onTeethChange,
 }) {
   const [chart, setChart] = useState(null);
   const [loadError, setLoadError] = useState("");
   const [selectedTooth, setSelectedTooth] = useState("");
   const [draft, setDraft] = useState(null);
+
+  const picked = useMemo(
+    () => new Set((selectedTeeth || []).map((tooth) => String(tooth))),
+    [selectedTeeth]
+  );
 
   async function loadChart() {
     if (!patientId) return;
@@ -100,6 +108,14 @@ export function DentalChart({
 
   function selectTooth(toothNumber) {
     const key = String(toothNumber);
+    if (pickMode && typeof onTeethChange === "function") {
+      const next = new Set(picked);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      onTeethChange([...next].sort((a, b) => Number(a) - Number(b)));
+      return;
+    }
+
     const record = chart?.[key] || emptyToothRecord(key);
     setSelectedTooth(key);
     setDraft({
@@ -139,24 +155,47 @@ export function DentalChart({
   }).length;
 
   return (
-    <section className="fdi-chart-shell">
+    <section className={`fdi-chart-shell ${pickMode ? "fdi-chart-shell--pick" : ""}`}>
       <div className="fdi-chart-layout">
         <div className="fdi-chart-canvas glass-card">
           <div className="fdi-chart-canvas__head">
             <div>
-              <span className="eyebrow">Interactive FDI chart</span>
+              <span className="eyebrow">
+                {pickMode ? "Select affected tooth" : "Interactive FDI chart"}
+              </span>
               <h2>2D Dental Chart</h2>
               <p className="muted-copy">
-                Chart status is driven by saved treatment records. Saving Root Canal on tooth #36
-                marks #36 as Root Canal automatically.
+                {pickMode
+                  ? "Click one or more teeth on the chart to mark them for this treatment. Selected teeth are highlighted."
+                  : "Chart status is driven by saved treatment records. Saving a treatment updates the matching tooth automatically."}
               </p>
             </div>
             <small className="fdi-chart-count">
-              {recordedCount
-                ? `${recordedCount} teeth with chart status`
-                : "No treatment-driven chart status yet."}
+              {pickMode
+                ? picked.size
+                  ? `${picked.size} tooth${picked.size === 1 ? "" : " teeth"} selected`
+                  : "No tooth selected yet"
+                : recordedCount
+                  ? `${recordedCount} teeth with chart status`
+                  : "No treatment-driven chart status yet."}
             </small>
           </div>
+
+          {pickMode && picked.size ? (
+            <p className="fdi-pick-chips">
+              {[...picked].map((tooth) => (
+                <button
+                  key={tooth}
+                  type="button"
+                  className="fdi-pick-chip"
+                  onClick={() => selectTooth(tooth)}
+                  title="Click to deselect"
+                >
+                  #{tooth} ×
+                </button>
+              ))}
+            </p>
+          ) : null}
 
           <div className="fdi-chart-scroll">
             <svg
@@ -227,7 +266,11 @@ export function DentalChart({
                   key={`u-${position.tooth}`}
                   toothNumber={position.tooth}
                   record={chart[String(position.tooth)]}
-                  selected={String(selectedTooth) === String(position.tooth)}
+                  selected={
+                    pickMode
+                      ? picked.has(String(position.tooth))
+                      : String(selectedTooth) === String(position.tooth)
+                  }
                   onSelect={selectTooth}
                   x={position.x}
                   y={position.y}
@@ -243,7 +286,11 @@ export function DentalChart({
                   key={`l-${position.tooth}`}
                   toothNumber={position.tooth}
                   record={chart[String(position.tooth)]}
-                  selected={String(selectedTooth) === String(position.tooth)}
+                  selected={
+                    pickMode
+                      ? picked.has(String(position.tooth))
+                      : String(selectedTooth) === String(position.tooth)
+                  }
                   onSelect={selectTooth}
                   x={position.x}
                   y={position.y}
@@ -265,7 +312,7 @@ export function DentalChart({
             <span className="fdi-legend__item fdi-legend__item--under_treatment">Under Treatment</span>
             <span className="fdi-legend__item fdi-legend__item--missing">Extracted / Missing</span>
           </div>
-          {selectedTooth && chart[selectedTooth]?.treatments?.length ? (
+          {!pickMode && selectedTooth && chart[selectedTooth]?.treatments?.length ? (
             <p className="muted-copy" style={{ marginTop: "0.75rem" }}>
               Tooth #{selectedTooth}:{" "}
               {(chart[selectedTooth].treatments || [])
@@ -275,15 +322,17 @@ export function DentalChart({
           ) : null}
         </div>
 
-        <ToothDetailsPanel
-          toothNumber={selectedTooth}
-          draft={draft}
-          readOnly={readOnly}
-          onCancel={() => {
-            setSelectedTooth("");
-            setDraft(null);
-          }}
-        />
+        {!pickMode ? (
+          <ToothDetailsPanel
+            toothNumber={selectedTooth}
+            draft={draft}
+            readOnly={readOnly}
+            onCancel={() => {
+              setSelectedTooth("");
+              setDraft(null);
+            }}
+          />
+        ) : null}
       </div>
     </section>
   );

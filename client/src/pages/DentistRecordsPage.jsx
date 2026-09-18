@@ -3,7 +3,6 @@ import { Plus, Search } from "lucide-react";
 import { api } from "../api";
 import { DentalChart } from "../components/DentalChart";
 import {
-  ALL_TEETH,
   PROCEDURE_FORM_OPTIONS,
   procedureRequiresTooth,
 } from "../components/DentalChart/dentalChartData";
@@ -302,7 +301,7 @@ export function DentistRecordsPage() {
                     <td>
                       <strong>{patient.fullName || patient.patientName}</strong>
                       <small>
-                        <code>{patient.recordCode || patient.profileCode || patient.id}</code>
+                        <code>{patient.patientId || patient.recordCode || patient.profileCode || patient.id}</code>
                       </small>
                     </td>
                     <td>{formatAgeSex(patient)}</td>
@@ -431,7 +430,11 @@ export function DentistRecordsPage() {
         <DentistModal title={detail.patient.fullName} onClose={() => setDetail(null)} wide>
           <div className="dentist-detail-grid">
             <p>
-              <strong>Patient ID:</strong> {detail.patient.recordCode || detail.patient.id}
+              <strong>Patient ID:</strong>{" "}
+              {detail.patient.patientId || detail.patient.recordCode || detail.patient.id}
+            </p>
+            <p>
+              <strong>Category:</strong> {detail.patient.patientCategory || "—"}
             </p>
             <p>
               <strong>Name:</strong> {detail.patient.fullName || detail.patient.patientName}
@@ -558,6 +561,19 @@ export function DentistRecordsPage() {
             patientId={detail.patient.id}
             dentistName={detail.patient.assignedDentist || ""}
             refreshKey={chartRefreshKey}
+            pickMode={treatmentFormOpen}
+            selectedTeeth={
+              String(treatmentForm.toothNumber || "")
+                .split(/[,\s]+/)
+                .map((part) => part.trim())
+                .filter(Boolean)
+            }
+            onTeethChange={(teeth) =>
+              setTreatmentForm((current) => ({
+                ...current,
+                toothNumber: teeth.join(", "),
+              }))
+            }
             onTreatmentRecorded={() => refreshPatientDetail(detail.patient.id)}
           />
 
@@ -645,8 +661,9 @@ export function DentistRecordsPage() {
               {treatmentFormOpen ? (
                 <>
                   <p className="muted-copy">
-                    Saving updates treatment history and automatically updates the dental chart for
-                    the affected tooth. Amount paid and next appointment are managed by Staff.
+                    Enter diagnosis and treatment, then click the affected tooth on the dental chart
+                    above. Saving updates history and the chart automatically. Amount paid and next
+                    appointment are managed by Staff.
                   </p>
                   <form className="dentist-form" onSubmit={saveTreatment}>
                     <div className="field-grid field-grid--two">
@@ -688,48 +705,18 @@ export function DentistRecordsPage() {
                           ))}
                         </select>
                       </label>
-                      <label className="field">
-                        <span>Affected Tooth{toothRequired ? " *" : " (optional)"}</span>
-                        <select
-                          required={toothRequired && !String(treatmentForm.toothNumber).includes(",")}
-                          value={
-                            String(treatmentForm.toothNumber || "").includes(",")
-                              ? ""
-                              : treatmentForm.toothNumber
-                          }
-                          onChange={(event) =>
-                            setTreatmentForm((current) => ({
-                              ...current,
-                              toothNumber: event.target.value,
-                            }))
-                          }
-                        >
-                          <option value="">
-                            {toothRequired ? "Select tooth…" : "None / whole mouth"}
-                          </option>
-                          {ALL_TEETH.map((tooth) => (
-                            <option key={tooth} value={String(tooth)}>
-                              Tooth #{tooth}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="field">
-                        <span>Or multiple teeth (optional)</span>
-                        <input
-                          value={
-                            String(treatmentForm.toothNumber || "").includes(",")
-                              ? treatmentForm.toothNumber
-                              : ""
-                          }
-                          onChange={(event) =>
-                            setTreatmentForm((current) => ({
-                              ...current,
-                              toothNumber: event.target.value,
-                            }))
-                          }
-                          placeholder="e.g. 14, 15, 16"
-                        />
+                      <label className="field field--full">
+                        <span>Affected tooth</span>
+                        <p className="muted-copy" style={{ margin: 0 }}>
+                          {treatmentForm.toothNumber
+                            ? `Selected from chart: #${String(treatmentForm.toothNumber)
+                                .split(/[,\s]+/)
+                                .filter(Boolean)
+                                .join(", #")}`
+                            : toothRequired
+                              ? "Click the affected tooth directly on the dental chart above."
+                              : "Optional — click teeth on the chart if this treatment is tooth-specific."}
+                        </p>
                       </label>
                       <label className="field">
                         <span>Treatment Date</span>

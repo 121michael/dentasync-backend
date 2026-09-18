@@ -1985,13 +1985,25 @@ function createPatientPortalRouter({
   router.get("/profile", async (req, res) => {
     const userId = userIdFor(req);
     try {
-      const [userResult, profileResult, preferenceResult] = await Promise.all([
-        db.query(
+      let userResult;
+      try {
+        userResult = await db.query(
+          `SELECT id, first_name, last_name, email, phone, is_verified, created_at,
+                  patient_id, patient_category
+           FROM users
+           WHERE id = $1`,
+          [userId]
+        );
+      } catch (columnError) {
+        if (columnError?.code !== "42703") throw columnError;
+        userResult = await db.query(
           `SELECT id, first_name, last_name, email, phone, is_verified, created_at
            FROM users
            WHERE id = $1`,
           [userId]
-        ),
+        );
+      }
+      const [profileResult, preferenceResult] = await Promise.all([
         db.query("SELECT * FROM patient_portal_profiles WHERE user_id = $1", [userId]),
         db.query("SELECT * FROM patient_portal_preferences WHERE user_id = $1", [userId]),
       ]);
@@ -2000,8 +2012,12 @@ function createPatientPortalRouter({
       }
 
       const user = userResult.rows[0];
+      const profileRow = profileResult.rows[0] || {};
       return res.json({
         profile: {
+          id: user.id,
+          patientId: user.patient_id || null,
+          patientCategory: user.patient_category || profileRow.patient_category || "regular",
           firstName: user.first_name || "",
           lastName: user.last_name || "",
           fullName: `${user.first_name || ""} ${user.last_name || ""}`.trim(),
@@ -2009,7 +2025,8 @@ function createPatientPortalRouter({
           phone: user.phone || "",
           memberSince: user.created_at || null,
           verified: user.is_verified,
-          ...(profileResult.rows[0] || {}),
+          ...profileRow,
+          patient_category: user.patient_category || profileRow.patient_category || "regular",
         },
         preferences: {
           theme: preferenceResult.rows[0]?.theme || "light",
@@ -2046,6 +2063,21 @@ function createPatientPortalRouter({
          WHERE id = $5`,
         [firstName, lastName, email, phone, userId]
       );
+
+      // Category may be updated for records, but Patient ID remains stable once issued.
+      if (body.patientCategory || body.category) {
+        const patientIds = require("../services/patientIds");
+        const category = patientIds.normalizeCategory(body.patientCategory || body.category);
+        try {
+          await db.query(
+            `UPDATE users SET patient_category = $1 WHERE id = $2`,
+            [category, userId]
+          );
+        } catch (categoryError) {
+          if (categoryError?.code !== "42703") throw categoryError;
+        }
+      }
+
       const dateOfBirth = isIsoDate(body.dateOfBirth) ? body.dateOfBirth : null;
       const profileValues = [
         userId,
