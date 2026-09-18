@@ -956,23 +956,33 @@ function createStaffPortalRouter({
     try {
       const patients = await clinicalPatients.listClinicalRecords(db, { search, limit: 100 });
       return res.json({
-        patients: patients.map((record) => ({
-          id: record.id,
-          recordCode: record.recordCode,
-          firstName: record.firstName,
-          lastName: record.lastName,
-          fullName: record.fullName,
-          patientName: record.fullName,
-          email: record.email,
-          phone: record.phone,
-          dateOfBirth: record.dateOfBirth,
-          gender: record.gender,
-          lastVisit: record.lastTreatmentDate,
-          accountStatus: record.linkedUserId ? "linked_account" : "clinical_record",
-          isVerified: record.staffVerificationStatus === "verified",
-          staffVerificationStatus: record.staffVerificationStatus || "pending",
-          isClinicalRecord: true,
-        })),
+        patients: patients.map((record) => {
+          const nextAppointment = clinicalPatients.resolveClinicalNextAppointment(record, []);
+          return {
+            id: record.id,
+            recordCode: record.recordCode,
+            firstName: record.firstName,
+            lastName: record.lastName,
+            fullName: record.fullName,
+            patientName: record.fullName,
+            email: record.email,
+            phone: record.phone,
+            dateOfBirth: record.dateOfBirth,
+            gender: record.gender,
+            age: record.age,
+            ageSex: record.ageSex || clinicalPatients.formatAgeSex(record.age, record.gender),
+            lastVisit: record.lastTreatmentDate,
+            lastTreatment: record.lastTreatment,
+            lastTreatmentDate: record.lastTreatmentDate,
+            amountPaid: record.lastAmountPaid,
+            nextAppointmentDate: nextAppointment?.date || record.nextAppointmentDate || null,
+            nextAppointmentTime: nextAppointment?.time || record.nextAppointmentTime || null,
+            accountStatus: record.linkedUserId ? "linked_account" : "clinical_record",
+            isVerified: record.staffVerificationStatus === "verified",
+            staffVerificationStatus: record.staffVerificationStatus || "pending",
+            isClinicalRecord: true,
+          };
+        }),
       });
     } catch (error) {
       if (clinicalPatients.isMissingRelation(error)) {
@@ -1044,18 +1054,88 @@ function createStaffPortalRouter({
     if (!Number.isSafeInteger(recordId) || recordId <= 0) {
       return res.status(400).json({ message: "A valid patient record ID is required." });
     }
+
+    // Staff may edit demographics and staff-managed scheduling/payment metadata.
+    // Clinical treatment procedure/diagnosis/notes are dentist-managed.
+    const allowed = {};
+    for (const key of [
+      "firstName",
+      "lastName",
+      "email",
+      "phone",
+      "dateOfBirth",
+      "age",
+      "gender",
+      "address",
+      "notes",
+      "nextAppointmentDate",
+      "nextAppointmentTime",
+    ]) {
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, key)) {
+        allowed[key] = req.body[key];
+      }
+    }
+
     try {
-      const record = await clinicalPatients.updateClinicalRecord(db, recordId, req.body || {}, {
+      const record = await clinicalPatients.updateClinicalRecord(db, recordId, allowed, {
         id: req.staff.id,
         role: "staff",
       });
       return res.json({
         message: "Patient record updated.",
-        patient: { ...record, patientName: record.fullName, isClinicalRecord: true },
+        patient: {
+          ...record,
+          patientName: record.fullName,
+          ageSex: record.ageSex || clinicalPatients.formatAgeSex(record.age, record.gender),
+          isClinicalRecord: true,
+        },
       });
     } catch (error) {
       return res.status(error.status || 500).json({
         message: error.status ? error.message : "Unable to update the patient record.",
+      });
+    }
+  });
+
+  router.patch("/patients/:id/treatments/:treatmentId", async (req, res) => {
+    const recordId = Number.parseInt(req.params.id, 10);
+    const treatmentId = Number.parseInt(req.params.treatmentId, 10);
+    if (!Number.isSafeInteger(recordId) || recordId <= 0 || !Number.isSafeInteger(treatmentId) || treatmentId <= 0) {
+      return res.status(400).json({ message: "A valid patient record and treatment id are required." });
+    }
+    if (!Object.prototype.hasOwnProperty.call(req.body || {}, "amountPaid")) {
+      return res.status(400).json({ message: "amountPaid is required." });
+    }
+
+    try {
+      const treatment = await clinicalPatients.updateTreatmentAmountPaid(
+        db,
+        recordId,
+        treatmentId,
+        req.body.amountPaid,
+        { id: req.staff.id, role: "staff" }
+      );
+      const amountCharged = Number(treatment.amountCharged || 0);
+      const amountPaid = Number(treatment.amountPaid || 0);
+      const paymentStatus =
+        amountPaid <= 0 ? "pending" : amountPaid >= amountCharged ? "paid" : "partially_paid";
+
+      return res.json({
+        message: "Amount paid updated on the shared patient dental record.",
+        treatment: {
+          id: treatment.id,
+          treatment: treatment.treatment,
+          treatmentDate: treatment.treatmentDate,
+          amountCharged,
+          amountPaid,
+          balance: Math.round((amountCharged - amountPaid) * 100) / 100,
+          paymentStatus,
+          status: treatment.status,
+        },
+      });
+    } catch (error) {
+      return res.status(error.status || 500).json({
+        message: error.status ? error.message : "Unable to update the amount paid.",
       });
     }
   });
@@ -1142,31 +1222,64 @@ function createStaffPortalRouter({
       if (!detail || detail.record.archived) {
         return res.status(404).json({ message: "Patient record not found." });
       }
+
+      let appointments = [];
+      try {
+        appointments = await clinicalPatients.listLinkedAppointments(db, detail.record, { limit: 100 });
+      } catch (appointmentError) {
+        console.warn("Staff clinical appointments lookup failed:", appointmentError.message);
+      }
+
+      const nextAppointment = clinicalPatients.resolveClinicalNextAppointment(
+        detail.record,
+        appointments
+      );
+
       return res.json({
         patient: {
           ...detail.record,
           patientName: detail.record.fullName,
+          ageSex:
+            detail.record.ageSex ||
+            clinicalPatients.formatAgeSex(detail.record.age, detail.record.gender),
           accountStatus: detail.record.linkedUserId ? "linked_account" : "clinical_record",
           isClinicalRecord: true,
           isVerified: detail.record.staffVerificationStatus === "verified",
           staffVerificationStatus: detail.record.staffVerificationStatus || "pending",
           staffVerifiedAt: detail.record.staffVerifiedAt || null,
           createdAt: detail.record.createdAt,
+          nextAppointmentDate: detail.record.nextAppointmentDate || nextAppointment?.date || null,
+          nextAppointmentTime: detail.record.nextAppointmentTime || nextAppointment?.time || null,
+          nextAppointment,
           profile: {
             date_of_birth: detail.record.dateOfBirth,
             gender: detail.record.gender,
             address: detail.record.address,
             dental_concerns: detail.record.notes,
           },
-          appointments: [],
-          treatments: detail.treatments.map((record) => ({
-            id: record.id,
-            treatment: record.treatment,
-            dentist: record.dentistName,
-            date: record.treatmentDate,
-            status: record.status,
-            notes: record.notes || "",
-          })),
+          appointments,
+          treatments: detail.treatments.map((record) => {
+            const amountCharged = Number(record.amountCharged || 0);
+            const amountPaid = Number(record.amountPaid || 0);
+            return {
+              id: record.id,
+              treatment: record.treatment,
+              name: record.treatment,
+              dentist: record.dentistName,
+              date: record.treatmentDate,
+              treatmentDate: record.treatmentDate,
+              status: record.status,
+              notes: record.notes || "",
+              diagnosisNotes: record.diagnosisNotes || "",
+              toothNumber: record.toothNumber,
+              durationMinutes: record.durationMinutes,
+              amountCharged,
+              amountPaid,
+              balance: Math.round((amountCharged - amountPaid) * 100) / 100,
+              paymentStatus:
+                amountPaid <= 0 ? "pending" : amountPaid >= amountCharged ? "paid" : "partially_paid",
+            };
+          }),
         },
       });
     } catch (error) {

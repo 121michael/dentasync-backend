@@ -19,6 +19,17 @@ const emptyForm = {
   medicalDentalNotes: "",
 };
 
+function formatMoney(value) {
+  return `₱${Number(value || 0).toFixed(2)}`;
+}
+
+function formatAgeSex(patient) {
+  if (patient?.ageSex) return patient.ageSex;
+  const age = patient?.age != null && patient.age !== "" ? patient.age : "—";
+  const sex = patient?.gender || patient?.profile?.gender || "—";
+  return `${age} / ${sex}`;
+}
+
 export function StaffPatientsPage() {
   const { pushToast, confirm } = useStaffUi();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -31,6 +42,9 @@ export function StaffPatientsPage() {
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
+  const [paymentDrafts, setPaymentDrafts] = useState({});
+  const [nextApptDate, setNextApptDate] = useState("");
+  const [nextApptTime, setNextApptTime] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -54,6 +68,7 @@ export function StaffPatientsPage() {
         const response = await api.getStaffPatient(focusId);
         if (response?.patient) {
           setDetail(response.patient);
+          seedStaffManagedFields(response.patient);
         }
       } catch (viewError) {
         pushToast(viewError.message, "error");
@@ -65,11 +80,26 @@ export function StaffPatientsPage() {
     })();
   }, [searchParams, setSearchParams, pushToast]);
 
+  function seedStaffManagedFields(patient) {
+    const drafts = {};
+    for (const treatment of patient.treatments || []) {
+      drafts[treatment.id] = String(treatment.amountPaid ?? "");
+    }
+    setPaymentDrafts(drafts);
+    setNextApptDate(
+      patient.nextAppointmentDate ? String(patient.nextAppointmentDate).slice(0, 10) : ""
+    );
+    setNextApptTime(
+      patient.nextAppointmentTime ? String(patient.nextAppointmentTime).slice(0, 5) : ""
+    );
+  }
+
   async function openDetail(patientId) {
     setBusy(`view-${patientId}`);
     try {
       const response = await api.getStaffPatient(patientId);
       setDetail(response.patient);
+      seedStaffManagedFields(response.patient);
     } catch (viewError) {
       pushToast(viewError.message, "error");
     } finally {
@@ -113,6 +143,42 @@ export function StaffPatientsPage() {
       setFormOpen(false);
       setForm(emptyForm);
       setEditingId(null);
+      await load();
+    } catch (saveError) {
+      pushToast(saveError.message, "error");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function saveStaffManaged(event) {
+    event.preventDefault();
+    if (!detail?.id) return;
+    setBusy("staff-managed");
+    try {
+      await api.updateStaffPatient(detail.id, {
+        nextAppointmentDate: nextApptDate || null,
+        nextAppointmentTime: nextApptTime || null,
+      });
+
+      const treatments = detail.treatments || [];
+      for (const treatment of treatments) {
+        const draft = paymentDrafts[treatment.id];
+        if (draft === undefined || draft === "") continue;
+        const nextPaid = Number(draft);
+        if (!Number.isFinite(nextPaid) || nextPaid < 0) {
+          throw new Error(`Amount paid for ${treatment.treatment || "treatment"} must be a valid amount.`);
+        }
+        if (Number(treatment.amountPaid || 0) === nextPaid) continue;
+        await api.updateStaffPatientTreatmentPayment(detail.id, treatment.id, {
+          amountPaid: nextPaid,
+        });
+      }
+
+      pushToast("Amount paid and next appointment saved to the shared dental record.");
+      const refreshed = await api.getStaffPatient(detail.id);
+      setDetail(refreshed.patient);
+      seedStaffManagedFields(refreshed.patient);
       await load();
     } catch (saveError) {
       pushToast(saveError.message, "error");
@@ -167,7 +233,10 @@ export function StaffPatientsPage() {
           <div>
             <span className="eyebrow">Clinical registry</span>
             <h2>Patient Records</h2>
-            <p>Maintain patient information and assist with registration. Permanent system deletion remains admin-only.</p>
+            <p>
+              View the same shared dental record the dentist updates. Enter Amount Paid and Next
+              Appointment here.
+            </p>
           </div>
           <button className="button button--primary" onClick={openCreate}>
             <Plus size={16} /> Register Patient
@@ -197,12 +266,12 @@ export function StaffPatientsPage() {
             <table className="staff-table">
               <thead>
                 <tr>
-                  <th>Patient ID</th>
-                  <th>Full Name</th>
-                  <th>Contact</th>
+                  <th>Patient</th>
                   <th>Age / Sex</th>
-                  <th>Last Appointment</th>
-                  <th>Assigned Dentist</th>
+                  <th>Treatment</th>
+                  <th>Treatment Date</th>
+                  <th>Amount Paid</th>
+                  <th>Next Appointment</th>
                   <th>Record Status</th>
                   <th>Action</th>
                 </tr>
@@ -211,15 +280,32 @@ export function StaffPatientsPage() {
                 {patients.map((patient) => (
                   <tr key={patient.id}>
                     <td>
-                      <code>{patient.recordCode || patient.id}</code>
+                      <strong>{patient.fullName || patient.patientName}</strong>
+                      <small>
+                        <code>{patient.recordCode || patient.id}</code>
+                      </small>
+                    </td>
+                    <td>{formatAgeSex(patient)}</td>
+                    <td>{patient.lastTreatment || "—"}</td>
+                    <td>
+                      {patient.lastTreatmentDate || patient.lastVisit
+                        ? formatStaffDate(patient.lastTreatmentDate || patient.lastVisit)
+                        : "—"}
                     </td>
                     <td>
-                      <strong>{patient.fullName || patient.patientName}</strong>
+                      {patient.amountPaid != null && patient.amountPaid !== ""
+                        ? formatMoney(patient.amountPaid)
+                        : "—"}
                     </td>
-                    <td>{patient.phone || patient.email || "—"}</td>
-                    <td>{[patient.age ?? "—", patient.gender || "—"].join(" / ")}</td>
-                    <td>{patient.lastVisit ? formatStaffDate(patient.lastVisit) : "—"}</td>
-                    <td>—</td>
+                    <td>
+                      {patient.nextAppointmentDate
+                        ? `${formatStaffDate(patient.nextAppointmentDate)}${
+                            patient.nextAppointmentTime
+                              ? ` ${String(patient.nextAppointmentTime).slice(0, 5)}`
+                              : ""
+                          }`
+                        : "—"}
+                    </td>
                     <td>
                       <StaffStatusBadge
                         status={patient.staffVerificationStatus || patient.accountStatus || "clinical_record"}
@@ -274,14 +360,13 @@ export function StaffPatientsPage() {
       ) : null}
 
       {detail ? (
-        <StaffModal title="Patient profile" onClose={() => setDetail(null)} wide>
+        <StaffModal title="Shared patient dental record" onClose={() => setDetail(null)} wide>
           <div className="staff-detail-grid">
             <p><small>Name</small><strong>{detail.fullName || detail.patientName}</strong></p>
             <p><small>Record code</small><strong>{detail.recordCode || detail.id}</strong></p>
             <p><small>Contact</small><strong>{detail.phone || detail.email || "—"}</strong></p>
-            <p><small>Gender</small><strong>{detail.gender || detail.profile?.gender || "—"}</strong></p>
+            <p><small>Age / Sex</small><strong>{formatAgeSex(detail)}</strong></p>
             <p><small>Birth date</small><strong>{detail.dateOfBirth || detail.profile?.date_of_birth || "—"}</strong></p>
-            <p><small>Status</small><strong>{detail.accountStatus}</strong></p>
             <p>
               <small>Verification</small>
               <strong>
@@ -289,24 +374,93 @@ export function StaffPatientsPage() {
               </strong>
             </p>
           </div>
-          <h3 className="admin-subheading">Treatment history</h3>
-          <div className="admin-history-list">
+
+          <h3 className="admin-subheading">Clinical treatment history (dentist)</h3>
+          <p className="muted-copy">
+            Read-only clinical fields from the dentist. Update Amount Paid below — changes sync to the
+            dentist vault automatically.
+          </p>
+          <div className="staff-table-wrap">
             {(detail.treatments || []).length ? (
-              detail.treatments.map((treatment) => (
-                <article key={treatment.id}>
-                  <div>
-                    <strong>{treatment.treatment}</strong>
-                    <small>
-                      {formatStaffDate(treatment.date)} · {treatment.dentist || "—"} · {treatment.status}
-                    </small>
-                  </div>
-                </article>
-              ))
+              <table className="staff-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Procedure</th>
+                    <th>Diagnosis</th>
+                    <th>Dentist</th>
+                    <th>Notes</th>
+                    <th>Cost</th>
+                    <th>Amount Paid</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detail.treatments.map((treatment) => (
+                    <tr key={treatment.id}>
+                      <td>{formatStaffDate(treatment.date || treatment.treatmentDate)}</td>
+                      <td>{treatment.treatment || treatment.name || "—"}</td>
+                      <td>{treatment.diagnosisNotes || "—"}</td>
+                      <td>{treatment.dentist || "—"}</td>
+                      <td>{treatment.notes || "—"}</td>
+                      <td>{formatMoney(treatment.amountCharged)}</td>
+                      <td>
+                        <label className="field" style={{ margin: 0 }}>
+                          <span className="sr-only">Amount paid</span>
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}>
+                            ₱
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={paymentDrafts[treatment.id] ?? ""}
+                              onChange={(event) =>
+                                setPaymentDrafts((current) => ({
+                                  ...current,
+                                  [treatment.id]: event.target.value,
+                                }))
+                              }
+                              style={{ width: "7rem" }}
+                            />
+                          </span>
+                        </label>
+                      </td>
+                      <td>{treatment.paymentStatus || treatment.status || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             ) : (
-              <p className="muted-copy">No treatments on file.</p>
+              <p className="muted-copy">No treatments on file yet.</p>
             )}
           </div>
-          <div className="staff-heading-actions">
+
+          <form className="admin-form" onSubmit={saveStaffManaged} style={{ marginTop: "1.25rem" }}>
+            <h3 className="admin-subheading">Staff-managed fields</h3>
+            <div className="field-grid field-grid--two">
+              <label className="field">
+                <span>Next Appointment</span>
+                <input
+                  type="date"
+                  value={nextApptDate}
+                  onChange={(event) => setNextApptDate(event.target.value)}
+                />
+              </label>
+              <label className="field">
+                <span>Time</span>
+                <input
+                  type="time"
+                  value={nextApptTime}
+                  onChange={(event) => setNextApptTime(event.target.value)}
+                />
+              </label>
+            </div>
+            <button className="button button--primary" disabled={Boolean(busy)}>
+              {busy === "staff-managed" ? "Saving…" : "Save Changes"}
+            </button>
+          </form>
+
+          <div className="staff-heading-actions" style={{ marginTop: "1rem" }}>
             {detail.staffVerificationStatus !== "verified" ? (
               <button
                 className="button button--primary"

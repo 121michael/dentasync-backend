@@ -1172,24 +1172,34 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
         limit: 100,
       });
       return res.json({
-        patients: patients.map((record) => ({
-          id: record.id,
-          recordCode: record.recordCode,
-          firstName: record.firstName,
-          lastName: record.lastName,
-          fullName: record.fullName,
-          patientName: record.fullName,
-          email: record.email,
-          phone: record.phone,
-          dateOfBirth: record.dateOfBirth,
-          gender: record.gender,
-          lastVisit: record.lastTreatmentDate,
-          lastTreatment: record.lastTreatment,
-          lastTreatmentName: record.lastTreatment,
-          accountStatus: record.linkedUserId ? "linked_account" : "clinical_record",
-          linkedUserId: record.linkedUserId,
-          isClinicalRecord: true,
-        })),
+        patients: patients.map((record) => {
+          const nextAppointment = clinicalPatients.resolveClinicalNextAppointment(record, []);
+          return {
+            id: record.id,
+            recordCode: record.recordCode,
+            firstName: record.firstName,
+            lastName: record.lastName,
+            fullName: record.fullName,
+            patientName: record.fullName,
+            email: record.email,
+            phone: record.phone,
+            dateOfBirth: record.dateOfBirth,
+            gender: record.gender,
+            age: record.age,
+            ageSex: record.ageSex || clinicalPatients.formatAgeSex(record.age, record.gender),
+            lastVisit: record.lastTreatmentDate,
+            lastTreatment: record.lastTreatment,
+            lastTreatmentName: record.lastTreatment,
+            lastTreatmentDate: record.lastTreatmentDate,
+            amountPaid: record.lastAmountPaid,
+            nextAppointmentDate: nextAppointment?.date || record.nextAppointmentDate || null,
+            nextAppointmentTime: nextAppointment?.time || record.nextAppointmentTime || null,
+            nextAppointment: nextAppointment,
+            accountStatus: record.linkedUserId ? "linked_account" : "clinical_record",
+            linkedUserId: record.linkedUserId,
+            isClinicalRecord: true,
+          };
+        }),
       });
     } catch (error) {
       if (clinicalPatients.isMissingRelation(error)) {
@@ -1250,14 +1260,38 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
     if (!Number.isSafeInteger(recordId) || recordId <= 0) {
       return res.status(400).json({ message: "A valid patient record ID is required." });
     }
+
+    // Dentist may correct demographics (Age/Sex). Staff-managed payment/next-appointment fields are ignored.
+    const allowed = {};
+    for (const key of [
+      "firstName",
+      "lastName",
+      "email",
+      "phone",
+      "dateOfBirth",
+      "age",
+      "gender",
+      "address",
+      "notes",
+    ]) {
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, key)) {
+        allowed[key] = req.body[key];
+      }
+    }
+
     try {
-      const record = await clinicalPatients.updateClinicalRecord(db, recordId, req.body || {}, {
+      const record = await clinicalPatients.updateClinicalRecord(db, recordId, allowed, {
         id: req.dentist.id,
         role: "dentist",
       });
       return res.json({
         message: "Patient record updated.",
-        patient: { ...record, patientName: record.fullName, isClinicalRecord: true },
+        patient: {
+          ...record,
+          patientName: record.fullName,
+          ageSex: record.ageSex || clinicalPatients.formatAgeSex(record.age, record.gender),
+          isClinicalRecord: true,
+        },
       });
     } catch (error) {
       return res.status(error.status || 500).json({
@@ -1306,20 +1340,22 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
         console.warn("Dentist clinical appointments lookup failed:", appointmentError.message);
       }
 
-      const patientNextAppointment = clinicalPatients.resolveNextAppointment(appointments);
+      const patientNextAppointment = clinicalPatients.resolveClinicalNextAppointment(
+        detail.record,
+        appointments
+      );
 
       return res.json({
         patient: {
           ...detail.record,
           patientName: detail.record.fullName,
           ageSex:
-            detail.record.age !== null || detail.record.gender
-              ? `${detail.record.age !== null && detail.record.age !== undefined ? `${detail.record.age} yrs` : "—"}${
-                  detail.record.gender ? ` / ${detail.record.gender}` : ""
-                }`
-              : "—",
+            detail.record.ageSex ||
+            clinicalPatients.formatAgeSex(detail.record.age, detail.record.gender),
           accountStatus: detail.record.linkedUserId ? "linked_account" : "clinical_record",
           isClinicalRecord: true,
+          nextAppointmentDate: detail.record.nextAppointmentDate || patientNextAppointment?.date || null,
+          nextAppointmentTime: detail.record.nextAppointmentTime || patientNextAppointment?.time || null,
         },
         appointments,
         nextAppointment: patientNextAppointment,
@@ -1327,7 +1363,11 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
           const amountCharged = Number(row.amountCharged || 0);
           const amountPaid = Number(row.amountPaid || 0);
           const nextAppointment =
-            clinicalPatients.resolveNextAppointment(appointments, row.treatmentDate) || patientNextAppointment;
+            clinicalPatients.resolveClinicalNextAppointment(
+              detail.record,
+              appointments,
+              row.treatmentDate
+            ) || patientNextAppointment;
           return {
             id: row.id,
             name: row.treatment,
@@ -1809,7 +1849,8 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
           clinicLocation: req.body?.clinicLocation,
           coverageStatus: req.body?.coverageStatus,
           amountCharged: req.body?.amountCharged,
-          amountPaid: req.body?.amountPaid,
+          // Amount paid is staff-managed on the shared clinical record.
+          amountPaid: 0,
           appointmentId,
         },
         { id: req.dentist.id, role: "dentist" }

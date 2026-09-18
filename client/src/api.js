@@ -178,6 +178,8 @@ export const api = {
   getStaffPatient: (patientId) => request(`/staff/patients/${patientId}`),
   updateStaffPatient: (patientId, body) =>
     request(`/staff/patients/${patientId}`, { method: "PATCH", body }),
+  updateStaffPatientTreatmentPayment: (patientId, treatmentId, body) =>
+    request(`/staff/patients/${patientId}/treatments/${treatmentId}`, { method: "PATCH", body }),
   verifyStaffPatient: (patientId, body) =>
     request(`/staff/patients/${patientId}/verification`, { method: "PATCH", body }),
   deleteStaffPatient: (patientId) =>

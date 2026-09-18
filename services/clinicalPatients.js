@@ -47,6 +47,31 @@ function parseMoneyAmount(value, fieldLabel) {
   return Math.round(amount * 100) / 100;
 }
 
+function formatAgeSex(age, gender) {
+  const agePart = age != null && age !== "" ? String(age) : "—";
+  const sexPart = gender ? String(gender) : "—";
+  return `${agePart} / ${sexPart}`;
+}
+
+function normalizeAppointmentTime(value) {
+  const raw = stringValue(value, 8);
+  if (!raw) return null;
+  const match = raw.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+  if (!match) {
+    const error = new Error("Provide a valid appointment time (HH:MM).");
+    error.status = 400;
+    throw error;
+  }
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+    const error = new Error("Provide a valid appointment time (HH:MM).");
+    error.status = 400;
+    throw error;
+  }
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
 function mapClinicalTreatment(row) {
   return {
     id: row.id,
@@ -80,6 +105,8 @@ function isMissingRelation(error) {
 function mapClinicalRecord(row, extras = {}) {
   const firstName = row.first_name || "";
   const lastName = row.last_name || "";
+  const age = extras.age ?? row.age ?? null;
+  const gender = row.gender || "";
   return {
     id: row.id,
     recordCode: row.record_code,
@@ -89,10 +116,14 @@ function mapClinicalRecord(row, extras = {}) {
     email: row.email || "",
     phone: row.phone || "",
     dateOfBirth: row.date_of_birth || null,
-    gender: row.gender || "",
+    gender,
+    age,
+    ageSex: formatAgeSex(age, gender),
     address: row.address || "",
     notes: row.notes || "",
     linkedUserId: row.linked_user_id || null,
+    nextAppointmentDate: row.next_appointment_date || null,
+    nextAppointmentTime: row.next_appointment_time || null,
     staffVerificationStatus: row.staff_verification_status || "pending",
     staffVerifiedAt: row.staff_verified_at || null,
     staffVerifiedBy: row.staff_verified_by || null,
@@ -104,7 +135,11 @@ function mapClinicalRecord(row, extras = {}) {
     updatedAt: row.updated_at || null,
     lastTreatment: extras.lastTreatment ?? row.last_treatment ?? "",
     lastTreatmentDate: extras.lastTreatmentDate ?? row.last_treatment_date ?? null,
-    age: extras.age ?? row.age ?? null,
+    lastAmountPaid:
+      extras.lastAmountPaid ??
+      (row.last_amount_paid != null && row.last_amount_paid !== ""
+        ? Number(row.last_amount_paid)
+        : null),
   };
 }
 
@@ -175,6 +210,13 @@ async function listClinicalRecords(db, { search = null, includeArchived = false,
          ORDER BY treatment.treatment_date DESC, treatment.id DESC
          LIMIT 1
        ) AS last_treatment_date,
+       (
+         SELECT treatment.amount_paid
+         FROM clinic_patient_treatments AS treatment
+         WHERE treatment.clinical_record_id = record.id
+         ORDER BY treatment.treatment_date DESC, treatment.id DESC
+         LIMIT 1
+       ) AS last_amount_paid,
        CASE
          WHEN record.date_of_birth IS NULL THEN NULL
          ELSE DATE_PART('year', AGE(record.date_of_birth::timestamp))::int
@@ -313,6 +355,94 @@ function resolveNextAppointment(appointments = [], afterDate = null) {
   return upcoming[0] || null;
 }
 
+/**
+ * Prefer staff-saved next appointment on the clinical record; fall back to linked appointments.
+ */
+function resolveClinicalNextAppointment(record, appointments = [], afterDate = null) {
+  const storedDate =
+    record?.nextAppointmentDate instanceof Date
+      ? record.nextAppointmentDate.toISOString().slice(0, 10)
+      : stringValue(record?.nextAppointmentDate, 10);
+  if (storedDate && isIsoDate(storedDate)) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const stored = new Date(`${storedDate}T00:00:00`);
+    if (!Number.isNaN(stored.getTime())) {
+      stored.setHours(0, 0, 0, 0);
+      const after = afterDate ? new Date(afterDate) : null;
+      if (after && !Number.isNaN(after.getTime())) {
+        after.setHours(0, 0, 0, 0);
+      }
+      const isUpcoming = after ? stored > after : stored >= today;
+      if (isUpcoming) {
+        return {
+          id: null,
+          date: storedDate,
+          time: record.nextAppointmentTime || null,
+          treatment: "Follow-up",
+          status: "scheduled",
+          source: "clinical_record",
+        };
+      }
+    }
+  }
+  const linked = resolveNextAppointment(appointments, afterDate);
+  return linked ? { ...linked, source: "appointment" } : null;
+}
+
+/**
+ * Staff-only payment update on a shared clinical treatment row.
+ */
+async function updateTreatmentAmountPaid(db, recordId, treatmentId, amountPaidRaw, actor = {}) {
+  const amountPaid = parseMoneyAmount(amountPaidRaw, "Amount Paid");
+  const existing = await db.query(
+    `SELECT *
+     FROM clinic_patient_treatments
+     WHERE id = $1
+       AND clinical_record_id = $2
+     LIMIT 1`,
+    [treatmentId, recordId]
+  );
+  if (!existing.rows.length) {
+    const error = new Error("Treatment history record not found.");
+    error.status = 404;
+    throw error;
+  }
+
+  const actorId = actor.id ? String(actor.id) : null;
+  let result;
+  try {
+    result = await db.query(
+      `UPDATE clinic_patient_treatments
+       SET amount_paid = $1,
+           updated_at = CURRENT_TIMESTAMP,
+           updated_by = $2
+       WHERE id = $3
+         AND clinical_record_id = $4
+       RETURNING *`,
+      [amountPaid, actorId, treatmentId, recordId]
+    );
+  } catch (error) {
+    if (error?.code === "42703") {
+      const fallbackError = new Error(
+        "Treatment payment amounts are not available. Run npm run migrate:admin-dashboard-updates."
+      );
+      fallbackError.status = 503;
+      throw fallbackError;
+    }
+    throw error;
+  }
+
+  await db.query(
+    `UPDATE clinic_patient_records
+     SET updated_at = CURRENT_TIMESTAMP, updated_by = $2
+     WHERE id = $1`,
+    [recordId, actorId]
+  );
+
+  return mapClinicalTreatment(result.rows[0]);
+}
+
 async function createClinicalRecord(db, input, actor = {}) {
   const firstName = stringValue(input.firstName, 80);
   const lastName = stringValue(input.lastName, 80);
@@ -394,9 +524,77 @@ async function createClinicalRecord(db, input, actor = {}) {
   return mapClinicalRecord(result.rows[0]);
 }
 
+async function syncLinkedProfileDemographics(db, record) {
+  if (!record?.linkedUserId) return;
+  const linkedUserId = String(record.linkedUserId);
+  const dateOfBirth =
+    record.dateOfBirth instanceof Date
+      ? record.dateOfBirth.toISOString().slice(0, 10)
+      : stringValue(record.dateOfBirth, 10);
+  const gender = stringValue(record.gender, 40);
+
+  try {
+    await db.query(
+      `UPDATE patient_portal_profiles
+       SET date_of_birth = COALESCE($1::date, date_of_birth),
+           birth_date = COALESCE($1::date, birth_date),
+           gender = COALESCE($2, gender),
+           updated_at = CURRENT_TIMESTAMP
+       WHERE user_id::text = $3`,
+      [dateOfBirth, gender, linkedUserId]
+    );
+  } catch (error) {
+    if (error?.code === "42703") {
+      await db
+        .query(
+          `UPDATE patient_portal_profiles
+           SET date_of_birth = COALESCE($1::date, date_of_birth),
+               gender = COALESCE($2, gender),
+               updated_at = CURRENT_TIMESTAMP
+           WHERE user_id::text = $3`,
+          [dateOfBirth, gender, linkedUserId]
+        )
+        .catch((inner) => {
+          if (inner?.code !== "42P01" && inner?.code !== "42703") throw inner;
+        });
+      return;
+    }
+    if (error?.code !== "42P01") throw error;
+  }
+}
+
+function deriveDateOfBirthFromAge(ageYears, existingDob = null) {
+  const age = Number(ageYears);
+  if (!Number.isInteger(age) || age < 0 || age > 120) {
+    const error = new Error("Age must be a whole number between 0 and 120.");
+    error.status = 400;
+    throw error;
+  }
+
+  const today = new Date();
+  let month = 0;
+  let day = 1;
+  if (existingDob) {
+    const parsed = new Date(
+      existingDob instanceof Date ? existingDob : `${String(existingDob).slice(0, 10)}T00:00:00`
+    );
+    if (!Number.isNaN(parsed.getTime())) {
+      month = parsed.getUTCMonth();
+      day = parsed.getUTCDate();
+    }
+  }
+  const year = today.getFullYear() - age;
+  const derived = new Date(Date.UTC(year, month, day));
+  return derived.toISOString().slice(0, 10);
+}
+
 async function updateClinicalRecord(db, recordId, input, actor = {}) {
   const existing = await db.query(
-    `SELECT id FROM clinic_patient_records WHERE id = $1 AND COALESCE(is_archived, FALSE) = FALSE LIMIT 1`,
+    `SELECT *
+     FROM clinic_patient_records
+     WHERE id = $1
+       AND COALESCE(is_archived, FALSE) = FALSE
+     LIMIT 1`,
     [recordId]
   );
   if (!existing.rows.length) {
@@ -405,21 +603,60 @@ async function updateClinicalRecord(db, recordId, input, actor = {}) {
     throw error;
   }
 
+  const current = existing.rows[0];
   const fields = [];
   const params = [];
+  const payload = { ...input };
+
+  if (Object.prototype.hasOwnProperty.call(payload, "age") && !Object.prototype.hasOwnProperty.call(payload, "dateOfBirth")) {
+    payload.dateOfBirth = deriveDateOfBirthFromAge(payload.age, current.date_of_birth);
+  }
+
   const mapping = {
-    firstName: ["first_name", stringValue(input.firstName, 80)],
-    lastName: ["last_name", stringValue(input.lastName, 80)],
-    email: ["email", Object.prototype.hasOwnProperty.call(input, "email") ? normalizeEmail(input.email) : undefined],
-    phone: ["phone", Object.prototype.hasOwnProperty.call(input, "phone") ? normalizePhone(input.phone) : undefined],
-    dateOfBirth: ["date_of_birth", Object.prototype.hasOwnProperty.call(input, "dateOfBirth") ? stringValue(input.dateOfBirth, 10) : undefined],
-    gender: ["gender", Object.prototype.hasOwnProperty.call(input, "gender") ? stringValue(input.gender, 40) : undefined],
-    address: ["address", Object.prototype.hasOwnProperty.call(input, "address") ? stringValue(input.address, 500) : undefined],
-    notes: ["notes", Object.prototype.hasOwnProperty.call(input, "notes") ? stringValue(input.notes, 2000) : undefined],
+    firstName: ["first_name", stringValue(payload.firstName, 80)],
+    lastName: ["last_name", stringValue(payload.lastName, 80)],
+    email: [
+      "email",
+      Object.prototype.hasOwnProperty.call(payload, "email") ? normalizeEmail(payload.email) : undefined,
+    ],
+    phone: [
+      "phone",
+      Object.prototype.hasOwnProperty.call(payload, "phone") ? normalizePhone(payload.phone) : undefined,
+    ],
+    dateOfBirth: [
+      "date_of_birth",
+      Object.prototype.hasOwnProperty.call(payload, "dateOfBirth")
+        ? stringValue(payload.dateOfBirth, 10)
+        : undefined,
+    ],
+    gender: [
+      "gender",
+      Object.prototype.hasOwnProperty.call(payload, "gender") ? stringValue(payload.gender, 40) : undefined,
+    ],
+    address: [
+      "address",
+      Object.prototype.hasOwnProperty.call(payload, "address") ? stringValue(payload.address, 500) : undefined,
+    ],
+    notes: [
+      "notes",
+      Object.prototype.hasOwnProperty.call(payload, "notes") ? stringValue(payload.notes, 2000) : undefined,
+    ],
+    nextAppointmentDate: [
+      "next_appointment_date",
+      Object.prototype.hasOwnProperty.call(payload, "nextAppointmentDate")
+        ? stringValue(payload.nextAppointmentDate, 10)
+        : undefined,
+    ],
+    nextAppointmentTime: [
+      "next_appointment_time",
+      Object.prototype.hasOwnProperty.call(payload, "nextAppointmentTime")
+        ? normalizeAppointmentTime(payload.nextAppointmentTime)
+        : undefined,
+    ],
   };
 
   for (const [key, [column, value]] of Object.entries(mapping)) {
-    if (!Object.prototype.hasOwnProperty.call(input, key)) continue;
+    if (!Object.prototype.hasOwnProperty.call(payload, key)) continue;
     if ((key === "firstName" || key === "lastName") && !value) {
       const error = new Error(`${key} cannot be empty.`);
       error.status = 400;
@@ -427,6 +664,11 @@ async function updateClinicalRecord(db, recordId, input, actor = {}) {
     }
     if (key === "dateOfBirth" && value && !isIsoDate(value)) {
       const error = new Error("Provide a valid date of birth (YYYY-MM-DD).");
+      error.status = 400;
+      throw error;
+    }
+    if (key === "nextAppointmentDate" && value && !isIsoDate(value)) {
+      const error = new Error("Provide a valid next appointment date (YYYY-MM-DD).");
       error.status = 400;
       throw error;
     }
@@ -445,14 +687,54 @@ async function updateClinicalRecord(db, recordId, input, actor = {}) {
   fields.push("updated_at = CURRENT_TIMESTAMP");
   params.push(recordId);
 
-  const result = await db.query(
-    `UPDATE clinic_patient_records
-     SET ${fields.join(", ")}
-     WHERE id = $${params.length}
-     RETURNING *`,
-    params
-  );
-  return mapClinicalRecord(result.rows[0]);
+  let result;
+  try {
+    result = await db.query(
+      `UPDATE clinic_patient_records
+       SET ${fields.join(", ")}
+       WHERE id = $${params.length}
+       RETURNING *`,
+      params
+    );
+  } catch (error) {
+    if (error?.code === "42703" && /next_appointment/.test(String(error.message || ""))) {
+      const fallbackError = new Error(
+        "Next appointment fields are not available. Run npm run migrate:clinical-next-appointment."
+      );
+      fallbackError.status = 503;
+      throw fallbackError;
+    }
+    throw error;
+  }
+
+  const updatedRow = result.rows[0];
+  let age = null;
+  if (updatedRow.date_of_birth) {
+    const dob =
+      updatedRow.date_of_birth instanceof Date
+        ? updatedRow.date_of_birth
+        : new Date(`${String(updatedRow.date_of_birth).slice(0, 10)}T00:00:00`);
+    if (!Number.isNaN(dob.getTime())) {
+      const today = new Date();
+      age = today.getFullYear() - dob.getFullYear();
+      const monthDiff = today.getMonth() - dob.getMonth();
+      if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) {
+        age -= 1;
+      }
+    }
+  }
+
+  const mapped = mapClinicalRecord(updatedRow, { age });
+
+  if (
+    Object.prototype.hasOwnProperty.call(payload, "dateOfBirth") ||
+    Object.prototype.hasOwnProperty.call(payload, "gender") ||
+    Object.prototype.hasOwnProperty.call(payload, "age")
+  ) {
+    await syncLinkedProfileDemographics(db, mapped);
+  }
+
+  return mapped;
 }
 
 async function archiveClinicalRecord(db, recordId, actor = {}) {
@@ -957,21 +1239,26 @@ module.exports = {
   getClinicalRecord,
   listLinkedAppointments,
   resolveNextAppointment,
+  resolveClinicalNextAppointment,
   createClinicalRecord,
   updateClinicalRecord,
   archiveClinicalRecord,
   addClinicalTreatment,
   updateClinicalTreatment,
+  updateTreatmentAmountPaid,
   completeInProgressTreatmentForUser,
   mapClinicalTreatment,
   verifyClinicalRecordIdentity,
   linkClinicalRecordsToUser,
   findOrCreateClinicalRecordForUser,
   mapClinicalRecord,
+  formatAgeSex,
   isMissingRelation,
   stringValue,
   normalizeEmail,
   normalizePhone,
   isIsoDate,
   parseMoneyAmount,
+  normalizeAppointmentTime,
+  deriveDateOfBirthFromAge,
 };

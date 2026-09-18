@@ -23,12 +23,24 @@ const emptyTreatment = {
   toothNumber: "",
   diagnosisNotes: "",
   amountCharged: "",
-  amountPaid: "",
   notes: "",
+};
+
+const emptyAgeSexForm = {
+  age: "",
+  gender: "",
+  dateOfBirth: "",
 };
 
 function formatMoney(value) {
   return `₱${Number(value || 0).toFixed(2)}`;
+}
+
+function formatAgeSex(patient) {
+  if (patient?.ageSex) return patient.ageSex;
+  const age = patient?.age != null && patient.age !== "" ? patient.age : "—";
+  const sex = patient?.gender || "—";
+  return `${age} / ${sex}`;
 }
 
 function treatmentBalance(treatment) {
@@ -38,10 +50,16 @@ function treatmentBalance(treatment) {
   return Math.round((Number(treatment?.amountCharged || 0) - Number(treatment?.amountPaid || 0)) * 100) / 100;
 }
 
-function nextAppointmentLabel(treatment, fallbackAppointment) {
-  const next = treatment?.nextAppointment || fallbackAppointment;
-  if (!next?.date) return "No scheduled appointment";
-  return formatDentistDate(next.date);
+function nextAppointmentLabel(treatment, fallbackAppointment, patient) {
+  const next =
+    treatment?.nextAppointment ||
+    fallbackAppointment ||
+    (patient?.nextAppointmentDate
+      ? { date: patient.nextAppointmentDate, time: patient.nextAppointmentTime }
+      : null);
+  if (!next?.date) return "—";
+  const dateLabel = formatDentistDate(next.date);
+  return next.time ? `${dateLabel} ${String(next.time).slice(0, 5)}` : dateLabel;
 }
 
 export function DentistRecordsPage() {
@@ -56,6 +74,8 @@ export function DentistRecordsPage() {
   const [detail, setDetail] = useState(null);
   const [xrays, setXrays] = useState([]);
   const [treatmentForm, setTreatmentForm] = useState(emptyTreatment);
+  const [ageSexOpen, setAgeSexOpen] = useState(false);
+  const [ageSexForm, setAgeSexForm] = useState(emptyAgeSexForm);
 
   const load = useCallback(async () => {
     try {
@@ -104,10 +124,50 @@ export function DentistRecordsPage() {
   async function viewPatient(patient) {
     try {
       setTreatmentForm(emptyTreatment);
+      setAgeSexOpen(false);
       await refreshPatientDetail(patient.id);
       setError("");
     } catch (viewError) {
       setError(viewError.message);
+    }
+  }
+
+  function openAgeSexEditor() {
+    if (!detail?.patient) return;
+    setAgeSexForm({
+      age: detail.patient.age != null ? String(detail.patient.age) : "",
+      gender: detail.patient.gender || "",
+      dateOfBirth: detail.patient.dateOfBirth
+        ? String(detail.patient.dateOfBirth).slice(0, 10)
+        : "",
+    });
+    setAgeSexOpen(true);
+  }
+
+  async function saveAgeSex(event) {
+    event.preventDefault();
+    if (!detail?.patient?.id) return;
+    setBusy(true);
+    setError("");
+    setSuccess("");
+    try {
+      const payload = {
+        gender: ageSexForm.gender,
+      };
+      if (ageSexForm.dateOfBirth) {
+        payload.dateOfBirth = ageSexForm.dateOfBirth;
+      } else if (ageSexForm.age !== "") {
+        payload.age = Number(ageSexForm.age);
+      }
+      const response = await api.updateDentistPatient(detail.patient.id, payload);
+      setSuccess(response.message || "Age / Sex updated and synced to the patient profile.");
+      setAgeSexOpen(false);
+      await refreshPatientDetail(detail.patient.id);
+      await load();
+    } catch (saveError) {
+      setError(saveError.message);
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -126,12 +186,12 @@ export function DentistRecordsPage() {
         toothNumber: treatmentForm.toothNumber || undefined,
         diagnosisNotes: treatmentForm.diagnosisNotes,
         amountCharged: treatmentForm.amountCharged === "" ? 0 : Number(treatmentForm.amountCharged),
-        amountPaid: treatmentForm.amountPaid === "" ? 0 : Number(treatmentForm.amountPaid),
         notes: treatmentForm.notes,
       });
       setSuccess(response.message || "Treatment record saved successfully.");
       setTreatmentForm(emptyTreatment);
       await refreshPatientDetail(detail.patient.id);
+      await load();
     } catch (saveError) {
       setError(saveError.message);
     } finally {
@@ -201,34 +261,45 @@ export function DentistRecordsPage() {
             <table className="dentist-table">
               <thead>
                 <tr>
-                  <th>Patient Profile ID</th>
-                  <th>Full Name</th>
-                  <th>Phone Contact</th>
+                  <th>Patient</th>
                   <th>Age / Sex</th>
-                  <th>Last Treatment Action</th>
-                  <th />
+                  <th>Treatment</th>
+                  <th>Treatment Date</th>
+                  <th>Amount Paid</th>
+                  <th>Next Appointment</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {patients.map((patient) => (
                   <tr key={patient.id}>
                     <td>
-                      <code>{patient.recordCode || patient.profileCode || patient.id}</code>
-                    </td>
-                    <td>
                       <strong>{patient.fullName || patient.patientName}</strong>
+                      <small>
+                        <code>{patient.recordCode || patient.profileCode || patient.id}</code>
+                      </small>
                     </td>
-                    <td>{patient.phone || "—"}</td>
+                    <td>{formatAgeSex(patient)}</td>
+                    <td>{patient.lastTreatment || patient.lastTreatmentName || "—"}</td>
                     <td>
-                      {patient.ageSex || [patient.age ?? "—", patient.gender || "—"].join(" / ")}
+                      {formatDentistDate(
+                        patient.lastTreatmentDate || patient.lastVisit || patient.lastTreatment,
+                        "—"
+                      )}
                     </td>
                     <td>
-                      <span className="dentist-date-pill">
-                        {formatDentistDate(
-                          patient.lastTreatmentDate || patient.lastTreatment,
-                          "No visits yet"
-                        )}
-                      </span>
+                      {patient.amountPaid != null && patient.amountPaid !== ""
+                        ? formatMoney(patient.amountPaid)
+                        : "—"}
+                    </td>
+                    <td>
+                      {patient.nextAppointmentDate
+                        ? `${formatDentistDate(patient.nextAppointmentDate)}${
+                            patient.nextAppointmentTime
+                              ? ` ${String(patient.nextAppointmentTime).slice(0, 5)}`
+                              : ""
+                          }`
+                        : "—"}
                     </td>
                     <td>
                       <button
@@ -343,13 +414,82 @@ export function DentistRecordsPage() {
               <strong>Email:</strong> {detail.patient.email || "—"}
             </p>
             <p>
-              <strong>Age / Sex:</strong>{" "}
-              {detail.patient.ageSex ||
-                `${detail.patient.age != null ? `${detail.patient.age} yrs` : "—"}${
-                  detail.patient.gender ? ` / ${detail.patient.gender}` : ""
-                }`}
+              <strong>Age / Sex:</strong> {formatAgeSex(detail.patient)}{" "}
+              <button
+                type="button"
+                className="button button--secondary button--compact"
+                onClick={openAgeSexEditor}
+              >
+                Edit
+              </button>
+            </p>
+            <p>
+              <strong>Next Appointment (staff):</strong>{" "}
+              {nextAppointmentLabel(null, detail.nextAppointment, detail.patient)}
             </p>
           </div>
+
+          {ageSexOpen ? (
+            <form className="dentist-form" onSubmit={saveAgeSex} style={{ marginBottom: "1rem" }}>
+              <div className="dentist-panel__heading">
+                <div>
+                  <span className="eyebrow">Demographics</span>
+                  <h2>Edit Age / Sex</h2>
+                </div>
+              </div>
+              <p className="muted-copy">
+                Updates this dental record and syncs to the linked patient profile used by Staff.
+              </p>
+              <div className="field-grid field-grid--two">
+                <label className="field">
+                  <span>Age</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="120"
+                    value={ageSexForm.age}
+                    onChange={(event) =>
+                      setAgeSexForm((current) => ({ ...current, age: event.target.value }))
+                    }
+                    placeholder="21"
+                  />
+                </label>
+                <label className="field">
+                  <span>Sex</span>
+                  <input
+                    value={ageSexForm.gender}
+                    onChange={(event) =>
+                      setAgeSexForm((current) => ({ ...current, gender: event.target.value }))
+                    }
+                    placeholder="Male / Female"
+                    required
+                  />
+                </label>
+                <label className="field">
+                  <span>Date of Birth (optional)</span>
+                  <input
+                    type="date"
+                    value={ageSexForm.dateOfBirth}
+                    onChange={(event) =>
+                      setAgeSexForm((current) => ({ ...current, dateOfBirth: event.target.value }))
+                    }
+                  />
+                </label>
+              </div>
+              <div className="dentist-modal__actions">
+                <button
+                  type="button"
+                  className="button button--secondary"
+                  onClick={() => setAgeSexOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button className="button button--primary" disabled={busy}>
+                  {busy ? "Saving…" : "Save Age / Sex"}
+                </button>
+              </div>
+            </form>
+          ) : null}
 
           <DentalChart
             patientId={detail.patient.id}
@@ -406,10 +546,14 @@ export function DentistRecordsPage() {
           <section className="dentist-treatment-form">
             <div className="dentist-panel__heading">
               <div>
-                <span className="eyebrow">Chairside note</span>
+                <span className="eyebrow">Clinical information</span>
                 <h2>Add treatment</h2>
               </div>
             </div>
+            <p className="muted-copy">
+              Enter diagnosis, procedure, and clinical notes. Amount paid and next appointment are
+              managed by Staff on this same shared record.
+            </p>
             <form className="dentist-form" onSubmit={saveTreatment}>
               <div className="field-grid field-grid--two">
                 <label className="field">
@@ -424,7 +568,7 @@ export function DentistRecordsPage() {
                   />
                 </label>
                 <label className="field">
-                  <span>Date</span>
+                  <span>Treatment Date</span>
                   <input
                     type="date"
                     value={treatmentForm.treatmentDate}
@@ -437,7 +581,7 @@ export function DentistRecordsPage() {
                   />
                 </label>
                 <label className="field">
-                  <span>Amount Charged</span>
+                  <span>Treatment Cost (Amount Charged)</span>
                   <input
                     type="number"
                     min="0"
@@ -447,22 +591,6 @@ export function DentistRecordsPage() {
                       setTreatmentForm((current) => ({
                         ...current,
                         amountCharged: event.target.value,
-                      }))
-                    }
-                    placeholder="1500"
-                  />
-                </label>
-                <label className="field">
-                  <span>Amount Paid</span>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={treatmentForm.amountPaid}
-                    onChange={(event) =>
-                      setTreatmentForm((current) => ({
-                        ...current,
-                        amountPaid: event.target.value,
                       }))
                     }
                     placeholder="1500"
@@ -511,7 +639,7 @@ export function DentistRecordsPage() {
                 </label>
               </div>
               <label className="field">
-                <span>Additional notes</span>
+                <span>Dentist notes</span>
                 <textarea
                   rows="2"
                   value={treatmentForm.notes}
@@ -529,7 +657,7 @@ export function DentistRecordsPage() {
           <section className="treatment-record">
             <div className="treatment-record__header">
               <div>
-                <span className="eyebrow">Patient clinical ledger</span>
+                <span className="eyebrow">Shared patient dental record</span>
                 <h2>Treatment Record</h2>
               </div>
             </div>
@@ -540,16 +668,12 @@ export function DentistRecordsPage() {
                 <strong>{detail.patient.fullName || detail.patient.patientName || "—"}</strong>
               </p>
               <p>
-                <small>Age</small>
-                <strong>
-                  {detail.patient.age != null && detail.patient.age !== ""
-                    ? detail.patient.age
-                    : "—"}
-                </strong>
+                <small>Age / Sex</small>
+                <strong>{formatAgeSex(detail.patient)}</strong>
               </p>
               <p>
-                <small>Gender</small>
-                <strong>{detail.patient.gender || "—"}</strong>
+                <small>Contact</small>
+                <strong>{detail.patient.phone || detail.patient.email || "—"}</strong>
               </p>
             </div>
 
@@ -561,11 +685,12 @@ export function DentistRecordsPage() {
                       <th>Date</th>
                       <th>Tooth No/s</th>
                       <th>Procedure</th>
+                      <th>Diagnosis</th>
                       <th>Dentist</th>
                       <th>Amount Charged</th>
-                      <th>Amount Paid</th>
+                      <th>Amount Paid (staff)</th>
                       <th>Balance</th>
-                      <th>Next Appt.</th>
+                      <th>Next Appt. (staff)</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -574,11 +699,12 @@ export function DentistRecordsPage() {
                         <td>{formatDentistDate(treatment.date || treatment.treatmentDate)}</td>
                         <td>{treatment.toothNumber || treatment.tooth_number || "—"}</td>
                         <td>{treatment.name || treatment.treatment || "—"}</td>
+                        <td>{treatment.diagnosisNotes || "—"}</td>
                         <td>{treatment.dentist || "—"}</td>
                         <td>{formatMoney(treatment.amountCharged)}</td>
                         <td>{formatMoney(treatment.amountPaid)}</td>
                         <td>{formatMoney(treatmentBalance(treatment))}</td>
-                        <td>{nextAppointmentLabel(treatment, detail.nextAppointment)}</td>
+                        <td>{nextAppointmentLabel(treatment, detail.nextAppointment, detail.patient)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -587,6 +713,18 @@ export function DentistRecordsPage() {
                 <p className="muted-copy">No treatments on file.</p>
               )}
             </div>
+            {(detail.treatments || []).some((treatment) => treatment.notes) ? (
+              <div style={{ marginTop: "1rem" }}>
+                <h3 className="admin-subheading">Dentist notes</h3>
+                {(detail.treatments || [])
+                  .filter((treatment) => treatment.notes)
+                  .map((treatment) => (
+                    <p key={`note-${treatment.id}`} className="muted-copy">
+                      <strong>{treatment.name || treatment.treatment}:</strong> {treatment.notes}
+                    </p>
+                  ))}
+              </div>
+            ) : null}
           </section>
         </DentistModal>
       ) : null}
