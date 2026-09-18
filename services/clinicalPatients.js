@@ -336,19 +336,37 @@ async function createClinicalRecord(db, input, actor = {}) {
 
   let linkedUserId = null;
   if (email || phone) {
-    const linked = await db.query(
-      `SELECT id
-       FROM users
-       WHERE LOWER(role) = 'patient'
-         AND COALESCE(is_archived, FALSE) = FALSE
-         AND (
-           ($1::text IS NOT NULL AND LOWER(email) = LOWER($1))
-           OR ($2::text IS NOT NULL AND phone = $2)
-         )
-       LIMIT 1`,
-      [email, phone]
-    );
-    linkedUserId = linked.rows[0]?.id || null;
+    try {
+      const linked = await withSavepoint(db, "link_clinical_user", async () =>
+        db.query(
+          `SELECT id
+           FROM users
+           WHERE LOWER(role) = 'patient'
+             AND COALESCE(is_archived, FALSE) = FALSE
+             AND (
+               ($1::text IS NOT NULL AND LOWER(email) = LOWER($1))
+               OR ($2::text IS NOT NULL AND phone = $2)
+             )
+           LIMIT 1`,
+          [email, phone]
+        )
+      );
+      linkedUserId = linked.rows[0]?.id || null;
+    } catch (error) {
+      if (error?.code !== "42703") throw error;
+      const linked = await db.query(
+        `SELECT id
+         FROM users
+         WHERE LOWER(role) = 'patient'
+           AND (
+             ($1::text IS NOT NULL AND LOWER(email) = LOWER($1))
+             OR ($2::text IS NOT NULL AND phone = $2)
+           )
+         LIMIT 1`,
+        [email, phone]
+      );
+      linkedUserId = linked.rows[0]?.id || null;
+    }
   }
 
   const result = await db.query(
@@ -721,14 +739,41 @@ async function findOrCreateClinicalRecordForUser(db, userId, actor = {}) {
     return mapClinicalRecord(existing.rows[0]);
   }
 
-  const userResult = await db.query(
-    `SELECT id, first_name, last_name, email, phone, date_of_birth, gender
-     FROM users
-     WHERE id::text = $1
-     LIMIT 1`,
-    [linkedUserId]
-  );
-  const user = userResult.rows[0];
+  // users has name/contact fields; DOB/gender live on patient_portal_profiles.
+  let user;
+  try {
+    const userResult = await withSavepoint(db, "load_user_with_profile", async () =>
+      db.query(
+        `SELECT account.id,
+                account.first_name,
+                account.last_name,
+                account.email,
+                account.phone,
+                profile.date_of_birth,
+                profile.gender
+         FROM users AS account
+         LEFT JOIN patient_portal_profiles AS profile
+           ON profile.user_id::text = account.id::text
+         WHERE account.id::text = $1
+         LIMIT 1`,
+        [linkedUserId]
+      )
+    );
+    user = userResult.rows[0];
+  } catch (error) {
+    if (error?.code !== "42P01" && error?.code !== "42703") {
+      throw error;
+    }
+    const fallback = await db.query(
+      `SELECT id, first_name, last_name, email, phone
+       FROM users
+       WHERE id::text = $1
+       LIMIT 1`,
+      [linkedUserId]
+    );
+    user = fallback.rows[0];
+  }
+
   if (!user) {
     const error = new Error("Patient account not found for this queue entry.");
     error.status = 404;
@@ -743,33 +788,30 @@ async function findOrCreateClinicalRecordForUser(db, userId, actor = {}) {
   } else if (typeof user.date_of_birth === "string") {
     dateOfBirth = user.date_of_birth.slice(0, 10);
   }
-  const record = await createClinicalRecord(
-    db,
-    {
+
+  // Insert directly with linked_user_id to avoid createClinicalRecord's users.is_archived probe.
+  const result = await db.query(
+    `INSERT INTO clinic_patient_records (
+       record_code, first_name, last_name, email, phone, date_of_birth, gender,
+       notes, linked_user_id, created_by, created_by_role, updated_by
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $10)
+     RETURNING *`,
+    [
+      generateRecordCode(),
       firstName,
       lastName,
-      email: typeof user.email === "string" ? user.email : null,
-      phone: user.phone == null ? null : String(user.phone),
-      dateOfBirth,
-      gender: typeof user.gender === "string" ? user.gender : null,
-      notes: "Auto-created from dentist start-treatment queue flow.",
-    },
-    actor
+      normalizeEmail(typeof user.email === "string" ? user.email : null),
+      normalizePhone(user.phone == null ? null : String(user.phone)),
+      dateOfBirth && isIsoDate(dateOfBirth) ? dateOfBirth : null,
+      stringValue(typeof user.gender === "string" ? user.gender : null, 40),
+      "Auto-created from dentist start-treatment queue flow.",
+      linkedUserId,
+      actor.id ? String(actor.id) : null,
+      actor.role || null,
+    ]
   );
 
-  if (!record.linkedUserId || String(record.linkedUserId) !== linkedUserId) {
-    await db.query(
-      `UPDATE clinic_patient_records
-       SET linked_user_id = $1,
-           updated_at = CURRENT_TIMESTAMP,
-           updated_by = $2
-       WHERE id = $3`,
-      [linkedUserId, actor.id ? String(actor.id) : null, record.id]
-    );
-    record.linkedUserId = linkedUserId;
-  }
-
-  return record;
+  return mapClinicalRecord(result.rows[0]);
 }
 
 module.exports = {
