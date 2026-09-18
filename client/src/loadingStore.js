@@ -14,7 +14,7 @@ let shownAt = 0;
 
 const API_SHOW_DELAY_MS = 220;
 const ROUTE_SHOW_DELAY_MS = 0;
-const MIN_VISIBLE_MS = 240;
+const MIN_VISIBLE_MS = 280;
 
 function notify() {
   const snapshot = getLoadingSnapshot();
