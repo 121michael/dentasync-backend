@@ -200,6 +200,13 @@ async function diagnoseMissingCheckInAppointment(client, patient) {
   };
 }
 
+function defaultWalkInDentist() {
+  return {
+    dentistId: "dr-sarah-cruz",
+    dentistName: "Dr. Sarah Cruz",
+  };
+}
+
 async function resolveWalkInDentist(client) {
   const catalogDentists = [
     { id: "dr-sarah-cruz", name: "Dr. Sarah Cruz" },
@@ -223,19 +230,21 @@ async function resolveWalkInDentist(client) {
       )
     );
     if (linked.rows[0]?.catalog_dentist_id) {
-      const catalogId = String(linked.rows[0].catalog_dentist_id);
-      const catalog = catalogDentists.find((item) => item.id === catalogId);
-      const fullName = linked.rows[0].full_name || "";
-      return {
-        dentistId: catalogId,
-        dentistName: catalog?.name || (fullName ? `Dr. ${fullName}` : "Clinic Dentist"),
-      };
+      const catalogId = String(linked.rows[0].catalog_dentist_id).trim();
+      if (catalogId) {
+        const catalog = catalogDentists.find((item) => item.id === catalogId);
+        const fullName = linked.rows[0].full_name || "";
+        return {
+          dentistId: catalogId,
+          dentistName: catalog?.name || (fullName ? `Dr. ${fullName}` : "Clinic Dentist"),
+        };
+      }
     }
   } catch {
     // Fall through to catalog defaults when dentist profiles are unavailable.
   }
 
-  return catalogDentists[0];
+  return defaultWalkInDentist();
 }
 
 async function nextOpenWalkInSlot(client, dentistId, appointmentDate, preferredTime) {
@@ -265,14 +274,17 @@ async function nextOpenWalkInSlot(client, dentistId, appointmentDate, preferredT
 
 async function ensureAppointmentLinkedToCatalogDentist(client, appointment) {
   if (!appointment) return appointment;
-  const dentistId = String(appointment.dentist_id || "");
-  if (dentistId && !dentistId.startsWith("walk-in-")) {
+  const currentDentistId = String(appointment.dentist_id || "");
+  if (currentDentistId && !currentDentistId.startsWith("walk-in-")) {
     return appointment;
   }
   const dentist = await resolveWalkInDentist(client);
+  const fallback = defaultWalkInDentist();
+  const catalogDentistId = dentist.dentistId || fallback.dentistId;
+  const catalogDentistName = dentist.dentistName || fallback.dentistName;
   const slot = await nextOpenWalkInSlot(
     client,
-    dentist.dentistId,
+    catalogDentistId,
     appointment.appointment_date,
     appointment.appointment_time || "09:00:00"
   );
@@ -284,7 +296,7 @@ async function ensureAppointmentLinkedToCatalogDentist(client, appointment) {
          updated_at = CURRENT_TIMESTAMP
      WHERE id = $4
      RETURNING *`,
-    [dentist.dentistId, dentist.dentistName, slot, appointment.id]
+    [catalogDentistId, catalogDentistName, slot, appointment.id]
   );
   const row = updated.rows[0] || appointment;
   row.patient_name = appointment.patient_name;
@@ -303,9 +315,12 @@ async function createWalkInAppointmentForPatient(client, patient) {
   const appointmentDate = clock.rows[0].clinic_today;
   const preferredTime = clock.rows[0].clinic_time;
   const dentist = await resolveWalkInDentist(client);
+  const fallback = defaultWalkInDentist();
+  const dentistId = dentist.dentistId || fallback.dentistId;
+  const dentistName = dentist.dentistName || fallback.dentistName;
   const appointmentTime = await nextOpenWalkInSlot(
     client,
-    dentist.dentistId,
+    dentistId,
     appointmentDate,
     preferredTime
   );
@@ -321,8 +336,8 @@ async function createWalkInAppointmentForPatient(client, patient) {
      RETURNING *`,
     [
       String(patient.id),
-      dentist.dentistId,
-      dentist.dentistName,
+      dentistId,
+      dentistName,
       appointmentDate,
       appointmentTime,
       800,
