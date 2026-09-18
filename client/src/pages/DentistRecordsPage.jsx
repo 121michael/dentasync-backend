@@ -132,8 +132,18 @@ export function DentistRecordsPage() {
     }
   }
 
+  function isProfileLocked(patient = detail?.patient) {
+    return Boolean(patient?.profileLocked || patient?.accountLinked || patient?.linkedUserId);
+  }
+
   function openAgeSexEditor() {
     if (!detail?.patient) return;
+    if (isProfileLocked(detail.patient)) {
+      setError(
+        "Basic patient information comes from the patient account profile and cannot be edited here."
+      );
+      return;
+    }
     setAgeSexForm({
       age: detail.patient.age != null ? String(detail.patient.age) : "",
       gender: detail.patient.gender || "",
@@ -408,28 +418,65 @@ export function DentistRecordsPage() {
               <strong>Patient ID:</strong> {detail.patient.recordCode || detail.patient.id}
             </p>
             <p>
+              <strong>Name:</strong> {detail.patient.fullName || detail.patient.patientName}
+            </p>
+            <p>
+              <strong>Sex:</strong> {detail.patient.gender || "—"}
+            </p>
+            <p>
+              <strong>Age:</strong>{" "}
+              {detail.patient.age != null && detail.patient.age !== "" ? detail.patient.age : "—"}
+            </p>
+            <p>
+              <strong>Birthdate:</strong>{" "}
+              {detail.patient.dateOfBirth
+                ? formatDentistDate(detail.patient.dateOfBirth)
+                : "—"}
+            </p>
+            <p>
               <strong>Phone:</strong> {detail.patient.phone || "—"}
             </p>
             <p>
               <strong>Email:</strong> {detail.patient.email || "—"}
             </p>
             <p>
+              <strong>Record type:</strong>{" "}
+              {isProfileLocked(detail.patient) ? "Linked account (profile synced)" : "Walk-in clinical record"}
+            </p>
+            <p>
               <strong>Age / Sex:</strong> {formatAgeSex(detail.patient)}{" "}
-              <button
-                type="button"
-                className="button button--secondary button--compact"
-                onClick={openAgeSexEditor}
-              >
-                Edit
-              </button>
+              {!isProfileLocked(detail.patient) ? (
+                <button
+                  type="button"
+                  className="button button--secondary button--compact"
+                  onClick={openAgeSexEditor}
+                >
+                  Edit
+                </button>
+              ) : null}
             </p>
             <p>
               <strong>Next Appointment (staff):</strong>{" "}
               {nextAppointmentLabel(null, detail.nextAppointment, detail.patient)}
             </p>
+            <p>
+              <strong>Amount Paid (staff):</strong>{" "}
+              {detail.patient.amountPaid != null && detail.patient.amountPaid !== ""
+                ? formatMoney(detail.patient.amountPaid)
+                : detail.treatments?.[0]?.amountPaid != null
+                  ? formatMoney(detail.treatments[0].amountPaid)
+                  : "—"}
+            </p>
           </div>
 
-          {ageSexOpen ? (
+          {isProfileLocked(detail.patient) ? (
+            <p className="muted-copy">
+              Name, Sex, Age, Birthdate, and Phone are synced from the patient account profile and
+              are read-only here.
+            </p>
+          ) : null}
+
+          {ageSexOpen && !isProfileLocked(detail.patient) ? (
             <form className="dentist-form" onSubmit={saveAgeSex} style={{ marginBottom: "1rem" }}>
               <div className="dentist-panel__heading">
                 <div>
@@ -438,7 +485,7 @@ export function DentistRecordsPage() {
                 </div>
               </div>
               <p className="muted-copy">
-                Updates this dental record and syncs to the linked patient profile used by Staff.
+                For walk-in patients without an account. Prefer birthdate so age stays synchronized.
               </p>
               <div className="field-grid field-grid--two">
                 <label className="field">

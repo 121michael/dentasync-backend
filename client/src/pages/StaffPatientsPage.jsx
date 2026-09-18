@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Pencil, Plus, Search, Eye } from "lucide-react";
+import { Plus, Search, Eye } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
@@ -30,6 +30,19 @@ function formatAgeSex(patient) {
   return `${age} / ${sex}`;
 }
 
+function formatBirthdate(patient) {
+  const value = patient?.dateOfBirth || patient?.profile?.date_of_birth;
+  if (!value) return "—";
+  return formatStaffDate(value);
+}
+
+function recordStatus(patient) {
+  if (patient?.accountLinked || patient?.linkedUserId || patient?.accountStatus === "linked_account") {
+    return "linked_account";
+  }
+  return "clinical_record";
+}
+
 export function StaffPatientsPage() {
   const { pushToast, confirm } = useStaffUi();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -38,7 +51,6 @@ export function StaffPatientsPage() {
   const [patients, setPatients] = useState(null);
   const [detail, setDetail] = useState(null);
   const [formOpen, setFormOpen] = useState(false);
-  const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
@@ -108,24 +120,7 @@ export function StaffPatientsPage() {
   }
 
   function openCreate() {
-    setEditingId(null);
     setForm(emptyForm);
-    setFormOpen(true);
-  }
-
-  function openEdit(patient) {
-    setEditingId(patient.id);
-    setForm({
-      firstName: patient.firstName || "",
-      lastName: patient.lastName || "",
-      email: patient.email || "",
-      phone: patient.phone || "",
-      dateOfBirth: patient.dateOfBirth ? String(patient.dateOfBirth).slice(0, 10) : "",
-      gender: patient.gender || "",
-      address: patient.address || "",
-      emergencyContact: "",
-      medicalDentalNotes: patient.notes || "",
-    });
     setFormOpen(true);
   }
 
@@ -133,16 +128,10 @@ export function StaffPatientsPage() {
     event.preventDefault();
     setBusy("save");
     try {
-      if (editingId) {
-        await api.updateStaffPatient(editingId, form);
-        pushToast("Patient information updated.");
-      } else {
-        await api.createStaffPatient(form);
-        pushToast("Patient record created.");
-      }
+      await api.createStaffPatient(form);
+      pushToast("Walk-in patient record created (no login account).");
       setFormOpen(false);
       setForm(emptyForm);
-      setEditingId(null);
       await load();
     } catch (saveError) {
       pushToast(saveError.message, "error");
@@ -207,22 +196,10 @@ export function StaffPatientsPage() {
     }
   }
 
-  async function verifyPatient(patient, status = "verified") {
-    setBusy(`verify-${patient.id}`);
-    try {
-      const response = await api.verifyStaffPatient(patient.id, { status });
-      pushToast(response.message || "Patient verification updated.");
-      setDetail(response.patient);
-      await load();
-    } catch (verifyError) {
-      pushToast(verifyError.message, "error");
-    } finally {
-      setBusy("");
-    }
-  }
-
   if (error && !patients) return <ErrorState message={error} onRetry={load} />;
   if (!patients) return <LoadingState label="Loading patient records…" />;
+
+  const latestTreatment = detail?.treatments?.[0] || null;
 
   return (
     <div className="staff-page">
@@ -234,12 +211,12 @@ export function StaffPatientsPage() {
             <span className="eyebrow">Clinical registry</span>
             <h2>Patient Records</h2>
             <p>
-              View the same shared dental record the dentist updates. Enter Amount Paid and Next
-              Appointment here.
+              View the same shared dental record the dentist updates. Staff may edit Amount Paid and
+              Appointment only. Patient account verification is Admin-only.
             </p>
           </div>
           <button className="button button--primary" onClick={openCreate}>
-            <Plus size={16} /> Register Patient
+            <Plus size={16} /> Register Walk-in Patient
           </button>
         </div>
 
@@ -272,7 +249,7 @@ export function StaffPatientsPage() {
                   <th>Treatment Date</th>
                   <th>Amount Paid</th>
                   <th>Next Appointment</th>
-                  <th>Record Status</th>
+                  <th>Record Type</th>
                   <th>Action</th>
                 </tr>
               </thead>
@@ -307,9 +284,7 @@ export function StaffPatientsPage() {
                         : "—"}
                     </td>
                     <td>
-                      <StaffStatusBadge
-                        status={patient.staffVerificationStatus || patient.accountStatus || "clinical_record"}
-                      />
+                      <StaffStatusBadge status={recordStatus(patient)} />
                     </td>
                     <td>
                       <div className="staff-row-actions">
@@ -320,13 +295,6 @@ export function StaffPatientsPage() {
                         >
                           <Eye size={14} /> View
                         </button>
-                        <button
-                          className="button button--secondary button--compact"
-                          onClick={() => openEdit(patient)}
-                          disabled={Boolean(busy)}
-                        >
-                          <Pencil size={14} /> Edit
-                        </button>
                       </div>
                     </td>
                   </tr>
@@ -335,25 +303,85 @@ export function StaffPatientsPage() {
             </table>
           </div>
         ) : (
-          <EmptyState title="No patient records found" detail="Add a clinical patient record or adjust your search." />
+          <EmptyState
+            title="No patient records found"
+            detail="Add a walk-in clinical patient record or adjust your search."
+          />
         )}
       </section>
 
       {formOpen ? (
-        <StaffModal title={editingId ? "Edit patient information" : "Add new patient"} onClose={() => setFormOpen(false)} wide>
+        <StaffModal title="Register walk-in patient (no login account)" onClose={() => setFormOpen(false)} wide>
+          <p className="muted-copy">
+            Use this for patients without a portal account. Account-linked patients sync Name, Sex,
+            Age, Birthdate, and Phone from their verified profile automatically.
+          </p>
           <form className="admin-form" onSubmit={savePatient}>
             <div className="field-grid field-grid--two">
-              <label className="field"><span>First name</span><input required value={form.firstName} onChange={(e) => setForm((c) => ({ ...c, firstName: e.target.value }))} /></label>
-              <label className="field"><span>Last name</span><input required value={form.lastName} onChange={(e) => setForm((c) => ({ ...c, lastName: e.target.value }))} /></label>
-              <label className="field"><span>Email</span><input type="email" value={form.email} onChange={(e) => setForm((c) => ({ ...c, email: e.target.value }))} /></label>
-              <label className="field"><span>Phone</span><input value={form.phone} onChange={(e) => setForm((c) => ({ ...c, phone: e.target.value }))} /></label>
-              <label className="field"><span>Date of birth</span><input type="date" value={form.dateOfBirth} onChange={(e) => setForm((c) => ({ ...c, dateOfBirth: e.target.value }))} /></label>
-              <label className="field"><span>Sex / Gender</span><input value={form.gender} onChange={(e) => setForm((c) => ({ ...c, gender: e.target.value }))} /></label>
-              <label className="field field--full"><span>Address</span><input value={form.address} onChange={(e) => setForm((c) => ({ ...c, address: e.target.value }))} /></label>
-              <label className="field field--full"><span>Notes</span><textarea rows="3" value={form.medicalDentalNotes} onChange={(e) => setForm((c) => ({ ...c, medicalDentalNotes: e.target.value }))} /></label>
+              <label className="field">
+                <span>First name</span>
+                <input
+                  required
+                  value={form.firstName}
+                  onChange={(e) => setForm((c) => ({ ...c, firstName: e.target.value }))}
+                />
+              </label>
+              <label className="field">
+                <span>Last name</span>
+                <input
+                  required
+                  value={form.lastName}
+                  onChange={(e) => setForm((c) => ({ ...c, lastName: e.target.value }))}
+                />
+              </label>
+              <label className="field">
+                <span>Email</span>
+                <input
+                  type="email"
+                  value={form.email}
+                  onChange={(e) => setForm((c) => ({ ...c, email: e.target.value }))}
+                />
+              </label>
+              <label className="field">
+                <span>Phone</span>
+                <input
+                  value={form.phone}
+                  onChange={(e) => setForm((c) => ({ ...c, phone: e.target.value }))}
+                />
+              </label>
+              <label className="field">
+                <span>Date of birth</span>
+                <input
+                  type="date"
+                  value={form.dateOfBirth}
+                  onChange={(e) => setForm((c) => ({ ...c, dateOfBirth: e.target.value }))}
+                />
+              </label>
+              <label className="field">
+                <span>Sex / Gender</span>
+                <input
+                  value={form.gender}
+                  onChange={(e) => setForm((c) => ({ ...c, gender: e.target.value }))}
+                />
+              </label>
+              <label className="field field--full">
+                <span>Address</span>
+                <input
+                  value={form.address}
+                  onChange={(e) => setForm((c) => ({ ...c, address: e.target.value }))}
+                />
+              </label>
+              <label className="field field--full">
+                <span>Notes</span>
+                <textarea
+                  rows="3"
+                  value={form.medicalDentalNotes}
+                  onChange={(e) => setForm((c) => ({ ...c, medicalDentalNotes: e.target.value }))}
+                />
+              </label>
             </div>
             <button className="button button--primary" disabled={Boolean(busy)}>
-              {busy === "save" ? "Saving…" : "Save patient"}
+              {busy === "save" ? "Saving…" : "Create patient record"}
             </button>
           </form>
         </StaffModal>
@@ -362,26 +390,83 @@ export function StaffPatientsPage() {
       {detail ? (
         <StaffModal title="Shared patient dental record" onClose={() => setDetail(null)} wide>
           <div className="staff-detail-grid">
-            <p><small>Name</small><strong>{detail.fullName || detail.patientName}</strong></p>
-            <p><small>Record code</small><strong>{detail.recordCode || detail.id}</strong></p>
-            <p><small>Contact</small><strong>{detail.phone || detail.email || "—"}</strong></p>
-            <p><small>Age / Sex</small><strong>{formatAgeSex(detail)}</strong></p>
-            <p><small>Birth date</small><strong>{detail.dateOfBirth || detail.profile?.date_of_birth || "—"}</strong></p>
             <p>
-              <small>Verification</small>
+              <small>Record type</small>
               <strong>
-                <StaffStatusBadge status={detail.staffVerificationStatus || "pending"} />
+                <StaffStatusBadge status={recordStatus(detail)} />
               </strong>
+            </p>
+            <p>
+              <small>Record code</small>
+              <strong>{detail.recordCode || detail.id}</strong>
             </p>
           </div>
 
-          <h3 className="admin-subheading">Clinical treatment history (dentist)</h3>
+          <h3 className="admin-subheading">Patient Information</h3>
           <p className="muted-copy">
-            Read-only clinical fields from the dentist. Update Amount Paid below — changes sync to the
-            dentist vault automatically.
+            {detail.profileLocked || detail.accountLinked || detail.linkedUserId
+              ? "Synced from the patient account profile (read-only). Admin verifies accounts."
+              : "Walk-in clinical record (no login account). Profile fields are not editable by Staff."}
           </p>
-          <div className="staff-table-wrap">
-            {(detail.treatments || []).length ? (
+          <div className="staff-detail-grid">
+            <p>
+              <small>Name</small>
+              <strong>{detail.fullName || detail.patientName}</strong>
+            </p>
+            <p>
+              <small>Sex</small>
+              <strong>{detail.gender || detail.profile?.gender || "—"}</strong>
+            </p>
+            <p>
+              <small>Age</small>
+              <strong>{detail.age != null && detail.age !== "" ? detail.age : "—"}</strong>
+            </p>
+            <p>
+              <small>Birthdate</small>
+              <strong>{formatBirthdate(detail)}</strong>
+            </p>
+            <p>
+              <small>Phone</small>
+              <strong>{detail.phone || "—"}</strong>
+            </p>
+            <p>
+              <small>Email</small>
+              <strong>{detail.email || "—"}</strong>
+            </p>
+          </div>
+
+          <h3 className="admin-subheading">Dental Record</h3>
+          <p className="muted-copy">
+            Read-only clinical fields from the dentist. Staff cannot edit diagnosis, treatment, or
+            notes.
+          </p>
+          {latestTreatment ? (
+            <div className="staff-detail-grid">
+              <p>
+                <small>Diagnosis</small>
+                <strong>{latestTreatment.diagnosisNotes || "—"}</strong>
+              </p>
+              <p>
+                <small>Treatment</small>
+                <strong>{latestTreatment.treatment || latestTreatment.name || "—"}</strong>
+              </p>
+              <p>
+                <small>Dentist Notes</small>
+                <strong>{latestTreatment.notes || "—"}</strong>
+              </p>
+              <p>
+                <small>Treatment Date</small>
+                <strong>
+                  {formatStaffDate(latestTreatment.date || latestTreatment.treatmentDate)}
+                </strong>
+              </p>
+            </div>
+          ) : (
+            <p className="muted-copy">No dental treatments on file yet.</p>
+          )}
+
+          {(detail.treatments || []).length > 1 ? (
+            <div className="staff-table-wrap" style={{ marginTop: "1rem" }}>
               <table className="staff-table">
                 <thead>
                   <tr>
@@ -391,7 +476,6 @@ export function StaffPatientsPage() {
                     <th>Dentist</th>
                     <th>Notes</th>
                     <th>Cost</th>
-                    <th>Amount Paid</th>
                     <th>Status</th>
                   </tr>
                 </thead>
@@ -404,42 +488,66 @@ export function StaffPatientsPage() {
                       <td>{treatment.dentist || "—"}</td>
                       <td>{treatment.notes || "—"}</td>
                       <td>{formatMoney(treatment.amountCharged)}</td>
-                      <td>
-                        <label className="field" style={{ margin: 0 }}>
-                          <span className="sr-only">Amount paid</span>
-                          <span style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}>
-                            ₱
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              value={paymentDrafts[treatment.id] ?? ""}
-                              onChange={(event) =>
-                                setPaymentDrafts((current) => ({
-                                  ...current,
-                                  [treatment.id]: event.target.value,
-                                }))
-                              }
-                              style={{ width: "7rem" }}
-                            />
-                          </span>
-                        </label>
-                      </td>
                       <td>{treatment.paymentStatus || treatment.status || "—"}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            ) : (
-              <p className="muted-copy">No treatments on file yet.</p>
-            )}
-          </div>
+            </div>
+          ) : null}
 
           <form className="admin-form" onSubmit={saveStaffManaged} style={{ marginTop: "1.25rem" }}>
-            <h3 className="admin-subheading">Staff-managed fields</h3>
+            <h3 className="admin-subheading">Staff Information</h3>
+            <p className="muted-copy">Only Amount Paid and Appointment are editable by Staff.</p>
+
+            {(detail.treatments || []).length ? (
+              <div className="staff-table-wrap" style={{ marginBottom: "1rem" }}>
+                <table className="staff-table">
+                  <thead>
+                    <tr>
+                      <th>Treatment</th>
+                      <th>Cost</th>
+                      <th>Amount Paid</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {detail.treatments.map((treatment) => (
+                      <tr key={`pay-${treatment.id}`}>
+                        <td>{treatment.treatment || treatment.name || "—"}</td>
+                        <td>{formatMoney(treatment.amountCharged)}</td>
+                        <td>
+                          <label className="field" style={{ margin: 0 }}>
+                            <span className="sr-only">Amount paid</span>
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}>
+                              ₱
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={paymentDrafts[treatment.id] ?? ""}
+                                onChange={(event) =>
+                                  setPaymentDrafts((current) => ({
+                                    ...current,
+                                    [treatment.id]: event.target.value,
+                                  }))
+                                }
+                                style={{ width: "7rem" }}
+                              />
+                            </span>
+                          </label>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="muted-copy">Add a dentist treatment first before recording amount paid.</p>
+            )}
+
             <div className="field-grid field-grid--two">
               <label className="field">
-                <span>Next Appointment</span>
+                <span>Appointment date</span>
                 <input
                   type="date"
                   value={nextApptDate}
@@ -447,7 +555,7 @@ export function StaffPatientsPage() {
                 />
               </label>
               <label className="field">
-                <span>Time</span>
+                <span>Appointment time</span>
                 <input
                   type="time"
                   value={nextApptTime}
@@ -461,28 +569,11 @@ export function StaffPatientsPage() {
           </form>
 
           <div className="staff-heading-actions" style={{ marginTop: "1rem" }}>
-            {detail.staffVerificationStatus !== "verified" ? (
-              <button
-                className="button button--primary"
-                onClick={() => verifyPatient(detail, "verified")}
-                disabled={Boolean(busy)}
-              >
-                Verify Patient
-              </button>
-            ) : null}
-            {detail.staffVerificationStatus !== "rejected" ? (
-              <button
-                className="button button--secondary"
-                onClick={() => verifyPatient(detail, "rejected")}
-                disabled={Boolean(busy)}
-              >
-                Reject verification
-              </button>
-            ) : null}
-            <button className="button button--secondary" onClick={() => openEdit(detail)}>
-              Edit information
-            </button>
-            <button className="button button--danger" onClick={() => archivePatient(detail)} disabled={Boolean(busy)}>
+            <button
+              className="button button--danger"
+              onClick={() => archivePatient(detail)}
+              disabled={Boolean(busy)}
+            >
               Archive record
             </button>
           </div>

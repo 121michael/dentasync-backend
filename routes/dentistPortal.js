@@ -1197,6 +1197,8 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
             nextAppointment: nextAppointment,
             accountStatus: record.linkedUserId ? "linked_account" : "clinical_record",
             linkedUserId: record.linkedUserId,
+            profileLocked: Boolean(record.profileLocked || record.linkedUserId),
+            accountLinked: Boolean(record.accountLinked || record.linkedUserId),
             isClinicalRecord: true,
           };
         }),
@@ -1261,7 +1263,8 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
       return res.status(400).json({ message: "A valid patient record ID is required." });
     }
 
-    // Dentist may correct demographics (Age/Sex). Staff-managed payment/next-appointment fields are ignored.
+    // Dentist may edit clinical notes/address on any record.
+    // Account-linked demographics (name/sex/age/birthdate/phone) are profile-owned and rejected by the service.
     const allowed = {};
     for (const key of [
       "firstName",
@@ -1284,13 +1287,15 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
         id: req.dentist.id,
         role: "dentist",
       });
+      const [enriched] = await clinicalPatients.enrichRecordsFromLinkedProfiles(db, [record]);
       return res.json({
         message: "Patient record updated.",
         patient: {
-          ...record,
-          patientName: record.fullName,
-          ageSex: record.ageSex || clinicalPatients.formatAgeSex(record.age, record.gender),
+          ...enriched,
+          patientName: enriched.fullName,
+          ageSex: enriched.ageSex || clinicalPatients.formatAgeSex(enriched.age, enriched.gender),
           isClinicalRecord: true,
+          profileLocked: Boolean(enriched.profileLocked || enriched.linkedUserId),
         },
       });
     } catch (error) {
@@ -1354,6 +1359,9 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
             clinicalPatients.formatAgeSex(detail.record.age, detail.record.gender),
           accountStatus: detail.record.linkedUserId ? "linked_account" : "clinical_record",
           isClinicalRecord: true,
+          profileLocked: Boolean(detail.record.profileLocked || detail.record.linkedUserId),
+          accountLinked: Boolean(detail.record.accountLinked || detail.record.linkedUserId),
+          linkedUserId: detail.record.linkedUserId || null,
           nextAppointmentDate: detail.record.nextAppointmentDate || patientNextAppointment?.date || null,
           nextAppointmentTime: detail.record.nextAppointmentTime || patientNextAppointment?.time || null,
         },

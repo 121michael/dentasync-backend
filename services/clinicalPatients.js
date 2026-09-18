@@ -105,8 +105,13 @@ function isMissingRelation(error) {
 function mapClinicalRecord(row, extras = {}) {
   const firstName = row.first_name || "";
   const lastName = row.last_name || "";
-  const age = extras.age ?? row.age ?? null;
+  const dateOfBirth = row.date_of_birth || null;
   const gender = row.gender || "";
+  const age =
+    extras.age ??
+    row.age ??
+    ageFromDateOfBirth(dateOfBirth) ??
+    null;
   return {
     id: row.id,
     recordCode: row.record_code,
@@ -115,7 +120,7 @@ function mapClinicalRecord(row, extras = {}) {
     fullName: `${firstName} ${lastName}`.trim(),
     email: row.email || "",
     phone: row.phone || "",
-    dateOfBirth: row.date_of_birth || null,
+    dateOfBirth,
     gender,
     age,
     ageSex: formatAgeSex(age, gender),
@@ -173,6 +178,127 @@ async function withSavepoint(db, name, fn) {
   }
 }
 
+function ageFromDateOfBirth(value) {
+  if (!value) return null;
+  const dob =
+    value instanceof Date ? value : new Date(`${String(value).slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(dob.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - dob.getFullYear();
+  const monthDiff = today.getMonth() - dob.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) {
+    age -= 1;
+  }
+  return age >= 0 ? age : null;
+}
+
+/**
+ * Overlay account-linked basics from users + patient_portal_profiles.
+ * Profile/account is the source of truth for Name, Sex, Age, Birthdate, Phone.
+ */
+async function enrichRecordsFromLinkedProfiles(db, records) {
+  if (!Array.isArray(records) || !records.length) return records || [];
+  const linkedIds = [
+    ...new Set(
+      records
+        .map((record) => (record.linkedUserId ? String(record.linkedUserId) : null))
+        .filter(Boolean)
+    ),
+  ];
+  if (!linkedIds.length) {
+    return records.map((record) => ({
+      ...record,
+      profileLocked: Boolean(record.linkedUserId),
+      accountLinked: Boolean(record.linkedUserId),
+    }));
+  }
+
+  let accountRows = [];
+  try {
+    const result = await db.query(
+      `SELECT
+         account.id::text AS user_id,
+         account.first_name,
+         account.last_name,
+         account.email,
+         account.phone,
+         COALESCE(profile.date_of_birth, profile.birth_date) AS date_of_birth,
+         profile.gender,
+         profile.address
+       FROM users AS account
+       LEFT JOIN patient_portal_profiles AS profile
+         ON profile.user_id::text = account.id::text
+       WHERE account.id::text = ANY($1::text[])`,
+      [linkedIds]
+    );
+    accountRows = result.rows;
+  } catch (error) {
+    if (error?.code === "42703") {
+      const result = await db.query(
+        `SELECT
+           account.id::text AS user_id,
+           account.first_name,
+           account.last_name,
+           account.email,
+           account.phone,
+           profile.date_of_birth,
+           profile.gender,
+           profile.address
+         FROM users AS account
+         LEFT JOIN patient_portal_profiles AS profile
+           ON profile.user_id::text = account.id::text
+         WHERE account.id::text = ANY($1::text[])`,
+        [linkedIds]
+      );
+      accountRows = result.rows;
+    } else if (error?.code !== "42P01") {
+      throw error;
+    }
+  }
+
+  const byUserId = new Map(accountRows.map((row) => [String(row.user_id), row]));
+
+  return records.map((record) => {
+    if (!record.linkedUserId) {
+      return {
+        ...record,
+        profileLocked: false,
+        accountLinked: false,
+      };
+    }
+    const account = byUserId.get(String(record.linkedUserId));
+    if (!account) {
+      return {
+        ...record,
+        profileLocked: true,
+        accountLinked: true,
+      };
+    }
+
+    const firstName = stringValue(account.first_name, 80) || record.firstName;
+    const lastName = stringValue(account.last_name, 80) || record.lastName;
+    const dateOfBirth = account.date_of_birth || record.dateOfBirth;
+    const gender = stringValue(account.gender, 40) || record.gender;
+    const age = ageFromDateOfBirth(dateOfBirth);
+
+    return {
+      ...record,
+      firstName,
+      lastName,
+      fullName: `${firstName || ""} ${lastName || ""}`.trim() || record.fullName,
+      email: normalizeEmail(account.email) || record.email,
+      phone: normalizePhone(account.phone) || record.phone || "",
+      dateOfBirth,
+      gender: gender || "",
+      age,
+      ageSex: formatAgeSex(age, gender),
+      address: stringValue(account.address, 500) || record.address,
+      profileLocked: true,
+      accountLinked: true,
+    };
+  });
+}
+
 async function listClinicalRecords(db, { search = null, includeArchived = false, limit = 100, offset = 0 } = {}) {
   const params = [];
   const clauses = [];
@@ -188,6 +314,7 @@ async function listClinicalRecords(db, { search = null, includeArchived = false,
       OR record.phone ILIKE $${params.length}
       OR record.record_code ILIKE $${params.length}
       OR record.id::text ILIKE $${params.length}
+      OR record.linked_user_id ILIKE $${params.length}
     )`);
   }
   const whereSql = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
@@ -228,7 +355,8 @@ async function listClinicalRecords(db, { search = null, includeArchived = false,
     params
   );
 
-  return result.rows.map((row) => mapClinicalRecord(row));
+  const mapped = result.rows.map((row) => mapClinicalRecord(row));
+  return enrichRecordsFromLinkedProfiles(db, mapped);
 }
 
 async function getClinicalRecord(db, recordId) {
@@ -257,8 +385,10 @@ async function getClinicalRecord(db, recordId) {
     [recordId]
   );
 
+  const [record] = await enrichRecordsFromLinkedProfiles(db, [mapClinicalRecord(result.rows[0])]);
+
   return {
-    record: mapClinicalRecord(result.rows[0]),
+    record,
     treatments: treatments.rows.map(mapClinicalTreatment),
   };
 }
@@ -607,6 +737,28 @@ async function updateClinicalRecord(db, recordId, input, actor = {}) {
   const fields = [];
   const params = [];
   const payload = { ...input };
+
+  const profileOwnedFields = [
+    "firstName",
+    "lastName",
+    "email",
+    "phone",
+    "dateOfBirth",
+    "age",
+    "gender",
+  ];
+  if (current.linked_user_id) {
+    const blocked = profileOwnedFields.filter((key) =>
+      Object.prototype.hasOwnProperty.call(payload, key)
+    );
+    if (blocked.length) {
+      const error = new Error(
+        "Basic patient information comes from the patient account profile and cannot be edited here. Ask the patient to update their profile, or contact Admin."
+      );
+      error.status = 403;
+      throw error;
+    }
+  }
 
   if (Object.prototype.hasOwnProperty.call(payload, "age") && !Object.prototype.hasOwnProperty.call(payload, "dateOfBirth")) {
     payload.dateOfBirth = deriveDateOfBirthFromAge(payload.age, current.date_of_birth);
@@ -1253,6 +1405,7 @@ module.exports = {
   findOrCreateClinicalRecordForUser,
   mapClinicalRecord,
   formatAgeSex,
+  enrichRecordsFromLinkedProfiles,
   isMissingRelation,
   stringValue,
   normalizeEmail,
@@ -1261,4 +1414,5 @@ module.exports = {
   parseMoneyAmount,
   normalizeAppointmentTime,
   deriveDateOfBirthFromAge,
+  ageFromDateOfBirth,
 };

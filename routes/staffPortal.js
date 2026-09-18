@@ -978,6 +978,9 @@ function createStaffPortalRouter({
             nextAppointmentDate: nextAppointment?.date || record.nextAppointmentDate || null,
             nextAppointmentTime: nextAppointment?.time || record.nextAppointmentTime || null,
             accountStatus: record.linkedUserId ? "linked_account" : "clinical_record",
+            linkedUserId: record.linkedUserId || null,
+            profileLocked: Boolean(record.profileLocked || record.linkedUserId),
+            accountLinked: Boolean(record.accountLinked || record.linkedUserId),
             isVerified: record.staffVerificationStatus === "verified",
             staffVerificationStatus: record.staffVerificationStatus || "pending",
             isClinicalRecord: true,
@@ -1055,10 +1058,16 @@ function createStaffPortalRouter({
       return res.status(400).json({ message: "A valid patient record ID is required." });
     }
 
-    // Staff may edit demographics and staff-managed scheduling/payment metadata.
-    // Clinical treatment procedure/diagnosis/notes are dentist-managed.
+    // Staff may ONLY update next appointment (and amount paid via treatment route).
+    // Demographics/clinical fields are rejected even if sent in the request body.
     const allowed = {};
-    for (const key of [
+    for (const key of ["nextAppointmentDate", "nextAppointmentTime"]) {
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, key)) {
+        allowed[key] = req.body[key];
+      }
+    }
+
+    const forbidden = [
       "firstName",
       "lastName",
       "email",
@@ -1068,12 +1077,21 @@ function createStaffPortalRouter({
       "gender",
       "address",
       "notes",
-      "nextAppointmentDate",
-      "nextAppointmentTime",
-    ]) {
-      if (Object.prototype.hasOwnProperty.call(req.body || {}, key)) {
-        allowed[key] = req.body[key];
-      }
+      "diagnosis",
+      "treatment",
+      "diagnosisNotes",
+    ].filter((key) => Object.prototype.hasOwnProperty.call(req.body || {}, key));
+    if (forbidden.length) {
+      return res.status(403).json({
+        message:
+          "Staff can only update Amount Paid and Appointment. Patient profile and clinical fields are not editable.",
+        rejectedFields: forbidden,
+      });
+    }
+    if (!Object.keys(allowed).length) {
+      return res.status(400).json({
+        message: "Provide nextAppointmentDate and/or nextAppointmentTime to update.",
+      });
     }
 
     try {
@@ -1081,12 +1099,13 @@ function createStaffPortalRouter({
         id: req.staff.id,
         role: "staff",
       });
+      const [enriched] = await clinicalPatients.enrichRecordsFromLinkedProfiles(db, [record]);
       return res.json({
-        message: "Patient record updated.",
+        message: "Appointment information updated on the shared patient dental record.",
         patient: {
-          ...record,
-          patientName: record.fullName,
-          ageSex: record.ageSex || clinicalPatients.formatAgeSex(record.age, record.gender),
+          ...enriched,
+          patientName: enriched.fullName,
+          ageSex: enriched.ageSex || clinicalPatients.formatAgeSex(enriched.age, enriched.gender),
           isClinicalRecord: true,
         },
       });
@@ -1097,12 +1116,38 @@ function createStaffPortalRouter({
     }
   });
 
+  router.patch("/patients/:id/verification", async (_req, res) => {
+    return res.status(403).json({
+      message:
+        "Patient account verification is Admin-only. Staff cannot verify, approve, or reject patient accounts.",
+    });
+  });
+
   router.patch("/patients/:id/treatments/:treatmentId", async (req, res) => {
     const recordId = Number.parseInt(req.params.id, 10);
     const treatmentId = Number.parseInt(req.params.treatmentId, 10);
     if (!Number.isSafeInteger(recordId) || recordId <= 0 || !Number.isSafeInteger(treatmentId) || treatmentId <= 0) {
       return res.status(400).json({ message: "A valid patient record and treatment id are required." });
     }
+
+    const forbiddenClinical = [
+      "diagnosis",
+      "diagnosisNotes",
+      "treatment",
+      "name",
+      "notes",
+      "dentistNotes",
+      "treatmentDate",
+      "amountCharged",
+    ].filter((key) => Object.prototype.hasOwnProperty.call(req.body || {}, key));
+    if (forbiddenClinical.length) {
+      return res.status(403).json({
+        message:
+          "Staff can only update Amount Paid on treatments. Clinical fields are dentist-owned.",
+        rejectedFields: forbiddenClinical,
+      });
+    }
+
     if (!Object.prototype.hasOwnProperty.call(req.body || {}, "amountPaid")) {
       return res.status(400).json({ message: "amountPaid is required." });
     }
@@ -1136,56 +1181,6 @@ function createStaffPortalRouter({
     } catch (error) {
       return res.status(error.status || 500).json({
         message: error.status ? error.message : "Unable to update the amount paid.",
-      });
-    }
-  });
-
-  router.patch("/patients/:id/verification", async (req, res) => {
-    const recordId = Number.parseInt(req.params.id, 10);
-    if (!Number.isSafeInteger(recordId) || recordId <= 0) {
-      return res.status(400).json({ message: "A valid patient record ID is required." });
-    }
-
-    const status =
-      clinicalPatients.stringValue(req.body?.status || req.body?.verificationStatus, 40) ||
-      "verified";
-
-    try {
-      const record = await clinicalPatients.verifyClinicalRecordIdentity(db, recordId, status, {
-        id: req.staff.id,
-        role: "staff",
-      });
-
-      try {
-        await notifyStaff({
-          type: "patient",
-          title: "Patient identity verification updated",
-          body: `${record.fullName} verification is now ${record.staffVerificationStatus}.`,
-          entityType: "clinical_patient",
-          entityId: record.id,
-        });
-      } catch (notifyError) {
-        console.warn("Staff verification notification skipped:", notifyError.message);
-      }
-
-      return res.json({
-        message: `Patient verification marked as ${record.staffVerificationStatus}.`,
-        patient: {
-          ...record,
-          patientName: record.fullName,
-          accountStatus: record.linkedUserId ? "linked_account" : "clinical_record",
-          isVerified: record.staffVerificationStatus === "verified",
-          isClinicalRecord: true,
-        },
-      });
-    } catch (error) {
-      if (clinicalPatients.isMissingRelation(error)) {
-        return res.status(503).json({
-          message: "Clinical patient records are not available. Run npm run migrate:clinical-records.",
-        });
-      }
-      return res.status(error.status || 500).json({
-        message: error.status ? error.message : "Unable to update patient verification.",
       });
     }
   });
@@ -1244,6 +1239,9 @@ function createStaffPortalRouter({
             clinicalPatients.formatAgeSex(detail.record.age, detail.record.gender),
           accountStatus: detail.record.linkedUserId ? "linked_account" : "clinical_record",
           isClinicalRecord: true,
+          profileLocked: Boolean(detail.record.profileLocked || detail.record.linkedUserId),
+          accountLinked: Boolean(detail.record.accountLinked || detail.record.linkedUserId),
+          linkedUserId: detail.record.linkedUserId || null,
           isVerified: detail.record.staffVerificationStatus === "verified",
           staffVerificationStatus: detail.record.staffVerificationStatus || "pending",
           staffVerifiedAt: detail.record.staffVerifiedAt || null,
