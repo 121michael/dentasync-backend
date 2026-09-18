@@ -92,6 +92,8 @@ function ageFromDob(value) {
 }
 
 function mapQueueEntry(row) {
+  const status = displayQueueStatus(row.status);
+  const waitMinutes = Number(row.estimated_wait_minutes || 0);
   return {
     id: row.id,
     token: row.token,
@@ -105,8 +107,10 @@ function mapQueueEntry(row) {
     appointmentId: row.appointment_id || null,
     appointmentDate: row.appointment_date || null,
     appointmentTime: row.appointment_time || null,
-    status: displayQueueStatus(row.status),
-    waitMinutes: Number(row.estimated_wait_minutes || 0),
+    status,
+    waitMinutes,
+    // For in-chair patients, estimated_wait_minutes stores the live procedure length.
+    durationMinutes: status === "in_chair" ? waitMinutes : null,
     checkedInAt: row.checked_in_at || null,
   };
 }
@@ -682,12 +686,48 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
         { id: req.dentist.id, role: "dentist" }
       );
 
+      let appointmentServiceId = null;
+      let appointmentServiceName = null;
+      if (current.appointment_id) {
+        const appointmentResult = await client.query(
+          `SELECT service_id, service_name
+           FROM patient_portal_appointments
+           WHERE id = $1
+           LIMIT 1`,
+          [current.appointment_id]
+        );
+        appointmentServiceId = appointmentResult.rows[0]?.service_id || null;
+        appointmentServiceName = appointmentResult.rows[0]?.service_name || null;
+      }
+
+      const durationServiceId =
+        appointmentServiceId ||
+        `procedure-${procedureName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 80) || "custom"}`;
+      const durationServiceName = procedureName || appointmentServiceName || "Dental visit";
+
+      await client
+        .query(
+          `INSERT INTO clinic_service_durations (service_id, service_name, default_duration_minutes, updated_at)
+           VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+           ON CONFLICT (service_id) DO UPDATE SET
+             service_name = EXCLUDED.service_name,
+             default_duration_minutes = EXCLUDED.default_duration_minutes,
+             updated_at = CURRENT_TIMESTAMP`,
+          [durationServiceId, durationServiceName, durationMinutes]
+        )
+        .catch((error) => {
+          if (error?.code !== "42P01") throw error;
+        });
+
+      // Store procedure length on the in-service row so waits behind use it.
       const updatedResult = await client.query(
         `UPDATE patient_portal_queue_entries
-         SET status = 'dentist', updated_at = CURRENT_TIMESTAMP
+         SET status = 'dentist',
+             estimated_wait_minutes = $2,
+             updated_at = CURRENT_TIMESTAMP
          WHERE id = $1
          RETURNING *`,
-        [queueId]
+        [queueId, durationMinutes]
       );
 
       if (current.appointment_id) {
@@ -700,6 +740,8 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
         );
       }
 
+      await recomputeWaitsBehind(client, current.position);
+
       await notifyPatient(client, {
         userId: current.user_id,
         type: "queue",
@@ -711,13 +753,15 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
       transactionOpen = false;
 
       return res.status(201).json({
-        message: "Treatment started and saved to the patient record.",
+        message:
+          "Ongoing treatment started. It will be finalized to the patient record when you press Done.",
         queueEntry: {
           id: updatedResult.rows[0].id,
           token: updatedResult.rows[0].token,
           sequence: updatedResult.rows[0].position,
           status: displayQueueStatus(updatedResult.rows[0].status),
           waitMinutes: Number(updatedResult.rows[0].estimated_wait_minutes || 0),
+          durationMinutes,
         },
         patient: {
           id: clinicalRecord.id,
@@ -768,6 +812,8 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
     const queueId = numericId(req.params.id);
     const submittedStatus = stringValue(req.body?.status, 40)?.toLowerCase();
     const databaseStatus = QUEUE_STATUS_MAP[submittedStatus];
+    const durationMinutes = Number.parseInt(req.body?.durationMinutes, 10);
+    const hasDuration = Number.isSafeInteger(durationMinutes) && durationMinutes > 0;
 
     if (!queueId || !databaseStatus) {
       return res.status(400).json({ message: "Choose a valid queue status." });
@@ -811,10 +857,24 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
         );
       }
 
+      let completedTreatment = null;
+      if (databaseStatus === "completed") {
+        completedTreatment = await clinicalPatients.completeInProgressTreatmentForUser(
+          client,
+          current.user_id,
+          {
+            appointmentId: current.appointment_id || null,
+            durationMinutes: hasDuration ? durationMinutes : null,
+          },
+          { id: req.dentist.id, role: "dentist" }
+        );
+        await recomputeWaitsBehind(client, current.position);
+      }
+
       await notifyPatient(client, {
         userId: current.user_id,
         type: "queue",
-        title: "Treatment status updated",
+        title: databaseStatus === "completed" ? "Treatment completed" : "Treatment status updated",
         body:
           databaseStatus === "completed"
             ? "Your visit has been marked as completed. Thank you for visiting Amethyst Dental."
@@ -836,6 +896,12 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
       }
 
       return res.json({
+        message:
+          databaseStatus === "completed"
+            ? completedTreatment
+              ? "Visit completed and treatment saved to the patient record."
+              : "Visit completed."
+            : "Queue status updated.",
         queueEntry: {
           id: updatedResult.rows[0].id,
           token: updatedResult.rows[0].token,
@@ -843,6 +909,15 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
           status: displayQueueStatus(updatedResult.rows[0].status),
           waitMinutes: Number(updatedResult.rows[0].estimated_wait_minutes || 0),
         },
+        treatment: completedTreatment
+          ? {
+              id: completedTreatment.id,
+              treatment: completedTreatment.treatment,
+              status: completedTreatment.status,
+              durationMinutes: completedTreatment.durationMinutes,
+              clinicalRecordId: completedTreatment.clinicalRecordId,
+            }
+          : null,
       });
     } catch (error) {
       if (transactionOpen) {
@@ -874,7 +949,11 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
 
     for (const entry of waitingResult.rows) {
       const aheadResult = await client.query(
-        `SELECT appointment.service_id, appointment.service_name
+        `SELECT
+           queue.status,
+           queue.estimated_wait_minutes,
+           appointment.service_id,
+           appointment.service_name
          FROM patient_portal_queue_entries AS queue
          LEFT JOIN patient_portal_appointments AS appointment
            ON appointment.id = queue.appointment_id

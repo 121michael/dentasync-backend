@@ -68,6 +68,23 @@ async function estimateWaitMinutesForPosition(db, {
   if (aheadEntries.length) {
     let total = 0;
     for (const entry of aheadEntries) {
+      const status = String(entry.status || "").toLowerCase();
+      const inService = status === "dentist" || status === "in_chair" || status === "in_treatment";
+      const procedureDuration = Number(
+        entry.procedureDurationMinutes ??
+          entry.procedure_duration_minutes ??
+          entry.durationMinutes ??
+          entry.duration_minutes ??
+          0
+      );
+      const queuedDuration = Number(entry.estimated_wait_minutes ?? entry.estimatedWaitMinutes ?? 0);
+
+      // In-chair patients use the live procedure duration captured at Start / duration save.
+      if (inService && (procedureDuration > 0 || queuedDuration > 0)) {
+        total += procedureDuration > 0 ? procedureDuration : queuedDuration;
+        continue;
+      }
+
       total += await getServiceDurationMinutes(
         db,
         entry.serviceId || entry.service_id,

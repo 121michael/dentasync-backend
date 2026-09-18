@@ -30,6 +30,21 @@ function emptyStartForm(entry = null) {
   };
 }
 
+function formatWaitLabel(entry) {
+  if (entry.status === "in_chair") {
+    const minutes = entry.durationMinutes || entry.waitMinutes;
+    return minutes ? `${minutes} min procedure` : "In service";
+  }
+  if (entry.status === "completed" || entry.status === "no_show") {
+    return "—";
+  }
+  const minutes = Number(entry.waitMinutes);
+  if (!Number.isFinite(minutes) || minutes <= 0) {
+    return "Next / ~0 min";
+  }
+  return `Est. wait ${minutes} min`;
+}
+
 export function DentistQueuePage() {
   const [tab, setTab] = useState("inline");
   const [data, setData] = useState(null);
@@ -75,7 +90,7 @@ export function DentistQueuePage() {
   function openComplete(entry) {
     setPendingComplete(entry);
     setDurationMinutes(
-      entry.durationMinutes || entry.duration_minutes || entry.procedureDurationMinutes || ""
+      entry.durationMinutes || entry.duration_minutes || entry.procedureDurationMinutes || entry.waitMinutes || ""
     );
   }
 
@@ -91,11 +106,14 @@ export function DentistQueuePage() {
           durationMinutes: minutes,
         });
       }
-      await api.updateDentistQueue(pendingComplete.id, {
+      const response = await api.updateDentistQueue(pendingComplete.id, {
         status: "completed",
         ...(Number.isFinite(minutes) && minutes > 0 ? { durationMinutes: minutes } : {}),
       });
-      setSuccess(`${pendingComplete.patientName} marked as finished.`);
+      setSuccess(
+        response.message ||
+          `${pendingComplete.patientName} marked Done — treatment saved to the patient record.`
+      );
       setPendingComplete(null);
       setDurationMinutes("");
       await load();
@@ -177,7 +195,7 @@ export function DentistQueuePage() {
       });
       setSuccess(
         response.message ||
-          `${pendingStart.patientName}'s treatment was started and saved to the patient record.`
+          `${pendingStart.patientName}'s ongoing treatment started. Press Done when finished to save the record.`
       );
       setPendingStart(null);
       setStartForm(emptyStartForm());
@@ -266,6 +284,7 @@ export function DentistQueuePage() {
                   <th>Sequence</th>
                   <th>Patient Profile</th>
                   <th>Procedure Schema</th>
+                  <th>Est. Wait</th>
                   <th>Status Check</th>
                   <th>Operational Control</th>
                 </tr>
@@ -282,6 +301,15 @@ export function DentistQueuePage() {
                     </td>
                     <td>{entry.procedure}</td>
                     <td>
+                      <strong>{formatWaitLabel(entry)}</strong>
+                      {entry.status !== "in_chair" &&
+                      entry.status !== "completed" &&
+                      entry.status !== "no_show" &&
+                      Number(entry.waitMinutes) > 0 ? (
+                        <small>Based on current procedure length ahead</small>
+                      ) : null}
+                    </td>
+                    <td>
                       <DentistStatusBadge status={entry.status} />
                     </td>
                     <td>
@@ -293,7 +321,7 @@ export function DentistQueuePage() {
                             disabled={Boolean(busy)}
                             onClick={() => openComplete(entry)}
                           >
-                            {busy === `complete-${entry.id}` ? "Saving…" : "Patient is finished"}
+                            {busy === `complete-${entry.id}` ? "Saving…" : "Done"}
                           </button>
                         ) : null}
                         {entry.status === "in_chair" ? (
@@ -343,7 +371,7 @@ export function DentistQueuePage() {
                               disabled={Boolean(busy)}
                               onClick={() => openComplete(entry)}
                             >
-                              Patient is finished
+                              Done
                             </button>
                           </>
                         ) : null}
@@ -354,7 +382,7 @@ export function DentistQueuePage() {
                             disabled={Boolean(busy)}
                             onClick={() => openComplete(entry)}
                           >
-                            Patient is finished
+                            Done
                           </button>
                         ) : null}
                       </div>
@@ -374,7 +402,7 @@ export function DentistQueuePage() {
 
       {pendingStart ? (
         <DentistModal
-          title="Start treatment"
+          title="Start ongoing treatment"
           wide
           onClose={() => {
             if (!busy) {
@@ -385,8 +413,10 @@ export function DentistQueuePage() {
         >
           <form className="dentist-form" onSubmit={submitStartTreatment}>
             <p className="dentist-confirm-copy">
-              Capture the procedure details for <strong>{pendingStart.patientName}</strong>. This is
-              saved automatically to the patient clinical record when treatment starts.
+              Capture the procedure for <strong>{pendingStart.patientName}</strong>. This starts an
+              ongoing treatment. It is finalized to the patient record only when you press{" "}
+              <strong>Done</strong>. Waiting patients will see an estimated wait based on the
+              duration you enter.
             </p>
 
             <div className="field-grid field-grid--two">
@@ -477,7 +507,7 @@ export function DentistQueuePage() {
                 Cancel
               </button>
               <button type="submit" className="button button--primary" disabled={Boolean(busy)}>
-                {busy.startsWith("start-") ? "Starting…" : "Start & save to patient record"}
+                {busy.startsWith("start-") ? "Starting…" : "Start ongoing treatment"}
               </button>
             </div>
           </form>
@@ -485,14 +515,15 @@ export function DentistQueuePage() {
       ) : null}
 
       {pendingComplete ? (
-        <DentistModal title="Patient is finished?" onClose={() => setPendingComplete(null)}>
+        <DentistModal title="Mark treatment Done?" onClose={() => setPendingComplete(null)}>
           <p className="dentist-confirm-copy">
-            Mark {pendingComplete.patientName}&apos;s {pendingComplete.procedure} as finished and
-            move them out of your active queue?
+            Mark {pendingComplete.patientName}&apos;s {pendingComplete.procedure} as Done? This
+            finalizes the ongoing treatment into the patient clinical record and frees the chair for
+            the next patient.
           </p>
           {pendingComplete.status === "in_chair" ? (
             <label className="field" style={{ marginBottom: "1rem" }}>
-              <span>Procedure duration (minutes)</span>
+              <span>Actual procedure duration (minutes)</span>
               <input
                 type="number"
                 min="1"
@@ -516,7 +547,7 @@ export function DentistQueuePage() {
               onClick={completePatient}
               disabled={Boolean(busy)}
             >
-              {busy.startsWith("complete-") ? "Saving…" : "Patient is finished"}
+              {busy.startsWith("complete-") ? "Saving…" : "Done — save to record"}
             </button>
           </div>
         </DentistModal>

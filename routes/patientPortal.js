@@ -1343,18 +1343,21 @@ function createPatientPortalRouter({
         source: "portal",
         documents: documents.filter((document) => String(document.recordId) === String(record.id)),
       }));
-      const clinicalRecords = clinicalResult.rows.map((record) => ({
-        id: `clinical-${record.id}`,
-        date: record.treatment_date,
-        treatment: record.treatment,
-        dentist: record.dentist_name,
-        clinic: record.clinic_location,
-        coverage: record.coverage_status,
-        status: record.status,
-        notes: record.notes,
-        source: "clinical",
-        documents: [],
-      }));
+      const clinicalRows = clinicalResult.rows;
+      const clinicalRecords = clinicalRows
+        .filter((record) => String(record.status || "").toLowerCase() === "completed")
+        .map((record) => ({
+          id: `clinical-${record.id}`,
+          date: record.treatment_date,
+          treatment: record.treatment,
+          dentist: record.dentist_name,
+          clinic: record.clinic_location,
+          coverage: record.coverage_status,
+          status: record.status,
+          notes: record.notes,
+          source: "clinical",
+          documents: [],
+        }));
       const appointmentRecords = appointmentResult.rows.map((appointment) => ({
         id: `appointment-${appointment.id}`,
         date: appointment.appointment_date,
@@ -1378,9 +1381,9 @@ function createPatientPortalRouter({
         }
       );
 
-      const clinicalCompleted = clinicalRecords.filter((record) => record.status === "completed").length;
-      const clinicalActive = clinicalRecords.filter((record) =>
-        ["planned", "in_progress"].includes(String(record.status || ""))
+      const clinicalCompleted = clinicalRecords.length;
+      const clinicalActive = clinicalRows.filter((record) =>
+        ["planned", "in_progress"].includes(String(record.status || "").toLowerCase())
       ).length;
 
       return res.json({

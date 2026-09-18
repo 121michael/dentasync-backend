@@ -613,6 +613,11 @@ async function updateClinicalTreatment(db, recordId, treatmentId, input, actor =
   const amountCharged = parseMoneyAmount(input.amountCharged, "Amount Charged");
   const amountPaid = parseMoneyAmount(input.amountPaid, "Amount Paid");
   const actorId = actor.id ? String(actor.id) : null;
+  const nextStatus = stringValue(input.status, 40);
+  const durationMinutes =
+    Number.isFinite(Number(input.durationMinutes)) && Number(input.durationMinutes) > 0
+      ? Math.round(Number(input.durationMinutes))
+      : null;
 
   let result;
   try {
@@ -622,22 +627,54 @@ async function updateClinicalTreatment(db, recordId, treatmentId, input, actor =
            treatment_date = $2,
            amount_charged = $3,
            amount_paid = $4,
+           status = COALESCE($5, status),
+           duration_minutes = COALESCE($6, duration_minutes),
            updated_at = CURRENT_TIMESTAMP,
-           updated_by = $5
-       WHERE id = $6
-         AND clinical_record_id = $7
+           updated_by = $7
+       WHERE id = $8
+         AND clinical_record_id = $9
        RETURNING *`,
-      [treatment, treatmentDate, amountCharged, amountPaid, actorId, treatmentId, recordId]
+      [
+        treatment,
+        treatmentDate,
+        amountCharged,
+        amountPaid,
+        nextStatus,
+        durationMinutes,
+        actorId,
+        treatmentId,
+        recordId,
+      ]
     );
   } catch (error) {
-    if (error?.code === "42703") {
-      const fallbackError = new Error(
-        "Treatment history amounts are not available. Run npm run migrate:admin-dashboard-updates."
-      );
-      fallbackError.status = 503;
-      throw fallbackError;
+    if (error?.code !== "42703") {
+      throw error;
     }
-    throw error;
+    try {
+      result = await db.query(
+        `UPDATE clinic_patient_treatments
+         SET treatment = $1,
+             treatment_date = $2,
+             amount_charged = $3,
+             amount_paid = $4,
+             status = COALESCE($5, status),
+             updated_at = CURRENT_TIMESTAMP,
+             updated_by = $6
+         WHERE id = $7
+           AND clinical_record_id = $8
+         RETURNING *`,
+        [treatment, treatmentDate, amountCharged, amountPaid, nextStatus, actorId, treatmentId, recordId]
+      );
+    } catch (innerError) {
+      if (innerError?.code === "42703") {
+        const fallbackError = new Error(
+          "Treatment history amounts are not available. Run npm run migrate:admin-dashboard-updates."
+        );
+        fallbackError.status = 503;
+        throw fallbackError;
+      }
+      throw innerError;
+    }
   }
 
   await db.query(
@@ -645,6 +682,107 @@ async function updateClinicalTreatment(db, recordId, treatmentId, input, actor =
      SET updated_at = CURRENT_TIMESTAMP, updated_by = $2
      WHERE id = $1`,
     [recordId, actorId]
+  );
+
+  return mapClinicalTreatment(result.rows[0]);
+}
+
+/**
+ * Finalize the latest in-progress clinical treatment for a portal user.
+ * Used when the dentist presses Done on the live queue.
+ */
+async function completeInProgressTreatmentForUser(db, userId, options = {}, actor = {}) {
+  const linkedUserId = String(userId || "").trim();
+  if (!linkedUserId) {
+    return null;
+  }
+
+  const appointmentId =
+    Number.isSafeInteger(Number(options.appointmentId)) && Number(options.appointmentId) > 0
+      ? Number(options.appointmentId)
+      : null;
+  const durationMinutes =
+    Number.isFinite(Number(options.durationMinutes)) && Number(options.durationMinutes) > 0
+      ? Math.round(Number(options.durationMinutes))
+      : null;
+  const actorId = actor.id ? String(actor.id) : null;
+
+  const recordResult = await db
+    .query(
+      `SELECT id
+       FROM clinic_patient_records
+       WHERE linked_user_id = $1
+         AND COALESCE(is_archived, FALSE) = FALSE
+       ORDER BY updated_at DESC
+       LIMIT 1`,
+      [linkedUserId]
+    )
+    .catch((error) => {
+      if (error?.code === "42P01") return { rows: [] };
+      throw error;
+    });
+  if (!recordResult.rows.length) {
+    return null;
+  }
+
+  const clinicalRecordId = recordResult.rows[0].id;
+
+  let result;
+  try {
+    result = await db.query(
+      `UPDATE clinic_patient_treatments
+       SET status = 'completed',
+           duration_minutes = COALESCE($1, duration_minutes),
+           updated_at = CURRENT_TIMESTAMP,
+           updated_by = $2
+       WHERE id = (
+         SELECT id
+         FROM clinic_patient_treatments
+         WHERE clinical_record_id = $3
+           AND LOWER(COALESCE(status, '')) = 'in_progress'
+           AND ($4::int IS NULL OR appointment_id = $4 OR appointment_id IS NULL)
+         ORDER BY
+           CASE WHEN appointment_id = $4 THEN 0 ELSE 1 END,
+           id DESC
+         LIMIT 1
+       )
+       RETURNING *`,
+      [durationMinutes, actorId, clinicalRecordId, appointmentId]
+    );
+  } catch (error) {
+    if (error?.code === "42703") {
+      result = await db.query(
+        `UPDATE clinic_patient_treatments
+         SET status = 'completed',
+             updated_at = CURRENT_TIMESTAMP,
+             updated_by = $1
+         WHERE id = (
+           SELECT id
+           FROM clinic_patient_treatments
+           WHERE clinical_record_id = $2
+             AND LOWER(COALESCE(status, '')) = 'in_progress'
+           ORDER BY id DESC
+           LIMIT 1
+         )
+         RETURNING *`,
+        [actorId, clinicalRecordId]
+      );
+    } else if (error?.code === "42P01") {
+      return null;
+    } else {
+      throw error;
+    }
+  }
+
+  if (!result.rows.length) {
+    return null;
+  }
+
+  await db.query(
+    `UPDATE clinic_patient_records
+     SET updated_at = CURRENT_TIMESTAMP, updated_by = $2
+     WHERE id = $1`,
+    [clinicalRecordId, actorId]
   );
 
   return mapClinicalTreatment(result.rows[0]);
@@ -824,6 +962,7 @@ module.exports = {
   archiveClinicalRecord,
   addClinicalTreatment,
   updateClinicalTreatment,
+  completeInProgressTreatmentForUser,
   mapClinicalTreatment,
   verifyClinicalRecordIdentity,
   linkClinicalRecordsToUser,
