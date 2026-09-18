@@ -112,6 +112,32 @@ function generateRecordCode() {
   return `CPR-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(2).toString("hex").toUpperCase()}`;
 }
 
+async function withSavepoint(db, name, fn) {
+  const savepoint = String(name || "sp").replace(/[^a-zA-Z0-9_]/g, "_");
+  try {
+    await db.query(`SAVEPOINT ${savepoint}`);
+  } catch {
+    // Pool connections / non-transactional callers have no SAVEPOINT support.
+    return fn();
+  }
+  try {
+    const result = await fn();
+    try {
+      await db.query(`RELEASE SAVEPOINT ${savepoint}`);
+    } catch {
+      // Ignore release failures after success.
+    }
+    return result;
+  } catch (error) {
+    try {
+      await db.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+    } catch (rollbackError) {
+      error.savepointRollbackError = rollbackError.message;
+    }
+    throw error;
+  }
+}
+
 async function listClinicalRecords(db, { search = null, includeArchived = false, limit = 100, offset = 0 } = {}) {
   const params = [];
   const clauses = [];
@@ -472,33 +498,35 @@ async function addClinicalTreatment(db, recordId, input, actor = {}) {
 
   let result;
   try {
-    result = await db.query(
-      `INSERT INTO clinic_patient_treatments (
-         clinical_record_id, treatment, dentist_name, clinic_location, coverage_status,
-         status, treatment_date, notes, duration_minutes, tooth_number, diagnosis_notes,
-         procedure_details, amount_charged, amount_paid, appointment_id,
-         created_by, created_by_role, updated_by
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $16)
-       RETURNING *`,
-      [
-        recordId,
-        treatment,
-        stringValue(input.dentistName, 160),
-        stringValue(input.clinicLocation, 160) || "Amethyst Dental Clinic",
-        stringValue(input.coverageStatus, 80),
-        stringValue(input.status, 40) || "completed",
-        treatmentDate,
-        stringValue(input.notes, 2000),
-        durationMinutes,
-        toothNumber,
-        diagnosisNotes,
-        procedureDetails,
-        amountCharged,
-        amountPaid,
-        appointmentId,
-        actor.id ? String(actor.id) : null,
-        actor.role || null,
-      ]
+    result = await withSavepoint(db, "clinical_treatment_full", async () =>
+      db.query(
+        `INSERT INTO clinic_patient_treatments (
+           clinical_record_id, treatment, dentist_name, clinic_location, coverage_status,
+           status, treatment_date, notes, duration_minutes, tooth_number, diagnosis_notes,
+           procedure_details, amount_charged, amount_paid, appointment_id,
+           created_by, created_by_role, updated_by
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $16)
+         RETURNING *`,
+        [
+          recordId,
+          treatment,
+          stringValue(input.dentistName, 160),
+          stringValue(input.clinicLocation, 160) || "Amethyst Dental Clinic",
+          stringValue(input.coverageStatus, 80),
+          stringValue(input.status, 40) || "completed",
+          treatmentDate,
+          stringValue(input.notes, 2000),
+          durationMinutes,
+          toothNumber,
+          diagnosisNotes,
+          procedureDetails,
+          amountCharged,
+          amountPaid,
+          appointmentId,
+          actor.id ? String(actor.id) : null,
+          actor.role || null,
+        ]
+      )
     );
   } catch (error) {
     if (error?.code !== "42703") {
@@ -709,15 +737,21 @@ async function findOrCreateClinicalRecordForUser(db, userId, actor = {}) {
 
   const firstName = stringValue(user.first_name, 80) || "Patient";
   const lastName = stringValue(user.last_name, 80) || linkedUserId;
+  let dateOfBirth = null;
+  if (user.date_of_birth instanceof Date && !Number.isNaN(user.date_of_birth.getTime())) {
+    dateOfBirth = user.date_of_birth.toISOString().slice(0, 10);
+  } else if (typeof user.date_of_birth === "string") {
+    dateOfBirth = user.date_of_birth.slice(0, 10);
+  }
   const record = await createClinicalRecord(
     db,
     {
       firstName,
       lastName,
-      email: user.email,
-      phone: user.phone,
-      dateOfBirth: user.date_of_birth,
-      gender: user.gender,
+      email: typeof user.email === "string" ? user.email : null,
+      phone: user.phone == null ? null : String(user.phone),
+      dateOfBirth,
+      gender: typeof user.gender === "string" ? user.gender : null,
       notes: "Auto-created from dentist start-treatment queue flow.",
     },
     actor

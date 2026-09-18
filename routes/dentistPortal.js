@@ -753,8 +753,12 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
           message: "Clinical patient records are not available. Run npm run migrate:clinical-records.",
         });
       }
-      console.error("Dentist start-treatment error:", error.message);
-      return res.status(500).json({ message: "Unable to start treatment and save the patient record." });
+      console.error("Dentist start-treatment error:", error.message, error.code || "", error.detail || "");
+      return res.status(500).json({
+        message: error.message || "Unable to start treatment and save the patient record.",
+        detail: error.message,
+        code: error.code || undefined,
+      });
     } finally {
       client.release();
     }
