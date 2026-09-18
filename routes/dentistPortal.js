@@ -1362,6 +1362,7 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
           profileLocked: Boolean(detail.record.profileLocked || detail.record.linkedUserId),
           accountLinked: Boolean(detail.record.accountLinked || detail.record.linkedUserId),
           linkedUserId: detail.record.linkedUserId || null,
+          amountPaid: detail.record.lastAmountPaid,
           nextAppointmentDate: detail.record.nextAppointmentDate || patientNextAppointment?.date || null,
           nextAppointmentTime: detail.record.nextAppointmentTime || patientNextAppointment?.time || null,
         },
