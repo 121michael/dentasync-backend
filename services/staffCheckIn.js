@@ -1,7 +1,5 @@
 "use strict";
 
-const { estimateWaitMinutesForPosition } = require("./waitTime");
-
 function stringValue(value, maxLength = 500) {
   if (typeof value !== "string" && typeof value !== "number") {
     return null;
@@ -211,16 +209,18 @@ async function resolveWalkInDentist(client) {
   ];
 
   try {
-    const linked = await client.query(
-      `SELECT profile.catalog_dentist_id,
-              CONCAT_WS(' ', account.first_name, account.last_name) AS full_name
-       FROM admin_portal_dentist_profiles AS profile
-       JOIN users AS account ON account.id = profile.user_id
-       WHERE COALESCE(profile.catalog_dentist_id, '') <> ''
-         AND COALESCE(account.is_archived, FALSE) = FALSE
-         AND LOWER(COALESCE(account.status, 'active')) = 'active'
-       ORDER BY account.id ASC
-       LIMIT 1`
+    const linked = await withSavepoint(client, "resolve_walkin_dentist", async () =>
+      client.query(
+        `SELECT profile.catalog_dentist_id,
+                CONCAT_WS(' ', account.first_name, account.last_name) AS full_name
+         FROM admin_portal_dentist_profiles AS profile
+         JOIN users AS account ON account.id = profile.user_id
+         WHERE COALESCE(profile.catalog_dentist_id, '') <> ''
+           AND COALESCE(account.is_archived, FALSE) = FALSE
+           AND LOWER(COALESCE(account.status, 'active')) = 'active'
+         ORDER BY account.id ASC
+         LIMIT 1`
+      )
     );
     if (linked.rows[0]?.catalog_dentist_id) {
       const catalogId = String(linked.rows[0].catalog_dentist_id);
@@ -383,29 +383,51 @@ async function findAppointmentsForRfidLookup(client, patientId) {
   return result.rows;
 }
 
+async function withSavepoint(client, name, fn) {
+  const savepoint = String(name || "sp").replace(/[^a-zA-Z0-9_]/g, "_");
+  await client.query(`SAVEPOINT ${savepoint}`);
+  try {
+    const result = await fn();
+    await client.query(`RELEASE SAVEPOINT ${savepoint}`);
+    return result;
+  } catch (error) {
+    try {
+      await client.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+    } catch (rollbackError) {
+      error.savepointRollbackError = rollbackError.message;
+    }
+    throw error;
+  }
+}
+
 async function findActiveQueueForPatient(client, patientId) {
   if (!patientId) return null;
-  const result = await client.query(
-    `SELECT
-       queue.id,
-       queue.token,
-       queue.position,
-       queue.status,
-       queue.estimated_wait_minutes,
-       queue.checked_in_at,
-       queue.appointment_id,
-       queue.user_id,
-       queue.check_in_method
-     FROM patient_portal_queue_entries AS queue
-     WHERE queue.user_id = $1
-       AND DATE(queue.checked_in_at) = CURRENT_DATE
-       AND queue.status NOT IN ('completed', 'no_show')
-     ORDER BY queue.checked_in_at DESC
-     LIMIT 1`,
-    [String(patientId)]
-  ).catch(async (error) => {
+  let result;
+  try {
+    result = await withSavepoint(client, "active_queue_with_method", async () =>
+      client.query(
+        `SELECT
+           queue.id,
+           queue.token,
+           queue.position,
+           queue.status,
+           queue.estimated_wait_minutes,
+           queue.checked_in_at,
+           queue.appointment_id,
+           queue.user_id,
+           queue.check_in_method
+         FROM patient_portal_queue_entries AS queue
+         WHERE queue.user_id = $1
+           AND DATE(queue.checked_in_at) = CURRENT_DATE
+           AND queue.status NOT IN ('completed', 'no_show')
+         ORDER BY queue.checked_in_at DESC
+         LIMIT 1`,
+        [String(patientId)]
+      )
+    );
+  } catch (error) {
     if (error.code !== "42703") throw error;
-    return client.query(
+    result = await client.query(
       `SELECT
          queue.id,
          queue.token,
@@ -423,7 +445,7 @@ async function findActiveQueueForPatient(client, patientId) {
        LIMIT 1`,
       [String(patientId)]
     );
-  });
+  }
   return result.rows[0] || null;
 }
 
@@ -453,6 +475,55 @@ async function allocateQueueToken(client, position) {
   return `A-${dayCode}-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
 }
 
+async function insertQueueEntry(client, { userId, appointmentId, token, position, estimatedWaitMinutes, method }) {
+  try {
+    return await withSavepoint(client, "queue_insert_with_method", async () =>
+      client.query(
+        `INSERT INTO patient_portal_queue_entries (
+           user_id, appointment_id, token, position, status, estimated_wait_minutes, check_in_method
+         ) VALUES ($1, $2, $3, $4, 'waiting', $5, $6)
+         RETURNING id, token, position, status, estimated_wait_minutes, checked_in_at, check_in_method`,
+        [String(userId), appointmentId, token, position, estimatedWaitMinutes, method]
+      )
+    );
+  } catch (insertError) {
+    if (insertError.code === "42703") {
+      // Older databases without check_in_method still share the same queue table.
+      return client.query(
+        `INSERT INTO patient_portal_queue_entries (
+           user_id, appointment_id, token, position, status, estimated_wait_minutes
+         ) VALUES ($1, $2, $3, $4, 'waiting', $5)
+         RETURNING id, token, position, status, estimated_wait_minutes, checked_in_at`,
+        [String(userId), appointmentId, token, position, estimatedWaitMinutes]
+      );
+    }
+    if (insertError.code === "23505") {
+      const retryToken = await allocateQueueToken(client, position + Math.floor(Math.random() * 90) + 10);
+      try {
+        return await withSavepoint(client, "queue_insert_retry_method", async () =>
+          client.query(
+            `INSERT INTO patient_portal_queue_entries (
+               user_id, appointment_id, token, position, status, estimated_wait_minutes, check_in_method
+             ) VALUES ($1, $2, $3, $4, 'waiting', $5, $6)
+             RETURNING id, token, position, status, estimated_wait_minutes, checked_in_at, check_in_method`,
+            [String(userId), appointmentId, retryToken, position, estimatedWaitMinutes, method]
+          )
+        );
+      } catch (retryError) {
+        if (retryError.code !== "42703") throw retryError;
+        return client.query(
+          `INSERT INTO patient_portal_queue_entries (
+             user_id, appointment_id, token, position, status, estimated_wait_minutes
+           ) VALUES ($1, $2, $3, $4, 'waiting', $5)
+           RETURNING id, token, position, status, estimated_wait_minutes, checked_in_at`,
+          [String(userId), appointmentId, retryToken, position, estimatedWaitMinutes]
+        );
+      }
+    }
+    throw insertError;
+  }
+}
+
 async function performStaffCheckIn(client, { appointment, staff, notifyClinicStaff, checkInMethod = "rfid" }) {
   const existingForPatient = await findActiveQueueForPatient(client, appointment.user_id);
   if (existingForPatient) {
@@ -471,67 +542,20 @@ async function performStaffCheckIn(client, { appointment, staff, notifyClinicSta
   const position = Number(positionResult.rows[0].next_position);
   const token = await allocateQueueToken(client, position);
 
-  const aheadResult = await client.query(
-    `SELECT appointment.service_id, appointment.service_name
-     FROM patient_portal_queue_entries AS queue
-     LEFT JOIN patient_portal_appointments AS appointment
-       ON appointment.id = queue.appointment_id
-     WHERE DATE(queue.checked_in_at) = CURRENT_DATE
-       AND queue.status NOT IN ('completed', 'no_show')
-       AND queue.position < $1
-     ORDER BY queue.position ASC`,
-    [position]
-  );
-  const estimatedWaitMinutes = await estimateWaitMinutesForPosition(client, {
-    position,
-    aheadEntries: aheadResult.rows,
-  });
+  const aheadCount = Math.max(0, position - 1);
+  // Keep wait estimates off optional tables while inside the check-in transaction.
+  // Those lookups can abort Postgres mid-transaction when tables are missing.
+  const estimatedWaitMinutes = aheadCount * 45;
 
   const method = String(checkInMethod || "rfid").toLowerCase();
-  let queueResult;
-  try {
-    queueResult = await client.query(
-      `INSERT INTO patient_portal_queue_entries (
-         user_id, appointment_id, token, position, status, estimated_wait_minutes, check_in_method
-       ) VALUES ($1, $2, $3, $4, 'waiting', $5, $6)
-       RETURNING id, token, position, status, estimated_wait_minutes, checked_in_at, check_in_method`,
-      [String(appointment.user_id), appointment.id, token, position, estimatedWaitMinutes, method]
-    );
-  } catch (insertError) {
-    if (insertError.code === "42703") {
-      // Older databases without check_in_method still share the same queue table.
-      queueResult = await client.query(
-        `INSERT INTO patient_portal_queue_entries (
-           user_id, appointment_id, token, position, status, estimated_wait_minutes
-         ) VALUES ($1, $2, $3, $4, 'waiting', $5)
-         RETURNING id, token, position, status, estimated_wait_minutes, checked_in_at`,
-        [String(appointment.user_id), appointment.id, token, position, estimatedWaitMinutes]
-      );
-    } else if (insertError.code === "23505") {
-      // Extremely rare race: allocate a fresh token and retry once.
-      const retryToken = await allocateQueueToken(client, position + Math.floor(Math.random() * 90) + 10);
-      try {
-        queueResult = await client.query(
-          `INSERT INTO patient_portal_queue_entries (
-             user_id, appointment_id, token, position, status, estimated_wait_minutes, check_in_method
-           ) VALUES ($1, $2, $3, $4, 'waiting', $5, $6)
-           RETURNING id, token, position, status, estimated_wait_minutes, checked_in_at, check_in_method`,
-          [String(appointment.user_id), appointment.id, retryToken, position, estimatedWaitMinutes, method]
-        );
-      } catch (retryError) {
-        if (retryError.code !== "42703") throw retryError;
-        queueResult = await client.query(
-          `INSERT INTO patient_portal_queue_entries (
-             user_id, appointment_id, token, position, status, estimated_wait_minutes
-           ) VALUES ($1, $2, $3, $4, 'waiting', $5)
-           RETURNING id, token, position, status, estimated_wait_minutes, checked_in_at`,
-          [String(appointment.user_id), appointment.id, retryToken, position, estimatedWaitMinutes]
-        );
-      }
-    } else {
-      throw insertError;
-    }
-  }
+  const queueResult = await insertQueueEntry(client, {
+    userId: appointment.user_id,
+    appointmentId: appointment.id,
+    token,
+    position,
+    estimatedWaitMinutes,
+    method,
+  });
 
   await client.query(
     `UPDATE patient_portal_appointments
@@ -541,17 +565,22 @@ async function performStaffCheckIn(client, { appointment, staff, notifyClinicSta
   );
 
   try {
-    await client.query(
-      `INSERT INTO patient_portal_notifications (user_id, type, title, body)
-       VALUES ($1, 'queue', $2, $3)`,
-      [
-        String(appointment.user_id),
-        "Checked in successfully",
-        `You are checked in. Queue number ${token}. Estimated wait about ${estimatedWaitMinutes} minutes.`,
-      ]
-    );
+    await withSavepoint(client, "queue_notify", async () => {
+      await client.query(
+        `INSERT INTO patient_portal_notifications (user_id, type, title, body)
+         VALUES ($1, 'queue', $2, $3)`,
+        [
+          String(appointment.user_id),
+          "Checked in successfully",
+          `You are checked in. Queue number ${token}. Estimated wait about ${estimatedWaitMinutes} minutes.`,
+        ]
+      );
+    });
   } catch (error) {
-    if (error.code !== "42P01") throw error;
+    // Missing notifications table (or optional columns) must not abort check-in.
+    if (error.code !== "42P01" && error.code !== "42703") {
+      throw error;
+    }
   }
 
   if (typeof notifyClinicStaff === "function") {

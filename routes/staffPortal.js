@@ -1503,6 +1503,12 @@ function createStaffPortalRouter({
           }
         } catch (lookupError) {
           if (!isMissingRelation(lookupError)) throw lookupError;
+          // Missing optional columns/relations leave the txn aborted unless we roll back first.
+          await client.query("ROLLBACK");
+          transactionOpen = false;
+          await client.query("BEGIN");
+          transactionOpen = true;
+          await client.query("SELECT pg_advisory_xact_lock(hashtext('patient_portal_queue'))");
           if (method !== "rfid") {
             patient = await staffCheckIn.findPatient(client, { patientId, code: payload?.code, phone, email });
           }
@@ -1659,7 +1665,7 @@ function createStaffPortalRouter({
       if (transactionOpen) {
         await client.query("ROLLBACK");
       }
-      console.error("Staff check-in error:", error.message);
+      console.error("Staff check-in error:", error.message, error.code || "", error.detail || "");
       if (method === "rfid") {
         staffRfidEvents.recordRfidEvent({
           rfidTag,
@@ -1672,6 +1678,7 @@ function createStaffPortalRouter({
           ? "Unable to create walk-in appointment for check-in."
           : error.message || "Unable to complete patient check-in.",
         detail: error.message,
+        code: error.code || undefined,
       });
     } finally {
       client.release();
