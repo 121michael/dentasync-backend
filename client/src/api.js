@@ -18,17 +18,22 @@ function accessToken() {
   return localStorage.getItem("amethyst_access_token");
 }
 
-function shouldTrackLoading(path, { silent = false } = {}) {
+function shouldTrackLoading(path, { method = "GET", silent = false, fullscreen } = {}) {
   if (silent) return false;
   // Session hydrate already has its own LoadingState in route guards.
   if (path === "/auth/me") return false;
+  // Explicit opt-in for rare fullscreen mutation flows.
+  if (fullscreen === true) return true;
+  // Small actions (save/update/submit) use button-level busy states only.
+  const verb = String(method || "GET").toUpperCase();
+  if (verb !== "GET" && verb !== "HEAD") return false;
   return true;
 }
 
-async function request(path, { method = "GET", body, headers = {}, authenticated = true, silent = false } = {}) {
+async function request(path, { method = "GET", body, headers = {}, authenticated = true, silent = false, fullscreen } = {}) {
   const requestHeaders = { ...headers };
   const token = accessToken();
-  const track = shouldTrackLoading(path, { silent });
+  const track = shouldTrackLoading(path, { method, silent, fullscreen });
 
   if (authenticated && token) {
     requestHeaders.Authorization = `Bearer ${token}`;
@@ -59,9 +64,9 @@ async function request(path, { method = "GET", body, headers = {}, authenticated
   }
 }
 
-async function download(path, filename, { silent = false } = {}) {
+async function download(path, filename, { silent = false, fullscreen } = {}) {
   const token = accessToken();
-  const track = shouldTrackLoading(path, { silent });
+  const track = shouldTrackLoading(path, { method: "GET", silent, fullscreen });
   if (track) beginApiLoading();
   try {
     const response = await fetch(`${API_BASE}${path}`, {

@@ -11,8 +11,8 @@ import { ToothLoader } from "./ToothLoader";
 const ROUTE_HOLD_MS = 280;
 
 /**
- * Global tooth overlay for route changes and tracked API work.
- * Mount once inside BrowserRouter.
+ * Global tooth overlay for route changes and major GET data loads.
+ * Mount once inside BrowserRouter. Mutations stay button-level only.
  */
 export function GlobalLoadingOverlay() {
   const location = useLocation();
@@ -31,7 +31,5 @@ export function GlobalLoadingOverlay() {
     };
   }, [location.pathname, location.search]);
 
-  if (!snapshot.visible) return null;
-
-  return <ToothLoader overlay label="Loading..." />;
+  return <ToothLoader overlay active={snapshot.visible} label="Loading" />;
 }
