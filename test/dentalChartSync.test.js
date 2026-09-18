@@ -21,6 +21,14 @@ test("parseAffectedTeeth accepts FDI lists and ranges", () => {
   assert.deepEqual(dentalChartSync.parseAffectedTeeth("99"), []);
 });
 
+test("parseAffectedTeeth accepts primary (pediatric) teeth", () => {
+  assert.deepEqual(dentalChartSync.parseAffectedTeeth("#75"), ["75"]);
+  assert.deepEqual(dentalChartSync.parseAffectedTeeth("51, 61"), ["51", "61"]);
+  assert.equal(dentalChartSync.isValidFdiTooth(85), true);
+  assert.equal(dentalChartSync.isValidFdiTooth(86), false);
+  assert.equal(dentalChartSync.isValidFdiTooth(49), false);
+});
+
 test("isToothSpecificTreatment requires tooth for root canal and filling", () => {
   assert.equal(dentalChartSync.isToothSpecificTreatment("Root Canal"), true);
   assert.equal(dentalChartSync.isToothSpecificTreatment("Dental Filling"), true);

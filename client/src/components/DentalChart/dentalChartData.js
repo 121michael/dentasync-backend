@@ -10,6 +10,36 @@ export const LOWER_TEETH = [
 
 export const ALL_TEETH = [...UPPER_TEETH, ...LOWER_TEETH];
 
+/** FDI primary (pediatric) dentition — same straight-line layout, five teeth per side. */
+export const PRIMARY_UPPER_TEETH = [55, 54, 53, 52, 51, 61, 62, 63, 64, 65];
+
+export const PRIMARY_LOWER_TEETH = [85, 84, 83, 82, 81, 71, 72, 73, 74, 75];
+
+export const ALL_PRIMARY_TEETH = [...PRIMARY_UPPER_TEETH, ...PRIMARY_LOWER_TEETH];
+
+export const EVERY_TOOTH = [...ALL_TEETH, ...ALL_PRIMARY_TEETH];
+
+export function isPrimaryTooth(toothNumber) {
+  return ALL_PRIMARY_TEETH.includes(Number(toothNumber));
+}
+
+export function teethForDentition(dentition) {
+  return dentition === "primary"
+    ? { upper: PRIMARY_UPPER_TEETH, lower: PRIMARY_LOWER_TEETH, all: ALL_PRIMARY_TEETH }
+    : { upper: UPPER_TEETH, lower: LOWER_TEETH, all: ALL_TEETH };
+}
+
+/** Pediatric patients (category P, or young children) default to the primary chart. */
+export function dentitionForPatient({ category, age } = {}) {
+  const normalized = String(category || "").trim().toLowerCase();
+  if (normalized === "p" || normalized.includes("pedia") || normalized.includes("child")) {
+    return "primary";
+  }
+  const numericAge = Number(age);
+  if (Number.isFinite(numericAge) && numericAge > 0 && numericAge <= 6) return "primary";
+  return "permanent";
+}
+
 export const CONDITION_OPTIONS = [
   { value: "healthy", label: "Healthy" },
   { value: "decay", label: "Decay" },
@@ -76,9 +106,9 @@ export function emptyToothRecord(toothNumber) {
   };
 }
 
-export function buildDefaultChart() {
+export function buildDefaultChart(teeth = EVERY_TOOTH) {
   const chart = {};
-  for (const tooth of ALL_TEETH) {
+  for (const tooth of teeth) {
     chart[String(tooth)] = emptyToothRecord(tooth);
   }
   return chart;
@@ -129,4 +159,10 @@ export function procedureRequiresTooth(procedureName) {
   return match ? match.toothSpecific : true;
 }
 
-export { toothPositions, toothTypeFromFdi, toothScale } from "./toothShapes";
+export {
+  FRONT_TOOTH_SHAPES,
+  TOOTH_VIEW,
+  frontToothShape,
+  isPrimaryToothNumber,
+  toothTypeFromFdi,
+} from "./toothShapes";

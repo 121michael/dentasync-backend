@@ -4864,149 +4864,245 @@ strong {
   color: var(--text-muted);
   white-space: nowrap;
 }
-.fdi-chart-scroll {
+.odo-scroll {
   width: 100%;
   overflow-x: auto;
   padding-bottom: 0.35rem;
 }
-.fdi-chart-svg {
-  display: block;
-  width: min(100%, 860px);
-  height: auto;
+.odo-head-meta {
+  display: grid;
+  justify-items: end;
+  gap: 0.4rem;
+}
+.odo-dentition {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #fff;
+}
+.odo-dentition__option {
+  border: 0;
+  border-radius: 999px;
+  padding: 0.22rem 0.7rem;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.odo-dentition__option.is-active {
+  background: #f4edff;
+  color: #4c1d75;
+}
+.odo-chart {
+  display: grid;
+  gap: 1.1rem;
+  min-width: 660px;
   margin: 0 auto;
-  user-select: none;
-  background: #ffffff;
+  padding: 0.9rem 0.6rem 0.4rem;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 16px;
 }
-.fdi-mouth {
-  pointer-events: none;
+.odo-chart--primary {
+  min-width: 460px;
 }
-.fdi-arch-label {
-  fill: #111111;
-  font-size: 15px;
+.odo-arch {
+  display: grid;
+  gap: 0.35rem;
+  justify-items: center;
+}
+.odo-arch__label {
+  color: var(--text-muted);
+  font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.12em;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  opacity: 0.9;
-  pointer-events: none;
+  text-transform: uppercase;
 }
-.fdi-tooth {
-  outline: none;
+.odo-row {
+  display: grid;
+  grid-template-columns:
+    repeat(var(--odo-half, 8), minmax(0, 1fr)) auto
+    repeat(var(--odo-half, 8), minmax(0, 1fr));
+  align-items: start;
+  justify-items: center;
+  gap: 0.35rem;
+  width: 100%;
 }
-.fdi-tooth__hit {
-  fill: transparent;
-  pointer-events: all;
+.odo-midline {
+  align-self: stretch;
+  width: 1px;
+  margin: 0 0.4rem;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(124, 58, 237, 0.4) 0 6px,
+    transparent 6px 12px
+  );
 }
-.fdi-tooth__shadow {
-  fill: rgba(110, 70, 55, 0.08);
-  pointer-events: none;
+.odo-tooth {
+  display: grid;
+  justify-items: center;
+  gap: 0.15rem;
+  width: 100%;
 }
-.fdi-tooth__shape {
-  fill: url(#fdiToothIvory);
-  stroke: rgba(180, 160, 130, 0.45);
-  stroke-width: 0.9;
-  filter: url(#fdiSoftShadow);
-  transition: stroke 0.15s ease;
+.odo-tooth__number {
+  color: #4b5563;
+  font-size: 0.68rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
-.fdi-tooth__shade {
-  fill: url(#fdiToothShade);
-  stroke: none;
-  pointer-events: none;
-  opacity: 0.5;
+.odo-tooth__button {
+  display: block;
+  width: 100%;
+  max-width: 46px;
+  padding: 2px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  line-height: 0;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
-.fdi-tooth__cusp {
-  fill: url(#fdiToothCusp);
-  stroke: none;
-  pointer-events: none;
+.odo-tooth__button:hover {
+  background: rgba(124, 58, 237, 0.07);
 }
-.fdi-tooth__highlight {
-  fill: url(#fdiToothHighlight);
-  stroke: none;
-  pointer-events: none;
-  opacity: 0.85;
-  mix-blend-mode: soft-light;
+.odo-tooth__button:focus-visible {
+  outline: 2px solid #7c3aed;
+  outline-offset: 2px;
 }
-.fdi-tooth__detail {
-  stroke: rgba(130, 105, 80, 0.32);
-  stroke-width: 1.05;
-  pointer-events: none;
+.odo-tooth__svg {
+  display: block;
+  width: 100%;
+  height: auto;
 }
-.fdi-tooth__detail-secondary {
-  stroke: rgba(140, 115, 90, 0.2);
-  stroke-width: 0.65;
-  pointer-events: none;
+/* Lower teeth are mirrored so crowns meet the midline — flat front view, never rotated. */
+.odo-tooth--lower .odo-tooth__svg {
+  transform: scaleY(-1);
 }
-.fdi-tooth__pit {
-  fill: rgba(120, 95, 70, 0.28);
-  stroke: none;
-  pointer-events: none;
-}
-.fdi-tooth--molar .fdi-tooth__detail {
-  stroke-width: 1.1;
-  stroke: rgba(120, 95, 70, 0.36);
-}
-.fdi-tooth--premolar .fdi-tooth__detail {
-  stroke-width: 1.05;
-}
-.fdi-tooth--canine .fdi-tooth__detail {
-  stroke-width: 1;
-}
-.fdi-tooth--central_incisor .fdi-tooth__shape,
-.fdi-tooth--lateral_incisor .fdi-tooth__shape {
-  stroke-width: 0.85;
-}
-.fdi-tooth__number {
-  fill: #222222;
-  font-size: 12.5px;
-  font-weight: 600;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  pointer-events: none;
-  paint-order: stroke;
-  stroke: rgba(255, 255, 255, 0.95);
-  stroke-width: 3px;
-}
-.fdi-tooth__selection {
-  fill: rgba(37, 99, 235, 0.03);
-  stroke: rgba(37, 99, 235, 0.45);
-  stroke-width: 1.35;
-  pointer-events: none;
-}
-.fdi-tooth__marker {
-  stroke: #fff;
-  stroke-width: 1.1;
-  pointer-events: none;
-}
-.fdi-tooth__marker--attention { fill: #ea580c; }
-.fdi-tooth__marker--treated { fill: #2563eb; }
-.fdi-tooth__marker--under { fill: #7c3aed; }
-.fdi-tooth__marker--note { fill: #6d28d9; }
-.fdi-tooth__missing-slot {
-  stroke: #a89ba8;
-  stroke-width: 1.5;
-}
-.fdi-tooth__missing-mark {
-  stroke: #a89ba8;
-}
-.fdi-tooth:hover .fdi-tooth__shape,
-.fdi-tooth:focus-visible .fdi-tooth__shape {
-  stroke: rgba(140, 120, 95, 0.75);
+.odo-tooth__root {
+  fill: #f4f0e7;
+  stroke: #cdc5b4;
   stroke-width: 1.2;
 }
-.fdi-tooth.is-selected .fdi-tooth__shape {
-  stroke: rgba(37, 99, 235, 0.55);
-  stroke-width: 1.35;
+.odo-tooth__crown {
+  fill: #fdfcf8;
+  stroke: #b5aca0;
+  stroke-width: 1.4;
+  transition: fill 0.15s ease, stroke 0.15s ease;
 }
-.fdi-tooth--needs_attention .fdi-tooth__shape,
-.fdi-tooth--fractured .fdi-tooth__shape {
-  stroke: #c2410c;
+.odo-tooth__detail {
+  stroke: rgba(150, 140, 120, 0.5);
+  stroke-width: 1;
+  stroke-linecap: round;
 }
-.fdi-tooth--treated .fdi-tooth__shape {
-  stroke: #3b82f6;
-}
-.fdi-tooth--under_treatment .fdi-tooth__shape {
+.odo-tooth__button:hover .odo-tooth__crown {
   stroke: #7c3aed;
 }
-.fdi-tooth--missing .fdi-tooth__number {
-  fill: #8b8198;
+.odo-tooth.is-selected .odo-tooth__button {
+  border-color: #7c3aed;
+  background: #f4edff;
+}
+.odo-tooth.is-selected .odo-tooth__crown {
+  stroke: #7c3aed;
+  stroke-width: 2;
+}
+.odo-tooth.is-selected .odo-tooth__number {
+  color: #4c1d75;
+}
+.odo-tooth--treated .odo-tooth__crown {
+  fill: #eaf3ff;
+  stroke: #2563eb;
+}
+.odo-tooth--treated .odo-tooth__root {
+  fill: #f3f8ff;
+  stroke: #9dbaf0;
+}
+.odo-tooth--under_treatment .odo-tooth__crown {
+  fill: #f6efff;
+  stroke: #7c3aed;
+}
+.odo-tooth--needs_attention .odo-tooth__crown,
+.odo-tooth--fractured .odo-tooth__crown {
+  fill: #fff4e8;
+  stroke: #c2410c;
+}
+.odo-tooth--missing .odo-tooth__crown,
+.odo-tooth--missing .odo-tooth__root {
+  fill: #f4f2f6;
+  stroke: #c0b8c6;
+  stroke-dasharray: 4 3;
+}
+.odo-tooth--missing .odo-tooth__detail {
+  display: none;
+}
+.odo-tooth--missing .odo-tooth__number {
+  color: #8b8198;
+}
+.odo-tooth__missing {
+  stroke: #8b8198;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+}
+.odo-tooth__mark {
+  pointer-events: none;
+}
+.odo-tooth__mark--root_canal path {
+  stroke: #1d4ed8;
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+.odo-tooth__mark--root_canal circle {
+  fill: #1d4ed8;
+}
+.odo-tooth__mark--filling rect {
+  fill: #2563eb;
+}
+.odo-tooth__mark--crown rect {
+  fill: none;
+  stroke: #1d4ed8;
+  stroke-width: 2.4;
+}
+.odo-tooth__mark--bridge path {
+  stroke: #1d4ed8;
+  stroke-width: 2.6;
+  stroke-linecap: round;
+}
+.odo-tooth__mark--bridge rect {
+  fill: none;
+  stroke: #1d4ed8;
+  stroke-width: 2;
+}
+.odo-tooth__mark--sealant circle {
+  fill: #0f9f6e;
+}
+.odo-tooth__mark--braces path {
+  stroke: #7c3aed;
+  stroke-width: 2;
+}
+.odo-tooth__mark--braces rect {
+  fill: none;
+  stroke: #7c3aed;
+  stroke-width: 2;
+}
+.odo-tooth__flag {
+  width: 0.38rem;
+  height: 0.38rem;
+  border-radius: 999px;
+  background: transparent;
+}
+.odo-tooth--treated .odo-tooth__flag {
+  background: #2563eb;
+}
+.odo-tooth--under_treatment .odo-tooth__flag {
+  background: #7c3aed;
+}
+.odo-tooth--needs_attention .odo-tooth__flag,
+.odo-tooth--fractured .odo-tooth__flag {
+  background: #ea580c;
+}
+.odo-tooth--missing .odo-tooth__flag {
+  background: #8b8198;
 }
 .fdi-legend {
   display: flex;
@@ -5143,10 +5239,14 @@ strong {
   cursor: pointer;
 }
 
-.fdi-chart-shell--pick .fdi-tooth.is-selected .fdi-tooth__selection {
-  stroke: #7c3aed;
+.fdi-chart-shell--pick .odo-tooth.is-selected .odo-tooth__button {
+  border-color: #6d28d9;
+  background: #ede4ff;
+  box-shadow: inset 0 0 0 1px #6d28d9;
+}
+.fdi-chart-shell--pick .odo-tooth.is-selected .odo-tooth__crown {
+  stroke: #6d28d9;
   stroke-width: 2.4;
-  opacity: 0.95;
 }
 
 .fdi-chart-shell--pick .fdi-chart-layout {
@@ -5180,8 +5280,39 @@ strong {
   .dentist-modal--wide {
     width: min(100%, 96vw);
   }
+  .odo-chart {
+    min-width: 600px;
+    gap: 0.9rem;
+  }
+  .odo-chart--primary {
+    min-width: 400px;
+  }
+  .odo-tooth__button {
+    max-width: 38px;
+  }
+  .odo-row {
+    gap: 0.25rem;
+  }
 }
 
 @media (max-width: 760px) {
   .assistant-composer { flex-direction: column; align-items: stretch; }
+  .fdi-chart-canvas__head {
+    flex-direction: column;
+  }
+  .odo-head-meta {
+    justify-items: start;
+  }
+  .odo-chart {
+    min-width: 540px;
+  }
+  .odo-chart--primary {
+    min-width: 360px;
+  }
+  .odo-tooth__button {
+    max-width: 32px;
+  }
+  .odo-tooth__number {
+    font-size: 0.62rem;
+  }
 }

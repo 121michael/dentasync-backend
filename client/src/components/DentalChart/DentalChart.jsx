@@ -4,37 +4,48 @@ import { ErrorState, LoadingState } from "../UI";
 import { Tooth } from "./Tooth";
 import { ToothDetailsPanel } from "./ToothDetailsPanel";
 import {
-  ALL_TEETH,
-  LOWER_TEETH,
   TREATMENT_OPTIONS,
-  UPPER_TEETH,
   buildDefaultChart,
+  dentitionForPatient,
   emptyToothRecord,
+  isPrimaryTooth,
   labelFor,
   normalizeChartEntry,
-  toothPositions,
+  teethForDentition,
 } from "./dentalChartData";
-import { gumArchStrokePath } from "./mouthShapes";
 
-const VIEW = { width: 860, height: 680 };
-
-const UPPER_ARCH = { cx: VIEW.width / 2, cy: 208, rx: 232, ry: 138 };
-const LOWER_ARCH = { cx: VIEW.width / 2, cy: 462, rx: 232, ry: 138 };
+function hasChartStatus(entry) {
+  if (!entry) return false;
+  const conditions = entry.condition || [];
+  const meaningfulCondition =
+    conditions.length && !(conditions.length === 1 && conditions[0] === "healthy");
+  return Boolean(
+    meaningfulCondition ||
+      (entry.treatments && entry.treatments.length) ||
+      (entry.notes && entry.notes.trim()) ||
+      (entry.status && entry.status !== "healthy")
+  );
+}
 
 export function DentalChart({
   patientId,
-  onTreatmentRecorded,
   readOnly = false,
   refreshKey = 0,
   loadChartApi,
   pickMode = false,
   selectedTeeth = [],
   onTeethChange,
+  patientCategory,
+  patientAge,
 }) {
   const [chart, setChart] = useState(null);
   const [loadError, setLoadError] = useState("");
   const [selectedTooth, setSelectedTooth] = useState("");
   const [draft, setDraft] = useState(null);
+  const [dentition, setDentition] = useState(() =>
+    dentitionForPatient({ category: patientCategory, age: patientAge })
+  );
+  const [dentitionPinned, setDentitionPinned] = useState(false);
 
   const picked = useMemo(
     () => new Set((selectedTeeth || []).map((tooth) => String(tooth))),
@@ -48,13 +59,17 @@ export function DentalChart({
       const loader = loadChartApi || api.getDentistDentalChart;
       const response = await loader(patientId);
       const next = buildDefaultChart();
+      let primaryEntries = 0;
       for (const entry of response.entries || response.chart || []) {
         const normalized = normalizeChartEntry(entry);
-        if (normalized.toothNumber) {
-          next[normalized.toothNumber] = normalized;
+        if (!normalized.toothNumber) continue;
+        next[normalized.toothNumber] = normalized;
+        if (isPrimaryTooth(normalized.toothNumber) && hasChartStatus(normalized)) {
+          primaryEntries += 1;
         }
       }
       setChart(next);
+      if (primaryEntries && !dentitionPinned) setDentition("primary");
       if (selectedTooth && next[selectedTooth]) {
         setDraft({
           ...next[selectedTooth],
@@ -72,6 +87,8 @@ export function DentalChart({
     setSelectedTooth("");
     setDraft(null);
     setChart(null);
+    setDentitionPinned(false);
+    setDentition(dentitionForPatient({ category: patientCategory, age: patientAge }));
     loadChart();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [patientId]);
@@ -82,29 +99,8 @@ export function DentalChart({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
 
-  const upperPositions = useMemo(
-    () =>
-      toothPositions(UPPER_TEETH, {
-        ...UPPER_ARCH,
-        invert: false,
-        labelPad: 42,
-        viewWidth: VIEW.width,
-        viewHeight: VIEW.height,
-      }),
-    []
-  );
-
-  const lowerPositions = useMemo(
-    () =>
-      toothPositions(LOWER_TEETH, {
-        ...LOWER_ARCH,
-        invert: true,
-        labelPad: 42,
-        viewWidth: VIEW.width,
-        viewHeight: VIEW.height,
-      }),
-    []
-  );
+  const { upper, lower, all } = useMemo(() => teethForDentition(dentition), [dentition]);
+  const half = upper.length / 2;
 
   function selectTooth(toothNumber) {
     const key = String(toothNumber);
@@ -125,6 +121,13 @@ export function DentalChart({
     });
   }
 
+  function switchDentition(next) {
+    setDentitionPinned(true);
+    setDentition(next);
+    setSelectedTooth("");
+    setDraft(null);
+  }
+
   if (loadError && !chart) {
     return (
       <section className="fdi-chart-shell glass-card">
@@ -141,18 +144,41 @@ export function DentalChart({
     );
   }
 
-  const recordedCount = ALL_TEETH.filter((tooth) => {
-    const entry = chart[String(tooth)];
+  const recordedCount = all.filter((tooth) => hasChartStatus(chart[String(tooth)])).length;
+
+  function renderRow(teeth, arch) {
+    const right = teeth.slice(0, half);
+    const left = teeth.slice(half);
     return (
-      entry &&
-      ((entry.condition &&
-        entry.condition.length &&
-        !(entry.condition.length === 1 && entry.condition[0] === "healthy")) ||
-        (entry.treatments && entry.treatments.length) ||
-        (entry.notes && entry.notes.trim()) ||
-        (entry.status && entry.status !== "healthy"))
+      <div className="odo-row" style={{ "--odo-half": half }}>
+        {right.map((tooth) => (
+          <Tooth
+            key={`${arch}-${tooth}`}
+            toothNumber={tooth}
+            arch={arch}
+            record={chart[String(tooth)]}
+            selected={
+              pickMode ? picked.has(String(tooth)) : String(selectedTooth) === String(tooth)
+            }
+            onSelect={selectTooth}
+          />
+        ))}
+        <span className="odo-midline" aria-hidden="true" />
+        {left.map((tooth) => (
+          <Tooth
+            key={`${arch}-${tooth}`}
+            toothNumber={tooth}
+            arch={arch}
+            record={chart[String(tooth)]}
+            selected={
+              pickMode ? picked.has(String(tooth)) : String(selectedTooth) === String(tooth)
+            }
+            onSelect={selectTooth}
+          />
+        ))}
+      </div>
     );
-  }).length;
+  }
 
   return (
     <section className={`fdi-chart-shell ${pickMode ? "fdi-chart-shell--pick" : ""}`}>
@@ -161,7 +187,7 @@ export function DentalChart({
           <div className="fdi-chart-canvas__head">
             <div>
               <span className="eyebrow">
-                {pickMode ? "Select affected tooth" : "Interactive FDI chart"}
+                {pickMode ? "Select affected tooth" : "FDI odontogram — front view"}
               </span>
               <h2>2D Dental Chart</h2>
               <p className="muted-copy">
@@ -170,15 +196,33 @@ export function DentalChart({
                   : "Chart status is driven by saved treatment records. Saving a treatment updates the matching tooth automatically."}
               </p>
             </div>
-            <small className="fdi-chart-count">
-              {pickMode
-                ? picked.size
-                  ? `${picked.size} tooth${picked.size === 1 ? "" : " teeth"} selected`
-                  : "No tooth selected yet"
-                : recordedCount
-                  ? `${recordedCount} teeth with chart status`
-                  : "No treatment-driven chart status yet."}
-            </small>
+            <div className="odo-head-meta">
+              <div className="odo-dentition" role="group" aria-label="Dentition">
+                <button
+                  type="button"
+                  className={`odo-dentition__option ${dentition === "permanent" ? "is-active" : ""}`}
+                  onClick={() => switchDentition("permanent")}
+                >
+                  Adult
+                </button>
+                <button
+                  type="button"
+                  className={`odo-dentition__option ${dentition === "primary" ? "is-active" : ""}`}
+                  onClick={() => switchDentition("primary")}
+                >
+                  Pediatric
+                </button>
+              </div>
+              <small className="fdi-chart-count">
+                {pickMode
+                  ? picked.size
+                    ? `${picked.size} ${picked.size === 1 ? "tooth" : "teeth"} selected`
+                    : "No tooth selected yet"
+                  : recordedCount
+                    ? `${recordedCount} teeth with chart status`
+                    : "No treatment-driven chart status yet."}
+              </small>
+            </div>
           </div>
 
           {pickMode && picked.size ? (
@@ -197,110 +241,17 @@ export function DentalChart({
             </p>
           ) : null}
 
-          <div className="fdi-chart-scroll">
-            <svg
-              className="fdi-chart-svg"
-              viewBox={`0 0 ${VIEW.width} ${VIEW.height}`}
-              role="img"
-              aria-label="Interactive FDI dental chart with upper and lower arches"
-            >
-              <defs>
-                <linearGradient id="fdiToothIvory" x1="0.2" y1="0.05" x2="0.85" y2="0.95">
-                  <stop offset="0%" stopColor="#fffcf6" />
-                  <stop offset="35%" stopColor="#f5ecdc" />
-                  <stop offset="75%" stopColor="#e6d7bc" />
-                  <stop offset="100%" stopColor="#d4c19e" />
-                </linearGradient>
-                <radialGradient id="fdiToothCusp" cx="40%" cy="35%" r="65%">
-                  <stop offset="0%" stopColor="rgba(255,255,255,0.75)" />
-                  <stop offset="55%" stopColor="rgba(255,248,235,0.18)" />
-                  <stop offset="100%" stopColor="rgba(220,200,160,0)" />
-                </radialGradient>
-                <linearGradient id="fdiToothHighlight" x1="0" y1="0" x2="0.25" y2="1">
-                  <stop offset="0%" stopColor="rgba(255,255,255,0.55)" />
-                  <stop offset="45%" stopColor="rgba(255,255,255,0.08)" />
-                  <stop offset="100%" stopColor="rgba(255,255,255,0)" />
-                </linearGradient>
-                <linearGradient id="fdiToothShade" x1="0.5" y1="0" x2="0.5" y2="1">
-                  <stop offset="0%" stopColor="rgba(170,140,100,0.04)" />
-                  <stop offset="100%" stopColor="rgba(140,110,75,0.14)" />
-                </linearGradient>
-                <filter id="fdiGumBlur" x="-50%" y="-50%" width="200%" height="200%">
-                  <feGaussianBlur stdDeviation="9" />
-                </filter>
-                <filter id="fdiSoftShadow" x="-25%" y="-25%" width="150%" height="150%">
-                  <feDropShadow dx="0.2" dy="0.45" stdDeviation="0.45" floodColor="#8b5a4a" floodOpacity="0.14" />
-                </filter>
-              </defs>
-
-              <rect x="0" y="0" width={VIEW.width} height={VIEW.height} fill="#ffffff" />
-
-              <g className="fdi-mouth" aria-hidden="true">
-                <path
-                  d={gumArchStrokePath({ ...UPPER_ARCH, invert: false })}
-                  fill="none"
-                  stroke="rgba(230, 115, 105, 0.55)"
-                  strokeWidth="42"
-                  strokeLinecap="round"
-                  filter="url(#fdiGumBlur)"
-                />
-                <path
-                  d={gumArchStrokePath({ ...LOWER_ARCH, invert: true })}
-                  fill="none"
-                  stroke="rgba(230, 115, 105, 0.55)"
-                  strokeWidth="42"
-                  strokeLinecap="round"
-                  filter="url(#fdiGumBlur)"
-                />
-              </g>
-
-              <text className="fdi-arch-label" x={VIEW.width / 2} y={212} textAnchor="middle">
-                UPPER
-              </text>
-              <text className="fdi-arch-label" x={VIEW.width / 2} y={458} textAnchor="middle">
-                LOWER
-              </text>
-
-              {upperPositions.map((position) => (
-                <Tooth
-                  key={`u-${position.tooth}`}
-                  toothNumber={position.tooth}
-                  record={chart[String(position.tooth)]}
-                  selected={
-                    pickMode
-                      ? picked.has(String(position.tooth))
-                      : String(selectedTooth) === String(position.tooth)
-                  }
-                  onSelect={selectTooth}
-                  x={position.x}
-                  y={position.y}
-                  rotate={position.rotate}
-                  labelX={position.labelX}
-                  labelY={position.labelY}
-                  scale={position.scale}
-                />
-              ))}
-
-              {lowerPositions.map((position) => (
-                <Tooth
-                  key={`l-${position.tooth}`}
-                  toothNumber={position.tooth}
-                  record={chart[String(position.tooth)]}
-                  selected={
-                    pickMode
-                      ? picked.has(String(position.tooth))
-                      : String(selectedTooth) === String(position.tooth)
-                  }
-                  onSelect={selectTooth}
-                  x={position.x}
-                  y={position.y}
-                  rotate={position.rotate}
-                  labelX={position.labelX}
-                  labelY={position.labelY}
-                  scale={position.scale}
-                />
-              ))}
-            </svg>
+          <div className="odo-scroll">
+            <div className={`odo-chart odo-chart--${dentition}`}>
+              <div className="odo-arch">
+                <span className="odo-arch__label">Upper Teeth — Front View</span>
+                {renderRow(upper, "upper")}
+              </div>
+              <div className="odo-arch odo-arch--lower">
+                <span className="odo-arch__label">Lower Teeth — Front View</span>
+                {renderRow(lower, "lower")}
+              </div>
+            </div>
           </div>
 
           <div className="fdi-legend">

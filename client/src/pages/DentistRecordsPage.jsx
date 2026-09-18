@@ -559,7 +559,8 @@ export function DentistRecordsPage() {
 
           <DentalChart
             patientId={detail.patient.id}
-            dentistName={detail.patient.assignedDentist || ""}
+            patientCategory={detail.patient.patientCategory}
+            patientAge={detail.patient.age}
             refreshKey={chartRefreshKey}
             pickMode={treatmentFormOpen}
             selectedTeeth={
@@ -574,7 +575,6 @@ export function DentistRecordsPage() {
                 toothNumber: teeth.join(", "),
               }))
             }
-            onTreatmentRecorded={() => refreshPatientDetail(detail.patient.id)}
           />
 
           <section className="treatment-record" style={{ marginTop: "1.25rem" }}>

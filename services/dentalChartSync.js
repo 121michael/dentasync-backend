@@ -110,11 +110,14 @@ function parseAffectedTeeth(value) {
   return [...teeth];
 }
 
+/** Permanent teeth 11-48 plus primary (pediatric) teeth 51-85. */
 function isValidFdiTooth(n) {
-  if (!Number.isInteger(n) || n < 11 || n > 48) return false;
+  if (!Number.isInteger(n)) return false;
   const decade = Math.floor(n / 10);
   const unit = n % 10;
-  return [1, 2, 3, 4].includes(decade) && unit >= 1 && unit <= 8;
+  if ([1, 2, 3, 4].includes(decade)) return unit >= 1 && unit <= 8;
+  if ([5, 6, 7, 8].includes(decade)) return unit >= 1 && unit <= 5;
+  return false;
 }
 
 function preferStatus(current, next) {

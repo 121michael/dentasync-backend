@@ -475,6 +475,8 @@ export function StaffPatientsPage() {
           <div style={{ marginTop: "1rem" }}>
             <DentalChart
               patientId={detail.id}
+              patientCategory={detail.patientCategory}
+              patientAge={detail.age}
               readOnly
               loadChartApi={api.getStaffDentalChart}
             />
