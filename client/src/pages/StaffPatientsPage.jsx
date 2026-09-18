@@ -488,10 +488,10 @@ export function StaffPatientsPage() {
                 <thead>
                   <tr>
                     <th>Date</th>
+                    <th>Tooth</th>
                     <th>Procedure</th>
                     <th>Diagnosis</th>
                     <th>Dentist</th>
-                    <th>Notes</th>
                     <th>Cost</th>
                     <th>Status</th>
                   </tr>
@@ -500,10 +500,10 @@ export function StaffPatientsPage() {
                   {detail.treatments.map((treatment) => (
                     <tr key={treatment.id}>
                       <td>{formatStaffDate(treatment.date || treatment.treatmentDate)}</td>
+                      <td>{treatment.toothNumber ? `#${treatment.toothNumber}` : "—"}</td>
                       <td>{treatment.treatment || treatment.name || "—"}</td>
                       <td>{treatment.diagnosis || treatment.diagnosisNotes || "—"}</td>
                       <td>{treatment.dentist || "—"}</td>
-                      <td>{treatment.notes || "—"}</td>
                       <td>{formatMoney(treatment.amountCharged)}</td>
                       <td>{treatment.paymentStatus || treatment.status || "—"}</td>
                     </tr>

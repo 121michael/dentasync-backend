@@ -276,6 +276,10 @@ export const api = {
     }),
   addDentistTreatment: (patientId, body) =>
     request(`/dentist/patients/${patientId}/treatments`, { method: "POST", body }),
+  updateDentistTreatment: (patientId, treatmentId, body) =>
+    request(`/dentist/patients/${patientId}/treatments/${treatmentId}`, { method: "PUT", body }),
+  deleteDentistTreatment: (patientId, treatmentId) =>
+    request(`/dentist/patients/${patientId}/treatments/${treatmentId}`, { method: "DELETE" }),
   setDentistProcedureDuration: (queueEntryId, body) =>
     request(`/dentist/queue/${queueEntryId}/duration`, { method: "PATCH", body }),
   getAdminStaff: (params = {}) => {

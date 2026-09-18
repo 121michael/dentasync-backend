@@ -79,6 +79,9 @@ export function DentistRecordsPage() {
   const [treatmentForm, setTreatmentForm] = useState(emptyTreatment);
   const [treatmentFormOpen, setTreatmentFormOpen] = useState(false);
   const [savingTreatment, setSavingTreatment] = useState(false);
+  const [editingTreatmentId, setEditingTreatmentId] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deletingTreatment, setDeletingTreatment] = useState(false);
   const [chartRefreshKey, setChartRefreshKey] = useState(0);
   const [ageSexOpen, setAgeSexOpen] = useState(false);
   const [ageSexForm, setAgeSexForm] = useState(emptyAgeSexForm);
@@ -131,6 +134,8 @@ export function DentistRecordsPage() {
     try {
       setTreatmentForm(emptyTreatment);
       setTreatmentFormOpen(false);
+      setEditingTreatmentId(null);
+      setDeleteTarget(null);
       setAgeSexOpen(false);
       await refreshPatientDetail(patient.id);
       setError("");
@@ -188,6 +193,27 @@ export function DentistRecordsPage() {
     }
   }
 
+  function closeTreatmentForm() {
+    setTreatmentFormOpen(false);
+    setTreatmentForm(emptyTreatment);
+    setEditingTreatmentId(null);
+  }
+
+  function startEditTreatment(treatment) {
+    setError("");
+    setSuccess("");
+    setEditingTreatmentId(treatment.id);
+    setTreatmentForm({
+      name: treatment.name || treatment.treatment || "",
+      treatmentDate: String(treatment.date || treatment.treatmentDate || "").slice(0, 10),
+      durationMinutes: treatment.durationMinutes != null ? String(treatment.durationMinutes) : "",
+      toothNumber: treatment.toothNumber || treatment.tooth_number || "",
+      diagnosisNotes: treatment.diagnosis || treatment.diagnosisNotes || "",
+      amountCharged: treatment.amountCharged != null ? String(treatment.amountCharged) : "",
+    });
+    setTreatmentFormOpen(true);
+  }
+
   async function saveTreatment(event) {
     event.preventDefault();
     if (!detail?.patient?.id) return;
@@ -199,19 +225,27 @@ export function DentistRecordsPage() {
     setError("");
     setSuccess("");
     try {
-      const response = await api.addDentistTreatment(detail.patient.id, {
+      const payload = {
         name: treatmentForm.name,
         treatment: treatmentForm.name,
         treatmentDate: treatmentForm.treatmentDate || undefined,
         durationMinutes: Number(treatmentForm.durationMinutes) || undefined,
-        toothNumber: treatmentForm.toothNumber || undefined,
         diagnosisNotes: treatmentForm.diagnosisNotes,
         diagnosis: treatmentForm.diagnosisNotes,
         amountCharged: treatmentForm.amountCharged === "" ? 0 : Number(treatmentForm.amountCharged),
-      });
+      };
+      const response = editingTreatmentId
+        ? await api.updateDentistTreatment(detail.patient.id, editingTreatmentId, {
+            ...payload,
+            // Sent even when empty so clearing the chart selection is saved.
+            toothNumber: treatmentForm.toothNumber || "",
+          })
+        : await api.addDentistTreatment(detail.patient.id, {
+            ...payload,
+            toothNumber: treatmentForm.toothNumber || undefined,
+          });
       setSuccess(response.message || "Treatment saved. Dental chart updated automatically.");
-      setTreatmentForm(emptyTreatment);
-      setTreatmentFormOpen(false);
+      closeTreatmentForm();
       await refreshPatientDetail(detail.patient.id);
       setChartRefreshKey((key) => key + 1);
       await load();
@@ -219,6 +253,28 @@ export function DentistRecordsPage() {
       setError(saveError.message);
     } finally {
       setSavingTreatment(false);
+    }
+  }
+
+  async function confirmDeleteTreatment() {
+    if (!detail?.patient?.id || !deleteTarget?.id) return;
+    setDeletingTreatment(true);
+    setError("");
+    setSuccess("");
+    try {
+      const response = await api.deleteDentistTreatment(detail.patient.id, deleteTarget.id);
+      setSuccess(
+        response.message || "Treatment deleted. Dental chart recalculated from the remaining treatments."
+      );
+      setDeleteTarget(null);
+      if (editingTreatmentId === deleteTarget.id) closeTreatmentForm();
+      await refreshPatientDetail(detail.patient.id);
+      setChartRefreshKey((key) => key + 1);
+      await load();
+    } catch (deleteError) {
+      setError(deleteError.message);
+    } finally {
+      setDeletingTreatment(false);
     }
   }
 
@@ -602,6 +658,7 @@ export function DentistRecordsPage() {
                       <th>Amount Paid (staff)</th>
                       <th>Balance</th>
                       <th>Next Appt. (staff)</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -616,6 +673,24 @@ export function DentistRecordsPage() {
                         <td>{formatMoney(treatment.amountPaid)}</td>
                         <td>{formatMoney(treatmentBalance(treatment))}</td>
                         <td>{nextAppointmentLabel(treatment, detail.nextAppointment, detail.patient)}</td>
+                        <td>
+                          <div className="treatment-record__actions">
+                            <button
+                              type="button"
+                              className="button button--secondary button--compact"
+                              onClick={() => startEditTreatment(treatment)}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="button button--danger button--compact"
+                              onClick={() => setDeleteTarget(treatment)}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -630,22 +705,21 @@ export function DentistRecordsPage() {
             <div className="dentist-panel__heading">
               <div>
                 <span className="eyebrow">Clinical information</span>
-                <h2>Add Treatment</h2>
+                <h2>{editingTreatmentId ? "Edit Treatment" : "Add Treatment"}</h2>
               </div>
               <button
                 type="button"
                 className={`button ${treatmentFormOpen ? "button--secondary" : "button--primary"}`}
                 onClick={() => {
                   if (treatmentFormOpen) {
-                    setTreatmentFormOpen(false);
-                    setTreatmentForm(emptyTreatment);
+                    closeTreatmentForm();
                   } else {
                     setTreatmentFormOpen(true);
                   }
                 }}
               >
                 {treatmentFormOpen ? (
-                  "− Close Treatment Form"
+                  editingTreatmentId ? "Cancel Edit" : "− Close Treatment Form"
                 ) : (
                   <>
                     <Plus size={16} /> Add Treatment
@@ -661,9 +735,9 @@ export function DentistRecordsPage() {
               {treatmentFormOpen ? (
                 <>
                   <p className="muted-copy">
-                    Enter diagnosis and treatment, then click the affected tooth on the dental chart
-                    above. Saving updates history and the chart automatically. Amount paid and next
-                    appointment are managed by Staff.
+                    {editingTreatmentId
+                      ? "Editing a saved treatment. The recorded tooth is already highlighted on the chart above — click another tooth to change it. Saving recalculates the chart from the treatment history."
+                      : "Enter diagnosis and treatment, then click the affected tooth on the dental chart above. Saving updates history and the chart automatically. Amount paid and next appointment are managed by Staff."}
                   </p>
                   <form className="dentist-form" onSubmit={saveTreatment}>
                     <div className="field-grid field-grid--two">
@@ -763,9 +837,27 @@ export function DentistRecordsPage() {
                         />
                       </label>
                     </div>
-                    <button className="button button--primary" disabled={savingTreatment}>
-                      {savingTreatment ? "Saving Treatment…" : "Save Treatment"}
-                    </button>
+                    <div className="dentist-form__actions">
+                      <button className="button button--primary" disabled={savingTreatment}>
+                        {savingTreatment
+                          ? editingTreatmentId
+                            ? "Saving Changes…"
+                            : "Saving Treatment…"
+                          : editingTreatmentId
+                            ? "Save Changes"
+                            : "Save Treatment"}
+                      </button>
+                      {editingTreatmentId ? (
+                        <button
+                          type="button"
+                          className="button button--secondary"
+                          onClick={closeTreatmentForm}
+                          disabled={savingTreatment}
+                        >
+                          Cancel
+                        </button>
+                      ) : null}
+                    </div>
                   </form>
                 </>
               ) : null}
@@ -816,6 +908,53 @@ export function DentistRecordsPage() {
               <p className="muted-copy">No uploaded X-rays for this linked patient account.</p>
             )}
           </section>
+        </DentistModal>
+      ) : null}
+
+      {deleteTarget ? (
+        <DentistModal
+          title="Delete Treatment"
+          onClose={() => {
+            if (!deletingTreatment) setDeleteTarget(null);
+          }}
+        >
+          <p className="dentist-confirm-copy">Are you sure you want to delete this treatment?</p>
+          <div className="dentist-detail-grid">
+            <p>
+              <strong>Tooth:</strong>{" "}
+              {deleteTarget.toothNumber ? `#${deleteTarget.toothNumber}` : "—"}
+            </p>
+            <p>
+              <strong>Treatment:</strong> {deleteTarget.name || deleteTarget.treatment || "—"}
+            </p>
+            <p>
+              <strong>Diagnosis:</strong>{" "}
+              {deleteTarget.diagnosis || deleteTarget.diagnosisNotes || "—"}
+            </p>
+            <p>
+              <strong>Date:</strong>{" "}
+              {formatDentistDate(deleteTarget.date || deleteTarget.treatmentDate)}
+            </p>
+          </div>
+          <p className="muted-copy">This action will also update the dental chart.</p>
+          <div className="dentist-modal__actions">
+            <button
+              type="button"
+              className="button button--secondary"
+              onClick={() => setDeleteTarget(null)}
+              disabled={deletingTreatment}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="button button--danger"
+              onClick={confirmDeleteTreatment}
+              disabled={deletingTreatment}
+            >
+              {deletingTreatment ? "Deleting…" : "Delete Treatment"}
+            </button>
+          </div>
         </DentistModal>
       ) : null}
     </div>

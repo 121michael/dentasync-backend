@@ -63,6 +63,29 @@ function count(row, key = "count") {
   return Number.parseInt(row?.[key] || "0", 10);
 }
 
+/** Shared shape for treatment-history responses (create, update, delete). */
+function serializeDentistTreatment(row) {
+  return {
+    id: row.id,
+    name: row.treatment,
+    treatment: row.treatment,
+    dentist: row.dentistName,
+    date: row.treatmentDate,
+    treatmentDate: row.treatmentDate,
+    status: row.status,
+    notes: "",
+    diagnosis: row.diagnosis || row.diagnosisNotes || "",
+    diagnosisNotes: row.diagnosisNotes || row.diagnosis || "",
+    durationMinutes: row.durationMinutes,
+    toothNumber: row.toothNumber,
+    procedureDetails: row.procedureDetails,
+    amountCharged: row.amountCharged ?? 0,
+    amountPaid: row.amountPaid ?? 0,
+    balance: Math.round((Number(row.amountCharged || 0) - Number(row.amountPaid || 0)) * 100) / 100,
+    appointmentId: row.appointmentId,
+  };
+}
+
 function displayQueueStatus(status) {
   if (status === "dentist") return "in_chair";
   if (status === "preparing") return "called";
@@ -1883,25 +1906,7 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
 
       return res.status(201).json({
         message: "Treatment record saved successfully. Dental chart updated from this treatment.",
-        treatment: {
-          id: row.id,
-          name: row.treatment,
-          treatment: row.treatment,
-          dentist: row.dentistName,
-          date: row.treatmentDate,
-          treatmentDate: row.treatmentDate,
-          status: row.status,
-          notes: "",
-          diagnosis: row.diagnosis || row.diagnosisNotes || "",
-          diagnosisNotes: row.diagnosisNotes || row.diagnosis || "",
-          durationMinutes: row.durationMinutes,
-          toothNumber: row.toothNumber,
-          procedureDetails: row.procedureDetails,
-          amountCharged: row.amountCharged ?? 0,
-          amountPaid: row.amountPaid ?? 0,
-          balance: Math.round((Number(row.amountCharged || 0) - Number(row.amountPaid || 0)) * 100) / 100,
-          appointmentId: row.appointmentId,
-        },
+        treatment: serializeDentistTreatment(row),
         chartSynced: Boolean(row.toothNumber),
       });
     } catch (error) {
@@ -1915,6 +1920,86 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
       }
       console.error("Dentist treatment create error:", error.message);
       return res.status(500).json({ message: "Unable to save the treatment." });
+    }
+  });
+
+  router.put("/patients/:id/treatments/:treatmentId", async (req, res) => {
+    const recordId = numericId(req.params.id);
+    const treatmentId = numericId(req.params.treatmentId);
+    if (!recordId || !treatmentId) {
+      return res
+        .status(400)
+        .json({ message: "A valid patient record ID and treatment ID are required." });
+    }
+
+    try {
+      const row = await clinicalPatients.updateClinicalTreatment(
+        db,
+        recordId,
+        treatmentId,
+        {
+          treatment: req.body?.treatment || req.body?.name,
+          treatmentDate: req.body?.treatmentDate,
+          diagnosisNotes: req.body?.diagnosisNotes ?? req.body?.diagnosis,
+          toothNumber: req.body?.toothNumber ?? req.body?.affectedTooth ?? req.body?.affectedTeeth,
+          durationMinutes: req.body?.durationMinutes,
+          amountCharged: req.body?.amountCharged,
+          status: req.body?.status,
+          // Amount paid stays staff-owned and is deliberately not forwarded here.
+        },
+        { id: req.dentist.id, role: "dentist" }
+      );
+
+      return res.json({
+        message: "Treatment updated. Dental chart recalculated from the treatment history.",
+        treatment: serializeDentistTreatment(row),
+      });
+    } catch (error) {
+      if (error.status) {
+        return res.status(error.status).json({ message: error.message });
+      }
+      if (clinicalPatients.isMissingRelation(error)) {
+        return res.status(503).json({
+          message: "Clinical patient records are not available. Run npm run migrate:clinical-records.",
+        });
+      }
+      console.error("Dentist treatment update error:", error.message);
+      return res.status(500).json({ message: "Unable to update the treatment." });
+    }
+  });
+
+  router.delete("/patients/:id/treatments/:treatmentId", async (req, res) => {
+    const recordId = numericId(req.params.id);
+    const treatmentId = numericId(req.params.treatmentId);
+    if (!recordId || !treatmentId) {
+      return res
+        .status(400)
+        .json({ message: "A valid patient record ID and treatment ID are required." });
+    }
+
+    try {
+      const row = await clinicalPatients.deleteClinicalTreatment(
+        db,
+        recordId,
+        treatmentId,
+        { id: req.dentist.id, role: "dentist" }
+      );
+
+      return res.json({
+        message: "Treatment deleted. Dental chart recalculated from the remaining treatments.",
+        treatment: serializeDentistTreatment(row),
+      });
+    } catch (error) {
+      if (error.status) {
+        return res.status(error.status).json({ message: error.message });
+      }
+      if (clinicalPatients.isMissingRelation(error)) {
+        return res.status(503).json({
+          message: "Clinical patient records are not available. Run npm run migrate:clinical-records.",
+        });
+      }
+      console.error("Dentist treatment delete error:", error.message);
+      return res.status(500).json({ message: "Unable to delete the treatment." });
     }
   });
 

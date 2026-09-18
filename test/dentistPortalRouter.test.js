@@ -81,6 +81,24 @@ test("dentist dashboard rejects a token whose database account is not dentist", 
   }
 });
 
+test("treatment edit and delete are rejected for non-dentist accounts", async () => {
+  const portal = await startDentistPortal({ tokenRole: "staff", databaseRole: "staff" });
+  try {
+    const edit = await fetch(`${portal.url}/patients/3/treatments/9`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ treatment: "Root Canal", treatmentDate: "2026-09-18", toothNumber: "36" }),
+    });
+    assert.equal(edit.status, 403);
+
+    const remove = await fetch(`${portal.url}/patients/3/treatments/9`, { method: "DELETE" });
+    assert.equal(remove.status, 403);
+    assert.match((await remove.json()).message, /active dentist accounts only/i);
+  } finally {
+    await portal.close();
+  }
+});
+
 test("dentist dashboard authorizes the live database role instead of a token role claim", async () => {
   const portal = await startDentistPortal({ tokenRole: "patient", databaseRole: "dentist" });
   try {

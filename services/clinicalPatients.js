@@ -1,6 +1,7 @@
 "use strict";
 
 const crypto = require("crypto");
+const dentalChartSync = require("./dentalChartSync");
 
 function stringValue(value, maxLength = 500) {
   if (typeof value !== "string") {
@@ -978,7 +979,6 @@ async function archiveClinicalRecord(db, recordId, actor = {}) {
 }
 
 async function addClinicalTreatment(db, recordId, input, actor = {}) {
-  const dentalChartSync = require("./dentalChartSync");
   const treatment = stringValue(input.treatment, 200);
   if (!treatment) {
     const error = new Error("Treatment is required.");
@@ -1130,8 +1130,15 @@ async function updateClinicalTreatment(db, recordId, treatmentId, input, actor =
     throw error;
   }
 
-  const amountCharged = parseMoneyAmount(input.amountCharged, "Amount Charged");
-  const amountPaid = parseMoneyAmount(input.amountPaid, "Amount Paid");
+  const current = existing.rows[0];
+  const provided = (key) => input[key] !== undefined;
+  const amountCharged = provided("amountCharged")
+    ? parseMoneyAmount(input.amountCharged, "Amount Charged")
+    : Number(current.amount_charged || 0);
+  // Amount paid stays staff-owned: keep the saved value unless it is explicitly sent.
+  const amountPaid = provided("amountPaid")
+    ? parseMoneyAmount(input.amountPaid, "Amount Paid")
+    : Number(current.amount_paid || 0);
   const actorId = actor.id ? String(actor.id) : null;
   const nextStatus = stringValue(input.status, 40);
   const durationMinutes =
@@ -1139,32 +1146,61 @@ async function updateClinicalTreatment(db, recordId, treatmentId, input, actor =
       ? Math.round(Number(input.durationMinutes))
       : null;
 
+  const editsTooth = provided("toothNumber") || provided("affectedTooth");
+  const toothNumber = editsTooth
+    ? stringValue(input.toothNumber ?? input.affectedTooth, 20)
+    : current.tooth_number || null;
+  const editsDiagnosis = provided("diagnosisNotes") || provided("diagnosis");
+  const diagnosisNotes = editsDiagnosis
+    ? stringValue(input.diagnosisNotes, 2000) || stringValue(input.diagnosis, 2000)
+    : null;
+  const editsProcedureDetails = provided("procedureDetails");
+  const procedureDetails = editsProcedureDetails ? stringValue(input.procedureDetails, 2000) : null;
+
+  if (dentalChartSync.isToothSpecificTreatment(treatment)) {
+    if (!dentalChartSync.parseAffectedTeeth(toothNumber).length) {
+      const error = new Error("Affected tooth is required for this treatment.");
+      error.status = 400;
+      throw error;
+    }
+  }
+
+  const params = [];
+  const assignments = [];
+  const assign = (column, value) => {
+    params.push(value);
+    assignments.push(`${column} = $${params.length}`);
+  };
+  const assignKeep = (column, value) => {
+    params.push(value);
+    assignments.push(`${column} = COALESCE($${params.length}, ${column})`);
+  };
+
+  assign("treatment", treatment);
+  assign("treatment_date", treatmentDate);
+  assign("amount_charged", amountCharged);
+  assign("amount_paid", amountPaid);
+  assignKeep("status", nextStatus);
+  assignKeep("duration_minutes", durationMinutes);
+  if (editsTooth) assign("tooth_number", toothNumber);
+  if (editsDiagnosis) {
+    assign("diagnosis_notes", diagnosisNotes);
+    assign("notes", diagnosisNotes);
+  }
+  if (editsProcedureDetails) assign("procedure_details", procedureDetails);
+  assign("updated_by", actorId);
+  assignments.push("updated_at = CURRENT_TIMESTAMP");
+  params.push(treatmentId, recordId);
+
   let result;
   try {
     result = await db.query(
       `UPDATE clinic_patient_treatments
-       SET treatment = $1,
-           treatment_date = $2,
-           amount_charged = $3,
-           amount_paid = $4,
-           status = COALESCE($5, status),
-           duration_minutes = COALESCE($6, duration_minutes),
-           updated_at = CURRENT_TIMESTAMP,
-           updated_by = $7
-       WHERE id = $8
-         AND clinical_record_id = $9
+       SET ${assignments.join(", ")}
+       WHERE id = $${params.length - 1}
+         AND clinical_record_id = $${params.length}
        RETURNING *`,
-      [
-        treatment,
-        treatmentDate,
-        amountCharged,
-        amountPaid,
-        nextStatus,
-        durationMinutes,
-        actorId,
-        treatmentId,
-        recordId,
-      ]
+      params
     );
   } catch (error) {
     if (error?.code !== "42703") {
@@ -1178,12 +1214,23 @@ async function updateClinicalTreatment(db, recordId, treatmentId, input, actor =
              amount_charged = $3,
              amount_paid = $4,
              status = COALESCE($5, status),
+             notes = COALESCE($6, notes),
              updated_at = CURRENT_TIMESTAMP,
-             updated_by = $6
-         WHERE id = $7
-           AND clinical_record_id = $8
+             updated_by = $7
+         WHERE id = $8
+           AND clinical_record_id = $9
          RETURNING *`,
-        [treatment, treatmentDate, amountCharged, amountPaid, nextStatus, actorId, treatmentId, recordId]
+        [
+          treatment,
+          treatmentDate,
+          amountCharged,
+          amountPaid,
+          nextStatus,
+          diagnosisNotes,
+          actorId,
+          treatmentId,
+          recordId,
+        ]
       );
     } catch (innerError) {
       if (innerError?.code === "42703") {
@@ -1203,6 +1250,45 @@ async function updateClinicalTreatment(db, recordId, treatmentId, input, actor =
      WHERE id = $1`,
     [recordId, actorId]
   );
+
+  await rebuildChartAfterTreatmentChange(db, recordId, actor);
+
+  return mapClinicalTreatment(result.rows[0]);
+}
+
+/** The chart is derived data: rebuild it from whatever treatments remain on the record. */
+async function rebuildChartAfterTreatmentChange(db, recordId, actor = {}) {
+  try {
+    await dentalChartSync.rebuildChartFromTreatments(db, recordId, actor);
+  } catch (syncError) {
+    if (syncError.status) throw syncError;
+    console.warn("Dental chart rebuild after treatment change skipped:", syncError.message);
+  }
+}
+
+async function deleteClinicalTreatment(db, recordId, treatmentId, actor = {}) {
+  const result = await db.query(
+    `DELETE FROM clinic_patient_treatments
+     WHERE id = $1
+       AND clinical_record_id = $2
+     RETURNING *`,
+    [treatmentId, recordId]
+  );
+  if (!result.rows.length) {
+    const error = new Error("Treatment history record not found.");
+    error.status = 404;
+    throw error;
+  }
+
+  const actorId = actor.id ? String(actor.id) : null;
+  await db.query(
+    `UPDATE clinic_patient_records
+     SET updated_at = CURRENT_TIMESTAMP, updated_by = $2
+     WHERE id = $1`,
+    [recordId, actorId]
+  );
+
+  await rebuildChartAfterTreatmentChange(db, recordId, actor);
 
   return mapClinicalTreatment(result.rows[0]);
 }
@@ -1515,6 +1601,7 @@ module.exports = {
   archiveClinicalRecord,
   addClinicalTreatment,
   updateClinicalTreatment,
+  deleteClinicalTreatment,
   updateTreatmentAmountPaid,
   completeInProgressTreatmentForUser,
   mapClinicalTreatment,

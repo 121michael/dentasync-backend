@@ -251,6 +251,25 @@ async function syncChartFromTreatment(db, clinicalRecordId, treatmentRow, actor 
 }
 
 /**
+ * Drop treatment-derived chart entries whose treatment rows are gone (edited to another
+ * tooth, or deleted). Entries without treatments — legacy or clinician notes — are kept.
+ */
+async function clearOrphanedChartEntries(db, clinicalRecordId, activeTeeth) {
+  try {
+    await db.query(
+      `DELETE FROM clinic_dental_chart_entries
+       WHERE clinical_record_id = $1
+         AND jsonb_array_length(COALESCE(treatments_json, '[]'::jsonb)) > 0
+         AND NOT (tooth_number = ANY($2::text[]))`,
+      [clinicalRecordId, activeTeeth.map(String)]
+    );
+  } catch (error) {
+    if (error?.code === "42P01" || error?.code === "42703") return;
+    throw error;
+  }
+}
+
+/**
  * Rebuild chart statuses from full treatment history (latest applicable per tooth).
  * Does not delete prior treatment rows — only upserts chart entries.
  */
@@ -293,6 +312,8 @@ async function rebuildChartFromTreatments(db, clinicalRecordId, actor = {}) {
       byTooth.set(tooth, current);
     }
   }
+
+  await clearOrphanedChartEntries(db, clinicalRecordId, [...byTooth.keys()]);
 
   const saved = [];
   for (const [toothNumber, info] of byTooth.entries()) {
@@ -343,4 +364,5 @@ module.exports = {
   isValidFdiTooth,
   syncChartFromTreatment,
   rebuildChartFromTreatments,
+  clearOrphanedChartEntries,
 };
