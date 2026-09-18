@@ -4,6 +4,7 @@ const crypto = require("crypto");
 const bcrypt = require("bcrypt");
 const express = require("express");
 const clinicalPatients = require("../services/clinicalPatients");
+const dentalChartSync = require("../services/dentalChartSync");
 const {
   estimateWaitMinutesForPosition,
   getServiceDurationMinutes,
@@ -1385,10 +1386,11 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
             date: row.treatmentDate,
             treatmentDate: row.treatmentDate,
             status: row.status,
-            notes: row.notes || "",
+            notes: "",
+            diagnosis: row.diagnosisNotes || row.diagnosis || "",
+            diagnosisNotes: row.diagnosisNotes || row.diagnosis || "",
             durationMinutes: row.durationMinutes,
             toothNumber: row.toothNumber,
-            diagnosisNotes: row.diagnosisNotes,
             procedureDetails: row.procedureDetails,
             amountCharged,
             amountPaid,
@@ -1519,6 +1521,16 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
       );
       if (!record.rows.length) {
         return res.status(404).json({ message: "Patient record not found." });
+      }
+
+      // Ensure chart statuses reflect treatment history (DB-driven).
+      try {
+        await dentalChartSync.rebuildChartFromTreatments(db, recordId, {
+          id: req.dentist.id,
+          role: "dentist",
+        });
+      } catch (rebuildError) {
+        console.warn("Dental chart rebuild from treatments skipped:", rebuildError.message);
       }
 
       const result = await db.query(
@@ -1848,12 +1860,12 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
         {
           treatment: req.body?.treatment || req.body?.name,
           procedureDetails: req.body?.procedureDetails,
-          diagnosisNotes: req.body?.diagnosisNotes,
+          diagnosisNotes: req.body?.diagnosisNotes || req.body?.diagnosis || req.body?.notes,
           durationMinutes: req.body?.durationMinutes,
-          toothNumber: req.body?.toothNumber,
+          toothNumber: req.body?.toothNumber || req.body?.affectedTooth || req.body?.affectedTeeth,
           treatmentDate: req.body?.treatmentDate,
           status: req.body?.status,
-          notes: req.body?.notes,
+          notes: req.body?.diagnosisNotes || req.body?.diagnosis || req.body?.notes,
           dentistName,
           clinicLocation: req.body?.clinicLocation,
           coverageStatus: req.body?.coverageStatus,
@@ -1866,7 +1878,7 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
       );
 
       return res.status(201).json({
-        message: "Treatment record saved successfully.",
+        message: "Treatment record saved successfully. Dental chart updated from this treatment.",
         treatment: {
           id: row.id,
           name: row.treatment,
@@ -1875,16 +1887,18 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
           date: row.treatmentDate,
           treatmentDate: row.treatmentDate,
           status: row.status,
-          notes: row.notes || "",
+          notes: "",
+          diagnosis: row.diagnosis || row.diagnosisNotes || "",
+          diagnosisNotes: row.diagnosisNotes || row.diagnosis || "",
           durationMinutes: row.durationMinutes,
           toothNumber: row.toothNumber,
-          diagnosisNotes: row.diagnosisNotes,
           procedureDetails: row.procedureDetails,
           amountCharged: row.amountCharged ?? 0,
           amountPaid: row.amountPaid ?? 0,
           balance: Math.round((Number(row.amountCharged || 0) - Number(row.amountPaid || 0)) * 100) / 100,
           appointmentId: row.appointmentId,
         },
+        chartSynced: Boolean(row.toothNumber),
       });
     } catch (error) {
       if (error.status) {

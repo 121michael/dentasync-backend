@@ -73,6 +73,11 @@ function normalizeAppointmentTime(value) {
 }
 
 function mapClinicalTreatment(row) {
+  const diagnosis =
+    row.diagnosis_notes ||
+    row.diagnosisNotes ||
+    row.notes ||
+    null;
   return {
     id: row.id,
     clinicalRecordId: row.clinical_record_id,
@@ -82,10 +87,11 @@ function mapClinicalTreatment(row) {
     coverageStatus: row.coverage_status,
     status: row.status,
     treatmentDate: row.treatment_date,
-    notes: row.notes || "",
+    notes: "",
+    diagnosis,
+    diagnosisNotes: diagnosis,
     durationMinutes: row.duration_minutes != null ? Number(row.duration_minutes) : null,
     toothNumber: row.tooth_number || null,
-    diagnosisNotes: row.diagnosis_notes || null,
     procedureDetails: row.procedure_details || null,
     amountCharged: row.amount_charged != null ? Number(row.amount_charged) : 0,
     amountPaid: row.amount_paid != null ? Number(row.amount_paid) : 0,
@@ -911,6 +917,7 @@ async function archiveClinicalRecord(db, recordId, actor = {}) {
 }
 
 async function addClinicalTreatment(db, recordId, input, actor = {}) {
+  const dentalChartSync = require("./dentalChartSync");
   const treatment = stringValue(input.treatment, 200);
   if (!treatment) {
     const error = new Error("Treatment is required.");
@@ -939,8 +946,19 @@ async function addClinicalTreatment(db, recordId, input, actor = {}) {
       ? Math.round(Number(input.durationMinutes))
       : null;
   const toothNumber = stringValue(input.toothNumber, 20);
-  const diagnosisNotes = stringValue(input.diagnosisNotes, 2000);
+  // Prefer Diagnosis (diagnosisNotes). Legacy `notes` is mapped into diagnosis when diagnosis is empty.
+  const diagnosisNotes =
+    stringValue(input.diagnosisNotes, 2000) || stringValue(input.diagnosis, 2000) || stringValue(input.notes, 2000);
   const procedureDetails = stringValue(input.procedureDetails, 2000);
+
+  if (dentalChartSync.isToothSpecificTreatment(treatment)) {
+    const teeth = dentalChartSync.parseAffectedTeeth(toothNumber);
+    if (!teeth.length) {
+      const error = new Error("Affected tooth is required for this treatment.");
+      error.status = 400;
+      throw error;
+    }
+  }
   const amountCharged = parseMoneyAmount(input.amountCharged, "Amount Charged");
   const amountPaid = parseMoneyAmount(input.amountPaid, "Amount Paid");
   const appointmentId =
@@ -967,7 +985,7 @@ async function addClinicalTreatment(db, recordId, input, actor = {}) {
           stringValue(input.coverageStatus, 80),
           stringValue(input.status, 40) || "completed",
           treatmentDate,
-          stringValue(input.notes, 2000),
+          diagnosisNotes,
           durationMinutes,
           toothNumber,
           diagnosisNotes,
@@ -998,7 +1016,7 @@ async function addClinicalTreatment(db, recordId, input, actor = {}) {
         stringValue(input.coverageStatus, 80),
         stringValue(input.status, 40) || "completed",
         treatmentDate,
-        stringValue(input.notes, 2000),
+        diagnosisNotes,
         actor.id ? String(actor.id) : null,
         actor.role || null,
       ]
@@ -1012,7 +1030,14 @@ async function addClinicalTreatment(db, recordId, input, actor = {}) {
     [recordId, actor.id ? String(actor.id) : null]
   );
 
-  return mapClinicalTreatment(result.rows[0]);
+  const mapped = mapClinicalTreatment(result.rows[0]);
+  try {
+    await dentalChartSync.syncChartFromTreatment(db, recordId, result.rows[0], actor);
+  } catch (syncError) {
+    if (syncError.status) throw syncError;
+    console.warn("Dental chart sync after treatment skipped:", syncError.message);
+  }
+  return mapped;
 }
 
 async function updateClinicalTreatment(db, recordId, treatmentId, input, actor = {}) {

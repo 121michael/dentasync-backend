@@ -2,6 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 import { Plus, Search } from "lucide-react";
 import { api } from "../api";
 import { DentalChart } from "../components/DentalChart";
+import {
+  ALL_TEETH,
+  PROCEDURE_FORM_OPTIONS,
+  procedureRequiresTooth,
+} from "../components/DentalChart/dentalChartData";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
 import { DentistModal } from "../components/DentistUI";
 import { formatDentistDate } from "../dentistUtils";
@@ -23,7 +28,6 @@ const emptyTreatment = {
   toothNumber: "",
   diagnosisNotes: "",
   amountCharged: "",
-  notes: "",
 };
 
 const emptyAgeSexForm = {
@@ -74,6 +78,9 @@ export function DentistRecordsPage() {
   const [detail, setDetail] = useState(null);
   const [xrays, setXrays] = useState([]);
   const [treatmentForm, setTreatmentForm] = useState(emptyTreatment);
+  const [treatmentFormOpen, setTreatmentFormOpen] = useState(false);
+  const [savingTreatment, setSavingTreatment] = useState(false);
+  const [chartRefreshKey, setChartRefreshKey] = useState(0);
   const [ageSexOpen, setAgeSexOpen] = useState(false);
   const [ageSexForm, setAgeSexForm] = useState(emptyAgeSexForm);
 
@@ -124,6 +131,7 @@ export function DentistRecordsPage() {
   async function viewPatient(patient) {
     try {
       setTreatmentForm(emptyTreatment);
+      setTreatmentFormOpen(false);
       setAgeSexOpen(false);
       await refreshPatientDetail(patient.id);
       setError("");
@@ -184,7 +192,11 @@ export function DentistRecordsPage() {
   async function saveTreatment(event) {
     event.preventDefault();
     if (!detail?.patient?.id) return;
-    setBusy(true);
+    if (procedureRequiresTooth(treatmentForm.name) && !String(treatmentForm.toothNumber || "").trim()) {
+      setError("Affected tooth is required for this treatment.");
+      return;
+    }
+    setSavingTreatment(true);
     setError("");
     setSuccess("");
     try {
@@ -195,19 +207,23 @@ export function DentistRecordsPage() {
         durationMinutes: Number(treatmentForm.durationMinutes) || undefined,
         toothNumber: treatmentForm.toothNumber || undefined,
         diagnosisNotes: treatmentForm.diagnosisNotes,
+        diagnosis: treatmentForm.diagnosisNotes,
         amountCharged: treatmentForm.amountCharged === "" ? 0 : Number(treatmentForm.amountCharged),
-        notes: treatmentForm.notes,
       });
-      setSuccess(response.message || "Treatment record saved successfully.");
+      setSuccess(response.message || "Treatment saved. Dental chart updated automatically.");
       setTreatmentForm(emptyTreatment);
+      setTreatmentFormOpen(false);
       await refreshPatientDetail(detail.patient.id);
+      setChartRefreshKey((key) => key + 1);
       await load();
     } catch (saveError) {
       setError(saveError.message);
     } finally {
-      setBusy(false);
+      setSavingTreatment(false);
     }
   }
+
+  const toothRequired = procedureRequiresTooth(treatmentForm.name);
 
   if (error && !patients) {
     const needsMigration = /migrate:clinical-records/i.test(error);
@@ -541,8 +557,233 @@ export function DentistRecordsPage() {
           <DentalChart
             patientId={detail.patient.id}
             dentistName={detail.patient.assignedDentist || ""}
+            refreshKey={chartRefreshKey}
             onTreatmentRecorded={() => refreshPatientDetail(detail.patient.id)}
           />
+
+          <section className="treatment-record" style={{ marginTop: "1.25rem" }}>
+            <div className="treatment-record__header">
+              <div>
+                <span className="eyebrow">Shared patient dental record</span>
+                <h2>Treatment History</h2>
+              </div>
+            </div>
+            <p className="muted-copy">
+              Full clinical history is kept. The dental chart shows the latest applicable status per
+              tooth.
+            </p>
+            <div className="treatment-record__table-wrap">
+              {(detail.treatments || []).length ? (
+                <table className="treatment-record__table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Affected Tooth</th>
+                      <th>Treatment</th>
+                      <th>Diagnosis</th>
+                      <th>Dentist</th>
+                      <th>Amount Charged</th>
+                      <th>Amount Paid (staff)</th>
+                      <th>Balance</th>
+                      <th>Next Appt. (staff)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {detail.treatments.map((treatment) => (
+                      <tr key={treatment.id}>
+                        <td>{formatDentistDate(treatment.date || treatment.treatmentDate)}</td>
+                        <td>{treatment.toothNumber || treatment.tooth_number || "—"}</td>
+                        <td>{treatment.name || treatment.treatment || "—"}</td>
+                        <td>{treatment.diagnosis || treatment.diagnosisNotes || "—"}</td>
+                        <td>{treatment.dentist || "—"}</td>
+                        <td>{formatMoney(treatment.amountCharged)}</td>
+                        <td>{formatMoney(treatment.amountPaid)}</td>
+                        <td>{formatMoney(treatmentBalance(treatment))}</td>
+                        <td>{nextAppointmentLabel(treatment, detail.nextAppointment, detail.patient)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p className="muted-copy">No treatments on file yet.</p>
+              )}
+            </div>
+          </section>
+
+          <section className="dentist-treatment-form">
+            <div className="dentist-panel__heading">
+              <div>
+                <span className="eyebrow">Clinical information</span>
+                <h2>Add Treatment</h2>
+              </div>
+              <button
+                type="button"
+                className={`button ${treatmentFormOpen ? "button--secondary" : "button--primary"}`}
+                onClick={() => {
+                  if (treatmentFormOpen) {
+                    setTreatmentFormOpen(false);
+                    setTreatmentForm(emptyTreatment);
+                  } else {
+                    setTreatmentFormOpen(true);
+                  }
+                }}
+              >
+                {treatmentFormOpen ? (
+                  "− Close Treatment Form"
+                ) : (
+                  <>
+                    <Plus size={16} /> Add Treatment
+                  </>
+                )}
+              </button>
+            </div>
+
+            <div
+              className={`dentist-treatment-form__panel ${treatmentFormOpen ? "is-open" : ""}`}
+              aria-hidden={!treatmentFormOpen}
+            >
+              {treatmentFormOpen ? (
+                <>
+                  <p className="muted-copy">
+                    Saving updates treatment history and automatically updates the dental chart for
+                    the affected tooth. Amount paid and next appointment are managed by Staff.
+                  </p>
+                  <form className="dentist-form" onSubmit={saveTreatment}>
+                    <div className="field-grid field-grid--two">
+                      <label className="field field--full">
+                        <span>Diagnosis</span>
+                        <textarea
+                          required
+                          rows="2"
+                          value={treatmentForm.diagnosisNotes}
+                          onChange={(event) =>
+                            setTreatmentForm((current) => ({
+                              ...current,
+                              diagnosisNotes: event.target.value,
+                            }))
+                          }
+                          placeholder="e.g. Irreversible pulpitis on tooth #36"
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Treatment</span>
+                        <select
+                          required
+                          value={treatmentForm.name}
+                          onChange={(event) =>
+                            setTreatmentForm((current) => ({
+                              ...current,
+                              name: event.target.value,
+                              toothNumber: procedureRequiresTooth(event.target.value)
+                                ? current.toothNumber
+                                : current.toothNumber,
+                            }))
+                          }
+                        >
+                          <option value="">Select treatment…</option>
+                          {PROCEDURE_FORM_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.value}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="field">
+                        <span>Affected Tooth{toothRequired ? " *" : " (optional)"}</span>
+                        <select
+                          required={toothRequired && !String(treatmentForm.toothNumber).includes(",")}
+                          value={
+                            String(treatmentForm.toothNumber || "").includes(",")
+                              ? ""
+                              : treatmentForm.toothNumber
+                          }
+                          onChange={(event) =>
+                            setTreatmentForm((current) => ({
+                              ...current,
+                              toothNumber: event.target.value,
+                            }))
+                          }
+                        >
+                          <option value="">
+                            {toothRequired ? "Select tooth…" : "None / whole mouth"}
+                          </option>
+                          {ALL_TEETH.map((tooth) => (
+                            <option key={tooth} value={String(tooth)}>
+                              Tooth #{tooth}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="field">
+                        <span>Or multiple teeth (optional)</span>
+                        <input
+                          value={
+                            String(treatmentForm.toothNumber || "").includes(",")
+                              ? treatmentForm.toothNumber
+                              : ""
+                          }
+                          onChange={(event) =>
+                            setTreatmentForm((current) => ({
+                              ...current,
+                              toothNumber: event.target.value,
+                            }))
+                          }
+                          placeholder="e.g. 14, 15, 16"
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Treatment Date</span>
+                        <input
+                          type="date"
+                          value={treatmentForm.treatmentDate}
+                          onChange={(event) =>
+                            setTreatmentForm((current) => ({
+                              ...current,
+                              treatmentDate: event.target.value,
+                            }))
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Treatment Cost (Amount Charged)</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={treatmentForm.amountCharged}
+                          onChange={(event) =>
+                            setTreatmentForm((current) => ({
+                              ...current,
+                              amountCharged: event.target.value,
+                            }))
+                          }
+                          placeholder="1500"
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Duration (minutes)</span>
+                        <input
+                          type="number"
+                          min="1"
+                          value={treatmentForm.durationMinutes}
+                          onChange={(event) =>
+                            setTreatmentForm((current) => ({
+                              ...current,
+                              durationMinutes: event.target.value,
+                            }))
+                          }
+                          placeholder="45"
+                        />
+                      </label>
+                    </div>
+                    <button className="button button--primary" disabled={savingTreatment}>
+                      {savingTreatment ? "Saving Treatment…" : "Save Treatment"}
+                    </button>
+                  </form>
+                </>
+              ) : null}
+            </div>
+          </section>
 
           <section className="dentist-xray-panel">
             <div className="dentist-panel__heading">
@@ -552,8 +793,7 @@ export function DentistRecordsPage() {
               </div>
             </div>
             <p className="muted-copy">
-              AI findings are preliminary / supplementary only and are separate from the manual dental
-              chart.
+              AI findings are preliminary / supplementary only and are separate from the dental chart.
             </p>
             {xrays.length ? (
               <div className="xray-list">
@@ -588,190 +828,6 @@ export function DentistRecordsPage() {
             ) : (
               <p className="muted-copy">No uploaded X-rays for this linked patient account.</p>
             )}
-          </section>
-
-          <section className="dentist-treatment-form">
-            <div className="dentist-panel__heading">
-              <div>
-                <span className="eyebrow">Clinical information</span>
-                <h2>Add treatment</h2>
-              </div>
-            </div>
-            <p className="muted-copy">
-              Enter diagnosis, procedure, and clinical notes. Amount paid and next appointment are
-              managed by Staff on this same shared record.
-            </p>
-            <form className="dentist-form" onSubmit={saveTreatment}>
-              <div className="field-grid field-grid--two">
-                <label className="field">
-                  <span>Procedure</span>
-                  <input
-                    required
-                    value={treatmentForm.name}
-                    onChange={(event) =>
-                      setTreatmentForm((current) => ({ ...current, name: event.target.value }))
-                    }
-                    placeholder="e.g. Composite filling"
-                  />
-                </label>
-                <label className="field">
-                  <span>Treatment Date</span>
-                  <input
-                    type="date"
-                    value={treatmentForm.treatmentDate}
-                    onChange={(event) =>
-                      setTreatmentForm((current) => ({
-                        ...current,
-                        treatmentDate: event.target.value,
-                      }))
-                    }
-                  />
-                </label>
-                <label className="field">
-                  <span>Treatment Cost (Amount Charged)</span>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={treatmentForm.amountCharged}
-                    onChange={(event) =>
-                      setTreatmentForm((current) => ({
-                        ...current,
-                        amountCharged: event.target.value,
-                      }))
-                    }
-                    placeholder="1500"
-                  />
-                </label>
-                <label className="field">
-                  <span>Duration (minutes)</span>
-                  <input
-                    type="number"
-                    min="1"
-                    value={treatmentForm.durationMinutes}
-                    onChange={(event) =>
-                      setTreatmentForm((current) => ({
-                        ...current,
-                        durationMinutes: event.target.value,
-                      }))
-                    }
-                    placeholder="45"
-                  />
-                </label>
-                <label className="field">
-                  <span>Tooth No/s (FDI)</span>
-                  <input
-                    value={treatmentForm.toothNumber}
-                    onChange={(event) =>
-                      setTreatmentForm((current) => ({
-                        ...current,
-                        toothNumber: event.target.value,
-                      }))
-                    }
-                    placeholder="16 or 16, 17"
-                  />
-                </label>
-                <label className="field">
-                  <span>Diagnosis notes</span>
-                  <input
-                    value={treatmentForm.diagnosisNotes}
-                    onChange={(event) =>
-                      setTreatmentForm((current) => ({
-                        ...current,
-                        diagnosisNotes: event.target.value,
-                      }))
-                    }
-                    placeholder="Clinical findings"
-                  />
-                </label>
-              </div>
-              <label className="field">
-                <span>Dentist notes</span>
-                <textarea
-                  rows="2"
-                  value={treatmentForm.notes}
-                  onChange={(event) =>
-                    setTreatmentForm((current) => ({ ...current, notes: event.target.value }))
-                  }
-                />
-              </label>
-              <button className="button button--primary" disabled={busy}>
-                {busy ? "Saving…" : "Save treatment"}
-              </button>
-            </form>
-          </section>
-
-          <section className="treatment-record">
-            <div className="treatment-record__header">
-              <div>
-                <span className="eyebrow">Shared patient dental record</span>
-                <h2>Treatment Record</h2>
-              </div>
-            </div>
-
-            <div className="treatment-record__patient">
-              <p>
-                <small>Name</small>
-                <strong>{detail.patient.fullName || detail.patient.patientName || "—"}</strong>
-              </p>
-              <p>
-                <small>Age / Sex</small>
-                <strong>{formatAgeSex(detail.patient)}</strong>
-              </p>
-              <p>
-                <small>Contact</small>
-                <strong>{detail.patient.phone || detail.patient.email || "—"}</strong>
-              </p>
-            </div>
-
-            <div className="treatment-record__table-wrap">
-              {(detail.treatments || []).length ? (
-                <table className="treatment-record__table">
-                  <thead>
-                    <tr>
-                      <th>Date</th>
-                      <th>Tooth No/s</th>
-                      <th>Procedure</th>
-                      <th>Diagnosis</th>
-                      <th>Dentist</th>
-                      <th>Amount Charged</th>
-                      <th>Amount Paid (staff)</th>
-                      <th>Balance</th>
-                      <th>Next Appt. (staff)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {detail.treatments.map((treatment) => (
-                      <tr key={treatment.id}>
-                        <td>{formatDentistDate(treatment.date || treatment.treatmentDate)}</td>
-                        <td>{treatment.toothNumber || treatment.tooth_number || "—"}</td>
-                        <td>{treatment.name || treatment.treatment || "—"}</td>
-                        <td>{treatment.diagnosisNotes || "—"}</td>
-                        <td>{treatment.dentist || "—"}</td>
-                        <td>{formatMoney(treatment.amountCharged)}</td>
-                        <td>{formatMoney(treatment.amountPaid)}</td>
-                        <td>{formatMoney(treatmentBalance(treatment))}</td>
-                        <td>{nextAppointmentLabel(treatment, detail.nextAppointment, detail.patient)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : (
-                <p className="muted-copy">No treatments on file.</p>
-              )}
-            </div>
-            {(detail.treatments || []).some((treatment) => treatment.notes) ? (
-              <div style={{ marginTop: "1rem" }}>
-                <h3 className="admin-subheading">Dentist notes</h3>
-                {(detail.treatments || [])
-                  .filter((treatment) => treatment.notes)
-                  .map((treatment) => (
-                    <p key={`note-${treatment.id}`} className="muted-copy">
-                      <strong>{treatment.name || treatment.treatment}:</strong> {treatment.notes}
-                    </p>
-                  ))}
-              </div>
-            ) : null}
           </section>
         </DentistModal>
       ) : null}

@@ -4,9 +4,21 @@ import { TOOTH_SHAPES, toothTypeFromFdi } from "./toothShapes";
 function statusKey(record) {
   const status = record?.status || "healthy";
   const conditions = record?.condition || [];
-  if (status === "missing" || conditions.includes("missing")) return "missing";
-  if (status === "under_treatment") return "under_treatment";
-  if (status === "treated") return "treated";
+  const treatments = record?.treatments || [];
+  if (status === "missing" || conditions.includes("missing") || treatments.includes("extraction")) {
+    return "missing";
+  }
+  if (status === "under_treatment" || treatments.includes("braces")) return "under_treatment";
+  if (
+    status === "treated" ||
+    treatments.includes("root_canal") ||
+    treatments.includes("filling") ||
+    treatments.includes("crown") ||
+    treatments.includes("bridge") ||
+    treatments.includes("sealant")
+  ) {
+    return "treated";
+  }
   if (
     status === "needs_attention" ||
     conditions.includes("decay") ||

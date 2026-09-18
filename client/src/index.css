@@ -5115,6 +5115,42 @@ strong {
   background: var(--surface);
 }
 
+.dentist-treatment-form__panel {
+  display: grid;
+  gap: 0.75rem;
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  transform: translateY(-6px);
+  transition: max-height 0.28s ease, opacity 0.22s ease, transform 0.22s ease;
+  pointer-events: none;
+}
+
+.dentist-treatment-form__panel.is-open {
+  max-height: 1200px;
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+  margin-top: 0.35rem;
+}
+
+.fdi-readonly-block {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0.75rem 0;
+}
+
+.fdi-readonly-block p {
+  margin: 0;
+  display: grid;
+  gap: 0.15rem;
+}
+
+.fdi-readonly-block small {
+  color: var(--muted, #6b6475);
+  font-size: 0.78rem;
+}
+
 @media (max-width: 960px) {
   .fdi-chart-layout {
     grid-template-columns: 1fr;

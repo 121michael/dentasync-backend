@@ -6,36 +6,39 @@ import { ToothDetailsPanel } from "./ToothDetailsPanel";
 import {
   ALL_TEETH,
   LOWER_TEETH,
+  TREATMENT_OPTIONS,
   UPPER_TEETH,
   buildDefaultChart,
   emptyToothRecord,
   labelFor,
   normalizeChartEntry,
   toothPositions,
-  TREATMENT_OPTIONS,
 } from "./dentalChartData";
 import { gumArchStrokePath } from "./mouthShapes";
 
 const VIEW = { width: 860, height: 680 };
 
-// Same mouth placement as before — only slightly tighter.
 const UPPER_ARCH = { cx: VIEW.width / 2, cy: 208, rx: 232, ry: 138 };
 const LOWER_ARCH = { cx: VIEW.width / 2, cy: 462, rx: 232, ry: 138 };
 
-export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
+export function DentalChart({
+  patientId,
+  onTreatmentRecorded,
+  readOnly = false,
+  refreshKey = 0,
+  loadChartApi,
+}) {
   const [chart, setChart] = useState(null);
   const [loadError, setLoadError] = useState("");
-  const [saveError, setSaveError] = useState("");
-  const [success, setSuccess] = useState("");
   const [selectedTooth, setSelectedTooth] = useState("");
   const [draft, setDraft] = useState(null);
-  const [busy, setBusy] = useState(false);
 
   async function loadChart() {
     if (!patientId) return;
     setLoadError("");
     try {
-      const response = await api.getDentistDentalChart(patientId);
+      const loader = loadChartApi || api.getDentistDentalChart;
+      const response = await loader(patientId);
       const next = buildDefaultChart();
       for (const entry of response.entries || response.chart || []) {
         const normalized = normalizeChartEntry(entry);
@@ -44,6 +47,13 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
         }
       }
       setChart(next);
+      if (selectedTooth && next[selectedTooth]) {
+        setDraft({
+          ...next[selectedTooth],
+          condition: [...(next[selectedTooth].condition || [])],
+          treatments: [...(next[selectedTooth].treatments || [])],
+        });
+      }
     } catch (error) {
       setLoadError(error.message || "Unable to load dental chart.");
       setChart(null);
@@ -53,12 +63,16 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
   useEffect(() => {
     setSelectedTooth("");
     setDraft(null);
-    setSuccess("");
-    setSaveError("");
     setChart(null);
     loadChart();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [patientId]);
+
+  useEffect(() => {
+    if (!patientId || !refreshKey) return;
+    loadChart();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
 
   const upperPositions = useMemo(
     () =>
@@ -88,87 +102,11 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
     const key = String(toothNumber);
     const record = chart?.[key] || emptyToothRecord(key);
     setSelectedTooth(key);
-    setDraft({ ...record, condition: [...(record.condition || [])], treatments: [...(record.treatments || [])] });
-    setSaveError("");
-    setSuccess("");
-  }
-
-  function updateDraft(patch) {
-    setDraft((current) => (current ? { ...current, ...patch } : current));
-  }
-
-  function toggleListValue(listName, value) {
-    setDraft((current) => {
-      if (!current) return current;
-      const list = Array.isArray(current[listName]) ? [...current[listName]] : [];
-      const index = list.indexOf(value);
-      if (index >= 0) list.splice(index, 1);
-      else list.push(value);
-      const next = { ...current, [listName]: list };
-      if (listName === "condition") {
-        if (list.includes("missing")) next.status = "missing";
-        next.conditionLabel = list[0] || "healthy";
-      }
-      return next;
+    setDraft({
+      ...record,
+      condition: [...(record.condition || [])],
+      treatments: [...(record.treatments || [])],
     });
-  }
-
-  async function saveTooth() {
-    if (!patientId || !selectedTooth || !draft) return;
-    setBusy(true);
-    setSaveError("");
-    setSuccess("");
-    try {
-      const payload = {
-        toothNumber: String(selectedTooth),
-        status: draft.status || "healthy",
-        conditions: draft.condition || [],
-        conditionLabel: (draft.condition && draft.condition[0]) || draft.status || "healthy",
-        treatments: draft.treatments || [],
-        notes: draft.notes || "",
-      };
-      const response = await api.upsertDentistDentalChart(patientId, payload);
-      const savedRaw = (response.entries || [])[0] || response.entry || payload;
-      const saved = normalizeChartEntry({
-        ...savedRaw,
-        conditions: payload.conditions,
-        treatments: payload.treatments,
-        status: payload.status,
-        notes: payload.notes,
-        updatedBy: savedRaw.updatedBy || dentistName || savedRaw.createdBy,
-      });
-
-      setChart((current) => ({
-        ...(current || buildDefaultChart()),
-        [saved.toothNumber]: saved,
-      }));
-      setDraft(saved);
-      setSuccess("Dental chart updated successfully.");
-
-      // Mirror newly selected treatments into treatment history when supported.
-      const previous = chart?.[selectedTooth]?.treatments || [];
-      const added = (draft.treatments || []).filter((item) => !previous.includes(item));
-      for (const treatment of added) {
-        try {
-          await api.addDentistTreatment(patientId, {
-            treatment: labelFor(treatment, TREATMENT_OPTIONS),
-            name: labelFor(treatment, TREATMENT_OPTIONS),
-            toothNumber: String(selectedTooth),
-            notes: draft.notes || "",
-            status: draft.status === "under_treatment" ? "in_progress" : "completed",
-          });
-        } catch {
-          // Chart save already succeeded; history mirror is best-effort.
-        }
-      }
-      if (added.length && onTreatmentRecorded) {
-        await onTreatmentRecorded();
-      }
-    } catch (error) {
-      setSaveError(error.message || "Unable to save dental chart.");
-    } finally {
-      setBusy(false);
-    }
   }
 
   if (loadError && !chart) {
@@ -191,7 +129,9 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
     const entry = chart[String(tooth)];
     return (
       entry &&
-      ((entry.condition && entry.condition.length && !(entry.condition.length === 1 && entry.condition[0] === "healthy")) ||
+      ((entry.condition &&
+        entry.condition.length &&
+        !(entry.condition.length === 1 && entry.condition[0] === "healthy")) ||
         (entry.treatments && entry.treatments.length) ||
         (entry.notes && entry.notes.trim()) ||
         (entry.status && entry.status !== "healthy"))
@@ -207,15 +147,16 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
               <span className="eyebrow">Interactive FDI chart</span>
               <h2>2D Dental Chart</h2>
               <p className="muted-copy">
-                Manual clinical charting. Click a tooth to record status, condition, treatment, and notes.
+                Chart status is driven by saved treatment records. Saving Root Canal on tooth #36
+                marks #36 as Root Canal automatically.
               </p>
             </div>
             <small className="fdi-chart-count">
-              {recordedCount ? `${recordedCount} teeth with notes` : "No dental chart information recorded."}
+              {recordedCount
+                ? `${recordedCount} teeth with chart status`
+                : "No treatment-driven chart status yet."}
             </small>
           </div>
-
-          {success ? <p className="inline-alert inline-alert--success">{success}</p> : null}
 
           <div className="fdi-chart-scroll">
             <svg
@@ -255,7 +196,6 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
 
               <rect x="0" y="0" width={VIEW.width} height={VIEW.height} fill="#ffffff" />
 
-              {/* Soft pink gum halo along the full arch (reference style) */}
               <g className="fdi-mouth" aria-hidden="true">
                 <path
                   d={gumArchStrokePath({ ...UPPER_ARCH, invert: false })}
@@ -319,25 +259,29 @@ export function DentalChart({ patientId, dentistName, onTreatmentRecorded }) {
           <div className="fdi-legend">
             <span className="fdi-legend__item fdi-legend__item--healthy">Healthy</span>
             <span className="fdi-legend__item fdi-legend__item--decay">Decay / Attention</span>
-            <span className="fdi-legend__item fdi-legend__item--treated">Treated</span>
+            <span className="fdi-legend__item fdi-legend__item--treated">
+              Treated (Root Canal / Filling / Crown)
+            </span>
             <span className="fdi-legend__item fdi-legend__item--under_treatment">Under Treatment</span>
-            <span className="fdi-legend__item fdi-legend__item--missing">Missing</span>
+            <span className="fdi-legend__item fdi-legend__item--missing">Extracted / Missing</span>
           </div>
+          {selectedTooth && chart[selectedTooth]?.treatments?.length ? (
+            <p className="muted-copy" style={{ marginTop: "0.75rem" }}>
+              Tooth #{selectedTooth}:{" "}
+              {(chart[selectedTooth].treatments || [])
+                .map((value) => labelFor(value, TREATMENT_OPTIONS))
+                .join(" → ")}
+            </p>
+          ) : null}
         </div>
 
         <ToothDetailsPanel
           toothNumber={selectedTooth}
           draft={draft}
-          busy={busy}
-          error={saveError}
-          onChange={updateDraft}
-          onToggleCondition={(value) => toggleListValue("condition", value)}
-          onToggleTreatment={(value) => toggleListValue("treatments", value)}
-          onSave={saveTooth}
+          readOnly={readOnly}
           onCancel={() => {
             setSelectedTooth("");
             setDraft(null);
-            setSaveError("");
           }}
         />
       </div>

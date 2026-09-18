@@ -18,19 +18,39 @@ export const CONDITION_OPTIONS = [
   { value: "fractured", label: "Fractured" },
   { value: "impacted", label: "Impacted" },
   { value: "sensitive", label: "Sensitive" },
+  { value: "root_canal", label: "Root Canal" },
+  { value: "filling", label: "Restored / Filled" },
+  { value: "crown", label: "Crown" },
+  { value: "bridge", label: "Bridge" },
   { value: "other", label: "Other" },
 ];
 
 export const TREATMENT_OPTIONS = [
-  { value: "filling", label: "Filling" },
+  { value: "filling", label: "Dental Filling / Tooth Restoration" },
   { value: "extraction", label: "Extraction" },
-  { value: "cleaning", label: "Cleaning" },
+  { value: "cleaning", label: "Cleaning / Oral Prophylaxis" },
   { value: "root_canal", label: "Root Canal" },
   { value: "crown", label: "Crown" },
+  { value: "bridge", label: "Bridge" },
   { value: "denture", label: "Denture" },
   { value: "sealant", label: "Sealant" },
   { value: "braces", label: "Braces / Orthodontic Treatment" },
   { value: "other", label: "Other" },
+];
+
+/** Procedure choices for the Add Treatment form (labels match backend catalog). */
+export const PROCEDURE_FORM_OPTIONS = [
+  { value: "Root Canal", toothSpecific: true },
+  { value: "Dental Filling", toothSpecific: true },
+  { value: "Tooth Restoration", toothSpecific: true },
+  { value: "Extraction", toothSpecific: true },
+  { value: "Crown", toothSpecific: true },
+  { value: "Bridge", toothSpecific: true },
+  { value: "Sealant", toothSpecific: true },
+  { value: "Cleaning / Oral Prophylaxis", toothSpecific: false },
+  { value: "Orthodontic Treatment", toothSpecific: false },
+  { value: "Denture", toothSpecific: true },
+  { value: "Other", toothSpecific: false },
 ];
 
 export const STATUS_OPTIONS = [
@@ -38,7 +58,7 @@ export const STATUS_OPTIONS = [
   { value: "needs_attention", label: "Needs Attention" },
   { value: "under_treatment", label: "Under Treatment" },
   { value: "treated", label: "Treated" },
-  { value: "missing", label: "Missing" },
+  { value: "missing", label: "Missing / Extracted" },
 ];
 
 export function emptyToothRecord(toothNumber) {
@@ -82,7 +102,7 @@ export function normalizeChartEntry(entry = {}) {
     entry.status ||
     entry.toothStatus ||
     entry.tooth_status ||
-    (conditions.includes("missing") ? "missing" : "healthy");
+    (conditions.includes("missing") || treatments.includes("extraction") ? "missing" : "healthy");
 
   return {
     toothNumber,
@@ -102,5 +122,11 @@ export function labelFor(value, options) {
   return options.find((option) => option.value === value)?.label || value;
 }
 
-export { toothPositions, toothTypeFromFdi, toothScale } from "./toothShapes";
+export function procedureRequiresTooth(procedureName) {
+  const match = PROCEDURE_FORM_OPTIONS.find(
+    (option) => option.value.toLowerCase() === String(procedureName || "").trim().toLowerCase()
+  );
+  return match ? match.toothSpecific : true;
+}
 
+export { toothPositions, toothTypeFromFdi, toothScale } from "./toothShapes";

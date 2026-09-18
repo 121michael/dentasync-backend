@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Plus, Search, Eye } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
+import { DentalChart } from "../components/DentalChart";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { StaffModal, StaffStatusBadge } from "../components/StaffUI";
 import { useStaffUi } from "../components/StaffLayout";
@@ -438,21 +439,23 @@ export function StaffPatientsPage() {
           <h3 className="admin-subheading">Dental Record</h3>
           <p className="muted-copy">
             Read-only clinical fields from the dentist. Staff cannot edit diagnosis, treatment, or
-            notes.
+            chart status.
           </p>
           {latestTreatment ? (
             <div className="staff-detail-grid">
               <p>
                 <small>Diagnosis</small>
-                <strong>{latestTreatment.diagnosisNotes || "—"}</strong>
+                <strong>
+                  {latestTreatment.diagnosis || latestTreatment.diagnosisNotes || "—"}
+                </strong>
               </p>
               <p>
                 <small>Treatment</small>
                 <strong>{latestTreatment.treatment || latestTreatment.name || "—"}</strong>
               </p>
               <p>
-                <small>Dentist Notes</small>
-                <strong>{latestTreatment.notes || "—"}</strong>
+                <small>Affected Tooth</small>
+                <strong>{latestTreatment.toothNumber || "—"}</strong>
               </p>
               <p>
                 <small>Treatment Date</small>
@@ -464,6 +467,14 @@ export function StaffPatientsPage() {
           ) : (
             <p className="muted-copy">No dental treatments on file yet.</p>
           )}
+
+          <div style={{ marginTop: "1rem" }}>
+            <DentalChart
+              patientId={detail.id}
+              readOnly
+              loadChartApi={api.getStaffDentalChart}
+            />
+          </div>
 
           {(detail.treatments || []).length > 1 ? (
             <div className="staff-table-wrap" style={{ marginTop: "1rem" }}>
@@ -484,7 +495,7 @@ export function StaffPatientsPage() {
                     <tr key={treatment.id}>
                       <td>{formatStaffDate(treatment.date || treatment.treatmentDate)}</td>
                       <td>{treatment.treatment || treatment.name || "—"}</td>
-                      <td>{treatment.diagnosisNotes || "—"}</td>
+                      <td>{treatment.diagnosis || treatment.diagnosisNotes || "—"}</td>
                       <td>{treatment.dentist || "—"}</td>
                       <td>{treatment.notes || "—"}</td>
                       <td>{formatMoney(treatment.amountCharged)}</td>

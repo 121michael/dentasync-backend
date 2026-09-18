@@ -267,6 +267,7 @@ export const api = {
   updateDentistPatient: (id, body) => request(`/dentist/patients/${id}`, { method: "PATCH", body }),
   deleteDentistPatient: (id) => request(`/dentist/patients/${id}`, { method: "DELETE" }),
   getDentistDentalChart: (patientId) => request(`/dentist/patients/${patientId}/dental-chart`),
+  getStaffDentalChart: (patientId) => request(`/staff/patients/${patientId}/dental-chart`),
   upsertDentistDentalChart: (patientId, body) =>
     request(`/dentist/patients/${patientId}/dental-chart`, { method: "PUT", body }),
   deleteDentistDentalChartTooth: (patientId, toothNumber) =>
