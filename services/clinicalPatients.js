@@ -672,6 +672,72 @@ async function linkClinicalRecordsToUser(db, user) {
   }
 }
 
+async function findOrCreateClinicalRecordForUser(db, userId, actor = {}) {
+  const linkedUserId = String(userId || "").trim();
+  if (!linkedUserId) {
+    const error = new Error("A patient user id is required to open a clinical record.");
+    error.status = 400;
+    throw error;
+  }
+
+  const existing = await db.query(
+    `SELECT *
+     FROM clinic_patient_records
+     WHERE linked_user_id = $1
+       AND COALESCE(is_archived, FALSE) = FALSE
+     ORDER BY updated_at DESC, id DESC
+     LIMIT 1`,
+    [linkedUserId]
+  );
+  if (existing.rows[0]) {
+    return mapClinicalRecord(existing.rows[0]);
+  }
+
+  const userResult = await db.query(
+    `SELECT id, first_name, last_name, email, phone, date_of_birth, gender
+     FROM users
+     WHERE id::text = $1
+     LIMIT 1`,
+    [linkedUserId]
+  );
+  const user = userResult.rows[0];
+  if (!user) {
+    const error = new Error("Patient account not found for this queue entry.");
+    error.status = 404;
+    throw error;
+  }
+
+  const firstName = stringValue(user.first_name, 80) || "Patient";
+  const lastName = stringValue(user.last_name, 80) || linkedUserId;
+  const record = await createClinicalRecord(
+    db,
+    {
+      firstName,
+      lastName,
+      email: user.email,
+      phone: user.phone,
+      dateOfBirth: user.date_of_birth,
+      gender: user.gender,
+      notes: "Auto-created from dentist start-treatment queue flow.",
+    },
+    actor
+  );
+
+  if (!record.linkedUserId || String(record.linkedUserId) !== linkedUserId) {
+    await db.query(
+      `UPDATE clinic_patient_records
+       SET linked_user_id = $1,
+           updated_at = CURRENT_TIMESTAMP,
+           updated_by = $2
+       WHERE id = $3`,
+      [linkedUserId, actor.id ? String(actor.id) : null, record.id]
+    );
+    record.linkedUserId = linkedUserId;
+  }
+
+  return record;
+}
+
 module.exports = {
   listClinicalRecords,
   getClinicalRecord,
@@ -685,6 +751,7 @@ module.exports = {
   mapClinicalTreatment,
   verifyClinicalRecordIdentity,
   linkClinicalRecordsToUser,
+  findOrCreateClinicalRecordForUser,
   mapClinicalRecord,
   isMissingRelation,
   stringValue,

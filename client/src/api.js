@@ -209,6 +209,8 @@ export const api = {
   callNextDentistPatient: () => request("/dentist/queue/call-next", { method: "POST" }),
   updateDentistQueue: (queueEntryId, body) =>
     request(`/dentist/queue/${queueEntryId}`, { method: "PATCH", body }),
+  startDentistTreatment: (queueEntryId, body) =>
+    request(`/dentist/queue/${queueEntryId}/start-treatment`, { method: "POST", body }),
   getDentistAppointments: () => request("/dentist/appointments"),
   getDentistPatients: (search = "") =>
     request(`/dentist/patients${search ? `?search=${encodeURIComponent(search)}` : ""}`),

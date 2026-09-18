@@ -594,6 +594,172 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
     }
   });
 
+  router.post("/queue/:id/start-treatment", async (req, res) => {
+    const queueId = numericId(req.params.id);
+    const procedureType = stringValue(req.body?.procedureType, 80);
+    const procedureName =
+      stringValue(req.body?.procedureName || req.body?.treatment || req.body?.name, 200) ||
+      procedureType;
+    const toothNumber = stringValue(req.body?.toothNumber, 40);
+    const durationMinutes = Number.parseInt(req.body?.durationMinutes, 10);
+    const amountChargedRaw = req.body?.amountCharged ?? req.body?.price ?? req.body?.cost;
+    const clinicTz = process.env.CLINIC_TIMEZONE || "Asia/Manila";
+    const treatmentDate =
+      stringValue(req.body?.treatmentDate, 10) ||
+      new Date().toLocaleDateString("en-CA", { timeZone: clinicTz });
+
+    if (!queueId) {
+      return res.status(400).json({ message: "A valid queue entry id is required." });
+    }
+    if (!procedureName) {
+      return res.status(400).json({ message: "Procedure name is required." });
+    }
+    if (!Number.isSafeInteger(durationMinutes) || durationMinutes <= 0) {
+      return res.status(400).json({ message: "Duration minutes must be a positive number." });
+    }
+    if (amountChargedRaw === undefined || amountChargedRaw === null || amountChargedRaw === "") {
+      return res.status(400).json({ message: "Treatment price / amount charged is required." });
+    }
+
+    const client = await db.connect();
+    let transactionOpen = false;
+    try {
+      await client.query("BEGIN");
+      transactionOpen = true;
+
+      const current = await assertQueueBelongsToDentist(client, queueId, req.dentist);
+      if (!current) {
+        await client.query("ROLLBACK");
+        transactionOpen = false;
+        return res.status(404).json({ message: "Queue entry not found for this dentist." });
+      }
+
+      const patientResult = await client.query(
+        `SELECT id, first_name, last_name, email, phone,
+                CONCAT_WS(' ', first_name, last_name) AS full_name
+         FROM users
+         WHERE id::text = $1
+         LIMIT 1`,
+        [String(current.user_id)]
+      );
+      const patient = patientResult.rows[0];
+      if (!patient) {
+        await client.query("ROLLBACK");
+        transactionOpen = false;
+        return res.status(404).json({ message: "Patient account linked to this queue entry was not found." });
+      }
+
+      const dentistName =
+        stringValue(req.body?.dentistName, 160) ||
+        `Dr. ${`${req.dentist.first_name || ""} ${req.dentist.last_name || ""}`.trim()}`.trim() ||
+        "Clinic Dentist";
+
+      const clinicalRecord = await clinicalPatients.findOrCreateClinicalRecordForUser(
+        client,
+        current.user_id,
+        { id: req.dentist.id, role: "dentist" }
+      );
+
+      const treatment = await clinicalPatients.addClinicalTreatment(
+        client,
+        clinicalRecord.id,
+        {
+          treatment: procedureName,
+          procedureDetails: procedureType
+            ? `Procedure type: ${procedureType}`
+            : stringValue(req.body?.procedureDetails, 2000),
+          toothNumber,
+          durationMinutes,
+          amountCharged: amountChargedRaw,
+          amountPaid: req.body?.amountPaid ?? 0,
+          treatmentDate,
+          status: "in_progress",
+          notes: stringValue(req.body?.notes, 2000),
+          diagnosisNotes: stringValue(req.body?.diagnosisNotes, 2000),
+          dentistName,
+          appointmentId: current.appointment_id || null,
+        },
+        { id: req.dentist.id, role: "dentist" }
+      );
+
+      const updatedResult = await client.query(
+        `UPDATE patient_portal_queue_entries
+         SET status = 'dentist', updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1
+         RETURNING *`,
+        [queueId]
+      );
+
+      if (current.appointment_id) {
+        await client.query(
+          `UPDATE patient_portal_appointments
+           SET status = 'checked_in', updated_at = CURRENT_TIMESTAMP
+           WHERE id = $1
+             AND status NOT IN ('completed', 'cancelled', 'no_show')`,
+          [current.appointment_id]
+        );
+      }
+
+      await notifyPatient(client, {
+        userId: current.user_id,
+        type: "queue",
+        title: "Treatment started",
+        body: `Your ${procedureName} treatment has started with ${dentistName}.`,
+      });
+
+      await client.query("COMMIT");
+      transactionOpen = false;
+
+      return res.status(201).json({
+        message: "Treatment started and saved to the patient record.",
+        queueEntry: {
+          id: updatedResult.rows[0].id,
+          token: updatedResult.rows[0].token,
+          sequence: updatedResult.rows[0].position,
+          status: displayQueueStatus(updatedResult.rows[0].status),
+          waitMinutes: Number(updatedResult.rows[0].estimated_wait_minutes || 0),
+        },
+        patient: {
+          id: clinicalRecord.id,
+          userId: String(current.user_id),
+          fullName: clinicalRecord.fullName || patient.full_name || "Patient",
+          recordCode: clinicalRecord.recordCode || null,
+        },
+        treatment: {
+          id: treatment.id,
+          name: treatment.treatment,
+          treatment: treatment.treatment,
+          procedureType: procedureType || null,
+          toothNumber: treatment.toothNumber,
+          durationMinutes: treatment.durationMinutes,
+          amountCharged: treatment.amountCharged ?? 0,
+          amountPaid: treatment.amountPaid ?? 0,
+          treatmentDate: treatment.treatmentDate,
+          status: treatment.status,
+          dentist: treatment.dentistName,
+          clinicalRecordId: clinicalRecord.id,
+          appointmentId: treatment.appointmentId,
+        },
+      });
+    } catch (error) {
+      if (transactionOpen) {
+        await client.query("ROLLBACK");
+      }
+      if (error.status) {
+        return res.status(error.status).json({ message: error.message });
+      }
+      if (clinicalPatients.isMissingRelation(error)) {
+        return res.status(503).json({
+          message: "Clinical patient records are not available. Run npm run migrate:clinical-records.",
+        });
+      }
+      console.error("Dentist start-treatment error:", error.message);
+      return res.status(500).json({ message: "Unable to start treatment and save the patient record." });
+    } finally {
+      client.release();
+    }
+  });
+
   router.patch("/queue/:id", async (req, res) => {
     const queueId = numericId(req.params.id);
     const submittedStatus = stringValue(req.body?.status, 40)?.toLowerCase();
