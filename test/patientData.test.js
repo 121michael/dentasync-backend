@@ -46,9 +46,13 @@ test("canonicalTreatmentName collapses spellings into the treatment taxonomy", (
   for (const raw of ["Root Canal", "ROOT CANAL", "root canal treatment", "Root-canal", "RCT"]) {
     assert.equal(patientData.canonicalTreatmentName(raw), "Root Canal", raw);
   }
-  for (const raw of ["Dental Filling", "Tooth Restoration", "dental restoration", "composite filling"]) {
+  for (const raw of ["Dental Filling", "dental restoration", "composite filling"]) {
     assert.equal(patientData.canonicalTreatmentName(raw), "Dental Filling", raw);
   }
+  assert.equal(patientData.canonicalTreatmentName("Tooth Restoration"), "Tooth Restoration");
+  assert.equal(patientData.canonicalTreatmentName("Restoration"), "Restoration");
+  assert.equal(patientData.canonicalTreatmentName("Oral Surgery"), "Oral Surgery");
+  assert.equal(patientData.canonicalTreatmentName("Crown / Fixed Bridge"), "Crown / Fixed Bridge");
   assert.equal(patientData.canonicalTreatmentName("Extraction of tooth 36"), "Extraction");
   assert.equal(patientData.canonicalTreatmentName("Consultation"), "Consultation");
 });

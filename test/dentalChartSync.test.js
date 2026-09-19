@@ -32,7 +32,13 @@ test("parseAffectedTeeth accepts primary (pediatric) teeth", () => {
 test("isToothSpecificTreatment requires tooth for root canal and filling", () => {
   assert.equal(dentalChartSync.isToothSpecificTreatment("Root Canal"), true);
   assert.equal(dentalChartSync.isToothSpecificTreatment("Dental Filling"), true);
+  assert.equal(dentalChartSync.isToothSpecificTreatment("Restoration"), true);
+  assert.equal(dentalChartSync.isToothSpecificTreatment("Extraction"), true);
+  assert.equal(dentalChartSync.isToothSpecificTreatment("Oral Surgery"), true);
   assert.equal(dentalChartSync.isToothSpecificTreatment("Cleaning / Oral Prophylaxis"), false);
+  assert.equal(dentalChartSync.isToothSpecificTreatment("Oral Prophylaxis"), false);
+  assert.equal(dentalChartSync.isToothSpecificTreatment("Denture"), false);
+  assert.equal(dentalChartSync.isToothSpecificTreatment("Retainers"), false);
 });
 
 test("syncChartFromTreatment upserts chart entry for root canal on #36", async () => {

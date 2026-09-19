@@ -264,6 +264,10 @@ function paymentSummary(amountCharged, amountPaid) {
 function canonicalTreatmentName(value) {
   const raw = stringValue(value, 200);
   if (!raw) return "";
+  const catalog = dentalChartSync.PROCEDURE_CATALOG.find(
+    (item) => item.value.toLowerCase() === raw.toLowerCase()
+  );
+  if (catalog) return catalog.value;
   const mapped = dentalChartSync.mapTreatmentNameToChart(raw);
   if (mapped && CHART_KEY_TO_TREATMENT[mapped.key]) {
     return CHART_KEY_TO_TREATMENT[mapped.key];

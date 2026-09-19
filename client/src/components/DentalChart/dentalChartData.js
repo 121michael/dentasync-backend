@@ -70,18 +70,47 @@ export const TREATMENT_OPTIONS = [
 
 /** Procedure choices for the Add Treatment form (labels match backend catalog). */
 export const PROCEDURE_FORM_OPTIONS = [
-  { value: "Root Canal", toothSpecific: true },
-  { value: "Dental Filling", toothSpecific: true },
-  { value: "Tooth Restoration", toothSpecific: true },
-  { value: "Extraction", toothSpecific: true },
-  { value: "Crown", toothSpecific: true },
-  { value: "Bridge", toothSpecific: true },
-  { value: "Sealant", toothSpecific: true },
-  { value: "Cleaning / Oral Prophylaxis", toothSpecific: false },
-  { value: "Orthodontic Treatment", toothSpecific: false },
-  { value: "Denture", toothSpecific: true },
-  { value: "Other", toothSpecific: false },
+  { value: "Cleaning / Oral Prophylaxis", label: "Oral Prophylaxis", toothSpecific: false },
+  { value: "Dental Filling", label: "Restoration", toothSpecific: true },
+  { value: "Root Canal", label: "Root Canal", toothSpecific: true },
+  { value: "Extraction", label: "Extraction", toothSpecific: true },
+  { value: "Oral Surgery", label: "Oral Surgery", toothSpecific: true },
+  { value: "Orthodontic Treatment", label: "Ortho Adjustment", toothSpecific: false },
+  { value: "Retainers", label: "Retainers", toothSpecific: false },
+  { value: "Crown", label: "Crown", toothSpecific: true },
+  { value: "Bridge", label: "Bridge", toothSpecific: true },
+  { value: "Crown / Fixed Bridge", label: "Crown / Fixed Bridge", toothSpecific: true },
+  { value: "Denture", label: "Dentures", toothSpecific: false },
+  { value: "Sealant", label: "Sealant", toothSpecific: true },
+  { value: "Other", label: "Other", toothSpecific: false },
 ];
+
+const PROCEDURE_ALIASES = {
+  "oral prophylaxis": "Cleaning / Oral Prophylaxis",
+  "cleaning / oral prophylaxis": "Cleaning / Oral Prophylaxis",
+  restoration: "Dental Filling",
+  "tooth restoration": "Dental Filling",
+  "dental filling": "Dental Filling",
+  dentures: "Denture",
+  denture: "Denture",
+  "ortho adjustment": "Orthodontic Treatment",
+  "orthodontic treatment": "Orthodontic Treatment",
+  retainers: "Retainers",
+  "oral surgery": "Oral Surgery",
+  "crown / fixed bridge": "Crown / Fixed Bridge",
+};
+
+export function procedureFormValue(procedureName) {
+  const raw = String(procedureName || "").trim();
+  if (!raw) return "";
+  const exact = PROCEDURE_FORM_OPTIONS.find(
+    (option) =>
+      option.value.toLowerCase() === raw.toLowerCase() ||
+      String(option.label || "").toLowerCase() === raw.toLowerCase()
+  );
+  if (exact) return exact.value;
+  return PROCEDURE_ALIASES[raw.toLowerCase()] || raw;
+}
 
 export const STATUS_OPTIONS = [
   { value: "healthy", label: "Healthy" },
@@ -153,8 +182,9 @@ export function labelFor(value, options) {
 }
 
 export function procedureRequiresTooth(procedureName) {
+  const value = procedureFormValue(procedureName);
   const match = PROCEDURE_FORM_OPTIONS.find(
-    (option) => option.value.toLowerCase() === String(procedureName || "").trim().toLowerCase()
+    (option) => option.value.toLowerCase() === value.toLowerCase()
   );
   return match ? match.toothSpecific : true;
 }

@@ -23,9 +23,13 @@ export function DentistSummaryCard({ label, value, detail, icon: Icon, tone = "p
   );
 }
 
-export function DentistModal({ title, children, onClose, wide = false }) {
+export function DentistModal({ title, children, onClose, wide = false, stacked = false }) {
   return (
-    <div className="dentist-modal-backdrop" role="presentation" onMouseDown={onClose}>
+    <div
+      className={`dentist-modal-backdrop${stacked ? " dentist-modal-backdrop--stacked" : ""}`}
+      role="presentation"
+      onMouseDown={onClose}
+    >
       <section
         className={`dentist-modal ${wide ? "dentist-modal--wide" : ""}`}
         role="dialog"

@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Plus, Search } from "lucide-react";
 import { api } from "../api";
 import { DentalChart } from "../components/DentalChart";
 import {
   PROCEDURE_FORM_OPTIONS,
+  procedureFormValue,
   procedureRequiresTooth,
 } from "../components/DentalChart/dentalChartData";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
@@ -39,11 +40,8 @@ function formatMoney(value) {
   return `₱${Number(value || 0).toFixed(2)}`;
 }
 
-function formatAgeSex(patient) {
-  if (patient?.ageSex) return patient.ageSex;
-  const age = patient?.age != null && patient.age !== "" ? patient.age : "—";
-  const sex = patient?.gender || "—";
-  return `${age} / ${sex}`;
+function todayIsoDate() {
+  return new Date().toISOString().slice(0, 10);
 }
 
 function treatmentBalance(treatment) {
@@ -85,10 +83,11 @@ export function DentistRecordsPage() {
   const [chartRefreshKey, setChartRefreshKey] = useState(0);
   const [ageSexOpen, setAgeSexOpen] = useState(false);
   const [ageSexForm, setAgeSexForm] = useState(emptyAgeSexForm);
+  const treatmentFormRef = useRef(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (options = {}) => {
     try {
-      const response = await api.getDentistPatients(applied);
+      const response = await api.getDentistPatients(applied, options);
       setPatients(response.patients);
       setError("");
     } catch (loadError) {
@@ -118,11 +117,11 @@ export function DentistRecordsPage() {
     }
   }
 
-  async function refreshPatientDetail(patientId) {
-    const response = await api.getDentistPatient(patientId);
+  async function refreshPatientDetail(patientId, { silent = false } = {}) {
+    const response = await api.getDentistPatient(patientId, { silent });
     setDetail(response);
     try {
-      const xrayResponse = await api.getDentistPatientXrays(patientId);
+      const xrayResponse = await api.getDentistPatientXrays(patientId, { silent });
       setXrays(xrayResponse.xrays || []);
     } catch {
       setXrays([]);
@@ -182,7 +181,7 @@ export function DentistRecordsPage() {
         payload.age = Number(ageSexForm.age);
       }
       const response = await api.updateDentistPatient(detail.patient.id, payload);
-      setSuccess(response.message || "Age / Sex updated and synced to the patient profile.");
+      setSuccess(response.message || "Age and Sex updated and synced to the patient profile.");
       setAgeSexOpen(false);
       await refreshPatientDetail(detail.patient.id);
       await load();
@@ -193,25 +192,42 @@ export function DentistRecordsPage() {
     }
   }
 
+  function revealTreatmentForm() {
+    setTreatmentFormOpen(true);
+    window.requestAnimationFrame(() => {
+      treatmentFormRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+  }
+
+  function openAddTreatment() {
+    setError("");
+    setSuccess("");
+    setEditingTreatmentId(null);
+    setTreatmentForm({ ...emptyTreatment, treatmentDate: todayIsoDate() });
+    revealTreatmentForm();
+  }
+
   function closeTreatmentForm() {
     setTreatmentFormOpen(false);
     setTreatmentForm(emptyTreatment);
     setEditingTreatmentId(null);
   }
 
-  function startEditTreatment(treatment) {
+  function startEditTreatment(event, treatment) {
+    event.preventDefault();
+    event.stopPropagation();
     setError("");
     setSuccess("");
     setEditingTreatmentId(treatment.id);
     setTreatmentForm({
-      name: treatment.name || treatment.treatment || "",
+      name: procedureFormValue(treatment.name || treatment.treatment || ""),
       treatmentDate: String(treatment.date || treatment.treatmentDate || "").slice(0, 10),
       durationMinutes: treatment.durationMinutes != null ? String(treatment.durationMinutes) : "",
       toothNumber: treatment.toothNumber || treatment.tooth_number || "",
       diagnosisNotes: treatment.diagnosis || treatment.diagnosisNotes || "",
       amountCharged: treatment.amountCharged != null ? String(treatment.amountCharged) : "",
     });
-    setTreatmentFormOpen(true);
+    revealTreatmentForm();
   }
 
   async function saveTreatment(event) {
@@ -228,7 +244,7 @@ export function DentistRecordsPage() {
       const payload = {
         name: treatmentForm.name,
         treatment: treatmentForm.name,
-        treatmentDate: treatmentForm.treatmentDate || undefined,
+        treatmentDate: treatmentForm.treatmentDate || todayIsoDate(),
         durationMinutes: Number(treatmentForm.durationMinutes) || undefined,
         diagnosisNotes: treatmentForm.diagnosisNotes,
         diagnosis: treatmentForm.diagnosisNotes,
@@ -246,9 +262,9 @@ export function DentistRecordsPage() {
           });
       setSuccess(response.message || "Treatment saved. Dental chart updated automatically.");
       closeTreatmentForm();
-      await refreshPatientDetail(detail.patient.id);
+      await refreshPatientDetail(detail.patient.id, { silent: true });
       setChartRefreshKey((key) => key + 1);
-      await load();
+      await load({ silent: true });
     } catch (saveError) {
       setError(saveError.message);
     } finally {
@@ -268,9 +284,9 @@ export function DentistRecordsPage() {
       );
       setDeleteTarget(null);
       if (editingTreatmentId === deleteTarget.id) closeTreatmentForm();
-      await refreshPatientDetail(detail.patient.id);
+      await refreshPatientDetail(detail.patient.id, { silent: true });
       setChartRefreshKey((key) => key + 1);
-      await load();
+      await load({ silent: true });
     } catch (deleteError) {
       setError(deleteError.message);
     } finally {
@@ -343,7 +359,8 @@ export function DentistRecordsPage() {
               <thead>
                 <tr>
                   <th>Patient</th>
-                  <th>Age / Sex</th>
+                  <th>Age</th>
+                  <th>Sex</th>
                   <th>Treatment</th>
                   <th>Treatment Date</th>
                   <th>Amount Paid</th>
@@ -360,7 +377,10 @@ export function DentistRecordsPage() {
                         <code>{patient.patientId || patient.recordCode || patient.profileCode || patient.id}</code>
                       </small>
                     </td>
-                    <td>{formatAgeSex(patient)}</td>
+                    <td>
+                      {patient.age != null && patient.age !== "" ? patient.age : "—"}
+                    </td>
+                    <td>{patient.gender || "—"}</td>
                     <td>{patient.lastTreatment || patient.lastTreatmentName || "—"}</td>
                     <td>
                       {formatDentistDate(
@@ -484,79 +504,75 @@ export function DentistRecordsPage() {
 
       {detail ? (
         <DentistModal title={detail.patient.fullName} onClose={() => setDetail(null)} wide>
-          <div className="dentist-detail-grid">
-            <p>
-              <strong>Patient ID:</strong>{" "}
-              {detail.patient.patientId || detail.patient.recordCode || detail.patient.id}
-            </p>
-            <p>
-              <strong>Category:</strong> {detail.patient.patientCategory || "—"}
-            </p>
-            <p>
-              <strong>Name:</strong> {detail.patient.fullName || detail.patient.patientName}
-            </p>
-            <p>
-              <strong>Sex:</strong> {detail.patient.gender || "—"}
-            </p>
-            <p>
-              <strong>Age:</strong>{" "}
-              {detail.patient.age != null && detail.patient.age !== "" ? detail.patient.age : "—"}
-            </p>
-            <p>
-              <strong>Birthdate:</strong>{" "}
-              {detail.patient.dateOfBirth
-                ? formatDentistDate(detail.patient.dateOfBirth)
-                : "—"}
-            </p>
-            <p>
-              <strong>Phone:</strong> {detail.patient.phone || "—"}
-            </p>
-            <p>
-              <strong>Email:</strong> {detail.patient.email || "—"}
-            </p>
-            <p>
-              <strong>Record type:</strong>{" "}
-              {isProfileLocked(detail.patient) ? "Linked account (profile synced)" : "Walk-in clinical record"}
-            </p>
-            <p>
-              <strong>Age / Sex:</strong> {formatAgeSex(detail.patient)}{" "}
+          <section className="dentist-patient-info">
+            <div className="dentist-panel__heading">
+              <div>
+                <span className="eyebrow">Shared patient record</span>
+                <h2>Patient Information</h2>
+              </div>
               {!isProfileLocked(detail.patient) ? (
                 <button
                   type="button"
                   className="button button--secondary button--compact"
                   onClick={openAgeSexEditor}
                 >
-                  Edit
+                  Edit Age and Sex
                 </button>
               ) : null}
-            </p>
-            <p>
-              <strong>Next Appointment (staff):</strong>{" "}
-              {nextAppointmentLabel(null, detail.nextAppointment, detail.patient)}
-            </p>
-            <p>
-              <strong>Amount Paid (staff):</strong>{" "}
-              {detail.patient.amountPaid != null && detail.patient.amountPaid !== ""
-                ? formatMoney(detail.patient.amountPaid)
-                : detail.treatments?.[0]?.amountPaid != null
-                  ? formatMoney(detail.treatments[0].amountPaid)
-                  : "—"}
-            </p>
-          </div>
-
-          {isProfileLocked(detail.patient) ? (
-            <p className="muted-copy">
-              Name, Sex, Age, Birthdate, and Phone are synced from the patient account profile and
-              are read-only here.
-            </p>
-          ) : null}
+            </div>
+            <div className="dentist-detail-grid">
+              <p>
+                <strong>Patient ID:</strong>{" "}
+                {detail.patient.patientId || detail.patient.recordCode || detail.patient.id}
+              </p>
+              <p>
+                <strong>Name:</strong> {detail.patient.fullName || detail.patient.patientName}
+              </p>
+              <p>
+                <strong>Age:</strong>{" "}
+                {detail.patient.age != null && detail.patient.age !== "" ? detail.patient.age : "—"}
+              </p>
+              <p>
+                <strong>Sex:</strong> {detail.patient.gender || "—"}
+              </p>
+              <p>
+                <strong>Birthdate:</strong>{" "}
+                {detail.patient.dateOfBirth ? formatDentistDate(detail.patient.dateOfBirth) : "—"}
+              </p>
+              <p>
+                <strong>Phone Number:</strong> {detail.patient.phone || "—"}
+              </p>
+              <p>
+                <strong>Email:</strong> {detail.patient.email || "—"}
+              </p>
+              <p>
+                <strong>Category:</strong> {detail.patient.patientCategory || "—"}
+              </p>
+              <p>
+                <strong>Record type:</strong>{" "}
+                {isProfileLocked(detail.patient)
+                  ? "Linked account (profile synced)"
+                  : "Walk-in clinical record"}
+              </p>
+              <p>
+                <strong>Next Appointment:</strong>{" "}
+                {nextAppointmentLabel(null, detail.nextAppointment, detail.patient)}
+              </p>
+            </div>
+            {isProfileLocked(detail.patient) ? (
+              <p className="muted-copy">
+                Patient ID, Name, Age, Sex, Birthdate, and Phone Number are synced from the patient
+                account profile and are read-only here.
+              </p>
+            ) : null}
+          </section>
 
           {ageSexOpen && !isProfileLocked(detail.patient) ? (
             <form className="dentist-form" onSubmit={saveAgeSex} style={{ marginBottom: "1rem" }}>
               <div className="dentist-panel__heading">
                 <div>
                   <span className="eyebrow">Demographics</span>
-                  <h2>Edit Age / Sex</h2>
+                  <h2>Edit Age and Sex</h2>
                 </div>
               </div>
               <p className="muted-copy">
@@ -607,7 +623,7 @@ export function DentistRecordsPage() {
                   Cancel
                 </button>
                 <button className="button button--primary" disabled={busy}>
-                  {busy ? "Saving…" : "Save Age / Sex"}
+                  {busy ? "Saving…" : "Save Age and Sex"}
                 </button>
               </div>
             </form>
@@ -637,27 +653,187 @@ export function DentistRecordsPage() {
             <div className="treatment-record__header">
               <div>
                 <span className="eyebrow">Shared patient dental record</span>
-                <h2>Treatment History</h2>
+                <h2>Dental Treatment History</h2>
               </div>
+              <button
+                type="button"
+                className={`button ${treatmentFormOpen && !editingTreatmentId ? "button--secondary" : "button--primary"}`}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  if (treatmentFormOpen && !editingTreatmentId) {
+                    closeTreatmentForm();
+                  } else {
+                    openAddTreatment();
+                  }
+                }}
+              >
+                {treatmentFormOpen && !editingTreatmentId ? (
+                  "− Close Treatment Form"
+                ) : (
+                  <>
+                    <Plus size={16} /> Add Treatment
+                  </>
+                )}
+              </button>
             </div>
             <p className="muted-copy">
-              Full clinical history is kept. The dental chart shows the latest applicable status per
-              tooth.
+              Amount Paid stays in this table. Staff update payments; the dental chart updates from
+              these treatment rows.
             </p>
+
+            <div
+              ref={treatmentFormRef}
+              className={`dentist-treatment-form dentist-treatment-form--inline ${
+                treatmentFormOpen ? "is-open" : ""
+              }`}
+            >
+              <div
+                className={`dentist-treatment-form__panel ${treatmentFormOpen ? "is-open" : ""}`}
+                aria-hidden={!treatmentFormOpen}
+              >
+                {treatmentFormOpen ? (
+                  <>
+                    <div className="dentist-panel__heading">
+                      <div>
+                        <span className="eyebrow">Clinical information</span>
+                        <h2>{editingTreatmentId ? "Edit Treatment" : "Add Treatment"}</h2>
+                      </div>
+                    </div>
+                    <p className="muted-copy">
+                      {editingTreatmentId
+                        ? "The selected treatment is loaded below. Change any field and Save Changes to update this record only — the dental chart recalculates automatically."
+                        : "Choose the treatment type, date, and amount. Enter a tooth number for tooth-specific procedures, or click the tooth on the chart above."}
+                    </p>
+                    <form className="dentist-form" onSubmit={saveTreatment}>
+                      <div className="field-grid field-grid--two">
+                        <label className="field">
+                          <span>Treatment Type</span>
+                          <select
+                            required
+                            value={treatmentForm.name}
+                            onChange={(event) =>
+                              setTreatmentForm((current) => ({
+                                ...current,
+                                name: event.target.value,
+                              }))
+                            }
+                          >
+                            <option value="">Select Treatment</option>
+                            {PROCEDURE_FORM_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label || option.value}
+                              </option>
+                            ))}
+                            {treatmentForm.name &&
+                            !PROCEDURE_FORM_OPTIONS.some(
+                              (option) => option.value === treatmentForm.name
+                            ) ? (
+                              <option value={treatmentForm.name}>{treatmentForm.name}</option>
+                            ) : null}
+                          </select>
+                        </label>
+                        <label className="field">
+                          <span>Treatment Date</span>
+                          <input
+                            type="date"
+                            required
+                            value={treatmentForm.treatmentDate}
+                            onChange={(event) =>
+                              setTreatmentForm((current) => ({
+                                ...current,
+                                treatmentDate: event.target.value,
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Amount</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            inputMode="decimal"
+                            value={treatmentForm.amountCharged}
+                            onChange={(event) =>
+                              setTreatmentForm((current) => ({
+                                ...current,
+                                amountCharged: event.target.value,
+                              }))
+                            }
+                            placeholder="₱"
+                          />
+                        </label>
+                        <label className="field">
+                          <span>
+                            Tooth Number{toothRequired ? "" : " (optional)"}
+                          </span>
+                          <input
+                            value={treatmentForm.toothNumber}
+                            onChange={(event) =>
+                              setTreatmentForm((current) => ({
+                                ...current,
+                                toothNumber: event.target.value,
+                              }))
+                            }
+                            placeholder={toothRequired ? "e.g. 14" : "Optional"}
+                            required={toothRequired}
+                          />
+                        </label>
+                        <label className="field field--full">
+                          <span>Diagnosis</span>
+                          <textarea
+                            rows="2"
+                            value={treatmentForm.diagnosisNotes}
+                            onChange={(event) =>
+                              setTreatmentForm((current) => ({
+                                ...current,
+                                diagnosisNotes: event.target.value,
+                              }))
+                            }
+                            placeholder="e.g. Dental Caries"
+                          />
+                        </label>
+                      </div>
+                      <div className="dentist-form__actions">
+                        <button
+                          type="button"
+                          className="button button--secondary"
+                          onClick={closeTreatmentForm}
+                          disabled={savingTreatment}
+                        >
+                          Cancel
+                        </button>
+                        <button type="submit" className="button button--primary" disabled={savingTreatment}>
+                          {savingTreatment
+                            ? editingTreatmentId
+                              ? "Saving Changes…"
+                              : "Saving Treatment…"
+                            : editingTreatmentId
+                              ? "Save Changes"
+                              : "Save Treatment"}
+                        </button>
+                      </div>
+                    </form>
+                  </>
+                ) : null}
+              </div>
+            </div>
+
             <div className="treatment-record__table-wrap">
               {(detail.treatments || []).length ? (
                 <table className="treatment-record__table">
                   <thead>
                     <tr>
                       <th>Date</th>
-                      <th>Affected Tooth</th>
-                      <th>Treatment</th>
+                      <th>Tooth</th>
+                      <th>Procedure</th>
                       <th>Diagnosis</th>
                       <th>Dentist</th>
                       <th>Amount Charged</th>
-                      <th>Amount Paid (staff)</th>
+                      <th>Amount Paid</th>
                       <th>Balance</th>
-                      <th>Next Appt. (staff)</th>
+                      <th>Next Appointment</th>
                       <th>Actions</th>
                     </tr>
                   </thead>
@@ -665,7 +841,11 @@ export function DentistRecordsPage() {
                     {detail.treatments.map((treatment) => (
                       <tr key={treatment.id}>
                         <td>{formatDentistDate(treatment.date || treatment.treatmentDate)}</td>
-                        <td>{treatment.toothNumber || treatment.tooth_number || "—"}</td>
+                        <td>
+                          {treatment.toothNumber || treatment.tooth_number
+                            ? `#${treatment.toothNumber || treatment.tooth_number}`
+                            : "—"}
+                        </td>
                         <td>{treatment.name || treatment.treatment || "—"}</td>
                         <td>{treatment.diagnosis || treatment.diagnosisNotes || "—"}</td>
                         <td>{treatment.dentist || "—"}</td>
@@ -678,14 +858,18 @@ export function DentistRecordsPage() {
                             <button
                               type="button"
                               className="button button--secondary button--compact"
-                              onClick={() => startEditTreatment(treatment)}
+                              onClick={(event) => startEditTreatment(event, treatment)}
                             >
                               Edit
                             </button>
                             <button
                               type="button"
                               className="button button--danger button--compact"
-                              onClick={() => setDeleteTarget(treatment)}
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                setDeleteTarget(treatment);
+                              }}
                             >
                               Delete
                             </button>
@@ -698,169 +882,6 @@ export function DentistRecordsPage() {
               ) : (
                 <p className="muted-copy">No treatments on file yet.</p>
               )}
-            </div>
-          </section>
-
-          <section className="dentist-treatment-form">
-            <div className="dentist-panel__heading">
-              <div>
-                <span className="eyebrow">Clinical information</span>
-                <h2>{editingTreatmentId ? "Edit Treatment" : "Add Treatment"}</h2>
-              </div>
-              <button
-                type="button"
-                className={`button ${treatmentFormOpen ? "button--secondary" : "button--primary"}`}
-                onClick={() => {
-                  if (treatmentFormOpen) {
-                    closeTreatmentForm();
-                  } else {
-                    setTreatmentFormOpen(true);
-                  }
-                }}
-              >
-                {treatmentFormOpen ? (
-                  editingTreatmentId ? "Cancel Edit" : "− Close Treatment Form"
-                ) : (
-                  <>
-                    <Plus size={16} /> Add Treatment
-                  </>
-                )}
-              </button>
-            </div>
-
-            <div
-              className={`dentist-treatment-form__panel ${treatmentFormOpen ? "is-open" : ""}`}
-              aria-hidden={!treatmentFormOpen}
-            >
-              {treatmentFormOpen ? (
-                <>
-                  <p className="muted-copy">
-                    {editingTreatmentId
-                      ? "Editing a saved treatment. The recorded tooth is already highlighted on the chart above — click another tooth to change it. Saving recalculates the chart from the treatment history."
-                      : "Enter diagnosis and treatment, then click the affected tooth on the dental chart above. Saving updates history and the chart automatically. Amount paid and next appointment are managed by Staff."}
-                  </p>
-                  <form className="dentist-form" onSubmit={saveTreatment}>
-                    <div className="field-grid field-grid--two">
-                      <label className="field field--full">
-                        <span>Diagnosis</span>
-                        <textarea
-                          required
-                          rows="2"
-                          value={treatmentForm.diagnosisNotes}
-                          onChange={(event) =>
-                            setTreatmentForm((current) => ({
-                              ...current,
-                              diagnosisNotes: event.target.value,
-                            }))
-                          }
-                          placeholder="e.g. Irreversible pulpitis on tooth #36"
-                        />
-                      </label>
-                      <label className="field">
-                        <span>Treatment</span>
-                        <select
-                          required
-                          value={treatmentForm.name}
-                          onChange={(event) =>
-                            setTreatmentForm((current) => ({
-                              ...current,
-                              name: event.target.value,
-                              toothNumber: procedureRequiresTooth(event.target.value)
-                                ? current.toothNumber
-                                : current.toothNumber,
-                            }))
-                          }
-                        >
-                          <option value="">Select treatment…</option>
-                          {PROCEDURE_FORM_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.value}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="field field--full">
-                        <span>Affected tooth</span>
-                        <p className="muted-copy" style={{ margin: 0 }}>
-                          {treatmentForm.toothNumber
-                            ? `Selected from chart: #${String(treatmentForm.toothNumber)
-                                .split(/[,\s]+/)
-                                .filter(Boolean)
-                                .join(", #")}`
-                            : toothRequired
-                              ? "Click the affected tooth directly on the dental chart above."
-                              : "Optional — click teeth on the chart if this treatment is tooth-specific."}
-                        </p>
-                      </label>
-                      <label className="field">
-                        <span>Treatment Date</span>
-                        <input
-                          type="date"
-                          value={treatmentForm.treatmentDate}
-                          onChange={(event) =>
-                            setTreatmentForm((current) => ({
-                              ...current,
-                              treatmentDate: event.target.value,
-                            }))
-                          }
-                        />
-                      </label>
-                      <label className="field">
-                        <span>Treatment Cost (Amount Charged)</span>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={treatmentForm.amountCharged}
-                          onChange={(event) =>
-                            setTreatmentForm((current) => ({
-                              ...current,
-                              amountCharged: event.target.value,
-                            }))
-                          }
-                          placeholder="1500"
-                        />
-                      </label>
-                      <label className="field">
-                        <span>Duration (minutes)</span>
-                        <input
-                          type="number"
-                          min="1"
-                          value={treatmentForm.durationMinutes}
-                          onChange={(event) =>
-                            setTreatmentForm((current) => ({
-                              ...current,
-                              durationMinutes: event.target.value,
-                            }))
-                          }
-                          placeholder="45"
-                        />
-                      </label>
-                    </div>
-                    <div className="dentist-form__actions">
-                      <button className="button button--primary" disabled={savingTreatment}>
-                        {savingTreatment
-                          ? editingTreatmentId
-                            ? "Saving Changes…"
-                            : "Saving Treatment…"
-                          : editingTreatmentId
-                            ? "Save Changes"
-                            : "Save Treatment"}
-                      </button>
-                      {editingTreatmentId ? (
-                        <button
-                          type="button"
-                          className="button button--secondary"
-                          onClick={closeTreatmentForm}
-                          disabled={savingTreatment}
-                        >
-                          Cancel
-                        </button>
-                      ) : null}
-                    </div>
-                  </form>
-                </>
-              ) : null}
             </div>
           </section>
 
@@ -913,12 +934,15 @@ export function DentistRecordsPage() {
 
       {deleteTarget ? (
         <DentistModal
-          title="Delete Treatment"
+          stacked
+          title="Delete Treatment?"
           onClose={() => {
             if (!deletingTreatment) setDeleteTarget(null);
           }}
         >
-          <p className="dentist-confirm-copy">Are you sure you want to delete this treatment?</p>
+          <p className="dentist-confirm-copy">
+            This will remove the treatment record and update the dental chart.
+          </p>
           <div className="dentist-detail-grid">
             <p>
               <strong>Tooth:</strong>{" "}

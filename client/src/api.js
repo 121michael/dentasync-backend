@@ -242,11 +242,13 @@ export const api = {
   startDentistTreatment: (queueEntryId, body) =>
     request(`/dentist/queue/${queueEntryId}/start-treatment`, { method: "POST", body }),
   getDentistAppointments: () => request("/dentist/appointments"),
-  getDentistPatients: (search = "") =>
-    request(`/dentist/patients${search ? `?search=${encodeURIComponent(search)}` : ""}`),
+  getDentistPatients: (search = "", options = {}) =>
+    request(`/dentist/patients${search ? `?search=${encodeURIComponent(search)}` : ""}`, options),
   createDentistPatient: (body) => request("/dentist/patients", { method: "POST", body }),
-  getDentistPatient: (patientId) => request(`/dentist/patients/${patientId}`),
-  getDentistPatientXrays: (patientId) => request(`/dentist/patients/${patientId}/xrays`),
+  getDentistPatient: (patientId, options = {}) =>
+    request(`/dentist/patients/${patientId}`, options),
+  getDentistPatientXrays: (patientId, options = {}) =>
+    request(`/dentist/patients/${patientId}/xrays`, options),
   getDentistProfile: () => request("/dentist/profile"),
   updateDentistProfile: (body) => request("/dentist/profile", { method: "PUT", body }),
   getAdminDashboard: (options = {}) => request("/admin/dashboard", options),
@@ -266,8 +268,10 @@ export const api = {
   getAdminPatient: (id) => request(`/admin/patients/${id}`),
   updateDentistPatient: (id, body) => request(`/dentist/patients/${id}`, { method: "PATCH", body }),
   deleteDentistPatient: (id) => request(`/dentist/patients/${id}`, { method: "DELETE" }),
-  getDentistDentalChart: (patientId) => request(`/dentist/patients/${patientId}/dental-chart`),
-  getStaffDentalChart: (patientId) => request(`/staff/patients/${patientId}/dental-chart`),
+  getDentistDentalChart: (patientId, options = {}) =>
+    request(`/dentist/patients/${patientId}/dental-chart`, options),
+  getStaffDentalChart: (patientId, options = {}) =>
+    request(`/staff/patients/${patientId}/dental-chart`, options),
   upsertDentistDentalChart: (patientId, body) =>
     request(`/dentist/patients/${patientId}/dental-chart`, { method: "PUT", body }),
   deleteDentistDentalChartTooth: (patientId, toothNumber) =>

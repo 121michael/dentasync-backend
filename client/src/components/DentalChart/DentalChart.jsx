@@ -57,7 +57,7 @@ export function DentalChart({
     setLoadError("");
     try {
       const loader = loadChartApi || api.getDentistDentalChart;
-      const response = await loader(patientId);
+      const response = await loader(patientId, { silent: Boolean(refreshKey) });
       const next = buildDefaultChart();
       let primaryEntries = 0;
       for (const entry of response.entries || response.chart || []) {

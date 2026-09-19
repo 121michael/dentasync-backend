@@ -12,31 +12,40 @@ const TOOTH_SPECIFIC_KEYS = new Set([
   "crown",
   "bridge",
   "sealant",
-  "denture",
 ]);
 
 const PROCEDURE_CATALOG = [
   { value: "Root Canal", key: "root_canal", toothSpecific: true },
   { value: "Dental Filling", key: "filling", toothSpecific: true },
   { value: "Tooth Restoration", key: "filling", toothSpecific: true },
+  { value: "Restoration", key: "filling", toothSpecific: true },
   { value: "Extraction", key: "extraction", toothSpecific: true },
+  { value: "Oral Surgery", key: "other", toothSpecific: true },
   { value: "Crown", key: "crown", toothSpecific: true },
   { value: "Bridge", key: "bridge", toothSpecific: true },
+  { value: "Crown / Fixed Bridge", key: "crown", toothSpecific: true },
   { value: "Sealant", key: "sealant", toothSpecific: true },
   { value: "Cleaning / Oral Prophylaxis", key: "cleaning", toothSpecific: false },
+  { value: "Oral Prophylaxis", key: "cleaning", toothSpecific: false },
   { value: "Orthodontic Treatment", key: "braces", toothSpecific: false },
-  { value: "Denture", key: "denture", toothSpecific: true },
+  { value: "Ortho Adjustment", key: "braces", toothSpecific: false },
+  { value: "Retainers", key: "braces", toothSpecific: false },
+  { value: "Denture", key: "denture", toothSpecific: false },
+  { value: "Dentures", key: "denture", toothSpecific: false },
   { value: "Other", key: "other", toothSpecific: false },
 ];
 
 const TREATMENT_MATCHERS = [
   { match: /root[\s-]*canal|\brct\b/i, key: "root_canal", status: "treated" },
   { match: /tooth\s*restor|dental\s*fill|\bfilling\b|composite|amalgam|restorat/i, key: "filling", status: "treated" },
+  { match: /oral\s*surg/i, key: "other", status: "treated" },
   { match: /\bextract|\bexo\b|pull(ed)?\b/i, key: "extraction", status: "missing" },
+  { match: /crown\s*\/\s*fixed\s*bridge|fixed\s*bridge/i, key: "crown", status: "treated" },
   { match: /\bcrown\b/i, key: "crown", status: "treated" },
   { match: /\bbridge\b|\bfpd\b|fixed\s*partial/i, key: "bridge", status: "treated" },
   { match: /sealant/i, key: "sealant", status: "treated" },
   { match: /denture/i, key: "denture", status: "treated" },
+  { match: /retainer/i, key: "braces", status: "under_treatment" },
   { match: /clean|prophylaxis|scaling|oral\s*proph/i, key: "cleaning", status: "treated" },
   { match: /ortho|brace|bracket|aligner/i, key: "braces", status: "under_treatment" },
 ];

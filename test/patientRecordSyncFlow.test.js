@@ -246,7 +246,7 @@ test("one patient record stays synchronized across Admin profile, Dentist, and S
     { treatment: "Tooth Restoration", treatmentDate: "2026-09-18", toothNumber: "36", diagnosisNotes: "Dental caries" },
     { id: "dentist-1", role: "dentist" }
   );
-  assert.equal(edited.treatment, "Dental Filling");
+  assert.equal(edited.treatment, "Tooth Restoration");
   assert.equal(edited.amountPaid, 1500, "staff-owned payment survives a clinical edit");
   assert.deepEqual(db.chart.get("36").conditions_json, ["filling"]);
 

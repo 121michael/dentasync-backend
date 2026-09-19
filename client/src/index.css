@@ -4665,15 +4665,25 @@ strong {
 .treatment-record__table td:last-child {
   white-space: nowrap;
 }
+.dentist-patient-info {
+  margin-bottom: 1rem;
+}
+.dentist-modal-backdrop--stacked {
+  z-index: 90;
+}
 .treatment-record__actions {
   display: flex;
   flex-wrap: wrap;
   gap: .35rem;
+  position: relative;
+  z-index: 2;
 }
 .treatment-record__actions .button {
   min-height: 30px;
   padding: .32rem .6rem;
   font-size: .68rem;
+  cursor: pointer;
+  pointer-events: auto;
 }
 .dentist-form__actions {
   display: flex;
@@ -5428,6 +5438,14 @@ strong {
   display: grid;
   gap: 0.75rem;
   margin: 0 0 1rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.dentist-treatment-form--inline.is-open {
+  margin: 0 0 1rem;
   padding: 0.95rem;
   border: 1px solid var(--border);
   border-radius: 16px;
@@ -5443,6 +5461,13 @@ strong {
   transform: translateY(-6px);
   transition: max-height 0.28s ease, opacity 0.22s ease, transform 0.22s ease;
   pointer-events: none;
+}
+
+.dentist-treatment-form__panel.is-open {
+  max-height: 1400px;
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
 }
 
 .fdi-pick-chips {
