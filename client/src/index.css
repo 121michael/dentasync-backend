@@ -5563,3 +5563,80 @@ strong {
     width: 100%;
   }
 }
+
+/* ---------- Admin · Patient Document Intake ---------- */
+.inline-alert--warning { color: var(--amber); background: var(--amber-wash); border-color: color-mix(in srgb, var(--amber) 35%, transparent); }
+.intake-history__title { margin: 1.25rem 0 .6rem; font-size: .85rem; letter-spacing: .02em; text-transform: uppercase; color: var(--text-muted); }
+.intake-processing {
+  display: flex; align-items: center; gap: .85rem; margin-top: .9rem; padding: .9rem 1rem;
+  border-radius: 14px; border: 1px dashed color-mix(in srgb, var(--amethyst-700, #5b2d8e) 40%, var(--border));
+  background: color-mix(in srgb, var(--amethyst-700, #5b2d8e) 6%, #fff);
+}
+.intake-processing__spinner { animation: intake-spin 1s linear infinite; color: var(--amethyst-700, #5b2d8e); flex: none; }
+@keyframes intake-spin { to { transform: rotate(360deg); } }
+.intake-doc-list { list-style: none; margin: .9rem 0 0; padding: 0; display: grid; gap: .5rem; }
+.intake-doc {
+  display: flex; align-items: center; justify-content: space-between; gap: .75rem;
+  padding: .6rem .8rem; border-radius: 12px; border: 1px solid var(--border); background: var(--surface-muted);
+}
+.intake-doc--failed { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); background: var(--danger-wash); }
+.intake-doc--failed .intake-doc__main svg { color: var(--danger); }
+.intake-doc--processed .intake-doc__main svg, .intake-doc--attached .intake-doc__main svg { color: var(--emerald); }
+.intake-doc__main {
+  display: flex; align-items: center; gap: .65rem; flex: 1; min-width: 0; padding: 0; border: 0; background: none;
+  text-align: left; cursor: pointer; font: inherit; color: inherit;
+}
+.intake-doc__main:disabled { cursor: default; }
+.intake-doc__main span { display: grid; min-width: 0; }
+.intake-doc__main strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .82rem; }
+.intake-doc__main small { color: var(--text-muted); font-size: .7rem; }
+.intake-failure { margin-top: .9rem; padding: .85rem 1rem; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border)); background: var(--danger-wash); }
+.intake-failure strong { color: var(--danger); font-size: .82rem; }
+.intake-conflicts { display: grid; gap: .75rem; margin-top: .9rem; }
+.intake-conflict { padding: .85rem 1rem; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--amber) 55%, var(--border)); background: var(--amber-wash); }
+.intake-conflict__title { display: flex; align-items: center; gap: .5rem; color: var(--amber); font-size: .82rem; }
+.intake-conflict__options { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .5rem; }
+.intake-conflict__options small { color: var(--text-muted); font-weight: 400; }
+.intake-layout { align-items: stretch; }
+.intake-preview-empty { display: grid; place-items: center; gap: .5rem; min-height: 320px; text-align: center; color: var(--text-muted); border-radius: 10px; background: #fff; padding: 1rem; }
+.intake-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+.intake-field small.intake-field__meta { display: block; margin-top: .3rem; font-size: .68rem; color: var(--text-muted); }
+.intake-field em { color: var(--danger); font-style: normal; }
+.intake-field--missing input, .intake-field--missing select { border-color: color-mix(in srgb, var(--danger) 55%, var(--border)); background: color-mix(in srgb, var(--danger-wash) 60%, #fff); }
+.intake-field--missing .intake-field__meta, .intake-field--invalid .intake-field__meta { color: var(--danger); }
+.intake-field--invalid input, .intake-field--invalid select { border-color: var(--danger); }
+.intake-field--review input, .intake-field--review select { border-color: color-mix(in srgb, var(--amber) 70%, var(--border)); background: color-mix(in srgb, var(--amber-wash) 70%, #fff); }
+.intake-field--review .intake-field__meta { color: var(--amber); font-weight: 600; }
+.intake-field--extracted input, .intake-field--extracted select { border-color: color-mix(in srgb, var(--emerald) 45%, var(--border)); }
+.intake-field--extracted .intake-field__meta { color: var(--emerald); }
+.intake-field--manual .intake-field__meta { color: #3974ad; }
+.intake-category {
+  display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: .9rem; align-items: center;
+  padding: .85rem 1rem; border-radius: 12px; border: 1px solid var(--border); background: var(--surface-muted);
+}
+.intake-category strong { font-size: .82rem; }
+.intake-category__controls { display: grid; gap: .5rem; }
+.intake-category__controls select { width: 100%; }
+.intake-category.intake-field--missing { border-color: color-mix(in srgb, var(--danger) 55%, var(--border)); }
+.intake-checklist { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .45rem .9rem; font-size: .74rem; color: var(--text-muted); }
+.intake-checklist li.is-ok { color: var(--emerald); font-weight: 600; }
+.intake-actions { flex-wrap: wrap; margin-top: 1rem; }
+.intake-summary { padding: .75rem 1rem; border-radius: 12px; background: var(--surface-muted); margin-bottom: .9rem; }
+.intake-summary p { margin: 0; }
+.intake-matches { display: grid; gap: .85rem; margin: .9rem 0; }
+.intake-match { padding: .9rem 1rem; border-radius: 14px; border: 1px solid var(--border); background: #fff; }
+.intake-match.is-likely { border-color: color-mix(in srgb, var(--amber) 70%, var(--border)); box-shadow: 0 0 0 3px var(--amber-wash); }
+.intake-match__head { display: flex; align-items: center; gap: .65rem; flex-wrap: wrap; }
+.intake-match__head > div { flex: 1; display: grid; min-width: 0; }
+.intake-match__head small { font-size: .7rem; }
+.intake-match__grid { margin: .75rem 0; }
+.intake-match__apply { display: flex; flex-wrap: wrap; gap: .5rem .9rem; align-items: center; margin-top: .6rem; font-size: .74rem; }
+.intake-apply { display: flex; align-items: flex-start; gap: .5rem; margin-top: .5rem; font-size: .74rem; }
+.intake-apply--inline { margin-top: 0; align-items: center; }
+.intake-apply input { margin-top: .15rem; }
+.intake-saved { border-color: color-mix(in srgb, var(--emerald) 40%, var(--border)); }
+@media (max-width: 960px) {
+  .intake-layout { grid-template-columns: 1fr; }
+  .intake-form-grid { grid-template-columns: 1fr; }
+  .intake-category { grid-template-columns: 1fr; }
+}
