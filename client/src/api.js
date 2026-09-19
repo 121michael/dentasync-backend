@@ -186,8 +186,6 @@ export const api = {
     const suffix = params.toString() ? `?${params.toString()}` : "";
     return request(`/staff/check-ins${suffix}`, requestOptions);
   },
-  restoreStaffCheckIn: (checkInId) =>
-    request(`/staff/check-ins/${encodeURIComponent(checkInId)}/restore`, { method: "POST" }),
   staffCheckIn: (body) => request("/staff/check-in", { method: "POST", body }),
   getStaffRfidEvents: (sinceId = 0, options = {}) =>
     request(`/staff/rfid-events?sinceId=${encodeURIComponent(sinceId)}`, { silent: true, ...options }),

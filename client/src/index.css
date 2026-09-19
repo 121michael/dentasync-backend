@@ -2750,14 +2750,21 @@ strong {
   background: linear-gradient(135deg, rgba(91, 42, 134, .08), rgba(255,255,255,.9));
   border: 1px solid rgba(91, 42, 134, .12);
 }
+.staff-log-heading {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.staff-log-tabs {
+  margin-left: auto;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
 .staff-log-filters {
-  display: grid;
-  gap: .85rem;
+  display: flex;
+  justify-content: flex-end;
   padding-bottom: .2rem;
 }
-.staff-log-quick,
-.staff-log-filter-actions,
-.staff-log-actions {
+.staff-log-filter-actions {
   display: flex;
   flex-wrap: wrap;
   gap: .45rem;
@@ -2768,6 +2775,7 @@ strong {
   flex-wrap: wrap;
   gap: .75rem 1rem;
   align-items: end;
+  justify-content: flex-end;
 }
 .staff-log-filter-fields .field {
   min-width: 160px;
@@ -2775,6 +2783,17 @@ strong {
 }
 .staff-panel--table .staff-log-filters {
   margin: 0 0 .4rem;
+}
+@media (max-width: 760px) {
+  .staff-log-tabs {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-start;
+  }
+  .staff-log-filters,
+  .staff-log-filter-fields {
+    justify-content: flex-start;
+  }
 }
 .staff-rfid-status {
   display: inline-flex;
