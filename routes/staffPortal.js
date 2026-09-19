@@ -1069,20 +1069,9 @@ function createStaffPortalRouter({
       }
     }
 
-    const forbidden = [
-      "firstName",
-      "lastName",
-      "email",
-      "phone",
-      "dateOfBirth",
-      "age",
-      "gender",
-      "address",
-      "notes",
-      "diagnosis",
-      "treatment",
-      "diagnosisNotes",
-    ].filter((key) => Object.prototype.hasOwnProperty.call(req.body || {}, key));
+    const forbidden = Object.keys(req.body || {}).filter(
+      (key) => !["nextAppointmentDate", "nextAppointmentTime"].includes(key)
+    );
     if (forbidden.length) {
       return res.status(403).json({
         message:

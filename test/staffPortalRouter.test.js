@@ -142,3 +142,19 @@ test("staff payment update rejects every field except amountPaid", async () => {
     await portal.close();
   }
 });
+
+test("staff appointment update rejects every field except appointment date and time", async () => {
+  const portal = await startStaffPortal({ tokenRole: "staff", databaseRole: "staff" });
+  try {
+    const response = await fetch(`${portal.url}/patients/3`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nextAppointmentDate: "2026-10-05", diagnosis: "Changed" }),
+    });
+    assert.equal(response.status, 403);
+    const body = await response.json();
+    assert.deepEqual(body.rejectedFields, ["diagnosis"]);
+  } finally {
+    await portal.close();
+  }
+});
