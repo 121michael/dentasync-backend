@@ -205,6 +205,47 @@ Name: Ana Reyes
   assert.equal(visits[0].treatment, "Oral Prophylaxis");
 });
 
+test("Tests C and D — merged multi-pass OCR text of a scanned page fills every column", () => {
+  // Text as the OCR passes actually return it for a scanned page: cell-per-line
+  // output from one pass, mangled pipe delimiters from another.
+  const { payload } = extractStructuredPayload(`
+9/19/26, 1:31 PM
+file:///tmp/scan.html 1/1
+PATIENT INFORMATION
+Name: JUAN DELA CRUZ
+Age: 35
+Telephone: 09171234567
+TREATMENT HISTORY
+Date
+Procedure
+Amount
+09/01/2026
+Oral Prophylaxis
+1,000
+09/15/2026
+Restoration
+1,500
+10/01/2026
+Extraction
+2,000
+Date       Procedure    Amount
+09/01/2026 || Oral Prophylaxis || 1,000
+09/15/2026 | Restoration       1,500
+10/01/2026 2,000
+`);
+  assert.equal(payload.patient.fullName, "JUAN DELA CRUZ");
+  assert.equal(payload.patient.age, "35");
+  assert.equal(payload.patient.phone, "09171234567");
+  assert.deepEqual(
+    payload.procedure.visits.map((row) => [row.treatmentDate, row.treatment, row.amountCharged]),
+    [
+      ["09/01/2026", "Oral Prophylaxis", "1,000"],
+      ["09/15/2026", "Restoration", "1,500"],
+      ["10/01/2026", "EXO", "2,000"],
+    ]
+  );
+});
+
 test("section headings are never used as the patient name", () => {
   const { payload } = extractStructuredPayload(`
 PATIENT INFORMATION

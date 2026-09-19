@@ -1170,6 +1170,7 @@ function parseTreatmentRecordRows(rawText) {
   }
 
   // Printed tables keep their cells — read them column by column first.
+  const cellRows = [];
   if (columns) {
     for (const line of rawLines) {
       if (detectTableColumns(line)) continue;
@@ -1177,17 +1178,8 @@ function parseTreatmentRecordRows(rawText) {
       if (cells.length < 2 || cells.length > columns.length + 1) continue;
       const row = rowFromTableCells(cells, columns);
       if (row && (row.treatmentDate || row.treatment || row.amountCharged)) {
-        rows.push({ ...row, raw: cleanLine(line).slice(0, 180) });
+        cellRows.push({ ...row, raw: cleanLine(line).slice(0, 180) });
       }
-    }
-    if (rows.length) {
-      const seenCells = new Set();
-      return rows.filter((row) => {
-        const key = `${row.treatmentDate}|${row.treatment}|${row.amountCharged}|${row.toothNos}`;
-        if (seenCells.has(key)) return false;
-        seenCells.add(key);
-        return true;
-      });
     }
   }
 
@@ -1304,17 +1296,62 @@ function parseTreatmentRecordRows(rawText) {
     });
   }
 
-  const seen = new Set();
-  const unique = rows.filter((row) => {
-    const key = `${row.treatmentDate}|${row.treatment}|${row.amountCharged}|${row.toothNos}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-
+  const dedupe = (list) => {
+    const seen = new Set();
+    return list.filter((row) => {
+      const key = `${row.treatmentDate}|${row.treatment}|${row.amountCharged}|${row.toothNos}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
   // Once real procedure rows exist, drop date-only/amount-only noise lines.
-  const named = unique.filter((row) => row.treatment || row.toothNos);
-  return named.length ? named : unique;
+  const preferNamed = (list) => {
+    const named = list.filter((row) => row.treatment || row.toothNos);
+    return named.length ? named : list;
+  };
+
+  const lineRows = preferNamed(dedupe(rows));
+  const tableRows = preferNamed(dedupe(cellRows));
+  // OCR often mangles delimiters, so keep whichever pass read the table best.
+  const completeness = (list) =>
+    list.reduce(
+      (total, row) =>
+        total +
+        (row.treatmentDate ? 2 : 0) +
+        (row.treatment ? 2 : 0) +
+        (row.amountCharged ? 1 : 0) +
+        (row.toothNos || row.dentistName || row.amountPaid || row.balance ? 1 : 0),
+      0
+    );
+  const best = completeness(tableRows) > completeness(lineRows) ? tableRows : lineRows;
+  const other = best === tableRows ? lineRows : tableRows;
+
+  // Fill cells the winning pass missed from the other pass's matching row.
+  return best.map((row) => {
+    const match = other.find(
+      (candidate) =>
+        (row.treatmentDate && candidate.treatmentDate === row.treatmentDate) ||
+        (row.treatment && row.amountCharged &&
+          candidate.treatment === row.treatment &&
+          candidate.amountCharged === row.amountCharged)
+    );
+    if (!match) return row;
+    const merged = { ...row };
+    for (const key of [
+      "treatmentDate",
+      "treatment",
+      "toothNos",
+      "dentistName",
+      "amountCharged",
+      "amountPaid",
+      "balance",
+      "nextAppt",
+    ]) {
+      if (!merged[key] && match[key]) merged[key] = match[key];
+    }
+    return merged;
+  });
 }
 
 function pickPrimaryTreatmentRow(rows) {
