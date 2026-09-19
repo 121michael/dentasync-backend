@@ -677,52 +677,56 @@ async function createClinicalRecord(db, input, actor = {}) {
 
   let result;
   try {
-    result = await db.query(
-      `INSERT INTO clinic_patient_records (
-         record_code, first_name, last_name, email, phone, date_of_birth, gender,
-         address, notes, linked_user_id, patient_id, patient_category,
-         created_by, created_by_role, updated_by
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $13)
-       RETURNING *`,
-      [
-        generateRecordCode(),
-        firstName,
-        lastName,
-        email,
-        phone,
-        dateOfBirth,
-        gender,
-        address,
-        notes,
-        linkedUserId ? String(linkedUserId) : null,
-        patientId,
-        patientCategory,
-        actor.id ? String(actor.id) : null,
-        actor.role || null,
-      ]
+    result = await withSavepoint(db, "clinical_record_full", async () =>
+      db.query(
+        `INSERT INTO clinic_patient_records (
+           record_code, first_name, last_name, email, phone, date_of_birth, gender,
+           address, notes, linked_user_id, patient_id, patient_category,
+           created_by, created_by_role, updated_by
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $13)
+         RETURNING *`,
+        [
+          generateRecordCode(),
+          firstName,
+          lastName,
+          email,
+          phone,
+          dateOfBirth && isIsoDate(dateOfBirth) ? dateOfBirth : null,
+          gender,
+          address,
+          notes,
+          linkedUserId ? String(linkedUserId) : null,
+          patientId,
+          patientCategory,
+          actor.id ? String(actor.id) : null,
+          actor.role || null,
+        ]
+      )
     );
   } catch (error) {
     if (error?.code !== "42703") throw error;
-    result = await db.query(
-      `INSERT INTO clinic_patient_records (
-         record_code, first_name, last_name, email, phone, date_of_birth, gender,
-         address, notes, linked_user_id, created_by, created_by_role, updated_by
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $11)
-       RETURNING *`,
-      [
-        generateRecordCode(),
-        firstName,
-        lastName,
-        email,
-        phone,
-        dateOfBirth,
-        gender,
-        address,
-        notes,
-        linkedUserId ? String(linkedUserId) : null,
-        actor.id ? String(actor.id) : null,
-        actor.role || null,
-      ]
+    result = await withSavepoint(db, "clinical_record_legacy", async () =>
+      db.query(
+        `INSERT INTO clinic_patient_records (
+           record_code, first_name, last_name, email, phone, date_of_birth, gender,
+           address, notes, linked_user_id, created_by, created_by_role, updated_by
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $11)
+         RETURNING *`,
+        [
+          generateRecordCode(),
+          firstName,
+          lastName,
+          email,
+          phone,
+          dateOfBirth && isIsoDate(dateOfBirth) ? dateOfBirth : null,
+          gender,
+          address,
+          notes,
+          linkedUserId ? String(linkedUserId) : null,
+          actor.id ? String(actor.id) : null,
+          actor.role || null,
+        ]
+      )
     );
   }
 
@@ -1097,24 +1101,26 @@ async function addClinicalTreatment(db, recordId, input, actor = {}) {
     if (error?.code !== "42703") {
       throw error;
     }
-    result = await db.query(
-      `INSERT INTO clinic_patient_treatments (
-         clinical_record_id, treatment, dentist_name, clinic_location, coverage_status,
-         status, treatment_date, notes, created_by, created_by_role
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-       RETURNING *`,
-      [
-        recordId,
-        treatment,
-        stringValue(input.dentistName, 160),
-        stringValue(input.clinicLocation, 160) || "Amethyst Dental Clinic",
-        stringValue(input.coverageStatus, 80),
-        stringValue(input.status, 40) || "completed",
-        treatmentDate,
-        diagnosisNotes,
-        actor.id ? String(actor.id) : null,
-        actor.role || null,
-      ]
+    result = await withSavepoint(db, "clinical_treatment_legacy", async () =>
+      db.query(
+        `INSERT INTO clinic_patient_treatments (
+           clinical_record_id, treatment, dentist_name, clinic_location, coverage_status,
+           status, treatment_date, notes, created_by, created_by_role
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         RETURNING *`,
+        [
+          recordId,
+          treatment,
+          stringValue(input.dentistName, 160),
+          stringValue(input.clinicLocation, 160) || "Amethyst Dental Clinic",
+          stringValue(input.coverageStatus, 80),
+          stringValue(input.status, 40) || "completed",
+          treatmentDate,
+          diagnosisNotes,
+          actor.id ? String(actor.id) : null,
+          actor.role || null,
+        ]
+      )
     );
   }
 
@@ -1646,6 +1652,7 @@ module.exports = {
   formatAgeSex,
   enrichRecordsFromLinkedProfiles,
   isMissingRelation,
+  withSavepoint,
   stringValue,
   normalizeEmail,
   normalizePhone,

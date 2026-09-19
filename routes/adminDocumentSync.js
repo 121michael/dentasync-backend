@@ -120,6 +120,11 @@ function sanitizePayload(input) {
     lastName = firstName;
   }
 
+  const allowedSex = new Set(["Male", "Female", "Non-binary", "Prefer to self-describe"]);
+  const gender = allowedSex.has(patientData.normalizeSex(patient.gender))
+    ? patientData.normalizeSex(patient.gender)
+    : "";
+
   return {
     documentForm:
       input?.documentForm === "treatment_record" ||
@@ -132,9 +137,9 @@ function sanitizePayload(input) {
       fullName: fullName || `${firstName} ${lastName}`.trim(),
       email: normalizeEmail(patient.email) || "",
       phone: normalizePhone(patient.phone || "") || stringValue(patient.phone, 40) || "",
-      dateOfBirth: normalizeDate(patient.dateOfBirth || "") || "",
+      dateOfBirth: toIsoDocumentDate(patient.dateOfBirth || "") || "",
       age: stringValue(String(patient.age ?? ""), 3) || "",
-      gender: patientData.normalizeSex(patient.gender) || "",
+      gender,
       address: stringValue(patient.address, 300) || "",
     },
     procedure: {
@@ -733,19 +738,33 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
 
       if (hasVisitTable) {
         for (const row of datedVisitRows) {
-          const iso = toIsoDocumentDate(row.treatmentDate) || row.treatmentDate;
-          const amountCharged = Number(String(row.amountCharged || "0").replace(/(?:₱|php)/gi, "").replace(/,/g, "")) || 0;
-          const amountPaid = Number(String(row.amountPaid || "0").replace(/(?:₱|php)/gi, "").replace(/,/g, "")) || 0;
-          const dup = await client.query(
-            `SELECT id
-             FROM clinic_patient_treatments
-             WHERE clinical_record_id = $1
-               AND treatment_date = $2::date
-               AND LOWER(TRIM(treatment)) = LOWER(TRIM($3))
-               AND COALESCE(amount_charged, 0) = COALESCE($4::numeric, 0)
-             LIMIT 1`,
-            [clinicalRecordId, iso, row.treatment, String(amountCharged)]
-          );
+          const iso = toIsoDocumentDate(row.treatmentDate);
+          if (!isIsoDate(iso)) {
+            skippedUndated += 1;
+            continue;
+          }
+          const amountCharged = Number(String(row.amountCharged || "0").replace(/(?:₱|php)/gi, "").replace(/,/g, ""));
+          const amountPaid = Number(String(row.amountPaid || "0").replace(/(?:₱|php)/gi, "").replace(/,/g, ""));
+          const charged = Number.isFinite(amountCharged) && amountCharged >= 0 ? amountCharged : 0;
+          const paid = Number.isFinite(amountPaid) && amountPaid >= 0 ? amountPaid : 0;
+          let dup;
+          try {
+            dup = await clinicalPatients.withSavepoint(client, "doc_sync_dup", async () =>
+              client.query(
+                `SELECT id
+                 FROM clinic_patient_treatments
+                 WHERE clinical_record_id = $1
+                   AND treatment_date = $2::date
+                   AND LOWER(TRIM(treatment)) = LOWER(TRIM($3))
+                   AND COALESCE(amount_charged, 0) = COALESCE($4::numeric, 0)
+                 LIMIT 1`,
+                [clinicalRecordId, iso, row.treatment, String(charged)]
+              )
+            );
+          } catch {
+            skippedUndated += 1;
+            continue;
+          }
           if (dup.rows.length) {
             skippedDuplicates += 1;
             continue;
@@ -768,15 +787,15 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
                 status: "completed",
                 treatmentDate: iso,
                 toothNumber: row.toothNos || "",
-                amountCharged,
-                amountPaid,
+                amountCharged: charged,
+                amountPaid: paid,
                 notes: rowNotes || "",
               },
               { id: req.admin.id, role: "admin-sync" }
             );
             savedTreatments.push(createdTreatment);
           } catch (treatError) {
-            if (treatError?.status === 400) {
+            if (treatError?.status === 400 || treatError?.code) {
               skippedUndated += 1;
               continue;
             }
@@ -784,7 +803,7 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
           }
         }
         treatment = savedTreatments[0] || null;
-      } else if (procedure.treatment && (primaryDateIso || toIsoDocumentDate(procedure.treatmentDate))) {
+      } else if (procedure.treatment && isIsoDate(primaryDateIso || toIsoDocumentDate(procedure.treatmentDate))) {
         const iso = primaryDateIso || toIsoDocumentDate(procedure.treatmentDate);
         try {
           treatment = await clinicalPatients.addClinicalTreatment(
@@ -804,7 +823,11 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
           );
           savedTreatments.push(treatment);
         } catch (treatError) {
-          if (treatError?.status !== 400) throw treatError;
+          if (treatError?.status === 400 || treatError?.code) {
+            skippedUndated += 1;
+          } else {
+            throw treatError;
+          }
         }
       }
 
@@ -897,7 +920,7 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
       });
     } catch (error) {
       if (transactionOpen) {
-        await client.query("ROLLBACK");
+        await client.query("ROLLBACK").catch(() => {});
       }
       await writeAdminAudit(db, {
         ...auditActor(req),
@@ -906,10 +929,13 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
         targetId: req.params.id ? String(req.params.id) : null,
         result: "failed",
         detail: error.message || "Unable to save document data.",
-      });
-      console.error("Document sync commit error:", error.message);
+      }).catch(() => {});
+      console.error("Document sync commit error:", error.message, error.code || "");
+      const aborted = error.code === "25P02";
       return res.status(error.status || 500).json({
-        message: error.message || "Unable to sync document data to the database.",
+        message: aborted
+          ? "Unable to save this document because a database step failed. Leave Date of Birth blank if unread, keep the treatment Date as a real calendar date, then try Confirm & Save again."
+          : error.message || "Unable to sync document data to the database.",
       });
     } finally {
       client.release();
