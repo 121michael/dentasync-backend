@@ -14,6 +14,7 @@ const {
   UNSUPPORTED_DOCUMENT_MESSAGE,
 } = require("../services/documentSyncExtraction");
 const clinicalPatients = require("../services/clinicalPatients");
+const patientData = require("../services/patientData");
 const { writeAdminAudit } = require("../services/adminAudit");
 const {
   discardTemporaryDocumentFile,
@@ -129,7 +130,7 @@ function sanitizePayload(input) {
       phone: normalizePhone(patient.phone || "") || stringValue(patient.phone, 40) || "",
       dateOfBirth: normalizeDate(patient.dateOfBirth || "") || "",
       age: stringValue(String(patient.age ?? ""), 3) || "",
-      gender: stringValue(patient.gender, 40) || "",
+      gender: patientData.normalizeSex(patient.gender) || "",
       address: stringValue(patient.address, 300) || "",
     },
     procedure: {

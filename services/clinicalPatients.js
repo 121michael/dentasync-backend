@@ -2,6 +2,7 @@
 
 const crypto = require("crypto");
 const dentalChartSync = require("./dentalChartSync");
+const patientData = require("./patientData");
 
 function stringValue(value, maxLength = 500) {
   if (typeof value !== "string") {
@@ -73,6 +74,11 @@ function normalizeAppointmentTime(value) {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
 }
 
+function paymentFields(amountCharged, amountPaid) {
+  const summary = patientData.paymentSummary(amountCharged, amountPaid);
+  return { balance: summary.balance, paymentStatus: summary.paymentStatus };
+}
+
 function mapClinicalTreatment(row) {
   const diagnosis =
     row.diagnosis_notes ||
@@ -96,6 +102,7 @@ function mapClinicalTreatment(row) {
     procedureDetails: row.procedure_details || null,
     amountCharged: row.amount_charged != null ? Number(row.amount_charged) : 0,
     amountPaid: row.amount_paid != null ? Number(row.amount_paid) : 0,
+    ...paymentFields(row.amount_charged, row.amount_paid),
     appointmentId: row.appointment_id != null ? Number(row.appointment_id) : null,
     createdBy: row.created_by || null,
     createdByRole: row.created_by_role || null,
@@ -598,7 +605,7 @@ async function createClinicalRecord(db, input, actor = {}) {
   const email = normalizeEmail(input.email);
   const phone = normalizePhone(input.phone);
   const dateOfBirth = stringValue(input.dateOfBirth, 10);
-  const gender = stringValue(input.gender, 40);
+  const gender = patientData.normalizeSex(input.gender) || null;
   const address = stringValue(input.address, 500);
   const notes = stringValue(input.notes, 2000);
   const category = patientIds.normalizeCategory(input.patientCategory || input.category || "regular");
@@ -851,7 +858,7 @@ async function updateClinicalRecord(db, recordId, input, actor = {}) {
     ],
     gender: [
       "gender",
-      Object.prototype.hasOwnProperty.call(payload, "gender") ? stringValue(payload.gender, 40) : undefined,
+      Object.prototype.hasOwnProperty.call(payload, "gender") ? patientData.normalizeSex(payload.gender) || null : undefined,
     ],
     address: [
       "address",
@@ -979,7 +986,7 @@ async function archiveClinicalRecord(db, recordId, actor = {}) {
 }
 
 async function addClinicalTreatment(db, recordId, input, actor = {}) {
-  const treatment = stringValue(input.treatment, 200);
+  const treatment = patientData.canonicalTreatmentName(stringValue(input.treatment, 200));
   if (!treatment) {
     const error = new Error("Treatment is required.");
     error.status = 400;
@@ -1116,7 +1123,7 @@ async function updateClinicalTreatment(db, recordId, treatmentId, input, actor =
     throw error;
   }
 
-  const treatment = stringValue(input.treatment, 200);
+  const treatment = patientData.canonicalTreatmentName(stringValue(input.treatment, 200));
   if (!treatment) {
     const error = new Error("Procedure cannot be empty.");
     error.status = 400;

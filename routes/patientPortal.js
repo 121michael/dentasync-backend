@@ -4,6 +4,7 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const bcrypt = require("bcrypt");
+const patientData = require("../services/patientData");
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
@@ -2082,7 +2083,7 @@ function createPatientPortalRouter({
       const profileValues = [
         userId,
         dateOfBirth,
-        stringValue(body.gender, 40),
+        patientData.normalizeSex(body.gender) || null,
         stringValue(body.address, 500),
         stringValue(body.emergencyContactName, 120),
         stringValue(body.emergencyContactRelationship, 80),

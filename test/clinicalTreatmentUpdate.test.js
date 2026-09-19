@@ -74,7 +74,8 @@ test("updateClinicalTreatment updates existing treatment amounts", async () => {
     { id: "admin-1", role: "admin" }
   );
 
-  assert.equal(updated.treatment, "Dental Cleaning");
+  // "Dental Cleaning" is stored under the shared treatment taxonomy label.
+  assert.equal(updated.treatment, "Cleaning / Oral Prophylaxis");
   assert.equal(updated.amountCharged, 1500);
   assert.equal(updated.amountPaid, 1500);
   assert.equal(updated.treatmentDate, "2026-06-05");

@@ -5,6 +5,8 @@ const bcrypt = require("bcrypt");
 const express = require("express");
 const clinicalPatients = require("../services/clinicalPatients");
 const dentalChartSync = require("../services/dentalChartSync");
+const patientData = require("../services/patientData");
+const { writeAdminAudit } = require("../services/adminAudit");
 const {
   estimateWaitMinutesForPosition,
   getServiceDurationMinutes,
@@ -79,11 +81,24 @@ function serializeDentistTreatment(row) {
     durationMinutes: row.durationMinutes,
     toothNumber: row.toothNumber,
     procedureDetails: row.procedureDetails,
-    amountCharged: row.amountCharged ?? 0,
-    amountPaid: row.amountPaid ?? 0,
-    balance: Math.round((Number(row.amountCharged || 0) - Number(row.amountPaid || 0)) * 100) / 100,
+    ...patientData.paymentSummary(row.amountCharged, row.amountPaid),
     appointmentId: row.appointmentId,
   };
+}
+
+function auditDentistTreatment(db, req, action, recordId, row, detail) {
+  writeAdminAudit(db, {
+    actorId: String(req.dentist.id),
+    actorName: `Dr. ${`${req.dentist.first_name || ""} ${req.dentist.last_name || ""}`.trim()}`.trim(),
+    actorRole: "dentist",
+    action,
+    targetType: "clinical_treatment",
+    targetId: row?.id ? String(row.id) : null,
+    targetLabel: row?.treatment || null,
+    result: "success",
+    detail: `Patient record ${recordId}. ${detail}`.trim(),
+    ipAddress: req.ip || null,
+  }).catch(() => {});
 }
 
 function displayQueueStatus(status) {
@@ -1904,6 +1919,8 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
         { id: req.dentist.id, role: "dentist" }
       );
 
+      auditDentistTreatment(db, req, "Treatment Added", recordId, row, `Tooth: ${row.toothNumber || "—"}. Date: ${row.treatmentDate}.`);
+
       return res.status(201).json({
         message: "Treatment record saved successfully. Dental chart updated from this treatment.",
         treatment: serializeDentistTreatment(row),
@@ -1950,6 +1967,8 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
         { id: req.dentist.id, role: "dentist" }
       );
 
+      auditDentistTreatment(db, req, "Treatment Edited", recordId, row, `Tooth: ${row.toothNumber || "—"}. Date: ${row.treatmentDate}. Chart recalculated.`);
+
       return res.json({
         message: "Treatment updated. Dental chart recalculated from the treatment history.",
         treatment: serializeDentistTreatment(row),
@@ -1984,6 +2003,8 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
         treatmentId,
         { id: req.dentist.id, role: "dentist" }
       );
+
+      auditDentistTreatment(db, req, "Treatment Deleted", recordId, row, `Tooth: ${row.toothNumber || "—"}. Chart recalculated from remaining treatments.`);
 
       return res.json({
         message: "Treatment deleted. Dental chart recalculated from the remaining treatments.",

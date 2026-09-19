@@ -30,7 +30,7 @@ const PROCEDURE_CATALOG = [
 ];
 
 const TREATMENT_MATCHERS = [
-  { match: /root\s*canal|\brct\b/i, key: "root_canal", status: "treated" },
+  { match: /root[\s-]*canal|\brct\b/i, key: "root_canal", status: "treated" },
   { match: /tooth\s*restor|dental\s*fill|\bfilling\b|composite|amalgam|restorat/i, key: "filling", status: "treated" },
   { match: /\bextract|\bexo\b|pull(ed)?\b/i, key: "extraction", status: "missing" },
   { match: /\bcrown\b/i, key: "crown", status: "treated" },

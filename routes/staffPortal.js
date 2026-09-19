@@ -4,6 +4,8 @@ const crypto = require("crypto");
 const bcrypt = require("bcrypt");
 const express = require("express");
 const clinicalPatients = require("../services/clinicalPatients");
+const patientData = require("../services/patientData");
+const { writeAdminAudit } = require("../services/adminAudit");
 const staffCheckIn = require("../services/staffCheckIn");
 const staffWalkInQr = require("../services/staffWalkInQr");
 const staffRfidEvents = require("../services/staffRfidEvents");
@@ -1091,6 +1093,18 @@ function createStaffPortalRouter({
         role: "staff",
       });
       const [enriched] = await clinicalPatients.enrichRecordsFromLinkedProfiles(db, [record]);
+      writeAdminAudit(db, {
+        actorId: String(req.staff.id),
+        actorName: `${req.staff.first_name || ""} ${req.staff.last_name || ""}`.trim() || "Clinic Staff",
+        actorRole: "staff",
+        action: "Next Appointment Updated",
+        targetType: "clinical_patient",
+        targetId: String(recordId),
+        targetLabel: enriched.patientId || enriched.fullName,
+        result: "success",
+        detail: `Next appointment set to ${enriched.nextAppointmentDate || "—"} ${enriched.nextAppointmentTime || ""}`.trim(),
+        ipAddress: req.ip || null,
+      }).catch(() => {});
       return res.json({
         message: "Appointment information updated on the shared patient dental record.",
         patient: {
@@ -1147,6 +1161,13 @@ function createStaffPortalRouter({
     }
 
     try {
+      const before = await db
+        .query(`SELECT amount_paid FROM clinic_patient_treatments WHERE id = $1 AND clinical_record_id = $2`, [
+          treatmentId,
+          recordId,
+        ])
+        .then((result) => (result.rows[0] ? Number(result.rows[0].amount_paid || 0) : null))
+        .catch(() => null);
       const treatment = await clinicalPatients.updateTreatmentAmountPaid(
         db,
         recordId,
@@ -1154,10 +1175,20 @@ function createStaffPortalRouter({
         req.body.amountPaid,
         { id: req.staff.id, role: "staff" }
       );
-      const amountCharged = Number(treatment.amountCharged || 0);
-      const amountPaid = Number(treatment.amountPaid || 0);
-      const paymentStatus =
-        amountPaid <= 0 ? "pending" : amountPaid >= amountCharged ? "paid" : "partially_paid";
+      const payment = patientData.paymentSummary(treatment.amountCharged, treatment.amountPaid);
+
+      writeAdminAudit(db, {
+        actorId: String(req.staff.id),
+        actorName: `${req.staff.first_name || ""} ${req.staff.last_name || ""}`.trim() || "Clinic Staff",
+        actorRole: "staff",
+        action: "Amount Paid Updated",
+        targetType: "clinical_treatment",
+        targetId: String(treatment.id),
+        targetLabel: treatment.treatment,
+        result: "success",
+        detail: `Patient record ${recordId}. Previous: ${before ?? "—"}. New: ${payment.amountPaid}. Status: ${payment.paymentStatus}.`,
+        ipAddress: req.ip || null,
+      }).catch(() => {});
 
       return res.json({
         message: "Amount paid updated on the shared patient dental record.",
@@ -1165,10 +1196,7 @@ function createStaffPortalRouter({
           id: treatment.id,
           treatment: treatment.treatment,
           treatmentDate: treatment.treatmentDate,
-          amountCharged,
-          amountPaid,
-          balance: Math.round((amountCharged - amountPaid) * 100) / 100,
-          paymentStatus,
+          ...payment,
           status: treatment.status,
         },
       });
@@ -1253,8 +1281,7 @@ function createStaffPortalRouter({
           },
           appointments,
           treatments: detail.treatments.map((record) => {
-            const amountCharged = Number(record.amountCharged || 0);
-            const amountPaid = Number(record.amountPaid || 0);
+            const payment = patientData.paymentSummary(record.amountCharged, record.amountPaid);
             return {
               id: record.id,
               treatment: record.treatment,
@@ -1268,11 +1295,7 @@ function createStaffPortalRouter({
               diagnosisNotes: record.diagnosisNotes || record.diagnosis || record.notes || "",
               toothNumber: record.toothNumber,
               durationMinutes: record.durationMinutes,
-              amountCharged,
-              amountPaid,
-              balance: Math.round((amountCharged - amountPaid) * 100) / 100,
-              paymentStatus:
-                amountPaid <= 0 ? "pending" : amountPaid >= amountCharged ? "paid" : "partially_paid",
+              ...payment,
             };
           }),
         },
@@ -2070,8 +2093,7 @@ function createStaffPortalRouter({
       return res.status(400).json({ message: "amountPaid must be zero or greater." });
     }
     if (!PAYMENT_STATUSES.has(paymentStatus)) {
-      paymentStatus =
-        amountPaid <= 0 ? "pending" : amountPaid >= amount ? "paid" : "partially_paid";
+      paymentStatus = patientData.paymentStatus(amount, amountPaid);
     }
 
     try {
@@ -2140,8 +2162,7 @@ function createStaffPortalRouter({
       const nextPaid = amountPaid === null ? Number(row.amount_paid) : amountPaid;
       let nextStatus = paymentStatus || row.payment_status;
       if (!paymentStatus) {
-        nextStatus =
-          nextPaid <= 0 ? "pending" : nextPaid >= Number(row.amount) ? "paid" : "partially_paid";
+        nextStatus = patientData.paymentStatus(row.amount, nextPaid);
       }
       const result = await db.query(
         `UPDATE staff_portal_invoices
