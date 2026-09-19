@@ -1125,6 +1125,18 @@ function createStaffPortalRouter({
     });
   });
 
+  const rejectStaffClinicalMutation = (_req, res) =>
+    res.status(403).json({
+      message:
+        "Clinical treatments and dental chart status are dentist-owned. Staff have read-only clinical access.",
+    });
+
+  router.post("/patients/:id/treatments", rejectStaffClinicalMutation);
+  router.put("/patients/:id/treatments/:treatmentId", rejectStaffClinicalMutation);
+  router.delete("/patients/:id/treatments/:treatmentId", rejectStaffClinicalMutation);
+  router.put("/patients/:id/dental-chart", rejectStaffClinicalMutation);
+  router.delete("/patients/:id/dental-chart/:toothNumber", rejectStaffClinicalMutation);
+
   router.patch("/patients/:id/treatments/:treatmentId", async (req, res) => {
     const recordId = Number.parseInt(req.params.id, 10);
     const treatmentId = Number.parseInt(req.params.treatmentId, 10);
@@ -1132,16 +1144,7 @@ function createStaffPortalRouter({
       return res.status(400).json({ message: "A valid patient record and treatment id are required." });
     }
 
-    const forbiddenClinical = [
-      "diagnosis",
-      "diagnosisNotes",
-      "treatment",
-      "name",
-      "notes",
-      "dentistNotes",
-      "treatmentDate",
-      "amountCharged",
-    ].filter((key) => Object.prototype.hasOwnProperty.call(req.body || {}, key));
+    const forbiddenClinical = Object.keys(req.body || {}).filter((key) => key !== "amountPaid");
     if (forbiddenClinical.length) {
       return res.status(403).json({
         message:
