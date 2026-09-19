@@ -176,7 +176,18 @@ export const api = {
   markNotificationRead: (notificationId) =>
     request(`/patient/notifications/${notificationId}/read`, { method: "PATCH" }),
   getStaffDashboard: (options = {}) => request("/staff/dashboard", options),
-  getStaffCheckIns: (options = {}) => request("/staff/check-ins", options),
+  getStaffCheckIns: (options = {}) => {
+    const { query = {}, ...requestOptions } = options;
+    const params = new URLSearchParams();
+    if (query.range) params.set("range", query.range);
+    if (query.date) params.set("date", query.date);
+    if (query.month != null && query.month !== "") params.set("month", String(query.month));
+    if (query.year != null && query.year !== "") params.set("year", String(query.year));
+    const suffix = params.toString() ? `?${params.toString()}` : "";
+    return request(`/staff/check-ins${suffix}`, requestOptions);
+  },
+  restoreStaffCheckIn: (checkInId) =>
+    request(`/staff/check-ins/${encodeURIComponent(checkInId)}/restore`, { method: "POST" }),
   staffCheckIn: (body) => request("/staff/check-in", { method: "POST", body }),
   getStaffRfidEvents: (sinceId = 0, options = {}) =>
     request(`/staff/rfid-events?sinceId=${encodeURIComponent(sinceId)}`, { silent: true, ...options }),

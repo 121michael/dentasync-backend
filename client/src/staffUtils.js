@@ -72,6 +72,34 @@ export function formatStaffDateTime(value, fallback = "Just now") {
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
+    timeZone: "Asia/Manila",
+  }).format(date);
+}
+
+export function formatStaffLogDate(value, fallback = "—") {
+  if (!value) return fallback;
+  const text = typeof value === "string" ? value.trim() : value;
+  const date =
+    typeof text === "string" && /^\d{4}-\d{2}-\d{2}$/.test(text)
+      ? new Date(`${text}T00:00:00`)
+      : new Date(text);
+  if (Number.isNaN(date.getTime())) return fallback;
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: typeof text === "string" && /^\d{4}-\d{2}-\d{2}$/.test(text) ? undefined : "Asia/Manila",
+  }).format(date);
+}
+
+export function formatStaffLogTime(value, fallback = "—") {
+  if (!value) return fallback;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return fallback;
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "Asia/Manila",
   }).format(date);
 }
 

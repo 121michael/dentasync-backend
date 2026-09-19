@@ -13,6 +13,242 @@ function numericId(value) {
   return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
+function clinicTimezone() {
+  return process.env.CLINIC_TIMEZONE || "Asia/Manila";
+}
+
+function clinicYmd(date = new Date()) {
+  return date.toLocaleDateString("en-CA", { timeZone: clinicTimezone() });
+}
+
+function isIsoDate(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+function padCheckInId(id) {
+  const n = Number.parseInt(id, 10);
+  if (!Number.isSafeInteger(n) || n < 0) {
+    return id ? `CI-${String(id)}` : null;
+  }
+  return `CI-${String(n).padStart(6, "0")}`;
+}
+
+function monthName(month) {
+  return [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+  ][Number(month) - 1] || "Month";
+}
+
+function formatLogDateLabel(ymd) {
+  if (!isIsoDate(ymd)) return String(ymd || "");
+  const [year, month, day] = ymd.split("-").map(Number);
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(year, month - 1, day)));
+}
+
+function resolveCheckInLogFilter(query = {}, now = new Date()) {
+  const tz = clinicTimezone();
+  const today = clinicYmd(now);
+  const rangeRaw = String(query.range || "today").toLowerCase();
+  const date = isIsoDate(query.date) ? query.date : today;
+  const parsedYear = Number.parseInt(query.year, 10);
+  const parsedMonth = Number.parseInt(query.month, 10);
+  const todayYear = Number.parseInt(today.slice(0, 4), 10);
+  const todayMonth = Number.parseInt(today.slice(5, 7), 10);
+  const year =
+    Number.isInteger(parsedYear) && parsedYear >= 2000 && parsedYear <= 2100 ? parsedYear : todayYear;
+  const month =
+    Number.isInteger(parsedMonth) && parsedMonth >= 1 && parsedMonth <= 12 ? parsedMonth : todayMonth;
+
+  if (rangeRaw === "date") {
+    return {
+      range: "date",
+      timezone: tz,
+      date,
+      sort: "asc",
+      sql: `(queue.checked_in_at AT TIME ZONE $1)::date = $2::date`,
+      params: [tz, date],
+      label: "Check-In Log",
+      subtitle: formatLogDateLabel(date),
+      emptyDetail: `No patients checked in on ${formatLogDateLabel(date)}.`,
+    };
+  }
+
+  if (rangeRaw === "month" || rangeRaw === "this_month") {
+    const y = rangeRaw === "this_month" ? todayYear : year;
+    const m = rangeRaw === "this_month" ? todayMonth : month;
+    const start = `${y}-${String(m).padStart(2, "0")}-01`;
+    return {
+      range: "month",
+      timezone: tz,
+      year: y,
+      month: m,
+      date: start,
+      sort: "desc",
+      sql: `(queue.checked_in_at AT TIME ZONE $1)::date >= $2::date
+            AND (queue.checked_in_at AT TIME ZONE $1)::date < ($2::date + INTERVAL '1 month')`,
+      params: [tz, start],
+      label: "Check-In Log",
+      subtitle: `${monthName(m)} ${y}`,
+      emptyDetail: `No patients checked in during ${monthName(m)} ${y}.`,
+    };
+  }
+
+  if (rangeRaw === "year" || rangeRaw === "this_year") {
+    const y = rangeRaw === "this_year" ? todayYear : year;
+    return {
+      range: "year",
+      timezone: tz,
+      year: y,
+      date: `${y}-01-01`,
+      sort: "desc",
+      sql: `EXTRACT(YEAR FROM (queue.checked_in_at AT TIME ZONE $1)::timestamp)::int = $2::int`,
+      params: [tz, y],
+      label: "Check-In Log",
+      subtitle: String(y),
+      emptyDetail: `No patients checked in during ${y}.`,
+    };
+  }
+
+  return {
+    range: "today",
+    timezone: tz,
+    date: today,
+    sort: "asc",
+    sql: `(queue.checked_in_at AT TIME ZONE $1)::date = $2::date`,
+    params: [tz, today],
+    label: "Today's Check-In Log",
+    subtitle: formatLogDateLabel(today),
+    emptyDetail: "RFID taps and QR walk-ins will appear here.",
+  };
+}
+
+function checkInLogSelectSql(includeClinicPatientId = true) {
+  const clinicColumn = includeClinicPatientId
+    ? "patient.patient_id AS clinic_patient_id,"
+    : "NULL::text AS clinic_patient_id,";
+  return `SELECT
+           queue.id,
+           queue.token,
+           queue.position,
+           queue.status,
+           queue.estimated_wait_minutes,
+           queue.checked_in_at,
+           queue.updated_at,
+           queue.appointment_id,
+           appointment.service_name,
+           appointment.dentist_name,
+           appointment.appointment_date,
+           appointment.appointment_time,
+           patient.id AS patient_id,
+           ${clinicColumn}
+           CONCAT_WS(' ', patient.first_name, patient.last_name) AS patient_name
+         FROM patient_portal_queue_entries AS queue
+         JOIN users AS patient ON patient.id::text = queue.user_id
+         LEFT JOIN patient_portal_appointments AS appointment ON appointment.id = queue.appointment_id`;
+}
+
+async function listCheckInLog(db, query = {}) {
+  const filter = resolveCheckInLogFilter(query);
+  const order = filter.sort === "asc" ? "ASC" : "DESC";
+  const sql = `${checkInLogSelectSql(true)}
+         WHERE ${filter.sql}
+         ORDER BY queue.checked_in_at ${order}, queue.position ASC`;
+  try {
+    const result = await db.query(sql, filter.params);
+    return { filter, rows: result.rows };
+  } catch (error) {
+    if (error.code !== "42703") throw error;
+    const fallback = `${checkInLogSelectSql(false)}
+         WHERE ${filter.sql}
+         ORDER BY queue.checked_in_at ${order}, queue.position ASC`;
+    const result = await db.query(fallback, filter.params);
+    return { filter, rows: result.rows };
+  }
+}
+
+async function restoreCheckInFromHistory(client, { sourceQueueId, staff, notifyClinicStaff }) {
+  const sourceId = numericId(sourceQueueId);
+  if (!sourceId) {
+    const error = new Error("Choose a check-in record to restore.");
+    error.status = 400;
+    throw error;
+  }
+
+  const sourceResult = await client.query(
+    `SELECT
+       queue.id,
+       queue.user_id,
+       queue.token,
+       queue.position,
+       queue.status,
+       queue.checked_in_at
+     FROM patient_portal_queue_entries AS queue
+     WHERE queue.id = $1
+     LIMIT 1`,
+    [sourceId]
+  );
+  const source = sourceResult.rows[0];
+  if (!source) {
+    const error = new Error("Check-in record not found.");
+    error.status = 404;
+    throw error;
+  }
+
+  const patient = await findPatient(client, { patientId: source.user_id });
+  if (!patient) {
+    const error = new Error("Patient account for this check-in was not found.");
+    error.status = 404;
+    throw error;
+  }
+  if (!patient.is_verified) {
+    const error = new Error("Patient account is not verified yet.");
+    error.status = 403;
+    throw error;
+  }
+
+  const resolved = await resolveAppointmentForCheckIn(client, patient, { allowWalkIn: true });
+  if (!resolved.appointment) {
+    const error = new Error("Unable to create today's visit for this patient.");
+    error.status = 404;
+    throw error;
+  }
+
+  const checkIn = await performStaffCheckIn(client, {
+    appointment: resolved.appointment,
+    staff,
+    notifyClinicStaff,
+    checkInMethod: "restore",
+  });
+
+  return {
+    source,
+    walkInCreated: Boolean(resolved.walkInCreated),
+    alreadyCheckedIn: Boolean(checkIn.alreadyCheckedIn),
+    queueEntry: checkIn.queueEntry,
+    appointment: resolved.appointment,
+  };
+}
+
 function parseQrPayload(raw) {
   const text = stringValue(raw, 2000);
   if (!text) return null;
@@ -650,6 +886,12 @@ module.exports = {
   findAppointmentsForRfidLookup,
   findActiveQueueForPatient,
   performStaffCheckIn,
+  restoreCheckInFromHistory,
+  resolveCheckInLogFilter,
+  listCheckInLog,
+  padCheckInId,
+  clinicTimezone,
+  clinicYmd,
   stringValue,
   numericId,
 };

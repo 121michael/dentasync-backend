@@ -2750,8 +2750,32 @@ strong {
   background: linear-gradient(135deg, rgba(91, 42, 134, .08), rgba(255,255,255,.9));
   border: 1px solid rgba(91, 42, 134, .12);
 }
-.staff-checkin-hero h3 { margin: 0; font-size: 1.15rem; }
-.staff-checkin-hero p { margin: .35rem 0 0; color: var(--text-muted); font-size: .82rem; }
+.staff-log-filters {
+  display: grid;
+  gap: .85rem;
+  padding-bottom: .2rem;
+}
+.staff-log-quick,
+.staff-log-filter-actions,
+.staff-log-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .45rem;
+  align-items: center;
+}
+.staff-log-filter-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .75rem 1rem;
+  align-items: end;
+}
+.staff-log-filter-fields .field {
+  min-width: 160px;
+  margin: 0;
+}
+.staff-panel--table .staff-log-filters {
+  margin: 0 0 .4rem;
+}
 .staff-rfid-status {
   display: inline-flex;
   align-items: center;

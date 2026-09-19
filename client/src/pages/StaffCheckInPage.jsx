@@ -1,10 +1,45 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Nfc, QrCode, RefreshCw, ShieldCheck } from "lucide-react";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
-import { StaffStatusBadge } from "../components/StaffUI";
+import { StaffModal, StaffStatusBadge } from "../components/StaffUI";
 import { useStaffUi } from "../components/StaffLayout";
-import { formatStaffDateTime, formatStaffTime } from "../staffUtils";
+import { formatStaffDateTime, formatStaffLogDate, formatStaffLogTime, formatStaffTime } from "../staffUtils";
+
+const MONTHS = [
+  { value: 1, label: "January" },
+  { value: 2, label: "February" },
+  { value: 3, label: "March" },
+  { value: 4, label: "April" },
+  { value: 5, label: "May" },
+  { value: 6, label: "June" },
+  { value: 7, label: "July" },
+  { value: 8, label: "August" },
+  { value: 9, label: "September" },
+  { value: 10, label: "October" },
+  { value: 11, label: "November" },
+  { value: 12, label: "December" },
+];
+
+function clinicTodayYmd() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
+}
+
+function defaultLogFilter() {
+  const today = clinicTodayYmd();
+  return {
+    range: "today",
+    date: today,
+    month: Number(today.slice(5, 7)),
+    year: Number(today.slice(0, 4)),
+  };
+}
+
+function yearOptions(selectedYear) {
+  const current = Number(clinicTodayYmd().slice(0, 4));
+  const years = new Set([current, current - 1, current - 2, current - 3, selectedYear]);
+  return [...years].filter((year) => Number.isInteger(year) && year >= 2000).sort((a, b) => b - a);
+}
 
 function secondsLeft(expiresAt) {
   if (!expiresAt) return 0;
@@ -67,6 +102,14 @@ export function StaffCheckInPage() {
   const [rfidCode, setRfidCode] = useState("");
   const [verified, setVerified] = useState(null);
   const [checkIns, setCheckIns] = useState(null);
+  const [logMeta, setLogMeta] = useState({
+    label: "Today's Check-In Log",
+    subtitle: "",
+    emptyDetail: "RFID taps and QR walk-ins will appear here.",
+    range: "today",
+  });
+  const [logFilter, setLogFilter] = useState(defaultLogFilter);
+  const [viewing, setViewing] = useState(null);
   const [qrSession, setQrSession] = useState(null);
   const [countdown, setCountdown] = useState(0);
   const [error, setError] = useState("");
@@ -75,16 +118,30 @@ export function StaffCheckInPage() {
   const [listeningHint, setListeningHint] = useState("Hold the patient card on the ESP32 RFID reader.");
 
   const loadLog = useCallback(async (options = {}) => {
+    const query = options.query || logFilter;
     try {
-      const response = await api.getStaffCheckIns({ silent: true, ...options });
+      const response = await api.getStaffCheckIns({ silent: true, ...options, query });
       const rows = response.checkIns || [];
       setCheckIns(rows);
+      setLogMeta({
+        label: response.label || "Check-In Log",
+        subtitle: response.subtitle || "",
+        emptyDetail: response.emptyDetail || "No check-in records found.",
+        range: response.range || query.range || "today",
+      });
 
+      const viewingToday = (response.range || query.range || "today") === "today";
       if (!bootstrappedLogRef.current) {
         rows.forEach((row) => seenCheckInIdsRef.current.add(String(row.id)));
         bootstrappedLogRef.current = true;
         return;
       }
+
+      rows.forEach((row) => {
+        if (!viewingToday) seenCheckInIdsRef.current.add(String(row.id));
+      });
+
+      if (!viewingToday) return;
 
       const fresh = rows.find((row) => !seenCheckInIdsRef.current.has(String(row.id)));
       if (fresh) {
@@ -98,7 +155,8 @@ export function StaffCheckInPage() {
     } catch (loadError) {
       setError(loadError.message);
     }
-  }, [pushToast]);
+  }, [logFilter, pushToast]);
+
 
   const pollRfidEvents = useCallback(async () => {
     try {
@@ -115,7 +173,9 @@ export function StaffCheckInPage() {
         setError("");
         setListeningHint("Check-in complete. Ready for the next card.");
         pushToast(newest.message || "Patient checked in from RFID tap.");
-        await loadLog();
+        const today = defaultLogFilter();
+        setLogFilter(today);
+        await loadLog({ query: today });
         window.setTimeout(() => setScannerState("ready"), 1800);
         return;
       }
@@ -199,7 +259,9 @@ export function StaffCheckInPage() {
       setScannerState("success");
       pushToast(response.message || "Patient checked in successfully.");
       setRfidCode("");
-      await loadLog();
+      const today = defaultLogFilter();
+      setLogFilter(today);
+      await loadLog({ query: today });
     } catch (checkInError) {
       setScannerState("error");
       const detail = checkInError?.data?.detail || checkInError?.data?.diagnosis?.hint;
@@ -248,6 +310,31 @@ export function StaffCheckInPage() {
       setBusy(false);
     }
   }
+
+  function applyLogFilter(next) {
+    setLogFilter((current) => ({ ...current, ...next }));
+  }
+
+  async function restoreCheckIn(entry) {
+    if (!entry?.id) return;
+    setBusy(true);
+    try {
+      const response = await api.restoreStaffCheckIn(entry.id);
+      setVerified({ ...response, method: response.method || "restore" });
+      pushToast(response.message || "Restored as a new check-in for today.");
+      setViewing(null);
+      applyLogFilter(defaultLogFilter());
+      await loadLog({ query: defaultLogFilter() });
+    } catch (restoreError) {
+      pushToast(restoreError.message, "error");
+      setError(restoreError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const years = useMemo(() => yearOptions(logFilter.year), [logFilter.year]);
+  const showDateColumn = logMeta.range !== "today" && logMeta.range !== "date";
 
   if (error && !checkIns) return <ErrorState message={error} onRetry={loadLog} />;
   if (!checkIns) return <LoadingState label="Loading check-in center…" />;
@@ -376,38 +463,192 @@ export function StaffCheckInPage() {
       <section className="staff-panel staff-panel--table">
         <div className="staff-panel__heading">
           <div>
-            <span className="eyebrow">Today</span>
-            <h2>Check-In Log</h2>
-            <p>Successful walk-ins join the existing Queue Management list with a real queue number.</p>
+            <span className="eyebrow">{logMeta.range === "today" ? "Today" : "History"}</span>
+            <h2>{logMeta.label || "Check-In Log"}</h2>
+            <p>
+              {logMeta.subtitle ? `${logMeta.subtitle}. ` : ""}
+              Permanent visit log from RFID and QR check-ins. Completed visits stay here after they leave the
+              active queue.
+            </p>
           </div>
         </div>
+
+        <div className="staff-log-filters">
+          <div className="admin-tabs" role="tablist" aria-label="Check-in log range">
+            <button
+              type="button"
+              className={`admin-tab ${logFilter.range === "today" ? "is-active" : ""}`}
+              onClick={() => applyLogFilter(defaultLogFilter())}
+            >
+              Today
+            </button>
+            <button
+              type="button"
+              className={`admin-tab ${logFilter.range === "date" ? "is-active" : ""}`}
+              onClick={() => applyLogFilter({ range: "date" })}
+            >
+              Date
+            </button>
+            <button
+              type="button"
+              className={`admin-tab ${logFilter.range === "month" ? "is-active" : ""}`}
+              onClick={() => applyLogFilter({ range: "month" })}
+            >
+              Month
+            </button>
+            <button
+              type="button"
+              className={`admin-tab ${logFilter.range === "year" ? "is-active" : ""}`}
+              onClick={() => applyLogFilter({ range: "year" })}
+            >
+              Year
+            </button>
+          </div>
+
+          <div className="staff-log-quick">
+            <button type="button" className="button button--secondary button--compact" onClick={() => applyLogFilter(defaultLogFilter())}>
+              Today
+            </button>
+            <button
+              type="button"
+              className="button button--secondary button--compact"
+              onClick={() => applyLogFilter({ ...defaultLogFilter(), range: "month" })}
+            >
+              This Month
+            </button>
+            <button
+              type="button"
+              className="button button--secondary button--compact"
+              onClick={() => applyLogFilter({ ...defaultLogFilter(), range: "year" })}
+            >
+              This Year
+            </button>
+            <button
+              type="button"
+              className="button button--secondary button--compact"
+              onClick={() => applyLogFilter({ range: "date" })}
+            >
+              Custom Date
+            </button>
+          </div>
+
+          <div className="staff-log-filter-fields">
+            {logFilter.range === "date" ? (
+              <label className="field">
+                <span>Filter by Date</span>
+                <input
+                  type="date"
+                  value={logFilter.date}
+                  onChange={(event) => applyLogFilter({ range: "date", date: event.target.value })}
+                />
+              </label>
+            ) : null}
+            {logFilter.range === "month" ? (
+              <>
+                <label className="field">
+                  <span>Month</span>
+                  <select
+                    value={logFilter.month}
+                    onChange={(event) => applyLogFilter({ range: "month", month: Number(event.target.value) })}
+                  >
+                    {MONTHS.map((month) => (
+                      <option key={month.value} value={month.value}>
+                        {month.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Year</span>
+                  <select
+                    value={logFilter.year}
+                    onChange={(event) => applyLogFilter({ range: "month", year: Number(event.target.value) })}
+                  >
+                    {years.map((year) => (
+                      <option key={year} value={year}>
+                        {year}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </>
+            ) : null}
+            {logFilter.range === "year" ? (
+              <label className="field">
+                <span>Year</span>
+                <select
+                  value={logFilter.year}
+                  onChange={(event) => applyLogFilter({ range: "year", year: Number(event.target.value) })}
+                >
+                  {years.map((year) => (
+                    <option key={year} value={year}>
+                      {year}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            <div className="staff-log-filter-actions">
+              <button type="button" className="button button--primary button--compact" onClick={() => loadLog()} disabled={busy}>
+                Apply Filter
+              </button>
+              <button
+                type="button"
+                className="button button--secondary button--compact"
+                onClick={() => applyLogFilter(defaultLogFilter())}
+                disabled={busy}
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+        </div>
+
         {checkIns.length ? (
           <div className="staff-table-wrap">
             <table className="staff-table">
               <thead>
                 <tr>
-                  <th>Queue #</th>
-                  <th>Patient</th>
-                  <th>Service</th>
-                  <th>Dentist</th>
+                  {showDateColumn ? <th>Date</th> : null}
                   <th>Time</th>
+                  <th>Queue No.</th>
+                  <th>Patient</th>
+                  <th>Patient ID</th>
                   <th>Status</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
                 {checkIns.map((entry) => (
                   <tr key={entry.id}>
+                    {showDateColumn ? <td>{formatStaffLogDate(entry.timestamp)}</td> : null}
+                    <td>{formatStaffLogTime(entry.timestamp)}</td>
                     <td>
                       <code>{entry.token || entry.queueNumber}</code>
                     </td>
                     <td>
                       <strong>{entry.patientName}</strong>
                     </td>
-                    <td>{entry.appointment?.treatment || "—"}</td>
-                    <td>{entry.appointment?.dentist || "—"}</td>
-                    <td>{formatStaffDateTime(entry.timestamp)}</td>
+                    <td>
+                      <code>{entry.clinicPatientId || entry.patientId || "—"}</code>
+                    </td>
                     <td>
                       <StaffStatusBadge status={entry.status} />
+                    </td>
+                    <td>
+                      <div className="staff-log-actions">
+                        <button type="button" className="button button--secondary button--compact" onClick={() => setViewing(entry)}>
+                          View
+                        </button>
+                        <button
+                          type="button"
+                          className="button button--primary button--compact"
+                          onClick={() => restoreCheckIn(entry)}
+                          disabled={busy}
+                        >
+                          Restore Check-In
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -415,9 +656,71 @@ export function StaffCheckInPage() {
             </table>
           </div>
         ) : (
-          <EmptyState title="No check-ins yet" detail="RFID taps and QR walk-ins will appear here." />
+          <EmptyState title="No check-in records found." detail={logMeta.emptyDetail} />
         )}
       </section>
+
+      {viewing ? (
+        <StaffModal title={`Check-In ${viewing.checkInId || viewing.id}`} onClose={() => setViewing(null)}>
+          <div className="staff-detail-grid">
+            <p>
+              <small>Patient</small>
+              <strong>{viewing.patientName}</strong>
+            </p>
+            <p>
+              <small>Patient ID</small>
+              <strong>{viewing.clinicPatientId || viewing.patientId || "—"}</strong>
+            </p>
+            <p>
+              <small>Check-In ID</small>
+              <strong>{viewing.checkInId || "—"}</strong>
+            </p>
+            <p>
+              <small>Queue Number</small>
+              <strong>{viewing.token || viewing.queueNumber || "—"}</strong>
+            </p>
+            <p>
+              <small>Date</small>
+              <strong>{formatStaffLogDate(viewing.timestamp)}</strong>
+            </p>
+            <p>
+              <small>Time</small>
+              <strong>{formatStaffLogTime(viewing.timestamp)}</strong>
+            </p>
+            <p>
+              <small>Status</small>
+              <strong>
+                <StaffStatusBadge status={viewing.status} />
+              </strong>
+            </p>
+            <p>
+              <small>Appointment</small>
+              <strong>{viewing.appointment?.treatment || "Dental visit"}</strong>
+            </p>
+            <p>
+              <small>Dentist</small>
+              <strong>{viewing.appointment?.dentist || "—"}</strong>
+            </p>
+            <p>
+              <small>Completion time</small>
+              <strong>{viewing.completedAt ? formatStaffDateTime(viewing.completedAt) : "—"}</strong>
+            </p>
+          </div>
+          <div className="staff-heading-actions" style={{ marginTop: "1rem" }}>
+            <button type="button" className="button button--secondary" onClick={() => setViewing(null)}>
+              Close
+            </button>
+            <button
+              type="button"
+              className="button button--primary"
+              onClick={() => restoreCheckIn(viewing)}
+              disabled={busy}
+            >
+              Restore Check-In
+            </button>
+          </div>
+        </StaffModal>
+      ) : null}
     </div>
   );
 }

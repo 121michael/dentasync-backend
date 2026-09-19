@@ -95,12 +95,18 @@ function displayQueueStatus(status) {
 }
 
 function mapCheckIn(row) {
+  const completed = row.status === "completed" || row.status === "no_show";
   return {
     id: row.id,
+    checkInId: staffCheckIn.padCheckInId(row.id),
     token: row.token,
-    queueNumber: row.position,
+    queueNumber: row.token || (row.position != null ? `A-${String(row.position).padStart(3, "0")}` : null),
+    position: row.position,
     timestamp: row.checked_in_at,
-    patientId: row.patient_id,
+    completedAt: completed ? row.updated_at || null : null,
+    patientUserId: row.patient_id,
+    patientId: row.clinic_patient_id || row.patient_id,
+    clinicPatientId: row.clinic_patient_id || null,
     patientName: row.patient_name || "Patient",
     appointment: {
       id: row.appointment_id,
@@ -356,36 +362,108 @@ function createStaffPortalRouter({
     }
   });
 
-  router.get("/check-ins", async (_req, res) => {
+  router.get("/check-ins", async (req, res) => {
     try {
-      const result = await db.query(
-        `SELECT
-           queue.id,
-           queue.token,
-           queue.position,
-           queue.status,
-           queue.estimated_wait_minutes,
-           queue.checked_in_at,
-           queue.appointment_id,
-           appointment.service_name,
-           appointment.dentist_name,
-           appointment.appointment_date,
-           appointment.appointment_time,
-           patient.id AS patient_id,
-           CONCAT_WS(' ', patient.first_name, patient.last_name) AS patient_name
-         FROM patient_portal_queue_entries AS queue
-         JOIN users AS patient ON patient.id::text = queue.user_id
-         LEFT JOIN patient_portal_appointments AS appointment ON appointment.id = queue.appointment_id
-         WHERE DATE(queue.checked_in_at) = CURRENT_DATE
-         ORDER BY queue.checked_in_at DESC, queue.position ASC`
-      );
+      const { filter, rows } = await staffCheckIn.listCheckInLog(db, req.query || {});
       return res.json({
         updatedAt: new Date().toISOString(),
-        checkIns: result.rows.map(mapCheckIn),
+        range: filter.range,
+        label: filter.label,
+        subtitle: filter.subtitle,
+        emptyDetail: filter.emptyDetail,
+        date: filter.date || null,
+        month: filter.month || null,
+        year: filter.year || null,
+        timezone: filter.timezone,
+        checkIns: rows.map(mapCheckIn),
       });
     } catch (error) {
       console.error("Staff check-in log error:", error.message);
-      return res.status(500).json({ message: "Unable to load today's check-in log." });
+      return res.status(500).json({ message: "Unable to load the check-in log." });
+    }
+  });
+
+  router.post("/check-ins/:id/restore", async (req, res) => {
+    const sourceQueueId = numericId(req.params.id);
+    if (!sourceQueueId) {
+      return res.status(400).json({ message: "Choose a check-in record to restore." });
+    }
+
+    const client = await db.connect();
+    let transactionOpen = false;
+    try {
+      await client.query("BEGIN");
+      transactionOpen = true;
+      await client.query("SELECT pg_advisory_xact_lock(hashtext('patient_portal_queue'))");
+
+      const restored = await staffCheckIn.restoreCheckInFromHistory(client, {
+        sourceQueueId,
+        staff: req.staff,
+        notifyClinicStaff: notifyStaff,
+      });
+
+      await client.query("COMMIT");
+      transactionOpen = false;
+
+      if (!restored.alreadyCheckedIn && clinicSms?.notifyQueueSms) {
+        clinicSms
+          .notifyQueueSms({
+            userId: restored.appointment.user_id,
+            queueEntry: restored.queueEntry,
+            actorRole: "staff",
+            actorId: req.staff?.id,
+          })
+          .catch((smsError) => console.warn("Staff restore check-in SMS failed:", smsError.message));
+      }
+
+      return res.status(restored.alreadyCheckedIn ? 200 : 201).json({
+        message: restored.alreadyCheckedIn
+          ? "Patient already has an active check-in today."
+          : "Restored as a new check-in for today. The original record was not changed.",
+        restored: true,
+        alreadyCheckedIn: Boolean(restored.alreadyCheckedIn),
+        walkInCreated: Boolean(restored.walkInCreated),
+        source: {
+          id: restored.source.id,
+          checkInId: staffCheckIn.padCheckInId(restored.source.id),
+          token: restored.source.token,
+          timestamp: restored.source.checked_in_at,
+          status: displayQueueStatus(restored.source.status),
+        },
+        verified: true,
+        patient: {
+          id: restored.appointment.user_id,
+          fullName: restored.appointment.patient_name || "Patient",
+        },
+        appointment: {
+          id: restored.appointment.id,
+          service: restored.appointment.service_name,
+          dentist: restored.appointment.dentist_name,
+          date: restored.appointment.appointment_date,
+          time: restored.appointment.appointment_time,
+          status: "checked_in",
+        },
+        queue: {
+          id: restored.queueEntry.id,
+          token: restored.queueEntry.token,
+          queueNumber: restored.queueEntry.token,
+          position: restored.queueEntry.position,
+          status: displayQueueStatus(restored.queueEntry.status),
+          waitMinutes: Number(restored.queueEntry.estimated_wait_minutes || 0),
+          checkedInAt: restored.queueEntry.checked_in_at || new Date().toISOString(),
+        },
+      });
+    } catch (error) {
+      if (transactionOpen) {
+        await client.query("ROLLBACK");
+      }
+      const status = error.status || (error.message?.includes("not found") ? 404 : 500);
+      console.error("Staff restore check-in error:", error.message);
+      return res.status(status).json({
+        message: error.message || "Unable to restore this check-in.",
+      });
+    } finally {
+      client.release();
     }
   });
 
