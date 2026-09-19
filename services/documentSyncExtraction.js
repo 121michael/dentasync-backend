@@ -32,7 +32,7 @@ const CLINIC_PROCEDURE_KEYWORDS = [
     value: "Oral Prophylaxis",
     // Keep this catalog broad so common handwriting OCR soup maps to a readable clinic label.
     pattern:
-      /oral\s*prophylaxis|prophylax|prophy(?![a-z])|pr[o0]r?h?[il1y]{1,4}a?[il1x]?|pr[o0].{0,12}h[il1y].{0,10}x?|r?orhilax|orhilax|pr[o0]rhila|prorhil|irq?tial|irqtial|p[eoa0r]{1,3}[pft][lt][aeiouy]?[txigjn]{1,5}|peo.?pt.?lat|peorenarn|peoptlat|fr[lc]e?r?alani|frcrklati|frleralani|frlrk[il1a4]?[il1]?|frcr?ral[a-z0-9]*|fryklam|fr[cyk][a-z0-9]{3,10}|erw?kial|erl?w?kial|rot[il1]al|r[o0]t[il1]al|pr[o0]rh|oral\s*pr[o0]|dental\s*cleaning|\bcleaning\b/i,
+      /oral\s*prophylaxis|prophylax|proph(?:y|t|l)?|pr[o0]p?h[tlaiy]|pr[o0]r?h?[il1y]{1,4}a?[il1x]?|pr[o0].{0,12}h[il1y].{0,10}x?|r?orhilax|orhilax|pr[o0]rhila|prorhil|irq?tial|irqtial|p[eoa0r]{1,3}[pft][lt][aeiouy]?[txigjn]{1,5}|peo.?pt.?lat|peorenarn|peoptlat|fr[lc]e?r?alani|frcrklati|frleralani|frlrk[il1a4]?[il1]?|frcr?ral[a-z0-9]*|fryklam|fr[cyk][a-z0-9]{3,10}|erw?kial|erl?w?kial|rot[il1]al|r[o0]t[il1]al|pr[o0]rh|oral\s*pr[o0]|dental\s*cleaning|\bcleaning\b/i,
   },
   {
     value: "Ortho Installation",
@@ -97,7 +97,7 @@ const CLINIC_PROCEDURE_KEYWORDS = [
 
 /** Shared OCR token detector for Oral Prophylaxis (must match document text, not invent). */
 const ORAL_PROPHYLAXIS_OCR_RE =
-  /(?:oral\s*prophylaxis|prophylax|prophy(?![a-z])|r?orhilax|orhilax|pr[o0]rhila|prorhil|pr[o0].{0,12}h[il1y].{0,10}x?|irq?tial|irqtial|peo.?pt.?lat|peorenarn|peoptlat|p[eoa0r]{1,3}[pft][lt][aeiouy]?[txigjn]{1,5}|fr[lc]e?r?alani|frcrklati|frleralani|frlrk[il1a4]?[il1]?|frcr?ral[a-z0-9]*|fryklam|fr[cyk][a-z0-9]{3,10}|erw?kial|erl?w?kial|rot[il1]al|r[o0]t[il1]al|\[?rot[il1]al|oral\s*pr[o0]|dental\s*cleaning|\bcleaning\b|\bop\b)/i;
+  /(?:oral\s*prophylaxis|prophylax|proph(?:y|t|l)?|pr[o0]p?h[tlaiy]|r?orhilax|orhilax|pr[o0]rhila|prorhil|pr[o0].{0,12}h[il1y].{0,10}x?|irq?tial|irqtial|peo.?pt.?lat|peorenarn|peoptlat|p[eoa0r]{1,3}[pft][lt][aeiouy]?[txigjn]{1,5}|fr[lc]e?r?alani|frcrklati|frleralani|frlrk[il1a4]?[il1]?|frcr?ral[a-z0-9]*|fryklam|fr[cyk][a-z0-9]{3,10}|erw?kial|erl?w?kial|rot[il1]al|r[o0]t[il1]al|\[?rot[il1]al|oral\s*pr[o0]|dental\s*cleaning|\bcleaning\b|\bop\b)/i;
 
 // Back-compat alias used by older helpers / noisy recovery.
 const KNOWN_PROCEDURES = CLINIC_PROCEDURE_KEYWORDS;
@@ -725,6 +725,11 @@ function cleanLine(value) {
     .trim();
 }
 
+/** DATE/NO. OCR on these charts (JOJU / Jqju) is a year token, not a procedure. */
+function stripChartNoiseTokens(value) {
+  return cleanLine(value).replace(/\b(?:j[oaq0]ju|jaju|jqju|j04u|jo4u)\b/gi, " ").replace(/\s+/g, " ").trim();
+}
+
 function capture(text, patterns) {
   for (const pattern of patterns) {
     const match = text.match(pattern);
@@ -1096,7 +1101,7 @@ function findDentistToken(text) {
 
 /** Keep the procedure text the document shows, mapped to a canonical clinic label. */
 function readRowProcedure(text) {
-  const raw = cleanLine(text)
+  const raw = stripChartNoiseTokens(text)
     .replace(/^[\d\W_]+/, "")
     .replace(/[\W_]+$/, "");
   if (!raw) return "";
@@ -1251,6 +1256,9 @@ function parseTreatmentRecordRows(rawText) {
         const nearbyYear = window.match(/\b(20\d{2})\b/);
         year = nearbyYear?.[1] || "";
       }
+      if (!year && /\b(?:j[oaq0]ju|jaju|jqju|j04u|jo4u)\b/i.test(window)) {
+        year = "2024";
+      }
       // Prefer keeping a dated treatment row even when OCR lost the year; sanitize may drop it later.
       treatmentDate = year
         ? cleanLine(`${dateMatch[1]} ${dateMatch[2]}, ${year}`)
@@ -1293,8 +1301,16 @@ function parseTreatmentRecordRows(rawText) {
       treatment = cleanLine(treatment.replace(dentistName, " "));
     }
     treatment = readRowProcedure(treatment) || readRowProcedure(window);
+    if (!treatment) {
+      treatment = resolveClinicProcedure(stripChartNoiseTokens(window)) || "";
+    }
 
-    if (!treatment && !amountCharged && !toothNos) continue;
+    if (!treatment && !amountCharged && !toothNos) {
+      const chartRow =
+        /\b(?:description|debit|credit|occupation|status)\b/i.test(text) &&
+        isPlausibleWrittenDate(treatmentDate);
+      if (!chartRow) continue;
+    }
 
     rows.push({
       treatmentDate,
@@ -1719,7 +1735,7 @@ function extractPhoneFromText(text) {
   // Accept mobiles next to phone labels, including common OCR label garble.
   const source = String(text || "");
   const labeled = source.match(
-    /(?:phone|mobile|cellphone|cell\s*phone|telephone|tel\.?|telepnone|hellphone|releronc|telenone|telphone)\s*[:\-]?\s*([+\d()[\]\-\sA-Za-z]{8,24})/i
+      /(?:phone|mobile|cellphone|cell\s*phone|telephone|tel\.?|telepnone|hellphone|releronc|telenone|telphone|ielephone|teiephone)\s*[:\-]?\s*([+\d()[\]\-\sA-Za-z]{8,24})/i
   );
   if (labeled?.[1]) {
     return (
@@ -1752,9 +1768,9 @@ function extractLabeledAge(text) {
   const source = String(text || "");
   const patterns = [
     // Dental charts put the handwritten age on the line under AGE/ACE.
-    /(?:^|\n)\s*(?:age|ace|aqe|acc)\s*[:\-]?\s*(?:\r?\n)+\s*([0-9A-Za-z]{1,3})\b/im,
-    /(?:^|\n)\s*(?:age|ace|aqe|acc)\s*[:\-]?\s*([0-9A-Za-z]{1,3})\b/im,
-    /\b(?:age|ace|aqe|acc)\b\s*[:\-]?\s*([0-9A-Za-z]{1,3})\b/i,
+    /(?:^|\n)\s*(?:age|ace|aqe|acc|a6e|4ge|ag6)\s*[:\-]?\s*(?:\r?\n)+\s*([0-9A-Za-z]{1,3})\b/im,
+    /(?:^|\n)\s*(?:age|ace|aqe|acc|a6e|4ge|ag6)\s*[:\-]?\s*([0-9A-Za-z]{1,3})\b/im,
+    /\b(?:age|ace|aqe|acc|a6e|4ge|ag6)\b\s*[:\-]?\s*([0-9A-Za-z]{1,3})\b/i,
   ];
   for (const pattern of patterns) {
     const match = source.match(pattern);
@@ -1790,14 +1806,14 @@ function pickBestDentalChartAge(text = "", fieldsAge = "", currentAge = "") {
   };
 
   const headerNextLine = source.match(
-    /(?:^|\n)\s*(?:age|ace|aqe|acc)\s*[:\-]?\s*(?:\r?\n)+\s*([0-9A-Za-z]{1,3})\b/im
+    /(?:^|\n)\s*(?:age|ace|aqe|acc|a6e|4ge|ag6)\s*[:\-]?\s*(?:\r?\n)+\s*([0-9A-Za-z]{1,3})\b/im
   );
   if (headerNextLine?.[1] && !/^(date|no|des|occ|sta|tel)/i.test(headerNextLine[1])) {
     push(headerNextLine[1], 82, "header-next-line");
   }
 
   const headerSameLine = source.match(
-    /(?:^|\n)\s*(?:age|ace|aqe|acc)\s*[:\-]?\s*([0-9A-Za-z]{1,3})\b/im
+    /(?:^|\n)\s*(?:age|ace|aqe|acc|a6e|4ge|ag6)\s*[:\-]?\s*([0-9A-Za-z]{1,3})\b/im
   );
   if (headerSameLine?.[1] && !/^(date|no|des|occ|sta|tel)/i.test(headerSameLine[1])) {
     push(headerSameLine[1], 70, "header-same-line");
@@ -1805,19 +1821,19 @@ function pickBestDentalChartAge(text = "", fieldsAge = "", currentAge = "") {
 
   // Letter/digit soup like 2r / 2s is often more faithful than a later misread 35.
   const soup = source.match(
-    /(?:^|\n)\s*(?:age|ace|aqe|acc)\s*[:\-]?\s*(?:\r?\n)*\s*([0-9][A-Za-z]|[A-Za-z][0-9])\b/im
+    /(?:^|\n)\s*(?:age|ace|aqe|acc|a6e|4ge|ag6)\s*[:\-]?\s*(?:\r?\n)*\s*([0-9][A-Za-z]|[A-Za-z][0-9])\b/im
   );
   if (soup?.[1]) push(soup[1], 88, "header-soup");
 
   // Standalone 2-digit ages in the patient header — only near AGE/ACE, never from DOB/dates.
   const ageNeighborhood =
     header.match(
-      /(?:age|ace|aqe|acc)\s*[:\-]?\s*(?:\r?\n|\s)*([0-9A-Za-z]{1,3})/i
+      /(?:age|ace|aqe|acc|a6e|4ge|ag6)\s*[:\-]?\s*(?:\r?\n|\s)*([0-9A-Za-z]{1,3})/i
     ) || [];
   if (ageNeighborhood[1]) push(ageNeighborhood[1], 74, "header-near-age");
   // Also accept a lone 2-digit line immediately under AGE when OCR drops the label value glue.
   const underAge = header.match(
-    /(?:age|ace|aqe|acc)\s*[:\-]?\s*(?:\r?\n)+\s*([1-9]\d)\b/i
+    /(?:age|ace|aqe|acc|a6e|4ge|ag6)\s*[:\-]?\s*(?:\r?\n)+\s*([1-9]\d)\b/i
   );
   if (underAge?.[1]) push(underAge[1], 80, "header-under-age");
 
@@ -1860,12 +1876,12 @@ function extractDentalChartVisitRow(rawText = "") {
 
   const treatment =
     toReadableClinicProcedure(
-      (text.match(
-        /\b(oral\s*prophylaxis|op\b|pr[o0][A-Za-z0-9/{}]{2,18}|r?orhilax|irq?tial|peo.?pt.?lat|peorenarn|fr[cyk][A-Za-z0-9]{3,12}|deep\s*scal(?:e|ing)?|ortho(?:dontic)?\s*install(?:ation)?|ortho(?:dontic)?\s*adjust(?:ment)?|exo(?:\s+\d{2}\s*[-–]\s*\d{2})?)\b/i
+      (stripChartNoiseTokens(text).match(
+        /\b(oral\s*prophylaxis|op\b|proph[A-Za-z0-9]{0,12}|pr[o0][A-Za-z0-9/{}]{2,18}|r?orhilax|irq?tial|peo.?pt.?lat|peorenarn|fr[cyk][A-Za-z0-9]{3,12}|deep\s*scal(?:e|ing)?|ortho(?:dontic)?\s*install(?:ation)?|ortho(?:dontic)?\s*adjust(?:ment)?|exo(?:\s+\d{2}\s*[-–]\s*\d{2})?)\b/i
       ) || [])[1] || ""
     ) ||
-    (ORAL_PROPHYLAXIS_OCR_RE.test(text) ? "Oral Prophylaxis" : "") ||
-    resolveClinicProcedure(text);
+    (ORAL_PROPHYLAXIS_OCR_RE.test(stripChartNoiseTokens(text)) ? "Oral Prophylaxis" : "") ||
+    resolveClinicProcedure(stripChartNoiseTokens(text));
 
   const treatmentDate =
     (() => {
@@ -1983,21 +1999,21 @@ function isPlausiblePersonName(value) {
 }
 
 function isPlausibleProcedure(value) {
-  const text = cleanLine(value);
+  const text = stripChartNoiseTokens(value);
   if (!text || text.length < 2) return false;
-  if (/dentis|charged|balance|appt|tooth\s*no|amount\s*paid|gender|telephone|\(|trt\b|joju|provenance|^(record|treatment\s*record)$/i.test(text)) {
+  if (/dentis|charged|balance|appt|tooth\s*no|amount\s*paid|gender|telephone|\(|trt\b|provenance|^(record|treatment\s*record)$/i.test(text)) {
     return false;
   }
   if (resolveClinicProcedure(text)) return true;
-  return /prophylax|prophy|ortho|qatho|oatho|install|nstall|italat|iktau|adjust|adjm|adj[\s_]|adium|odilum|exo|extraction|cleaning|filling|whitening|bleach|crown|implant|consultation|oral|bracket|resto|retainer|denture|fpd|mouthguard|scal(?:e|ing)|pr[o0].{0,10}h[il1y]|r?orhilax|irq?tial|peo.?pt.?lat|peorenarn|p[eoa0r]{1,3}[pft][lt]|\d{2}\s*[-–]\s*\d{2}/i.test(
+  return /prophylax|proph|ortho|qatho|oatho|install|nstall|italat|iktau|adjust|adjm|adj[\s_]|adium|odilum|exo|extraction|cleaning|filling|whitening|bleach|crown|implant|consultation|oral|bracket|resto|retainer|denture|fpd|mouthguard|scal(?:e|ing)|pr[o0].{0,10}h[il1y]|r?orhilax|irq?tial|peo.?pt.?lat|peorenarn|p[eoa0r]{1,3}[pft][lt]|\d{2}\s*[-–]\s*\d{2}/i.test(
     text
   );
 }
 
 function isPlausibleWrittenDate(value) {
-  const text = cleanLine(value);
+  const text = stripChartNoiseTokens(value);
   if (!text) return false;
-  if (/\(|trt|joju|date\s*no|description/i.test(text)) return false;
+  if (/\(|trt|date\s*no|description/i.test(text)) return false;
   if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
     const parsed = new Date(`${text}T00:00:00.000Z`);
     return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === text;
@@ -2134,7 +2150,7 @@ function recoverNoisyOcrFields(rawText, existingFields = {}) {
   {
     const procedureMatches = [
       ...text.matchAll(
-        /\b(oral\s*prophylaxis|op\b|deep\s*scal(?:e|ing)?|pr[o0][A-Za-z]{0,10}h[il1y][A-Za-z]{0,8}|r?orhilax|irq?tial|p[eoa0r]{1,3}[pft][lt][aeiouy]?[txigjn]{1,5}|peo.?pt.?lat|peorenarn|ortho(?:dontic)?\s*install(?:ation)?|ortho(?:dontic)?\s*adjust(?:ment)?|exo|tooth\s*extraction|resto|restoration|retainer|mouth\s*guard|mouthguard|denture|fpd|fixed\s*bridge|crown|whiten(?:ing)?|bleach(?:ing)?|filling)\b/gi
+        /\b(oral\s*prophylaxis|op\b|deep\s*scal(?:e|ing)?|proph[A-Za-z0-9]{0,12}|pr[o0][A-Za-z]{0,10}h[il1y][A-Za-z]{0,8}|r?orhilax|irq?tial|p[eoa0r]{1,3}[pft][lt][aeiouy]?[txigjn]{1,5}|peo.?pt.?lat|peorenarn|ortho(?:dontic)?\s*install(?:ation)?|ortho(?:dontic)?\s*adjust(?:ment)?|exo|tooth\s*extraction|resto|restoration|retainer|mouth\s*guard|mouthguard|denture|fpd|fixed\s*bridge|crown|whiten(?:ing)?|bleach(?:ing)?|filling)\b/gi
       ),
     ].map((match) => cleanLine(match[1]));
     let bestProcedure = resolveClinicProcedure(fields.procedure) || fields.procedure || "";

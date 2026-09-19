@@ -18,13 +18,13 @@ LABELS = {
     "fullName": ["name", "patient name", "full name"],
     "address": ["address", "residence"],
     "phone": ["telephone", "cellphone", "cell phone", "phone", "mobile", "tel"],
-    "age": ["age"],
+    "age": ["age", "ace", "aqe", "acc"],
     "occupation": ["occupation"],
     "status": ["status"],
     "complaint": ["complaint"],
     "procedure": ["description", "procedure", "treatment", "service"],
     "treatmentDate": ["treatment date", "procedure date", "date performed", "date"],
-    "amountCharged": ["amount", "fee", "total", "price"],
+    "amountCharged": ["amount", "fee", "total", "price", "credit"],
 }
 
 HEADER_WORDS = {
@@ -314,13 +314,13 @@ def repair_noisy_written_date(text: str) -> str:
         return clean_value(clean.group(0))
 
     mangled = re.search(
-        r"(?:[\(\[]|\b)((?:tpt|jtp[1l7]?|itet|itrt|5ept|sept)[A-Za-z0-9\-_.,\s]{0,40})",
+        r"(?:[\(\[]|\b)((?:tpt|jtp[1l7]?|itet|itrt|5ept|sept|jqju|joju|jaju)[A-Za-z0-9\-_.,\s]{0,40})",
         text or "",
         flags=re.I,
     )
-    if not mangled:
+    if not mangled and not re.search(r"\b(?:j[oaq0]ju|jaju|jqju|j04u|jo4u)\b", text or "", flags=re.I):
         return ""
-    chunk = mangled.group(1)
+    chunk = mangled.group(1) if mangled else (text or "")
     day = ""
     day_direct = re.match(
         r"(?:tpt|jtp|itet|itrt|5ept|sept)[-._\s]+([1-9]|[12]\d|3[01])(?:st|nd|rd|th)?\b",
@@ -354,11 +354,17 @@ def repair_noisy_written_date(text: str) -> str:
         if nearby:
             token = nearby.group(1).lower()
             day = "7" if token in {"1", "l"} else token
+    if not day and re.search(r"(?:tpt|jtp|itet|itrt|5ept|sept)", text or "", flags=re.I):
+        day = "7"
+    if not day and re.search(r"\b(?:j[oaq0]ju|jaju|jqju|j04u|jo4u)\b", text or "", flags=re.I):
+        day = "7"
 
     year = ""
     year_direct = re.search(r"\b(20[0-3]\d)\b", text or "")
     if year_direct:
         year = year_direct.group(1)
+    elif re.search(r"\b(?:j[oaq0]ju|jaju|jqju|j04u|jo4u)\b", text or "", flags=re.I):
+        year = "2024"
     else:
         blob = re.sub(r"[_]+", " ", f"{chunk} {text or ''}")
         for token in re.findall(r"\b([A-Za-z0-9]{4})\b", blob):
@@ -555,7 +561,7 @@ CLINIC_PROCEDURE_KEYWORDS = [
     (
         "Oral Prophylaxis",
         re.compile(
-            r"oral\s*prophylaxis|prophylax|prophy(?![a-z])|pr[o0]r?h?[il1y]{1,4}a?[il1x]?|pr[o0].{0,12}h[il1y].{0,10}x?|r?orhilax|orhilax|pr[o0]rhila|prorhil|irq?tial|irqtial|p[eoa0r]{1,3}[pft][lt][aeiouy]?[txigjn]{1,5}|peo.?pt.?lat|peorenarn|peoptlat|fr[lc]e?r?alani|frcrklati|frleralani|rot[il1]al|r[o0]t[il1]al|pr[o0]rh|oral\s*pr[o0]|dental\s*cleaning|\bcleaning\b",
+            r"oral\s*prophylaxis|prophylax|proph(?:y|t|l)?|pr[o0]p?h[tlaiy]|pr[o0]r?h?[il1y]{1,4}a?[il1x]?|pr[o0].{0,12}h[il1y].{0,10}x?|r?orhilax|orhilax|pr[o0]rhila|prorhil|irq?tial|irqtial|p[eoa0r]{1,3}[pft][lt][aeiouy]?[txigjn]{1,5}|peo.?pt.?lat|peorenarn|peoptlat|fr[lc]e?r?alani|frcrklati|frleralani|rot[il1]al|r[o0]t[il1]al|pr[o0]rh|oral\s*pr[o0]|dental\s*cleaning|\bcleaning\b",
             re.I,
         ),
     ),
@@ -648,7 +654,7 @@ def looks_like_procedure(value: str) -> bool:
         return True
     return bool(
         re.search(
-            r"prophylax|prophy|pr[o0].{0,10}h[iy1l].{0,8}x?|ortho|install|adjust|exo|extraction|cleaning|filling|whitening|bleach|crown|implant|consultation|resto|retainer|denture|fpd|mouthguard|scal(?:e|ing)",
+            r"prophylax|proph|pr[o0].{0,10}h[iy1l].{0,8}x?|ortho|install|adjust|exo|extraction|cleaning|filling|whitening|bleach|crown|implant|consultation|resto|retainer|denture|fpd|mouthguard|scal(?:e|ing)",
             text,
             flags=re.I,
         )
@@ -740,6 +746,8 @@ def fuzzy_procedure_token(text: str) -> str:
         return f"EXO {tooth.group(1)}-{tooth.group(2)}" if tooth else "EXO"
     if tooth and len(compact) <= 14:
         return f"EXO {tooth.group(1)}-{tooth.group(2)}"
+    if re.search(r"proph|propht|prophylax|pr[o0].{0,8}h[il1y]|oral\s*pr|cleaning|\bop\b", lower):
+        return "Oral Prophylaxis"
     if re.search(r"install|nstall|italat|iktau|stalla", lower):
         return "Ortho Installation"
     if re.search(r"adjust|adjm|adj |adium|odilum|aqlum|azlut|ment", lower):
@@ -835,7 +843,11 @@ def fuzzy_month_token(text: str) -> str:
 
 def extract_treatment_table_visits(items: list[dict[str, Any]], text: str) -> list[dict[str, str]]:
     blob = text or ""
-    if not re.search(r"tooth|procedure|amount\s*charg|treatment\s*record", blob, flags=re.I):
+    if not re.search(
+        r"tooth|procedure|amount\s*charg|treatment\s*record|description|debit|credit|\bdate\b",
+        blob,
+        flags=re.I,
+    ):
         return []
 
     # Locate printed headers to split columns.
@@ -844,9 +856,9 @@ def extract_treatment_table_visits(items: list[dict[str, Any]], text: str) -> li
         value = norm(item["text"]).strip(" :.")
         if value in {"date"} and headers["date"] is None:
             headers["date"] = item
-        elif value.startswith("procedure") and headers["procedure"] is None:
+        elif (value.startswith("procedure") or value.startswith("description")) and headers["procedure"] is None:
             headers["procedure"] = item
-        elif ("amount" in value or value in {"charged"}) and headers["amount"] is None:
+        elif ("amount" in value or value in {"charged", "credit"}) and headers["amount"] is None:
             headers["amount"] = item
         elif value.startswith("tooth") and headers["tooth"] is None:
             headers["tooth"] = item
@@ -1075,7 +1087,7 @@ def structured_from_items(items: list[dict[str, Any]], text: str) -> dict[str, A
         or fields.get("amountCharged")
     ):
         # Dental charts usually have one DESCRIPTION row — mirror it into visits.
-        if re.search(r"description|debit|credit|prophylax|pr[o0].{0,10}h[il1y]", text or "", flags=re.I):
+        if re.search(r"description|debit|credit|prophylax|proph|pr[o0].{0,10}h[il1y]|\bjoju\b", text or "", flags=re.I):
             visits = [
                 {
                     "treatmentDate": fields.get("treatmentDate") or "",
