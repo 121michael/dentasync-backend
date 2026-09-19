@@ -305,10 +305,22 @@ SEPT 7 JOJU PROPHTLAXIS
 });
 
 test("written chart dates convert to ISO so Confirm & Save does not 400", () => {
-  const { toIsoDocumentDate } = require("../services/documentSyncExtraction");
+  const { toIsoDocumentDate, normalizePhone } = require("../services/documentSyncExtraction");
   assert.equal(toIsoDocumentDate("SEPT 7, 2024"), "2024-09-07");
   assert.equal(toIsoDocumentDate("SEPT. 7, 2024"), "2024-09-07");
   assert.equal(toIsoDocumentDate("09/07/2024"), "2024-09-07");
   assert.equal(toIsoDocumentDate("2024-09-07"), "2024-09-07");
   assert.equal(toIsoDocumentDate(""), "");
+  assert.equal(
+    toIsoDocumentDate(`
+NAME ANGELOU OBAS-BAGHTNAN
+ADDRESS MANDALUYONG CITY
+AGE 25
+DATE NO DESCRIPTION TIME DEBIT CREDIT
+SEPT 7 JOJU PROPHTLAXIS 3000
+`),
+    "2024-09-07"
+  );
+  assert.equal(normalizePhone("094564444i"), "");
+  assert.equal(normalizePhone("09123456789"), "639123456789");
 });

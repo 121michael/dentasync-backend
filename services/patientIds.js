@@ -52,6 +52,27 @@ function formatPatientId(prefix, year, sequence) {
   return `${prefix}${year}_${seq}`;
 }
 
+async function tryQuery(db, fn) {
+  const savepoint = `pid_${Math.random().toString(36).slice(2, 10)}`;
+  try {
+    await db.query(`SAVEPOINT ${savepoint}`);
+  } catch {
+    try {
+      return await fn();
+    } catch {
+      return null;
+    }
+  }
+  try {
+    const result = await fn();
+    await db.query(`RELEASE SAVEPOINT ${savepoint}`).catch(() => {});
+    return result;
+  } catch {
+    await db.query(`ROLLBACK TO SAVEPOINT ${savepoint}`).catch(() => {});
+    return null;
+  }
+}
+
 /**
  * Atomically allocate the next Patient ID for a category/year.
  * Uses patient_id_sequences with row lock; falls back to MAX scan if table missing.
@@ -62,7 +83,7 @@ async function allocatePatientId(db, { category = "regular", createdAt = null } 
   const when = createdAt ? new Date(createdAt) : new Date();
   const year = Number.isFinite(when.getTime()) ? when.getFullYear() : new Date().getFullYear();
 
-  try {
+  const sequenced = await tryQuery(db, async () => {
     const result = await db.query(
       `INSERT INTO patient_id_sequences (category_prefix, id_year, last_sequence)
        VALUES ($1, $2, 1)
@@ -72,44 +93,34 @@ async function allocatePatientId(db, { category = "regular", createdAt = null } 
        RETURNING last_sequence, id_year, category_prefix`,
       [prefix, year]
     );
-    const row = result.rows[0];
+    return result.rows[0];
+  });
+  if (sequenced) {
     return {
-      patientId: formatPatientId(row.category_prefix, row.id_year, row.last_sequence),
+      patientId: formatPatientId(sequenced.category_prefix, sequenced.id_year, sequenced.last_sequence),
       category: normalized,
-      prefix: row.category_prefix,
-      year: row.id_year,
-      sequence: row.last_sequence,
+      prefix: sequenced.category_prefix,
+      year: sequenced.id_year,
+      sequence: sequenced.last_sequence,
     };
-  } catch (error) {
-    if (error?.code !== "42P01") throw error;
   }
 
   // Fallback when sequences table is not migrated yet: scan existing IDs.
   const like = `${prefix}${year}_%`;
   let maxSeq = 0;
-  try {
-    const users = await db.query(
-      `SELECT patient_id FROM users WHERE patient_id LIKE $1`,
-      [like]
-    );
-    for (const row of users.rows) {
-      const match = String(row.patient_id || "").match(/_(\d+)$/);
-      if (match) maxSeq = Math.max(maxSeq, Number(match[1]));
-    }
-  } catch {
-    // users.patient_id may not exist yet
+  const users = await tryQuery(db, async () =>
+    db.query(`SELECT patient_id FROM users WHERE patient_id LIKE $1`, [like])
+  );
+  for (const row of users?.rows || []) {
+    const match = String(row.patient_id || "").match(/_(\d+)$/);
+    if (match) maxSeq = Math.max(maxSeq, Number(match[1]));
   }
-  try {
-    const clinical = await db.query(
-      `SELECT patient_id FROM clinic_patient_records WHERE patient_id LIKE $1`,
-      [like]
-    );
-    for (const row of clinical.rows) {
-      const match = String(row.patient_id || "").match(/_(\d+)$/);
-      if (match) maxSeq = Math.max(maxSeq, Number(match[1]));
-    }
-  } catch {
-    // clinical column may not exist yet
+  const clinical = await tryQuery(db, async () =>
+    db.query(`SELECT patient_id FROM clinic_patient_records WHERE patient_id LIKE $1`, [like])
+  );
+  for (const row of clinical?.rows || []) {
+    const match = String(row.patient_id || "").match(/_(\d+)$/);
+    if (match) maxSeq = Math.max(maxSeq, Number(match[1]));
   }
 
   const sequence = maxSeq + 1;

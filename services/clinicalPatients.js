@@ -647,16 +647,18 @@ async function createClinicalRecord(db, input, actor = {}) {
       }
     } catch (error) {
       if (error?.code !== "42703") throw error;
-      const linked = await db.query(
-        `SELECT id
-         FROM users
-         WHERE LOWER(role) = 'patient'
-           AND (
-             ($1::text IS NOT NULL AND LOWER(email) = LOWER($1))
-             OR ($2::text IS NOT NULL AND phone = $2)
-           )
-         LIMIT 1`,
-        [email, phone]
+      const linked = await withSavepoint(db, "link_clinical_user_legacy", async () =>
+        db.query(
+          `SELECT id
+           FROM users
+           WHERE LOWER(role) = 'patient'
+             AND (
+               ($1::text IS NOT NULL AND LOWER(email) = LOWER($1))
+               OR ($2::text IS NOT NULL AND phone = $2)
+             )
+           LIMIT 1`,
+          [email, phone]
+        )
       );
       linkedUserId = linked.rows[0]?.id || null;
     }
@@ -664,10 +666,12 @@ async function createClinicalRecord(db, input, actor = {}) {
 
   if (!patientId) {
     try {
-      const issued = await patientIds.allocatePatientId(db, {
-        category: patientCategory,
-        createdAt: new Date(),
-      });
+      const issued = await withSavepoint(db, "alloc_patient_id", async () =>
+        patientIds.allocatePatientId(db, {
+          category: patientCategory,
+          createdAt: new Date(),
+        })
+      );
       patientId = issued.patientId;
       patientCategory = issued.category;
     } catch (idError) {

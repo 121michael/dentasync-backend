@@ -24,6 +24,9 @@ test("allocatePatientId increments sequence per prefix/year", async () => {
   const store = new Map();
   const db = {
     async query(sql, params = []) {
+      if (/SAVEPOINT|RELEASE SAVEPOINT|ROLLBACK TO SAVEPOINT/i.test(sql)) {
+        return { rows: [] };
+      }
       if (sql.includes("INSERT INTO patient_id_sequences")) {
         const key = `${params[0]}:${params[1]}`;
         const current = store.get(key) || 0;
@@ -53,4 +56,34 @@ test("allocatePatientId increments sequence per prefix/year", async () => {
   assert.equal(first.patientId, "A2026_01");
   assert.equal(second.patientId, "A2026_02");
   assert.equal(senior.patientId, "S2026_01");
+});
+
+test("allocatePatientId falls back when the sequences table is missing", async () => {
+  const db = {
+    async query(sql, params = []) {
+      if (/SAVEPOINT|RELEASE SAVEPOINT|ROLLBACK TO SAVEPOINT/i.test(sql)) {
+        return { rows: [] };
+      }
+      if (sql.includes("INSERT INTO patient_id_sequences")) {
+        const error = new Error('relation "patient_id_sequences" does not exist');
+        error.code = "42P01";
+        throw error;
+      }
+      if (sql.includes("SELECT patient_id FROM users")) {
+        return { rows: [{ patient_id: "A2026_03" }] };
+      }
+      if (sql.includes("SELECT patient_id FROM clinic_patient_records")) {
+        const error = new Error('column "patient_id" does not exist');
+        error.code = "42703";
+        throw error;
+      }
+      throw new Error(`Unexpected: ${sql} ${JSON.stringify(params)}`);
+    },
+  };
+
+  const issued = await patientIds.allocatePatientId(db, {
+    category: "regular",
+    createdAt: "2026-09-18",
+  });
+  assert.equal(issued.patientId, "A2026_04");
 });
