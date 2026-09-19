@@ -9,6 +9,7 @@ const {
   extractDocumentData,
   normalizePhone,
   normalizeDate,
+  toIsoDocumentDate,
   normalizeAmount,
   DocumentValidationError,
   UNSUPPORTED_DOCUMENT_MESSAGE,
@@ -114,6 +115,9 @@ function sanitizePayload(input) {
     const parts = fullName.split(/\s+/).filter(Boolean);
     firstName = firstName || parts[0] || "";
     lastName = lastName || (parts.length > 1 ? parts.slice(1).join(" ") : "");
+  }
+  if (firstName && !lastName) {
+    lastName = firstName;
   }
 
   return {
@@ -549,8 +553,8 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
   });
 
   router.put("/sync/documents/:id", async (req, res) => {
-    const payload = sanitizePayload(req.body?.payload || req.body);
     try {
+      const payload = sanitizePayload(req.body?.payload || req.body);
       const result = await db.query(
         `UPDATE admin_portal_document_sync_jobs
          SET edited_payload = $1::jsonb,
@@ -646,42 +650,35 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
             "Patient name is required before saving. Enter the Name from the document (or type it if the line was blank), then try again.",
         });
       }
-      if (patient.dateOfBirth && !isIsoDate(patient.dateOfBirth)) {
-        await client.query("ROLLBACK");
-        transactionOpen = false;
-        return res.status(400).json({ message: "Provide a valid patient date of birth (YYYY-MM-DD)." });
-      }
-
-      const visitRows = Array.isArray(procedure.visits)
-        ? procedure.visits.filter((row) => stringValue(row?.treatment, 180))
-        : [];
-      const hasVisitTable = visitRows.length > 0;
-
-      if (!hasVisitTable && procedure.treatmentDate && !isIsoDate(procedure.treatmentDate) && !normalizeDate(procedure.treatmentDate)) {
-        await client.query("ROLLBACK");
-        transactionOpen = false;
-        return res.status(400).json({ message: "Provide a valid treatment date from the document." });
-      }
-      if (!hasVisitTable && procedure.treatment && !(normalizeDate(procedure.treatmentDate) || isIsoDate(procedure.treatmentDate))) {
+      const dateOfBirthIso = toIsoDocumentDate(patient.dateOfBirth);
+      if (patient.dateOfBirth && !dateOfBirthIso) {
         await client.query("ROLLBACK");
         transactionOpen = false;
         return res.status(400).json({
           message:
-            "Treatment date is required when a procedure is present. Use the date written on the document.",
+            "Date of Birth must be a real calendar date. Leave it blank if the document did not include one.",
         });
       }
+      patient.dateOfBirth = dateOfBirthIso;
+
+      const primaryDateIso = toIsoDocumentDate(procedure.treatmentDate);
+      const visitRows = Array.isArray(procedure.visits)
+        ? procedure.visits
+            .filter((row) => stringValue(row?.treatment, 180))
+            .map((row) => ({
+              ...row,
+              treatmentDate: toIsoDocumentDate(row.treatmentDate) || primaryDateIso,
+              amountCharged: normalizeAmount(row.amountCharged) || String(row.amountCharged || "").replace(/(?:₱|php)/gi, "").trim(),
+              amountPaid: normalizeAmount(row.amountPaid) || String(row.amountPaid || "").replace(/(?:₱|php)/gi, "").trim(),
+            }))
+        : [];
+      const datedVisitRows = visitRows.filter((row) => isIsoDate(row.treatmentDate) || toIsoDocumentDate(row.treatmentDate));
+      let skippedUndated = visitRows.length - datedVisitRows.length;
+      const hasVisitTable = datedVisitRows.length > 0;
+
       if (hasVisitTable) {
-        for (const row of visitRows) {
-          const iso = normalizeDate(row.treatmentDate) || (isIsoDate(row.treatmentDate) ? row.treatmentDate : "");
-          if (!iso) {
-            await client.query("ROLLBACK");
-            transactionOpen = false;
-            return res.status(400).json({
-              message:
-                "Each treatment row with a Procedure needs a readable Date from the document (or correct the OCR date before saving).",
-            });
-          }
-        }
+        procedure.visits = datedVisitRows;
+        if (!procedure.treatmentDate) procedure.treatmentDate = datedVisitRows[0].treatmentDate;
       }
 
       const match = await findMatchingClinicalPatient(client, patient);
@@ -735,10 +732,10 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
       let skippedDuplicates = 0;
 
       if (hasVisitTable) {
-        for (const row of visitRows) {
-          const iso = normalizeDate(row.treatmentDate) || row.treatmentDate;
-          const amountCharged = row.amountCharged || 0;
-          const amountPaid = row.amountPaid || 0;
+        for (const row of datedVisitRows) {
+          const iso = toIsoDocumentDate(row.treatmentDate) || row.treatmentDate;
+          const amountCharged = Number(String(row.amountCharged || "0").replace(/(?:₱|php)/gi, "").replace(/,/g, "")) || 0;
+          const amountPaid = Number(String(row.amountPaid || "0").replace(/(?:₱|php)/gi, "").replace(/,/g, "")) || 0;
           const dup = await client.query(
             `SELECT id
              FROM clinic_patient_treatments
@@ -747,7 +744,7 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
                AND LOWER(TRIM(treatment)) = LOWER(TRIM($3))
                AND COALESCE(amount_charged, 0) = COALESCE($4::numeric, 0)
              LIMIT 1`,
-            [clinicalRecordId, iso, row.treatment, String(amountCharged).replace(/,/g, "") || "0"]
+            [clinicalRecordId, iso, row.treatment, String(amountCharged)]
           );
           if (dup.rows.length) {
             skippedDuplicates += 1;
@@ -759,46 +756,56 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
           ]
             .filter(Boolean)
             .join(". ");
-          const createdTreatment = await clinicalPatients.addClinicalTreatment(
+          try {
+            const createdTreatment = await clinicalPatients.addClinicalTreatment(
+              client,
+              clinicalRecordId,
+              {
+                treatment: row.treatment,
+                dentistName: row.dentistName || "",
+                clinicLocation: procedure.clinicLocation || "Amethyst Dental Clinic",
+                coverageStatus: "",
+                status: "completed",
+                treatmentDate: iso,
+                toothNumber: row.toothNos || "",
+                amountCharged,
+                amountPaid,
+                notes: rowNotes || "",
+              },
+              { id: req.admin.id, role: "admin-sync" }
+            );
+            savedTreatments.push(createdTreatment);
+          } catch (treatError) {
+            if (treatError?.status === 400) {
+              skippedUndated += 1;
+              continue;
+            }
+            throw treatError;
+          }
+        }
+        treatment = savedTreatments[0] || null;
+      } else if (procedure.treatment && (primaryDateIso || toIsoDocumentDate(procedure.treatmentDate))) {
+        const iso = primaryDateIso || toIsoDocumentDate(procedure.treatmentDate);
+        try {
+          treatment = await clinicalPatients.addClinicalTreatment(
             client,
             clinicalRecordId,
             {
-              treatment: row.treatment,
-              dentistName: row.dentistName || "",
+              treatment: procedure.treatment,
+              dentistName: procedure.dentistName,
               clinicLocation: procedure.clinicLocation || "Amethyst Dental Clinic",
-              coverageStatus: "",
-              status: "completed",
+              coverageStatus: procedure.coverageStatus,
+              status: procedure.status || "completed",
               treatmentDate: iso,
-              toothNumber: row.toothNos || "",
-              amountCharged,
-              amountPaid,
-              notes: rowNotes || "",
+              amountCharged: Number(String(procedure.amountCharged || "0").replace(/(?:₱|php)/gi, "").replace(/,/g, "")) || 0,
+              notes: procedure.notes || "",
             },
             { id: req.admin.id, role: "admin-sync" }
           );
-          savedTreatments.push(createdTreatment);
+          savedTreatments.push(treatment);
+        } catch (treatError) {
+          if (treatError?.status !== 400) throw treatError;
         }
-        treatment = savedTreatments[0] || null;
-      } else if (procedure.treatment) {
-        const iso =
-          normalizeDate(procedure.treatmentDate) ||
-          (isIsoDate(procedure.treatmentDate) ? procedure.treatmentDate : "");
-        treatment = await clinicalPatients.addClinicalTreatment(
-          client,
-          clinicalRecordId,
-          {
-            treatment: procedure.treatment,
-            dentistName: procedure.dentistName,
-            clinicLocation: procedure.clinicLocation || "Amethyst Dental Clinic",
-            coverageStatus: procedure.coverageStatus,
-            status: procedure.status || "completed",
-            treatmentDate: iso,
-            amountCharged: procedure.amountCharged || 0,
-            notes: procedure.notes || "",
-          },
-          { id: req.admin.id, role: "admin-sync" }
-        );
-        savedTreatments.push(treatment);
       }
 
       const tempStoredName = job.stored_name;
@@ -870,9 +877,16 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
         [job.id]
       );
 
+      const skipNotes = [
+        skippedDuplicates ? `Duplicates skipped: ${skippedDuplicates}` : null,
+        skippedUndated ? `Treatment rows skipped (unreadable date): ${skippedUndated}` : null,
+      ].filter(Boolean);
+
       return res.json({
-        message:
+        message: [
           "Document successfully imported and data saved. The original source document was deleted.",
+          ...skipNotes,
+        ].join(" "),
         job: mapJob(refreshed.rows[0]),
         linked: {
           clinicalRecordId: String(clinicalRecordId),

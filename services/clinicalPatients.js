@@ -40,7 +40,7 @@ function parseMoneyAmount(value, fieldLabel) {
   if (value == null || value === "") {
     return 0;
   }
-  const amount = typeof value === "number" ? value : Number(String(value).replace(/,/g, "").trim());
+  const amount = typeof value === "number" ? value : Number(String(value).replace(/(?:₱|php)/gi, "").replace(/,/g, "").trim());
   if (!Number.isFinite(amount) || amount < 0) {
     const error = new Error(`${fieldLabel} must be a valid non-negative amount.`);
     error.status = 400;
@@ -992,7 +992,34 @@ async function addClinicalTreatment(db, recordId, input, actor = {}) {
     error.status = 400;
     throw error;
   }
-  const treatmentDate = stringValue(input.treatmentDate, 10) || new Date().toISOString().slice(0, 10);
+  const rawTreatmentDate = String(input.treatmentDate || "").trim();
+  const treatmentDate =
+    (isIsoDate(rawTreatmentDate) ? rawTreatmentDate : "") ||
+    (() => {
+      const monthName = rawTreatmentDate.match(
+        /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s*[-.]?\s*(\d{1,2})(?:st|nd|rd|th)?(?:,)?\s*(\d{4})\b/i
+      );
+      if (!monthName) return "";
+      const months = {
+        jan: "01",
+        feb: "02",
+        mar: "03",
+        apr: "04",
+        may: "05",
+        jun: "06",
+        jul: "07",
+        aug: "08",
+        sep: "09",
+        oct: "10",
+        nov: "11",
+        dec: "12",
+      };
+      const month = months[monthName[1].toLowerCase().replace(/\./g, "").slice(0, 3)];
+      if (!month) return "";
+      return `${monthName[3]}-${month}-${String(monthName[2]).padStart(2, "0")}`;
+    })() ||
+    (isIsoDate(stringValue(input.treatmentDate, 10) || "") ? stringValue(input.treatmentDate, 10) : "") ||
+    new Date().toISOString().slice(0, 10);
   if (!isIsoDate(treatmentDate)) {
     const error = new Error("Provide a valid treatment date (YYYY-MM-DD).");
     error.status = 400;

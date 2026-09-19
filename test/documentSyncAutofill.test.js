@@ -303,3 +303,12 @@ SEPT 7 JOJU PROPHTLAXIS
   assert.equal(payload.procedure.visits[0].treatment, "Oral Prophylaxis");
   assert.match(payload.procedure.visits[0].treatmentDate, /SEPT\s*7,\s*2024/i);
 });
+
+test("written chart dates convert to ISO so Confirm & Save does not 400", () => {
+  const { toIsoDocumentDate } = require("../services/documentSyncExtraction");
+  assert.equal(toIsoDocumentDate("SEPT 7, 2024"), "2024-09-07");
+  assert.equal(toIsoDocumentDate("SEPT. 7, 2024"), "2024-09-07");
+  assert.equal(toIsoDocumentDate("09/07/2024"), "2024-09-07");
+  assert.equal(toIsoDocumentDate("2024-09-07"), "2024-09-07");
+  assert.equal(toIsoDocumentDate(""), "");
+});

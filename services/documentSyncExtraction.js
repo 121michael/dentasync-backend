@@ -1461,6 +1461,24 @@ function normalizeDate(value) {
   return "";
 }
 
+/** Convert a document date (SEPT 7, 2024 / 09/07/2024 / ISO) to YYYY-MM-DD for save. */
+function toIsoDocumentDate(value) {
+  const text = cleanLine(value);
+  if (!text) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    const parsed = new Date(`${text}T00:00:00.000Z`);
+    if (!Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === text) return text;
+  }
+  const fromWritten = normalizeDate(text);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(fromWritten)) return fromWritten;
+  const repaired = repairNoisyWrittenDate(text);
+  if (repaired) {
+    const fromRepaired = normalizeDate(repaired);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(fromRepaired)) return fromRepaired;
+  }
+  return "";
+}
+
 function normalizeAmount(value) {
   const text = cleanLine(value);
   if (!text) return "";
@@ -3306,6 +3324,7 @@ module.exports = {
   ensureReadableExtraction,
   normalizePhone,
   normalizeDate,
+  toIsoDocumentDate,
   normalizeAmount,
   normalizeAge,
   inferProcedure,
