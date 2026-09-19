@@ -376,38 +376,6 @@ export const api = {
     }
     return response.blob();
   },
-  // Admin patient document intake (upload/scan → extract → review → save to canonical record)
-  getAdminIntakeSessions: () => request("/admin/patient-intake/sessions", { silent: true }),
-  createAdminIntakeSession: () => request("/admin/patient-intake/sessions", { method: "POST" }),
-  getAdminIntakeSession: (id) => request(`/admin/patient-intake/sessions/${id}`, { silent: true }),
-  uploadAdminIntakeDocument: (sessionId, file, sourceType = "upload") => {
-    const data = new FormData();
-    data.append("document", file);
-    data.append("sourceType", sourceType);
-    return request(`/admin/patient-intake/sessions/${sessionId}/documents`, { method: "POST", body: data });
-  },
-  removeAdminIntakeDocument: (sessionId, documentId) =>
-    request(`/admin/patient-intake/sessions/${sessionId}/documents/${documentId}`, { method: "DELETE" }),
-  updateAdminIntakeSession: (sessionId, body) =>
-    request(`/admin/patient-intake/sessions/${sessionId}`, { method: "PUT", body }),
-  matchAdminIntakeSession: (sessionId) =>
-    request(`/admin/patient-intake/sessions/${sessionId}/matches`, { method: "POST" }),
-  confirmAdminIntakeSession: (sessionId, body) =>
-    request(`/admin/patient-intake/sessions/${sessionId}/confirm`, { method: "POST", body }),
-  cancelAdminIntakeSession: (sessionId) =>
-    request(`/admin/patient-intake/sessions/${sessionId}/cancel`, { method: "POST" }),
-  async getAdminIntakeDocumentBlob(sessionId, documentId) {
-    const token = accessToken();
-    const response = await fetch(
-      `${API_BASE}/admin/patient-intake/sessions/${sessionId}/documents/${documentId}/file`,
-      { headers: token ? { Authorization: `Bearer ${token}` } : {} }
-    );
-    if (!response.ok) {
-      const data = await response.json().catch(() => null);
-      throw new ApiError(data?.message || "Unable to load document preview.", response.status, data);
-    }
-    return response.blob();
-  },
   getAdminPatientDocuments: (userId) => request(`/admin/patients/${userId}/documents`, { silent: true }),
   getAdminNotifications: (options = {}) => request("/admin/notifications", options),
   markAdminNotificationRead: (id) => request(`/admin/notifications/${id}/read`, { method: "PATCH" }),
