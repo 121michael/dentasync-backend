@@ -17,8 +17,9 @@ export function ToothDetailsPanel({
         <span className="eyebrow">Tooth details</span>
         <h3>Select a tooth</h3>
         <p className="muted-copy">
-          Click any FDI tooth to inspect its chart status. Status is updated automatically when you
-          save a treatment with an affected tooth — no separate “mark tooth” step.
+          {readOnly
+            ? "Click any FDI tooth to inspect its existing chart status. Staff cannot change treatments from this panel."
+            : "Click any FDI tooth to inspect its chart status. Status is updated automatically when you save a treatment with an affected tooth — no separate “mark tooth” step."}
         </p>
       </aside>
     );

@@ -2617,6 +2617,11 @@ strong {
 .staff-modal-backdrop { position: fixed; z-index: 70; inset: 0; display: grid; place-items: center; padding: 1rem; background: rgba(24, 13, 35, .52); backdrop-filter: blur(3px); }
 .staff-modal { width: min(100%, 520px); max-height: min(760px, calc(100vh - 2rem)); overflow-y: auto; padding: 1.1rem; border: 1px solid var(--border); border-radius: 18px; background: var(--surface-solid); box-shadow: var(--shadow-md); }
 .staff-modal--wide { width: min(100%, 1100px); }
+.staff-modal--record {
+  width: min(100%, 1100px);
+  max-height: min(92vh, 980px);
+  overflow: auto;
+}
 .staff-modal__header { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: 1rem; }
 .staff-modal__header h2 { font-size: 1.12rem; letter-spacing: -.035em; }
 .staff-modal__form,
@@ -5526,6 +5531,9 @@ strong {
     position: static;
   }
   .dentist-modal--wide {
+    width: min(100%, 96vw);
+  }
+  .staff-modal--record {
     width: min(100%, 96vw);
   }
   .odo-chart {

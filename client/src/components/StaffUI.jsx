@@ -44,11 +44,11 @@ export function StaffSummaryCard({ label, value, detail, tone = "purple" }) {
   );
 }
 
-export function StaffModal({ title, children, onClose, wide = false }) {
+export function StaffModal({ title, children, onClose, wide = false, record = false }) {
   return (
     <div className="staff-modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section
-        className={`staff-modal ${wide ? "staff-modal--wide" : ""}`}
+        className={`staff-modal ${wide ? "staff-modal--wide" : ""} ${record ? "staff-modal--record" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label={title}
