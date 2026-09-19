@@ -67,18 +67,21 @@ function seedVisitsFromProcedure(procedure = {}) {
   const visits = rawVisits.map((row) => ({ ...emptyVisitRow(), ...(row || {}) }));
   const usable = visits.filter(visitHasSignal);
   if (usable.length) {
-    // Dental charts are single-row: always organize Date / Procedure / Amount from primary.
+    // Every extracted row is kept as its own line; a multi-row document is never
+    // collapsed into the single primary procedure.
+    if (usable.length > 1) return usable;
+    // Single-row documents: fill only the cells the table left blank.
     const first = { ...usable[0] };
-    if (procedure.treatment) first.treatment = procedure.treatment;
-    if (procedure.treatmentDate) first.treatmentDate = procedure.treatmentDate;
-    if (procedure.amountCharged) first.amountCharged = procedure.amountCharged;
+    if (procedure.treatment && !first.treatment) first.treatment = procedure.treatment;
+    if (procedure.treatmentDate && !first.treatmentDate) first.treatmentDate = procedure.treatmentDate;
+    if (procedure.amountCharged && !first.amountCharged) first.amountCharged = procedure.amountCharged;
     // CREDIT OCR sometimes lands in Amount Paid — keep the fee in Amount Charged.
     if (!String(first.amountCharged || "").trim() && String(first.amountPaid || "").trim()) {
       first.amountCharged = first.amountPaid;
       first.amountPaid = "";
     }
     if (procedure.dentistName && !first.dentistName) first.dentistName = procedure.dentistName;
-    return [first, ...usable.slice(1)];
+    return [first];
   }
   const seeded = {
     ...emptyVisitRow(),

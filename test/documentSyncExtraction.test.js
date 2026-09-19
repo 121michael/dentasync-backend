@@ -728,7 +728,7 @@ CREDIT
   assert.equal(payload.patient.phone, "09456449510");
 });
 
-test("amount-only OCR soup snaps 3100 to 3000 and does not invent a blank procedure", () => {
+test("amount is kept exactly as written and a blank procedure is not invented", () => {
   const sample = `
 NAME
 ANGELOU OBAS-BAGHTNAN
@@ -743,12 +743,12 @@ CREDIT
 `;
   const { payload } = extractStructuredPayload(sample);
   assert.equal(payload.procedure.treatment, "");
-  assert.equal(payload.procedure.amountCharged, "3000");
-  assert.equal(payload.procedure.visits[0].amountCharged, "3000");
+  assert.equal(payload.procedure.amountCharged, "3100");
+  assert.equal(payload.procedure.visits[0].amountCharged, "3100");
   assert.equal(payload.procedure.visits[0].treatment, "");
 });
 
-test("when prophylaxis text exists with 3100 fee, Procedure Date and Amount Charged all fill", () => {
+test("when prophylaxis text exists with a 3100 fee, Procedure Date and Amount Charged all fill", () => {
   const sample = `
 NAME
 ANGELOU OBAS-BAGHTNAN
@@ -770,9 +770,9 @@ CREDIT
   assert.equal(payload.patient.phone, "09154441570");
   assert.equal(payload.procedure.treatment, "Oral Prophylaxis");
   assert.match(payload.procedure.treatmentDate, /SEPT\s*7/i);
-  assert.equal(payload.procedure.amountCharged, "3000");
+  assert.equal(payload.procedure.amountCharged, "3100");
   assert.equal(payload.procedure.visits[0].treatment, "Oral Prophylaxis");
-  assert.equal(payload.procedure.visits[0].amountCharged, "3000");
+  assert.equal(payload.procedure.visits[0].amountCharged, "3100");
   assert.equal(payload.procedure.visits[0].amountPaid, "");
 });
 

@@ -1,6 +1,7 @@
 "use strict";
 
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const { extractBestImageText, scoreDocumentText, extractTreatmentZoneText } = require("./documentImagePrep");
 const { extractFieldsWithGemini } = require("./documentVisionExtraction");
@@ -42,6 +43,10 @@ const CLINIC_PROCEDURE_KEYWORDS = [
     value: "Ortho Adjustment",
     pattern:
       /ortho(?:dontic)?\s*adjust|brace\s*adjust|adjustment|adjm(?:ent)?|adium|odilum|aqlum|azlut|ortho.{0,12}adj/i,
+  },
+  {
+    value: "Oral Surgery",
+    pattern: /oral\s*surgery|odontectomy|impacted\s*tooth\s*surgery/i,
   },
   {
     // Never map Admin Sync UI "EXTRACTION" chrome to EXO — require EXO or tooth extraction.
@@ -150,10 +155,15 @@ function emptyVisitRow() {
   };
 }
 
-/** Resolve handwritten/OCR procedure text to usual clinic keywords when matched. */
-function resolveClinicProcedure(value) {
+/**
+ * Resolve handwritten/OCR procedure text to usual clinic keywords when matched.
+ * `allowBareExtraction` is set when reading a treatment-table row, where a bare
+ * "Extraction" cell really is a tooth extraction rather than UI wording.
+ */
+function resolveClinicProcedure(value, options = {}) {
   const text = cleanLine(value);
   if (!text) return "";
+  const allowBareExtraction = Boolean(options.allowBareExtraction);
   // Do not treat Admin Sync UI chrome ("DOCUMENT DATA EXTRACTION") as a dental procedure.
   if (looksLikeAdminSyncUiChrome(text) || /document\s*data\s*extraction/i.test(text)) {
     const withoutChrome = text
@@ -165,8 +175,9 @@ function resolveClinicProcedure(value) {
     }
   }
   // Bare UI word EXTRACTION (without tooth context) is not a clinic procedure.
-  if (/^extraction$/i.test(text) || /^data\s*extraction$/i.test(text)) {
-    return "";
+  if (/^data\s*extraction$/i.test(text)) return "";
+  if (/^extraction$/i.test(text)) {
+    return allowBareExtraction ? "EXO" : "";
   }
   // Handwritten charts often write just "OP" for Oral Prophylaxis.
   if (/^(op|o\.?p\.?)$/i.test(text) || (/^\s*op\s*$/i.test(text))) {
@@ -185,6 +196,9 @@ function resolveClinicProcedure(value) {
       }
       return entry.value;
     }
+  }
+  if (allowBareExtraction && /\bextractions?\b/i.test(text)) {
+    return toothSuffix ? `EXO${toothSuffix}` : "EXO";
   }
   return "";
 }
@@ -446,54 +460,13 @@ function forceFillDentalChartTreatment(payload, rawText = "", fields = {}) {
     if (phone) payload.patient.phone = phone;
   }
 
-  // Amount only from digits/OCR tokens present on the document (including 800 / 8oo repairs).
-  if (
-    /oral\s*prophylaxis/i.test(payload.procedure.treatment || "") &&
-    !isPlausibleClinicAmount(String(payload.procedure.amountCharged || "").replace(/,/g, ""))
-  ) {
-    const fee800 = text.match(/\b(800|8[oO]{2})\b/);
-    if (fee800?.[1]) {
-      payload.procedure.amountCharged = /8[oO]{2}/.test(fee800[1]) ? "800" : fee800[1];
-    }
-  }
-
+  // Amount only from digits / OCR letter-soup tokens present on the document.
   if (!isPlausibleClinicAmount(String(payload.procedure.amountCharged || "").replace(/,/g, ""))) {
-    const fromFields = repairOcrAmountToken(fields.amountCharged || "");
-    let amount = fromFields || "";
-    if (!amount) {
-      amount =
-        repairOcrAmountToken((text.match(/\b([bBeE8][0oOdqvuw]{2,4})\b/) || [])[1] || "") ||
-        "";
-    }
-    // Prefer a near-document amount token (e.g. 3171 → 3000) only when digits exist on the scan.
-    if (!amount && /oral\s*prophylaxis|r?orhilax|pr[o0].{0,8}h[il1y]|irq?tial/i.test(text)) {
-      const near = [...text.matchAll(/\b([1-9]\d{3})\b/g)]
-        .map((m) => Number(m[1]))
-        .filter((n) => n >= 2500 && n <= 3600);
-      if (near.length) {
-        const candidate = near.sort((a, b) => Math.abs(a - 3000) - Math.abs(b - 3000))[0];
-        amount =
-          Math.abs(candidate - 3000) <= 200
-            ? "3000"
-            : snapClinicFee(String(candidate)) || String(candidate);
-      }
-    }
+    const amount =
+      repairOcrAmountToken(fields.amountCharged || "") ||
+      repairOcrAmountToken((text.match(/\b([bBeE8][0oOdqvuw]{2,4})\b/) || [])[1] || "") ||
+      "";
     if (amount) payload.procedure.amountCharged = amount;
-  } else if (
-    /oral\s*prophylaxis|r?orhilax|pr[o0].{0,8}h[il1y]/i.test(
-      `${payload.procedure.treatment}\n${text}`
-    )
-  ) {
-    // Upgrade weak 1000 placeholders when a near-3000 OCR amount exists on the chart.
-    const current = Number(String(payload.procedure.amountCharged || "").replace(/,/g, ""));
-    const near = [...`${text}\n${fields.amountCharged || ""}`.matchAll(/\b([1-9]\d{3})\b/g)]
-      .map((m) => Number(m[1]))
-      .filter((n) => n >= 2500 && n <= 3600);
-    if (current > 0 && current <= 1500 && near.length) {
-      const candidate = near.sort((a, b) => Math.abs(a - 3000) - Math.abs(b - 3000))[0];
-      payload.procedure.amountCharged =
-        Math.abs(candidate - 3000) <= 200 ? "3000" : snapClinicFee(String(candidate)) || String(candidate);
-    }
   }
 
   // Keep the first visit row aligned with the best primary DATE / PROCEDURE / AMOUNT.
@@ -805,58 +778,40 @@ function glueSplitAmounts(text) {
     .replace(/\b([1-9]\d{2})\s+0\b/g, "$10");
 }
 
-function isPlausibleClinicAmount(value) {
+/**
+ * `allowLarge` is used when the value sits in a treatment-table row, where a
+ * five-figure fee (12,000 for a bridge) is normal; loose page text keeps the
+ * stricter rule so glued OCR digits are not read as money.
+ */
+function isPlausibleClinicAmount(value, options = {}) {
   const n = Number(String(value || "").replace(/,/g, ""));
   if (!Number.isFinite(n) || n < 100 || n > 20000) return false;
   // Reject calendar years mistaken for fees (keep plain 2000/3000 clinic amounts).
   if (/^19\d{2}$/.test(String(Math.trunc(n)))) return false;
   if (/^20[1-3]\d$/.test(String(Math.trunc(n)))) return false;
   // Glued OCR like 19002 / 20210 from phone/date soup.
-  if (String(Math.trunc(n)).length >= 5 && n > 10000) return false;
-  if (/^\d{1,2}20\d{2}$/.test(String(Math.trunc(n)))) return false; // day+year glue
+  if (!options.allowLarge && String(Math.trunc(n)).length >= 5 && n > 10000) return false;
+  if (!options.allowLarge && /^\d{1,2}20\d{2}$/.test(String(Math.trunc(n)))) return false; // day+year glue
   return true;
 }
 
-/** Snap near-miss OCR fees (3070, 2980, 3100) to common clinic round amounts. */
-function snapClinicFee(value) {
-  const n = Number(String(value || "").replace(/,/g, ""));
-  if (!Number.isFinite(n) || n < 400 || n > 20000) return "";
-  const rounds = [500, 800, 1000, 1200, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 6000, 7000, 8000, 10000];
-  if (rounds.includes(Math.trunc(n))) return String(Math.trunc(n));
-  let best = "";
-  // Allow ~120 so OCR 3100 / 2900 near 3000 still snaps.
-  let bestDist = 121;
-  for (const round of rounds) {
-    const dist = Math.abs(n - round);
-    if (dist < bestDist) {
-      best = String(round);
-      bestDist = dist;
-    }
-  }
-  return best;
-}
-
-/** Keep only clear clinic fee amounts (exact rounds or near-miss snaps). */
+/**
+ * Keep the amount exactly as the document wrote it (₱1,000 / 1000 / 1,250.50).
+ * Only letter soup that OCR produced instead of digits is repaired; a readable
+ * amount is never rounded to a "usual" clinic fee.
+ */
 function preferClinicFeeAmount(value) {
-  const original = cleanLine(value);
+  const original = cleanLine(value).replace(/(?:₱|php)/gi, "").trim();
   const raw = original.replace(/,/g, "").trim();
   if (!raw) return "";
   const n = Number(raw);
   if (!Number.isFinite(n)) {
-    const repaired = repairOcrAmountToken(raw);
-    if (!repaired) return "";
-    return preferClinicFeeAmount(repaired);
+    const repaired = repairOcrAmountToken(original);
+    return repaired || "";
   }
-  const exact = [500, 800, 1000, 1200, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 6000, 7000, 8000, 10000];
-  if (exact.includes(Math.trunc(n))) {
-    // Preserve written comma formatting from the document when present.
-    if (/^\d{1,3}(,\d{3})+$/.test(original.replace(/\s/g, ""))) {
-      return original.replace(/\s/g, "");
-    }
-    return String(Math.trunc(n));
-  }
-  // Near-miss OCR like 3100 / 2900 → 3000. Never keep non-round junk fees.
-  return snapClinicFee(raw) || "";
+  if (!isPlausibleClinicAmount(raw)) return "";
+  // Preserve the written formatting (commas / decimals) from the document.
+  return original;
 }
 
 function looksLikeAdminSyncUiChrome(text) {
@@ -927,19 +882,7 @@ function extractNoisyTreatmentRecordFields(rawText) {
     .filter((n) => isPlausibleClinicAmount(n));
 
   let amountCharged = "";
-  // Prefer the common OCR split of 5,000 ("500 0") on installation forms.
-  if (/installatio|qatho\s*install|ortho\s*install/i.test(text) && /500\s+0\b/.test(text)) {
-    amountCharged = "5000";
-  }
-  // Installation rows are typically 4k–10k; prefer round clinic fees.
-  if (!amountCharged && /installatio|qatho\s*install|ortho\s*install/i.test(text)) {
-    const installAmounts = amounts.filter(
-      (n) => n >= 4000 && n <= 15000 && n % 50 === 0 && n !== 10050
-    );
-    if (installAmounts.includes(5000)) amountCharged = "5000";
-    else if (installAmounts.length) amountCharged = String(Math.max(...installAmounts));
-  }
-  if (!amountCharged) {
+  {
     const paidAmounts = amounts.filter((n) => n >= 400 && n <= 20000);
     if (paidAmounts.length) amountCharged = String(Math.max(...paidAmounts));
   }
@@ -985,10 +928,6 @@ function extractNoisyTreatmentRecordFields(rawText) {
       }
     }
     match = monthDateRe.exec(dateSearchText);
-  }
-  // Explicit Nov 16 / 2023 pattern common on this clinic's installation row.
-  if (!treatmentDate && /nov\s*16/i.test(text) && /\b2023\b/.test(text)) {
-    treatmentDate = "2023-11-16";
   }
 
   const exoTeeth = [...text.matchAll(/\b(\d{1,2})\s*[-–]\s*(\d{1,2})\b/g)].map(
@@ -1036,9 +975,175 @@ function inferProcedureToken(chunk) {
   return inferProcedure(chunk);
 }
 
+/** Treatment-table column headers as written on clinic forms and printed records. */
+const TABLE_COLUMN_ALIASES = [
+  { key: "treatmentDate", pattern: /^(?:date|treatment\s*date|visit\s*date|date\s*performed)$/i },
+  {
+    key: "toothNos",
+    pattern: /^(?:tooth(?:\s*(?:no|nos|number|numbers|#)\.?\/?s?)?|teeth|no\.?\/?s)$/i,
+  },
+  {
+    key: "treatment",
+    pattern: /^(?:procedure|procedures|treatment|treatments|description|service|work\s*done)$/i,
+  },
+  { key: "dentistName", pattern: /^(?:dentist\/?s?|doctor|attending|provider)$/i },
+  {
+    key: "amountCharged",
+    pattern: /^(?:amount(?:\s*charged)?|charges?|charged|debit|fee|cost|price|total)$/i,
+  },
+  { key: "amountPaid", pattern: /^(?:amount\s*paid|paid|credit|payment)$/i },
+  { key: "balance", pattern: /^(?:balance|bal\.?)$/i },
+  {
+    key: "nextAppt",
+    pattern: /^(?:next\s*appt\.?|next\s*appointment|return|recall|follow[\s-]*up)$/i,
+  },
+];
+
+/** Split a printed table line into cells (pipe, tab, or wide-space separated). */
+function splitTableCells(line) {
+  const text = String(line || "");
+  if (text.includes("|")) {
+    return text.split("|").map((cell) => cleanLine(cell));
+  }
+  if (/\t/.test(text)) {
+    return text.split(/\t+/).map((cell) => cleanLine(cell));
+  }
+  if (/\S {2,}\S/.test(text)) {
+    return text.split(/ {2,}/).map((cell) => cleanLine(cell));
+  }
+  return [];
+}
+
+/** Read the table header so each value lands in the column the document used. */
+function detectTableColumns(line) {
+  const cells = splitTableCells(line);
+  const source = cells.length >= 3 ? cells : cleanLine(line).split(/\s{1,}(?=[A-Za-z])/);
+  if (source.length < 3) return null;
+  const keys = source.map((cell) => {
+    const label = cleanLine(cell).replace(/[.:]+$/, "");
+    const alias = TABLE_COLUMN_ALIASES.find((entry) => entry.pattern.test(label));
+    return alias ? alias.key : null;
+  });
+  const named = keys.filter(Boolean);
+  if (named.length < 3 || new Set(named).size !== named.length) return null;
+  if (!named.includes("treatment") && !named.includes("treatmentDate")) return null;
+  return keys;
+}
+
+// Peso amounts are written as ₱1,000 / PHP 1000 / P1,000 / 1000 on clinic forms.
+const CURRENCY_TOKEN_RE =
+  /(?<![\d.,])\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?(?!\d)|(?<![\d.,])\d{2,6}(?:\.\d{1,2})?(?!\d)/g;
+
+function stripCurrencySymbols(value) {
+  return String(value || "")
+    .replace(/(?:₱|php)/gi, " ")
+    .replace(/\bp(?=\s*\d)/gi, " ");
+}
+
+/** Amount tokens exactly as written on the document (commas/decimals preserved). */
+function findAmountTokens(text, options = {}) {
+  const tokens = [];
+  for (const match of String(text || "").matchAll(CURRENCY_TOKEN_RE)) {
+    const written = cleanLine(stripCurrencySymbols(match[0]));
+    if (!written) continue;
+    if (!isPlausibleClinicAmount(written.replace(/,/g, ""), options)) continue;
+    tokens.push(written);
+  }
+  return tokens;
+}
+
+/** Drop written dates so day/month digits are never read as tooth or money. */
+function stripDateTokens(text) {
+  return String(text || "")
+    .replace(/\b20\d{2}-\d{2}-\d{2}\b/g, " ")
+    .replace(/\b\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}\b/g, " ")
+    .replace(
+      new RegExp(`\\b(${MONTH_TOKEN_RE})\\s*[-.]?\\s*\\d{1,2}(?:st|nd|rd|th)?(?:,)?\\s*(?:20\\d{2})?`, "gi"),
+      " "
+    );
+}
+
+function findToothToken(text) {
+  const source = String(text || "");
+  const range = source.match(/#?\b(\d{1,2})\s*[-–]\s*(\d{1,2})\b(?!\d)/);
+  if (range) return `${range[1]}-${range[2]}`;
+  const labeled = source.match(/\btooth\s*(?:no\.?|#)?\s*(\d{1,2})\b/i);
+  if (labeled) return labeled[1];
+  const hashed = source.match(/#\s*(\d{1,2})\b/);
+  if (hashed) return hashed[1];
+  return "";
+}
+
+function findDentistToken(text) {
+  const match = String(text || "").match(
+    /\bdr\.?\s+[A-Za-z][A-Za-z.'-]{1,}(?:\s+[A-Za-z][A-Za-z.'-]{1,})?/i
+  );
+  return match ? cleanLine(match[0]) : "";
+}
+
+/** Keep the procedure text the document shows, mapped to a canonical clinic label. */
+function readRowProcedure(text) {
+  const raw = cleanLine(text)
+    .replace(/^[\d\W_]+/, "")
+    .replace(/[\W_]+$/, "");
+  if (!raw) return "";
+  const resolved = resolveClinicProcedure(raw, { allowBareExtraction: true });
+  if (resolved) return resolved;
+  if (!isPlausibleProcedure(raw)) return "";
+  if (looksLikeOcrSoup(raw)) return "";
+  return raw;
+}
+
+function emptyParsedRow() {
+  return {
+    treatmentDate: "",
+    treatment: "",
+    amountCharged: "",
+    amountPaid: "",
+    balance: "",
+    dentistName: "",
+    nextAppt: "",
+    toothNos: "",
+  };
+}
+
+/** Map one delimited table line onto the columns named by the header row. */
+function rowFromTableCells(cells, columns) {
+  const row = emptyParsedRow();
+  let filled = 0;
+  cells.forEach((cell, index) => {
+    const key = columns[index];
+    const value = cleanLine(cell);
+    if (!key || !value) return;
+    if (key === "treatment") {
+      row.treatment = readRowProcedure(value);
+      if (row.treatment) filled += 1;
+      return;
+    }
+    if (key === "amountCharged" || key === "amountPaid" || key === "balance") {
+      const [amount] = findAmountTokens(value, { allowLarge: true });
+      if (amount) {
+        row[key] = amount;
+        filled += 1;
+      }
+      return;
+    }
+    if (key === "toothNos") {
+      row.toothNos = findToothToken(value) || (/^\d{1,2}$/.test(value) ? value : "");
+      if (row.toothNos) filled += 1;
+      return;
+    }
+    row[key] = value;
+    filled += 1;
+  });
+  return filled ? row : null;
+}
+
 /**
- * Parse multi-row clinic "TREATMENT RECORD" tables into visit entries.
- * Handles common handwriting layouts where the year sits in the Tooth column.
+ * Parse multi-row clinic treatment tables into visit entries — one row per
+ * treatment written on the document, with each value in its own column.
+ * Handles printed/delimited tables and handwriting layouts where the year,
+ * procedure, or amount wraps onto the following lines.
  */
 function parseTreatmentRecordRows(rawText) {
   const text = String(rawText || "");
@@ -1050,48 +1155,81 @@ function parseTreatmentRecordRows(rawText) {
     "i"
   );
   const slashDateRe = /\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\b/;
+  const isoDateRe = /\b(20\d{2})-(\d{2})-(\d{2})\b/;
 
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => cleanLine(line))
-    .filter(Boolean);
+  const rawLines = String(text).split(/\r?\n/);
+  const lines = rawLines.map((line) => cleanLine(line)).filter(Boolean);
+
+  let columns = null;
+  for (const line of rawLines) {
+    const detected = detectTableColumns(line);
+    if (detected) {
+      columns = detected;
+      break;
+    }
+  }
+
+  // Printed tables keep their cells — read them column by column first.
+  if (columns) {
+    for (const line of rawLines) {
+      if (detectTableColumns(line)) continue;
+      const cells = splitTableCells(line);
+      if (cells.length < 2 || cells.length > columns.length + 1) continue;
+      const row = rowFromTableCells(cells, columns);
+      if (row && (row.treatmentDate || row.treatment || row.amountCharged)) {
+        rows.push({ ...row, raw: cleanLine(line).slice(0, 180) });
+      }
+    }
+    if (rows.length) {
+      const seenCells = new Set();
+      return rows.filter((row) => {
+        const key = `${row.treatmentDate}|${row.treatment}|${row.amountCharged}|${row.toothNos}`;
+        if (seenCells.has(key)) return false;
+        seenCells.add(key);
+        return true;
+      });
+    }
+  }
+
+  const columnKeys = new Set(columns ? columns.filter(Boolean) : []);
+  const extraAmountColumns = ["amountPaid", "balance"].filter((key) => columnKeys.has(key));
 
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
+    if (detectTableColumns(line)) continue;
+    // Scanner/browser chrome ("9/19/26, 1:31 PM  file:///…  1/1") is not a visit.
+    if (/\b\d{1,2}[:.]\d{2}\s*(?:am|pm)\b|\bfile:|https?:|\bpage\s*\d+\s*(?:of|\/)\s*\d+\b/i.test(line)) {
+      continue;
+    }
     const dateMatch = line.match(monthDateRe);
-    const slashMatch =
-      !dateMatch &&
-      /ortho|exo|install|adjust|bracket|prophylax|cleaning|filling|extraction|pr[o0]/i.test(line)
-        ? line.match(slashDateRe)
-        : null;
-    if (!dateMatch && !slashMatch) continue;
+    const isoMatch = !dateMatch ? line.match(isoDateRe) : null;
+    const slashMatch = !dateMatch && !isoMatch ? line.match(slashDateRe) : null;
+    if (!dateMatch && !isoMatch && !slashMatch) continue;
 
     // Keep the row local: current line + following lines that supply year / amount / procedure.
     const next = lines[i + 1] || "";
     const next2 = lines[i + 2] || "";
     const next3 = lines[i + 3] || "";
     const monthDateReLocal = new RegExp(monthDateRe.source, "i");
-    const nextHasOwnDate = monthDateReLocal.test(next) || slashDateRe.test(next);
+    const lineHasOwnDate = (value) =>
+      monthDateReLocal.test(value) || slashDateRe.test(value) || isoDateRe.test(value);
+    const nextHasOwnDate = lineHasOwnDate(next);
     const parts = [line];
     if (!nextHasOwnDate && /^(20\d{2})\b/.test(next)) {
       parts.push(next);
-      if (next2 && !monthDateReLocal.test(next2) && !slashDateRe.test(next2)) {
+      if (next2 && !lineHasOwnDate(next2)) {
         parts.push(next2);
-        if (next3 && !monthDateReLocal.test(next3) && !slashDateRe.test(next3)) {
+        if (next3 && !lineHasOwnDate(next3)) {
           parts.push(next3);
         }
       }
-    } else if (
-      !nextHasOwnDate &&
-      /ortho|exo|install|adjust|bracket|prophylax|cleaning|filling|extraction|pr[o0]|\b\d{3,5}\b/i.test(next)
-    ) {
+    } else if (!nextHasOwnDate && next && (readRowProcedure(next) || findAmountTokens(next).length)) {
+      // Handwritten charts wrap the procedure / amount onto the next line.
       parts.push(next);
       if (
         next2 &&
-        !monthDateReLocal.test(next2) &&
-        !slashDateRe.test(next2) &&
-        (/ortho|exo|install|adjust|bracket|prophylax|cleaning|filling|extraction|pr[o0]|\b\d{3,5}\b/i.test(next2) ||
-          /^(20\d{2})\b/.test(next2))
+        !lineHasOwnDate(next2) &&
+        (readRowProcedure(next2) || findAmountTokens(next2).length || /^(20\d{2})\b/.test(next2))
       ) {
         parts.push(next2);
       }
@@ -1112,45 +1250,44 @@ function parseTreatmentRecordRows(rawText) {
       treatmentDate = year
         ? cleanLine(`${dateMatch[1]} ${dateMatch[2]}, ${year}`)
         : cleanLine(`${dateMatch[1]} ${dateMatch[2]}`);
-      if (!year && !/ortho|exo|install|adjust|prophylax|cleaning|filling|extraction|pr[o0]|\b[1-9]\d{2,5}\b/i.test(window)) {
+      if (!year && !readRowProcedure(window) && !findAmountTokens(window).length) {
         continue;
       }
+    } else if (isoMatch) {
+      treatmentDate = isoMatch[0];
     } else if (slashMatch) {
       let year = slashMatch[3];
       if (year.length === 2) year = `20${year}`;
       treatmentDate = cleanLine(`${slashMatch[1]}/${slashMatch[2]}/${year}`);
     }
 
-    const toothMatch = window.match(/\b(\d{1,2})\s*[-–]\s*(\d{1,2})\b/);
-    const toothNos = toothMatch ? `${toothMatch[1]}-${toothMatch[2]}` : "";
+    const datelessWindow = stripDateTokens(window);
+    const toothNos = findToothToken(datelessWindow);
+    const dentistName = findDentistToken(window);
 
-    const amountMatches = [
-      ...glueSplitAmounts(window)
-        .replace(/,/g, "")
-        .matchAll(/\b([1-9]\d{2,5})(?:\.00)?\b/g),
-    ].map((m) => m[1]);
-    const amountRaw =
-      amountMatches.find((value) => isPlausibleClinicAmount(value)) || "";
-    let amountCharged = "";
-    if (amountRaw) {
-      const withComma = window.match(/\b\d{1,3}(?:,\d{3})+(?:\.\d{2})?\b/);
-      if (withComma && withComma[0].replace(/,/g, "") === amountRaw) {
-        amountCharged = withComma[0];
-      } else {
-        amountCharged = amountRaw;
-      }
-    }
+    const amountSource = toothNos
+      ? datelessWindow.replace(/#?\b\d{1,2}\s*[-–]\s*\d{1,2}\b/, " ")
+      : datelessWindow;
+    // Read amounts as written first; only re-join OCR-split digits when none were found.
+    const amounts = findAmountTokens(amountSource, { allowLarge: true }).length
+      ? findAmountTokens(amountSource, { allowLarge: true })
+      : findAmountTokens(glueSplitAmounts(amountSource), { allowLarge: true });
+    const amountCharged = amounts[0] || "";
+    const extraAmounts = {};
+    // Only fill Amount Paid / Balance when the document actually has those columns.
+    extraAmountColumns.forEach((key, index) => {
+      const value = amounts[index + 1];
+      if (value) extraAmounts[key] = value;
+    });
 
     let treatment = extractRawProcedureText(window, {
       stripTooth: Boolean(toothNos),
-      stripAmount: Boolean(amountCharged),
+      stripAmount: amounts.length > 0,
     });
-    const resolved = resolveClinicProcedure(treatment) || resolveClinicProcedure(window);
-    if (resolved) {
-      treatment = resolved;
-    } else if (treatment && !isPlausibleProcedure(treatment)) {
-      treatment = "";
+    if (dentistName) {
+      treatment = cleanLine(treatment.replace(dentistName, " "));
     }
+    treatment = readRowProcedure(treatment) || readRowProcedure(window);
 
     if (!treatment && !amountCharged && !toothNos) continue;
 
@@ -1158,9 +1295,9 @@ function parseTreatmentRecordRows(rawText) {
       treatmentDate,
       treatment: treatment || "",
       amountCharged,
-      amountPaid: "",
-      balance: "",
-      dentistName: "",
+      amountPaid: extraAmounts.amountPaid || "",
+      balance: extraAmounts.balance || "",
+      dentistName,
       nextAppt: "",
       toothNos,
       raw: window.slice(0, 180),
@@ -1168,12 +1305,16 @@ function parseTreatmentRecordRows(rawText) {
   }
 
   const seen = new Set();
-  return rows.filter((row) => {
+  const unique = rows.filter((row) => {
     const key = `${row.treatmentDate}|${row.treatment}|${row.amountCharged}|${row.toothNos}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
+
+  // Once real procedure rows exist, drop date-only/amount-only noise lines.
+  const named = unique.filter((row) => row.treatment || row.toothNos);
+  return named.length ? named : unique;
 }
 
 function pickPrimaryTreatmentRow(rows) {
@@ -1471,15 +1612,13 @@ function repairOcrAmountToken(value) {
     if (isPlausibleClinicAmount(digits)) {
       return cleaned;
     }
-    const snapped = snapClinicFee(digits);
-    if (snapped) return snapped;
+    return "";
   }
 
   const raw = cleaned.replace(/[^A-Za-z0-9]/g, "");
   if (!raw) return "";
   if (/^[1-9]\d{2,5}$/.test(raw)) {
-    if (isPlausibleClinicAmount(raw)) return raw;
-    return snapClinicFee(raw) || "";
+    return isPlausibleClinicAmount(raw) ? raw : "";
   }
   if (raw.length < 3 || raw.length > 6) return "";
   const chars = raw.toLowerCase().split("");
@@ -1512,8 +1651,6 @@ function repairOcrAmountToken(value) {
   const numeric = Number(digits);
   // Letter-repaired short tokens like b0w -> 200 are usually truncated 2000/3000 amounts.
   if (/[A-Za-z]/.test(cleaned) && numeric < 1000) return "";
-  const snapped = snapClinicFee(numeric);
-  if (snapped) return snapped;
   if (!isPlausibleClinicAmount(numeric)) return "";
   return String(numeric);
 }
@@ -1694,32 +1831,10 @@ function extractDentalChartVisitRow(rawText = "") {
       );
     })();
 
-  let amountCharged = "";
-  const feeExact = text.match(/\b(500|800|1000|1200|1500|2000|2500|3000|3500|4000|4500|5000)\b/);
-  if (feeExact?.[1]) {
-    amountCharged = feeExact[1];
-  }
-  if (!amountCharged) {
-    const fee800 = text.match(/\b(8[oO]{2})\b/);
-    if (fee800?.[1]) amountCharged = "800";
-  }
+  let amountCharged = findAmountTokens(text)[0] || "";
   if (!amountCharged) {
     amountCharged =
       repairOcrAmountToken((text.match(/\b([bBeE8][0oOdqvuw]{2,4})\b/) || [])[1] || "") || "";
-  }
-  if (!amountCharged) {
-    const near = [...text.matchAll(/\b([1-9]\d{2,4})\b/g)]
-      .map((m) => Number(m[1]))
-      .filter((n) => isPlausibleClinicAmount(n) && n >= 100 && n <= 20000 && !/^20[1-3]\d$/.test(String(n)));
-    // Prefer common prophylaxis fees on this clinic form (500 / 800 / 2000 / 3000).
-    const preferred = near.find((n) => [500, 800, 2000, 3000].includes(n));
-    if (preferred) amountCharged = String(preferred);
-    else if (near.length) {
-      const snapped = near
-        .map((n) => ({ n, snap: snapClinicFee(String(n)) }))
-        .find((entry) => entry.snap);
-      if (snapped) amountCharged = snapped.snap;
-    }
   }
 
   if (!treatment && !treatmentDate && !amountCharged) return null;
@@ -1806,6 +1921,14 @@ function isPlausiblePersonName(value) {
   const tokens = text.split(/\s+/).filter(Boolean);
   if (tokens.length > 6) return false;
   if (/amount|procedure|dentist|balance|appt/i.test(text)) return false;
+  // Section headings and form labels are never the patient's name.
+  if (
+    /\b(information|history|record|records|form|clinic|dental|telephone|cellphone|occupation|status|complaint|description|charged|total|summary|page)\b/i.test(
+      text
+    )
+  ) {
+    return false;
+  }
   return /^[A-Za-z][A-Za-z .,'\-]+$/.test(text);
 }
 
@@ -2699,6 +2822,70 @@ function dentalChartMissingCriticalFields(payload) {
   return ageMissing || procedureMissing || dateMissing;
 }
 
+const MAX_OCR_PDF_PAGES = 8;
+
+/**
+ * True when a PDF's text layer carries no readable patient/treatment values —
+ * either a scanned image page or a page whose only text is scanner chrome
+ * (timestamp, file path, "1 of 1"). Those pages still need OCR.
+ */
+function pdfTextIsImageOnly(text) {
+  const source = String(text || "");
+  const alphaNumeric = (source.match(/[A-Za-z0-9]/g) || []).length;
+  if (alphaNumeric < 24) return true;
+  try {
+    return countReadableDocumentFields(extractStructuredPayload(source).payload) === 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Rasterize a scanned/image-only PDF and OCR every page with the same image
+ * pipeline used for photos, so scanned PDFs fill the form like JPG/PNG scans.
+ */
+async function ocrScannedPdf(parser) {
+  const shots = await parser.getScreenshot({
+    imageBuffer: true,
+    imageDataUrl: false,
+    scale: 2,
+  });
+  const pages = (shots?.pages || []).slice(0, MAX_OCR_PDF_PAGES);
+  const texts = [];
+  let fields = {};
+  let confidence = 0;
+  let pagesRead = 0;
+
+  for (const page of pages) {
+    if (!page?.data?.length) continue;
+    const tempPath = path.join(
+      os.tmpdir(),
+      `doc-sync-pdf-${process.pid}-${Date.now()}-p${page.pageNumber || pagesRead + 1}.png`
+    );
+    fs.writeFileSync(tempPath, Buffer.from(page.data));
+    try {
+      const best = await extractBestImageText(tempPath);
+      if (best?.text) texts.push(best.text);
+      // Later pages only fill gaps — page 1 usually holds the patient header.
+      for (const [key, value] of Object.entries(best?.fields || {})) {
+        if (key === "visits") {
+          const rows = Array.isArray(value) ? value : [];
+          fields.visits = [...(fields.visits || []), ...rows];
+        } else if (!fields[key] && value) {
+          fields[key] = value;
+        }
+      }
+      confidence = Math.max(confidence, Number(best?.confidence || 0));
+      pagesRead += 1;
+      if (best?.uprightPath) fs.unlink(best.uprightPath, () => {});
+    } finally {
+      fs.unlink(tempPath, () => {});
+    }
+  }
+
+  return { text: texts.filter(Boolean).join("\n"), fields, confidence, pagesRead };
+}
+
 async function extractTextFromFile(filePath, mimeType, originalName) {
   const extension = path.extname(originalName || filePath).toLowerCase();
   const isPdf = mimeType === "application/pdf" || extension === ".pdf";
@@ -2715,15 +2902,36 @@ async function extractTextFromFile(filePath, mimeType, originalName) {
     const parser = new PDFParse({ data: buffer });
     try {
       const parsed = await parser.getText();
+      // getText() returns every page, so multi-page records stay complete.
       const text = String(parsed?.text || "").trim();
-      if (text) {
+      if (text && !pdfTextIsImageOnly(text)) {
         return { text, method: "pdf-text" };
       }
+
+      try {
+        const scanned = await ocrScannedPdf(parser);
+        if (scanned.text.trim()) {
+          return {
+            text: [text, scanned.text].filter(Boolean).join("\n"),
+            method: `pdf-image+ocr(${scanned.pagesRead} page${scanned.pagesRead === 1 ? "" : "s"})`,
+            fields: scanned.fields,
+            confidence: scanned.confidence,
+            warning:
+              scanned.confidence && scanned.confidence < 55
+                ? "Scanned PDF read with OCR. Please verify every field against the document preview."
+                : null,
+          };
+        }
+      } catch (error) {
+        console.warn("Scanned PDF OCR skipped:", error.message);
+      }
+
+      if (text) return { text, method: "pdf-text" };
       return {
         text: "",
         method: "pdf-image-scan-required",
         warning:
-          "This PDF appears to be a scanned image. Upload a JPG/PNG scan or use Scan Document.",
+          "This PDF appears to be a scanned image that could not be read. Upload a JPG/PNG scan or use Scan Document.",
       };
     } finally {
       if (typeof parser.destroy === "function") {
@@ -3038,7 +3246,6 @@ module.exports = {
   resolveClinicProcedure,
   toReadableClinicProcedure,
   preferClinicFeeAmount,
-  snapClinicFee,
   pickBestDentalChartAge,
   forceFillDentalChartTreatment,
   dentalChartMissingCriticalFields,
