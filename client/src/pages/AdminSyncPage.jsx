@@ -982,6 +982,19 @@ export function AdminSyncPage() {
                   Existing patient match: {matchInfo.match.fullName} (ID {matchInfo.match.id})
                 </p>
               ) : null}
+
+              {matchInfo?.conflicts?.length ? (
+                <p className="inline-alert inline-alert--error">
+                  This document disagrees with the saved record — review before saving:{" "}
+                  {matchInfo.conflicts
+                    .map(
+                      (conflict) =>
+                        `${conflict.field}: document says ${conflict.documentValue}, record has ${conflict.existingValue}`
+                    )
+                    .join("; ")}
+                  . Saved patient details are kept unchanged.
+                </p>
+              ) : null}
             </div>
           </div>
         </section>

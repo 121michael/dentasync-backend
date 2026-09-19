@@ -245,6 +245,37 @@ async function findMatchingClinicalPatient(client, patient) {
   return { record: null, matchReason: null };
 }
 
+/**
+ * Values the document disagrees with on the matched record. Saving never
+ * overwrites stored demographics, so the Admin is told instead of silently
+ * keeping one of the two values.
+ */
+function findPatientConflicts(payload, record) {
+  if (!record) return [];
+  const compare = [
+    { field: "Phone", documentValue: payload.phone, existingValue: record.phone },
+    {
+      field: "Date of Birth",
+      documentValue: payload.dateOfBirth,
+      existingValue: record.date_of_birth
+        ? new Date(record.date_of_birth).toISOString().slice(0, 10)
+        : "",
+    },
+    { field: "Email", documentValue: payload.email, existingValue: record.email },
+  ];
+  return compare
+    .filter(({ documentValue, existingValue }) => {
+      const left = String(documentValue || "").trim().toLowerCase();
+      const right = String(existingValue || "").trim().toLowerCase();
+      return left && right && left !== right;
+    })
+    .map(({ field, documentValue, existingValue }) => ({
+      field,
+      documentValue: String(documentValue),
+      existingValue: String(existingValue),
+    }));
+}
+
 function mapMatchRecord(row) {
   if (!row) return null;
   return {
@@ -557,6 +588,7 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
         match: mapMatchRecord(match.record),
         matchReason: match.matchReason,
         isNewPatient: !match.record,
+        conflicts: findPatientConflicts(payload.patient, match.record),
         proposedPatient: {
           fullName: payload.patient.fullName,
           dateOfBirth: payload.patient.dateOfBirth || null,

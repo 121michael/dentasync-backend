@@ -669,6 +669,19 @@ function applyVisionVisits(payload, visits = []) {
   if (!usable.length) return payload;
 
   const existing = normalizeVisitRows(payload.procedure?.visits || []);
+  // Layout-aware rows (EasyOCR/vision) often miss the Date column that the
+  // parsed table already has — keep the richer set and only fill its blanks.
+  if (existing.length && usable.length <= existing.length) {
+    payload.procedure.visits = existing.map((row, index) => {
+      const candidate = usable[index] || {};
+      const merged = { ...row };
+      for (const key of Object.keys(emptyVisitRow())) {
+        if (!merged[key] && candidate[key]) merged[key] = candidate[key];
+      }
+      return merged;
+    });
+    return payload;
+  }
   if (usable.length >= existing.length) {
     payload.procedure.visits = usable;
     const primary = pickPrimaryTreatmentRow(usable);
