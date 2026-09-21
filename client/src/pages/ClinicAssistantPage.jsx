@@ -7,7 +7,7 @@ export function ClinicAssistantPage() {
   const [messages, setMessages] = useState([
     {
       role: "assistant",
-      text: "Hi — I can help with clinic services, booking, HMO coverage, queue check-in, and general oral-care information. Use the + button to attach a dental photo or X-ray for preliminary review. I cannot diagnose conditions or replace your dentist.",
+      text: "Hi — I can help with Amethyst Dental hours, location, services, booking, queue check-in, and questions about teeth and oral care. Use + to attach a dental photo or X-ray for a preliminary look. I cannot diagnose conditions or replace your dentist.",
     },
   ]);
   const [input, setInput] = useState("");
@@ -103,7 +103,7 @@ export function ClinicAssistantPage() {
       <SectionHeading
         eyebrow="Clinic information"
         title="AI Clinic Assistant"
-        detail="Ask about services and appointments, or attach a dental photo/X-ray with +. Preliminary image notes are not a diagnosis."
+        detail="Ask about teeth, oral care, clinic hours, services, and appointments. Attach a dental photo or X-ray with +. Preliminary notes are not a diagnosis."
       />
 
       <section className="glass-card assistant-panel">
@@ -190,7 +190,7 @@ export function ClinicAssistantPage() {
             <input
               value={input}
               onChange={(event) => setInput(event.target.value)}
-              placeholder="Ask the AI Assistant… or attach an image with +"
+              placeholder="Ask about teeth, clinic hours, services…"
               disabled={busy}
               maxLength={800}
             />

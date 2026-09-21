@@ -10,7 +10,7 @@ const jwt = require("jsonwebtoken");
 const multer = require("multer");
 const { linkClinicalRecordsToUser } = require("../services/clinicalPatients");
 const { estimateWaitMinutesForPosition } = require("../services/waitTime");
-const { answerWithOptionalGemini } = require("../services/clinicAssistant");
+const { answerWithOptionalGemini, loadClinicProfile } = require("../services/clinicAssistant");
 const { analyzeDentalImageBuffer, DISCLAIMER: IMAGE_ANALYSIS_DISCLAIMER } = require("../services/dentalImageAnalysis");
 const staffCheckIn = require("../services/staffCheckIn");
 const { insertPatientNotification, mapPatientNotification } = require("../services/patientPortalNotifications");
@@ -1547,7 +1547,12 @@ function createPatientPortalRouter({
 
     try {
       if (!req.file) {
-        const response = await answerWithOptionalGemini(question, SERVICES);
+        const clinic = await loadClinicProfile(db);
+        const response = await answerWithOptionalGemini(question, {
+          services: SERVICES,
+          dentists: DENTISTS,
+          clinic,
+        });
         return res.json({
           answer: response.answer,
           source: response.source,
