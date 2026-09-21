@@ -8,12 +8,21 @@ import {
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
 
-function displayDate(value) {
+function displayDate(value, fallback = "—") {
+  if (value == null || value === "") return fallback;
+  const text = typeof value === "string" ? value.trim() : value;
+  const date =
+    text instanceof Date
+      ? text
+      : /^\d{4}-\d{2}-\d{2}/.test(String(text))
+        ? new Date(`${String(text).slice(0, 10)}T00:00:00`)
+        : new Date(text);
+  if (Number.isNaN(date.getTime())) return fallback;
   return new Intl.DateTimeFormat("en-US", {
     month: "long",
     day: "numeric",
     year: "numeric",
-  }).format(new Date(`${value}T00:00:00`));
+  }).format(date);
 }
 
 function formatSize(size) {

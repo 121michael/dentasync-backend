@@ -7,6 +7,8 @@ const bcrypt = require("bcrypt");
 const express = require("express");
 const multer = require("multer");
 
+const { portalDate, portalTime } = require("../services/portalDates");
+
 const SERVICES = [
   {
     id: "cleaning",
@@ -161,8 +163,8 @@ function mapAppointment(appointment) {
     id: appointment.id,
     treatment: appointment.service_name,
     dentist: appointment.dentist_name,
-    date: appointment.appointment_date,
-    time: appointment.appointment_time,
+    date: portalDate(appointment.appointment_date),
+    time: portalTime(appointment.appointment_time),
     location: appointment.clinic_location,
     coverage: appointment.coverage_type,
     hmoProvider: appointment.hmo_provider,

@@ -24,20 +24,40 @@ function tomorrow() {
   return date.toISOString().slice(0, 10);
 }
 
-function displayDate(value) {
+function displayDate(value, fallback = "Date pending") {
+  if (value == null || value === "") return fallback;
+  const text = typeof value === "string" ? value.trim() : value;
+  const date =
+    text instanceof Date
+      ? text
+      : /^\d{4}-\d{2}-\d{2}/.test(String(text))
+        ? new Date(`${String(text).slice(0, 10)}T00:00:00`)
+        : new Date(text);
+  if (Number.isNaN(date.getTime())) return fallback;
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
-  }).format(new Date(`${value}T00:00:00`));
+  }).format(date);
 }
 
-function displayTime(value) {
-  const [hours, minutes] = value.split(":");
+function displayTime(value, fallback = "—") {
+  if (value == null || value === "") return fallback;
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return fallback;
+    return new Intl.DateTimeFormat("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(value);
+  }
+  const [hours, minutes] = String(value).split(":");
+  if (!/^\d{1,2}$/.test(hours || "") || !/^\d{2}$/.test(minutes || "")) return fallback;
+  const date = new Date(2026, 0, 1, Number(hours), Number(minutes));
+  if (Number.isNaN(date.getTime())) return fallback;
   return new Intl.DateTimeFormat("en-US", {
     hour: "numeric",
     minute: "2-digit",
-  }).format(new Date(2026, 0, 1, Number(hours), Number(minutes)));
+  }).format(date);
 }
 
 function currency(value) {
