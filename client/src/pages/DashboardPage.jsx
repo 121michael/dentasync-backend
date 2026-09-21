@@ -15,6 +15,7 @@ import {
 import { api } from "../api";
 import { DetailLink, ErrorState, LoadingState } from "../components/UI";
 import { PatientQrCheckInScanner } from "../components/PatientQrCheckInScanner";
+import { getPatientNotificationTarget } from "../patientNotificationNav";
 
 function greeting() {
   const hour = new Date().getHours();
@@ -303,21 +304,39 @@ export function DashboardPage() {
           </p>
           {(dashboard.recentNotifications || []).length ? (
             <div className="appointment-list">
-              {dashboard.recentNotifications.slice(0, 4).map((notification) => (
-                <article className="appointment-row" key={notification.id}>
+              {dashboard.recentNotifications.slice(0, 4).map((notification) => {
+                const target = getPatientNotificationTarget(notification);
+                return (
+                <article
+                  className={`appointment-row ${target?.path ? "is-clickable" : ""}`}
+                  key={notification.id}
+                  role={target?.path ? "button" : undefined}
+                  tabIndex={target?.path ? 0 : undefined}
+                  onClick={() => {
+                    if (target?.path) navigate(target.path);
+                  }}
+                  onKeyDown={(event) => {
+                    if (!target?.path) return;
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      navigate(target.path);
+                    }
+                  }}
+                >
                   <span
                     className={`status-pill status-pill--${
-                      notification.readAt ? "completed" : "pending"
+                      notification.read || notification.readAt ? "completed" : "pending"
                     }`}
                   >
-                    {notification.readAt ? "Read" : "New"}
+                    {notification.read || notification.readAt ? "Read" : "New"}
                   </span>
                   <div>
                     <strong>{notification.title}</strong>
                     <small>{notification.body}</small>
                   </div>
                 </article>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <p className="muted-copy">No notifications yet.</p>

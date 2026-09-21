@@ -23,19 +23,30 @@ export function StaffNotificationsPage() {
     patientUserId: "",
   });
 
-  const load = useCallback(async () => {
+  const load = useCallback(async ({ markSeen = false } = {}) => {
     try {
       const response = await api.getStaffNotifications();
-      setNotifications(response.notifications || []);
+      const items = response.notifications || [];
+      setNotifications(items);
       setError("");
+      if (markSeen) {
+        const unread = items.filter((item) => !item.read);
+        if (unread.length) {
+          await api.markAllStaffNotificationsRead();
+          setNotifications((current) =>
+            (current || []).map((item) => ({ ...item, read: true }))
+          );
+        }
+        notifyNotificationsChanged({ source: "staff", unread: 0 });
+      }
     } catch (loadError) {
       setError(loadError.message);
     }
   }, []);
 
   useEffect(() => {
-    load();
-    const timer = window.setInterval(load, 20000);
+    load({ markSeen: true });
+    const timer = window.setInterval(() => load({ markSeen: false }), 20000);
     return () => window.clearInterval(timer);
   }, [load]);
 
@@ -109,7 +120,7 @@ export function StaffNotificationsPage() {
     }
   }
 
-  if (error && !notifications) return <ErrorState message={error} onRetry={load} />;
+  if (error && !notifications) return <ErrorState message={error} onRetry={() => load({ markSeen: false })} />;
   if (!notifications) return <LoadingState label="Loading notification center…" />;
 
   return (
@@ -124,7 +135,7 @@ export function StaffNotificationsPage() {
             <p>Track appointment requests, check-ins, queue updates, and SMS delivery status.</p>
           </div>
           <div className="staff-heading-actions">
-            <button className="button button--secondary" onClick={load}>
+            <button className="button button--secondary" onClick={() => load({ markSeen: false })}>
               <RefreshCw size={16} /> Refresh
             </button>
             <button className="button button--secondary" onClick={markAll} disabled={Boolean(busy)}>

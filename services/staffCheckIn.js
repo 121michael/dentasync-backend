@@ -1,5 +1,7 @@
 "use strict";
 
+const { insertPatientNotification } = require("./patientPortalNotifications");
+
 function stringValue(value, maxLength = 500) {
   if (typeof value !== "string" && typeof value !== "number") {
     return null;
@@ -836,15 +838,14 @@ async function performStaffCheckIn(client, { appointment, staff, notifyClinicSta
 
   try {
     await withSavepoint(client, "queue_notify", async () => {
-      await client.query(
-        `INSERT INTO patient_portal_notifications (user_id, type, title, body)
-         VALUES ($1, 'queue', $2, $3)`,
-        [
-          String(appointment.user_id),
-          "Checked in successfully",
-          `You are checked in. Queue number ${token}. Estimated wait about ${estimatedWaitMinutes} minutes.`,
-        ]
-      );
+      await insertPatientNotification(client, {
+        userId: appointment.user_id,
+        type: "queue",
+        title: "Checked in successfully",
+        body: `You are checked in. Queue number ${token}. Estimated wait about ${estimatedWaitMinutes} minutes.`,
+        entityType: "queue",
+        entityId: queueResult.rows[0]?.id,
+      });
     });
   } catch (error) {
     // Missing notifications table (or optional columns) must not abort check-in.

@@ -63,7 +63,7 @@ function StaffNavigation({ onNavigate, alerts }) {
           <NavLink
             key={to}
             to={to}
-            onClick={onNavigate}
+            onClick={() => onNavigate(to)}
             className={({ isActive }) => `staff-nav__link ${isActive ? "is-active" : ""}`}
           >
             <Icon size={18} aria-hidden="true" />
@@ -97,16 +97,21 @@ export function StaffLayout() {
   const refreshAlerts = useCallback(async () => {
     try {
       const dashboard = await api.getStaffDashboard({ silent: true });
-      setAlerts({
-        unreadNotifications: Number(dashboard.metrics?.unreadNotifications || 0),
+      setAlerts((current) => ({
+        unreadNotifications: location.pathname.startsWith("/staff/notifications")
+          ? 0
+          : Number(dashboard.metrics?.unreadNotifications || 0),
         pendingAppointments: Number(dashboard.metrics?.pendingRequests || 0),
-      });
+      }));
     } catch {
       // Keep the last known badge state if the poll fails briefly.
     }
-  }, []);
+  }, [location.pathname]);
 
   useEffect(() => {
+    if (location.pathname.startsWith("/staff/notifications")) {
+      setAlerts((current) => ({ ...current, unreadNotifications: 0 }));
+    }
     refreshAlerts();
     const timer = window.setInterval(refreshAlerts, 20000);
     const stopListening = onNotificationsChanged((detail) => {
@@ -163,8 +168,11 @@ export function StaffLayout() {
     navigate("/login", { replace: true });
   }
 
-  function closeMenu() {
+  function closeMenu(to) {
     setIsMobileMenuOpen(false);
+    if (to === "/staff/notifications") {
+      setAlerts((current) => ({ ...current, unreadNotifications: 0 }));
+    }
   }
 
   const hasUnread = alerts.unreadNotifications > 0;
@@ -222,6 +230,7 @@ export function StaffLayout() {
               <NavLink
                 to="/staff/notifications"
                 className="icon-button"
+                onClick={() => setAlerts((current) => ({ ...current, unreadNotifications: 0 }))}
                 aria-label={
                   hasUnread
                     ? `Open notifications, ${alerts.unreadNotifications} unread`

@@ -1665,6 +1665,11 @@ strong {
   border: 1px solid var(--border);
   background: var(--surface);
 }
+.appointment-history-card.is-notification-focus {
+  outline: 2px solid rgba(112, 57, 169, .45);
+  outline-offset: -2px;
+  background: linear-gradient(90deg, var(--amethyst-100), var(--surface) 55%);
+}
 .appointment-history-card__header {
   display: flex;
   align-items: center;
@@ -1892,6 +1897,8 @@ strong {
 }
 
 .appointment-row > div { display: grid; gap: 0.18rem; min-width: 0; }
+.appointment-row.is-clickable { cursor: pointer; }
+.appointment-row.is-clickable:hover { background: var(--amethyst-100); }
 .appointment-row strong { overflow: hidden; font-size: 0.77rem; text-overflow: ellipsis; white-space: nowrap; }
 .appointment-row small { overflow: hidden; color: var(--text-muted); font-size: 0.65rem; text-overflow: ellipsis; white-space: nowrap; }
 .icon-button--danger { color: var(--danger); }
@@ -2268,6 +2275,13 @@ strong {
 .notification-row { display: grid; grid-template-columns: 39px minmax(0,1fr) auto; gap: .75rem; align-items: center; padding: 1rem 1.15rem; border-bottom: 1px solid var(--border); }
 .notification-row:last-child { border-bottom: 0; }
 .notification-row.is-unread { background: linear-gradient(90deg, var(--amethyst-100), transparent); }
+.notification-row.is-clickable { cursor: pointer; }
+.notification-row.is-clickable:hover { background: var(--amethyst-100); }
+.notification-row.is-clickable:focus-visible {
+  outline: 2px solid rgba(112, 57, 169, .55);
+  outline-offset: -2px;
+}
+.notification-row__aside { display: flex; flex-wrap: wrap; gap: .4rem; justify-content: flex-end; }
 .notification-row__icon { display: grid; width: 39px; height: 39px; place-items: center; border-radius: 11px; color: var(--amethyst-700); background: var(--amethyst-100); }
 .notification-row > div { display: grid; gap: .25rem; min-width: 0; }
 .notification-row h2 { font-size: .82rem; }

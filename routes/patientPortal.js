@@ -13,6 +13,7 @@ const { estimateWaitMinutesForPosition } = require("../services/waitTime");
 const { answerWithOptionalGemini } = require("../services/clinicAssistant");
 const { analyzeDentalImageBuffer, DISCLAIMER: IMAGE_ANALYSIS_DISCLAIMER } = require("../services/dentalImageAnalysis");
 const staffCheckIn = require("../services/staffCheckIn");
+const { insertPatientNotification, mapPatientNotification } = require("../services/patientPortalNotifications");
 const staffWalkInQr = require("../services/staffWalkInQr");
 const { resolveAppSecrets } = require("../lib/securityConfig");
 
@@ -619,13 +620,23 @@ function createPatientPortalRouter({
           [userId]
         ),
         db.query(
-          `SELECT id, type, title, body, read_at, created_at
+          `SELECT id, type, title, body, entity_type, entity_id, read_at, created_at
            FROM patient_portal_notifications
            WHERE user_id = $1
            ORDER BY created_at DESC
            LIMIT 5`,
           [userId]
-        ),
+        ).catch(async (error) => {
+          if (error.code !== "42703") throw error;
+          return db.query(
+            `SELECT id, type, title, body, read_at, created_at
+             FROM patient_portal_notifications
+             WHERE user_id = $1
+             ORDER BY created_at DESC
+             LIMIT 5`,
+            [userId]
+          );
+        }),
         db.query(
           `SELECT COALESCE(notify_sms, TRUE) AS notify_sms,
                   COALESCE(notify_appointment_sms, TRUE) AS notify_appointment_sms,
@@ -684,14 +695,7 @@ function createPatientPortalRouter({
             }
           : null,
         unreadNotifications: resultCount(notificationResult.rows[0], "unread_count"),
-        recentNotifications: recentNotificationResult.rows.map((row) => ({
-          id: row.id,
-          type: row.type,
-          title: row.title,
-          body: row.body,
-          readAt: row.read_at,
-          createdAt: row.created_at,
-        })),
+        recentNotifications: recentNotificationResult.rows.map((row) => mapPatientNotification(row)),
         smsPreferences: {
           notifySms: smsPrefs.notify_sms !== false,
           notifyAppointmentSms: smsPrefs.notify_appointment_sms !== false,
@@ -936,23 +940,23 @@ function createPatientPortalRouter({
         ]
       );
 
-      await db.query(
-        `INSERT INTO patient_portal_notifications (user_id, type, title, body)
-         VALUES ($1, 'appointment', 'Appointment request received', $2)`,
-        [
-          userId,
-          `${service.name} with ${dentist.name} on ${appointmentDate} at ${appointmentTime} is waiting for clinic confirmation.`,
-        ]
-      );
+      await insertPatientNotification(db, {
+        userId,
+        type: "appointment",
+        title: "Appointment request received",
+        body: `${service.name} with ${dentist.name} on ${appointmentDate} at ${appointmentTime} is waiting for clinic confirmation.`,
+        entityType: "appointment",
+        entityId: result.rows[0].id,
+      });
       if (userId !== guardianUserId) {
-        await db.query(
-          `INSERT INTO patient_portal_notifications (user_id, type, title, body)
-           VALUES ($1, 'appointment', 'Dependent appointment submitted', $2)`,
-          [
-            guardianUserId,
-            `You booked ${service.name} for a linked dependent on ${appointmentDate} at ${appointmentTime}.`,
-          ]
-        );
+        await insertPatientNotification(db, {
+          userId: guardianUserId,
+          type: "appointment",
+          title: "Dependent appointment submitted",
+          body: `You booked ${service.name} for a linked dependent on ${appointmentDate} at ${appointmentTime}.`,
+          entityType: "appointment",
+          entityId: result.rows[0].id,
+        });
       }
       const patientNameResult = await db.query(
         `SELECT CONCAT_WS(' ', first_name, last_name) AS full_name
@@ -2347,27 +2351,48 @@ function createPatientPortalRouter({
 
   router.get("/notifications", async (req, res) => {
     try {
-      const result = await db.query(
-        `SELECT id, type, title, body, read_at, created_at
-         FROM patient_portal_notifications
-         WHERE user_id = $1
-         ORDER BY created_at DESC
-         LIMIT 50`,
-        [userIdFor(req)]
-      );
+      let result;
+      try {
+        result = await db.query(
+          `SELECT id, type, title, body, entity_type, entity_id, read_at, created_at
+           FROM patient_portal_notifications
+           WHERE user_id = $1
+           ORDER BY created_at DESC
+           LIMIT 50`,
+          [userIdFor(req)]
+        );
+      } catch (error) {
+        if (error.code !== "42703") throw error;
+        result = await db.query(
+          `SELECT id, type, title, body, read_at, created_at
+           FROM patient_portal_notifications
+           WHERE user_id = $1
+           ORDER BY created_at DESC
+           LIMIT 50`,
+          [userIdFor(req)]
+        );
+      }
       return res.json({
-        notifications: result.rows.map((notification) => ({
-          id: notification.id,
-          type: notification.type,
-          title: notification.title,
-          body: notification.body,
-          read: Boolean(notification.read_at),
-          createdAt: notification.created_at,
-        })),
+        notifications: result.rows.map((notification) => mapPatientNotification(notification)),
       });
     } catch (error) {
       console.error("Patient notifications error:", error.message);
       return res.status(500).json({ message: "Unable to load notifications." });
+    }
+  });
+
+  router.patch("/notifications/read-all", async (req, res) => {
+    try {
+      const result = await db.query(
+        `UPDATE patient_portal_notifications
+         SET read_at = CURRENT_TIMESTAMP
+         WHERE user_id = $1 AND read_at IS NULL`,
+        [userIdFor(req)]
+      );
+      return res.json({ markedRead: result.rowCount || 0 });
+    } catch (error) {
+      console.error("Patient mark all notifications read error:", error.message);
+      return res.status(500).json({ message: "Unable to update notifications." });
     }
   });
 

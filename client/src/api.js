@@ -175,6 +175,7 @@ export const api = {
   getNotifications: () => request("/patient/notifications"),
   markNotificationRead: (notificationId) =>
     request(`/patient/notifications/${notificationId}/read`, { method: "PATCH" }),
+  markAllNotificationsRead: () => request("/patient/notifications/read-all", { method: "PATCH" }),
   getStaffDashboard: (options = {}) => request("/staff/dashboard", options),
   getStaffCheckIns: (options = {}) => {
     const { query = {}, ...requestOptions } = options;

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
   CalendarDays,
   Check,
@@ -14,6 +14,7 @@ import {
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
 import { useAuth } from "../useAuth";
+import { matchesNotificationFocus } from "../notificationFocus";
 
 const TIME_SLOTS = {
   Morning: ["09:00", "09:30", "10:00", "10:30", "11:00"],
@@ -90,6 +91,7 @@ function displayStatus(status) {
 export function AppointmentsPage() {
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { actingAs } = useAuth();
   const isBooking = location.pathname.endsWith("/book");
 
@@ -114,6 +116,8 @@ export function AppointmentsPage() {
     forPatientUserId: "",
   });
   const [authorizationFile, setAuthorizationFile] = useState(null);
+  const [focusKey, setFocusKey] = useState(() => searchParams.get("focus") || "");
+  const focusedCardRef = useRef(null);
 
   const load = useCallback(async () => {
     setError("");
@@ -136,6 +140,33 @@ export function AppointmentsPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    const focus = searchParams.get("focus");
+    if (focus) setFocusKey(focus);
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!focusKey || !appointments.length) return;
+    const match = appointments.find((appointment) =>
+      matchesNotificationFocus(appointment, focusKey, ["id"])
+    );
+    if (!match) return;
+    const timer = window.setTimeout(() => {
+      focusedCardRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 80);
+    const clearTimer = window.setTimeout(() => {
+      const next = new URLSearchParams(searchParams);
+      if (next.has("focus")) {
+        next.delete("focus");
+        setSearchParams(next, { replace: true });
+      }
+    }, 4000);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [focusKey, appointments, searchParams, setSearchParams]);
 
   const selectedService = useMemo(
     () => catalog?.services.find((service) => service.id === form.serviceId),
@@ -229,7 +260,13 @@ export function AppointmentsPage() {
           {appointments.length ? (
             <div className="appointment-history__cards">
               {appointments.map((appointment) => (
-                <article key={appointment.id} className="appointment-history-card">
+                <article
+                  key={appointment.id}
+                  ref={matchesNotificationFocus(appointment, focusKey, ["id"]) ? focusedCardRef : null}
+                  className={`appointment-history-card ${
+                    matchesNotificationFocus(appointment, focusKey, ["id"]) ? "is-notification-focus" : ""
+                  }`}
+                >
                   <header className="appointment-history-card__header">
                     <strong>Appointment</strong>
                     <span className={`status-pill status-pill--${appointment.status}`}>

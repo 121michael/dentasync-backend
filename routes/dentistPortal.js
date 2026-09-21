@@ -7,6 +7,7 @@ const clinicalPatients = require("../services/clinicalPatients");
 const dentalChartSync = require("../services/dentalChartSync");
 const patientData = require("../services/patientData");
 const { writeAdminAudit } = require("../services/adminAudit");
+const { insertPatientNotification } = require("../services/patientPortalNotifications");
 const {
   estimateWaitMinutesForPosition,
   getServiceDurationMinutes,
@@ -193,13 +194,9 @@ function mapPatient(row) {
   };
 }
 
-async function notifyPatient(client, { userId, type, title, body }) {
+async function notifyPatient(client, payload) {
   try {
-    await client.query(
-      `INSERT INTO patient_portal_notifications (user_id, type, title, body)
-       VALUES ($1, $2, $3, $4)`,
-      [String(userId), type, title, body]
-    );
+    await insertPatientNotification(client, payload);
   } catch (error) {
     if (error.code !== "42P01") {
       throw error;
@@ -595,6 +592,8 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
         type: "queue",
         title: "You are next",
         body: "Your dentist is ready. Please proceed to the treatment chair.",
+        entityType: "queue",
+        entityId: current.id,
       });
 
       await client.query("COMMIT");
@@ -799,6 +798,8 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
         type: "queue",
         title: "Treatment started",
         body: `Your ${procedureName} treatment has started with ${dentistName}.`,
+        entityType: "queue",
+        entityId: current.id,
       });
 
       await client.query("COMMIT");
@@ -931,6 +932,8 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
           databaseStatus === "completed"
             ? "Your visit has been marked as completed. Thank you for visiting Amethyst Dental."
             : `Your treatment status is now ${displayQueueStatus(databaseStatus).replaceAll("_", " ")}.`,
+        entityType: "queue",
+        entityId: current.id,
       });
 
       await client.query("COMMIT");

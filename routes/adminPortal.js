@@ -8,6 +8,7 @@ const { attachAdminDocumentSyncRoutes } = require("./adminDocumentSync");
 const { attachAdminCommandCenterRoutes } = require("./adminCommandCenter");
 const { writeAdminAudit } = require("../services/adminAudit");
 const clinicalPatients = require("../services/clinicalPatients");
+const { insertPatientNotification } = require("../services/patientPortalNotifications");
 
 const APPOINTMENT_ACTIONS = new Set([
   "approve",
@@ -216,13 +217,9 @@ function mapAppointment(row) {
   };
 }
 
-async function notifyPatient(client, { userId, type, title, body }) {
+async function notifyPatient(client, payload) {
   try {
-    await client.query(
-      `INSERT INTO patient_portal_notifications (user_id, type, title, body)
-       VALUES ($1, $2, $3, $4)`,
-      [String(userId), type, title, body]
-    );
+    await insertPatientNotification(client, payload);
   } catch (error) {
     if (error.code !== "42P01") {
       throw error;
@@ -1771,6 +1768,8 @@ function createAdminPortalRouter({
         type: "appointment",
         title: patientTitle,
         body: patientBody,
+        entityType: "appointment",
+        entityId: appointmentId,
       });
 
       await client.query("COMMIT");

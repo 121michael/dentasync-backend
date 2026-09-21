@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   ArrowLeftRight,
   Bell,
@@ -36,6 +36,7 @@ function initials(user) {
 export function PortalLayout({ theme, onToggleTheme }) {
   const { user, logout, actingAs, principal, startSession } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [unreadCount, setUnreadCount] = useState(0);
   const [switchingBack, setSwitchingBack] = useState(false);
   const date = new Intl.DateTimeFormat("en-US", {
@@ -48,13 +49,20 @@ export function PortalLayout({ theme, onToggleTheme }) {
   const refreshAlerts = useCallback(async () => {
     try {
       const dashboard = await api.getDashboard({ silent: true });
+      if (location.pathname.startsWith("/notifications")) {
+        setUnreadCount(0);
+        return;
+      }
       setUnreadCount(Number(dashboard.unreadNotifications || 0));
     } catch {
       // Keep the last known badge state if the poll fails briefly.
     }
-  }, []);
+  }, [location.pathname]);
 
   useEffect(() => {
+    if (location.pathname.startsWith("/notifications")) {
+      setUnreadCount(0);
+    }
     refreshAlerts();
     const timer = window.setInterval(refreshAlerts, 20000);
     const stopListening = onNotificationsChanged((detail) => {
@@ -68,7 +76,7 @@ export function PortalLayout({ theme, onToggleTheme }) {
       window.clearInterval(timer);
       stopListening();
     };
-  }, [refreshAlerts]);
+  }, [refreshAlerts, location.pathname]);
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -106,6 +114,9 @@ export function PortalLayout({ theme, onToggleTheme }) {
             <NavLink
               key={to}
               to={to}
+              onClick={() => {
+                if (to === "/notifications") setUnreadCount(0);
+              }}
               className={({ isActive }) => `portal-nav__link ${isActive ? "is-active" : ""}`}
             >
               <Icon size={19} aria-hidden="true" />
@@ -145,6 +156,7 @@ export function PortalLayout({ theme, onToggleTheme }) {
             <NavLink
               to="/notifications"
               className="icon-button notification-button"
+              onClick={() => setUnreadCount(0)}
               aria-label={hasUnread ? `Notifications, ${unreadCount} unread` : "Notifications"}
             >
               <Bell size={19} />

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { Bell, CheckCheck, CalendarDays, Info, UsersRound } from "lucide-react";
+import { Bell, CheckCheck, CalendarDays, ExternalLink, Info, UsersRound } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
 import { notifyNotificationsChanged } from "../notificationEvents";
+import { getPatientNotificationTarget } from "../patientNotificationNav";
 
 const icons = {
   appointment: CalendarDays,
@@ -17,6 +19,7 @@ function displayTime(value) {
 }
 
 export function NotificationsPage() {
+  const navigate = useNavigate();
   const [notifications, setNotifications] = useState(null);
   const [error, setError] = useState("");
 
@@ -30,9 +33,13 @@ export function NotificationsPage() {
       if (markSeen) {
         const unread = items.filter((item) => !item.read);
         if (unread.length) {
-          await Promise.all(
-            unread.map((item) => api.markNotificationRead(item.id).catch(() => null))
-          );
+          try {
+            await api.markAllNotificationsRead();
+          } catch {
+            await Promise.all(
+              unread.map((item) => api.markNotificationRead(item.id).catch(() => null))
+            );
+          }
           setNotifications((current) =>
             (current || []).map((notification) => ({ ...notification, read: true }))
           );
@@ -64,7 +71,25 @@ export function NotificationsPage() {
     }
   }
 
-  if (error && !notifications) return <ErrorState message={error} onRetry={load} />;
+  async function handleNotificationClick(notification) {
+    const target = getPatientNotificationTarget(notification);
+    if (!notification.read) {
+      try {
+        await api.markNotificationRead(notification.id);
+        setNotifications((current) =>
+          (current || []).map((item) =>
+            item.id === notification.id ? { ...item, read: true } : item
+          )
+        );
+        notifyNotificationsChanged({ source: "patient" });
+      } catch (markError) {
+        setError(markError.message);
+      }
+    }
+    if (target?.path) navigate(target.path);
+  }
+
+  if (error && !notifications) return <ErrorState message={error} onRetry={() => load({ markSeen: true })} />;
   if (!notifications) return <LoadingState label="Loading care updates" />;
 
   return (
@@ -79,10 +104,26 @@ export function NotificationsPage() {
         <section className="notification-list glass-card">
           {notifications.map((notification) => {
             const Icon = icons[notification.type] || Info;
+            const target = getPatientNotificationTarget(notification);
+            const clickable = Boolean(target?.path);
             return (
               <article
-                className={`notification-row ${notification.read ? "" : "is-unread"}`}
+                className={`notification-row ${notification.read ? "" : "is-unread"} ${
+                  clickable ? "is-clickable" : ""
+                }`}
                 key={notification.id}
+                role={clickable ? "button" : undefined}
+                tabIndex={clickable ? 0 : undefined}
+                onClick={() => {
+                  if (clickable) handleNotificationClick(notification);
+                }}
+                onKeyDown={(event) => {
+                  if (!clickable) return;
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    handleNotificationClick(notification);
+                  }
+                }}
               >
                 <span className="notification-row__icon"><Icon size={19} /></span>
                 <div>
@@ -90,11 +131,22 @@ export function NotificationsPage() {
                   <p>{notification.body}</p>
                   <small>{displayTime(notification.createdAt)}</small>
                 </div>
-                {!notification.read && (
-                  <button className="button button--secondary" onClick={() => markRead(notification.id)}>
-                    <CheckCheck size={16} /> Mark read
-                  </button>
-                )}
+                <div className="notification-row__aside" onClick={(event) => event.stopPropagation()}>
+                  {clickable ? (
+                    <button
+                      type="button"
+                      className="button button--primary button--compact"
+                      onClick={() => handleNotificationClick(notification)}
+                    >
+                      <ExternalLink size={16} /> {target.label || "View"}
+                    </button>
+                  ) : null}
+                  {!notification.read ? (
+                    <button className="button button--secondary" onClick={() => markRead(notification.id)}>
+                      <CheckCheck size={16} /> Mark read
+                    </button>
+                  ) : null}
+                </div>
               </article>
             );
           })}
