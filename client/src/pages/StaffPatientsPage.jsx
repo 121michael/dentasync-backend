@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Eye, Plus, Search, UserPlus } from "lucide-react";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
@@ -8,6 +9,7 @@ import {
   StaffModal,
   StaffStatusBadge,
 } from "../components/StaffUI";
+import { matchesNotificationFocus } from "../staffNotificationNav";
 
 const emptyRegistration = {
   firstName: "",
@@ -31,6 +33,8 @@ function ProfileLine({ label, value }) {
 }
 
 export function StaffPatientsPage() {
+  const [searchParams] = useSearchParams();
+  const focus = searchParams.get("focus") || "";
   const [patientData, setPatientData] = useState(null);
   const [search, setSearch] = useState("");
   const [submittedSearch, setSubmittedSearch] = useState("");
@@ -55,6 +59,26 @@ export function StaffPatientsPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (!focus) return undefined;
+    let cancelled = false;
+    (async () => {
+      setIsLoadingPatient(true);
+      setSelectedPatient(null);
+      try {
+        const response = await api.getStaffPatient(focus);
+        if (!cancelled) setSelectedPatient(response.patient);
+      } catch (viewError) {
+        if (!cancelled) setError(viewError.message);
+      } finally {
+        if (!cancelled) setIsLoadingPatient(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [focus]);
 
   async function viewPatient(patientId) {
     setIsLoadingPatient(true);
@@ -158,7 +182,10 @@ export function StaffPatientsPage() {
               </thead>
               <tbody>
                 {patients.map((patient) => (
-                  <tr key={patient.id}>
+                  <tr
+                    key={patient.id}
+                    className={matchesNotificationFocus(patient, focus) ? "is-notification-focus" : undefined}
+                  >
                     <td data-label="ID"><code>{patient.id}</code></td>
                     <td data-label="Patient Name">
                       <strong>{patient.fullName}</strong>

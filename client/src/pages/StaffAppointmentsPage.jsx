@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   CalendarClock,
   Check,
@@ -16,6 +17,7 @@ import {
   StaffModal,
   StaffStatusBadge,
 } from "../components/StaffUI";
+import { matchesNotificationFocus } from "../staffNotificationNav";
 
 function appointmentDateValue(date) {
   if (!date) return new Date().toISOString().slice(0, 10);
@@ -23,6 +25,9 @@ function appointmentDateValue(date) {
 }
 
 export function StaffAppointmentsPage() {
+  const [searchParams] = useSearchParams();
+  const focus = searchParams.get("focus") || "";
+  const focusedCardRef = useRef(null);
   const [appointmentData, setAppointmentData] = useState(null);
   const [availability, setAvailability] = useState(null);
   const [isAvailabilityOpen, setIsAvailabilityOpen] = useState(false);
@@ -48,6 +53,14 @@ export function StaffAppointmentsPage() {
     const refresh = window.setInterval(load, 30000);
     return () => window.clearInterval(refresh);
   }, [load]);
+
+  useEffect(() => {
+    if (!focus || !appointmentData) return undefined;
+    const timer = window.setTimeout(() => {
+      focusedCardRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [focus, appointmentData]);
 
   async function openAvailability() {
     setIsAvailabilityOpen(true);
@@ -153,7 +166,11 @@ export function StaffAppointmentsPage() {
         {appointments.length ? (
           <div className="staff-appointment-grid">
             {appointments.map((appointment) => (
-              <article className="staff-appointment-card" key={appointment.id}>
+              <article
+                className={`staff-appointment-card ${matchesNotificationFocus(appointment, focus) ? "is-notification-focus" : ""}`}
+                key={appointment.id}
+                ref={matchesNotificationFocus(appointment, focus) ? focusedCardRef : null}
+              >
                 <div className="staff-appointment-card__time">
                   <CalendarClock size={18} />
                   <strong>{formatStaffTime(appointment.time)}</strong>
@@ -210,7 +227,11 @@ export function StaffAppointmentsPage() {
         {requests.length ? (
           <div className="staff-request-list">
             {requests.map((request) => (
-              <article className="staff-request-row" key={request.id}>
+              <article
+                className={`staff-request-row ${matchesNotificationFocus(request, focus) ? "is-notification-focus" : ""}`}
+                key={request.id}
+                ref={matchesNotificationFocus(request, focus) ? focusedCardRef : null}
+              >
                 <span className="staff-request-row__icon"><UserRoundCheck size={20} /></span>
                 <div>
                   <strong>{request.patientName}</strong>

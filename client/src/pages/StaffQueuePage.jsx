@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Download, RefreshCw, Save } from "lucide-react";
 import { api } from "../api";
+import { matchesNotificationFocus } from "../staffNotificationNav";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
 import { statusLabel } from "../staffUtils";
 import {
@@ -18,6 +20,9 @@ function waitLabel(entry) {
 }
 
 export function StaffQueuePage() {
+  const [searchParams] = useSearchParams();
+  const focus = searchParams.get("focus") || "";
+  const focusedRowRef = useRef(null);
   const [queueData, setQueueData] = useState(null);
   const [draftStatuses, setDraftStatuses] = useState({});
   const [error, setError] = useState("");
@@ -46,6 +51,14 @@ export function StaffQueuePage() {
     const refresh = window.setInterval(load, 25000);
     return () => window.clearInterval(refresh);
   }, [load]);
+
+  useEffect(() => {
+    if (!focus || !queueData?.queue?.length) return undefined;
+    const timer = window.setTimeout(() => {
+      focusedRowRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [focus, queueData]);
 
   async function updateQueue(entry) {
     const status = draftStatuses[entry.id] || entry.status;
@@ -134,8 +147,14 @@ export function StaffQueuePage() {
                 </tr>
               </thead>
               <tbody>
-                {queue.map((entry) => (
-                  <tr key={entry.id}>
+                {queue.map((entry) => {
+                  const isFocused = matchesNotificationFocus(entry, focus);
+                  return (
+                  <tr
+                    key={entry.id}
+                    ref={isFocused ? focusedRowRef : null}
+                    className={isFocused ? "is-notification-focus" : undefined}
+                  >
                     <td data-label="Queue #"><strong>{entry.token || `#${String(entry.queueNumber).padStart(3, "0")}`}</strong></td>
                     <td data-label="Patient Name">{entry.patientName}</td>
                     <td data-label="Assigned Doctor">{entry.appointment.dentist}</td>
@@ -167,7 +186,8 @@ export function StaffQueuePage() {
                       </button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </StaffDataTable>

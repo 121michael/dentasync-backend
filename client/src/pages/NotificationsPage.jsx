@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { Bell, CheckCheck, CalendarDays, Info, UsersRound } from "lucide-react";
+import { Bell, CalendarDays, Info, UsersRound } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
+import { notifyNotificationsChanged, onNotificationsChanged } from "../notificationEvents";
+import { getPatientNotificationTarget } from "../staffNotificationNav";
 
 const icons = {
   appointment: CalendarDays,
@@ -16,6 +19,7 @@ function displayTime(value) {
 }
 
 export function NotificationsPage() {
+  const navigate = useNavigate();
   const [notifications, setNotifications] = useState(null);
   const [error, setError] = useState("");
 
@@ -31,18 +35,31 @@ export function NotificationsPage() {
 
   useEffect(() => {
     load();
+    const stopListening = onNotificationsChanged((detail) => {
+      if (detail?.source === "patient" && detail.unread === 0) {
+        setNotifications((current) =>
+          current ? current.map((notification) => ({ ...notification, read: true })) : current
+        );
+      }
+    });
+    return stopListening;
   }, [load]);
 
-  async function markRead(notificationId) {
-    try {
-      await api.markNotificationRead(notificationId);
-      setNotifications((current) =>
-        current.map((notification) =>
-          notification.id === notificationId ? { ...notification, read: true } : notification
-        )
-      );
-    } catch (markError) {
-      setError(markError.message);
+  async function openNotification(notification) {
+    if (!notification.read) {
+      try {
+        await api.markNotificationRead(notification.id);
+        setNotifications((current) =>
+          current.map((item) => (item.id === notification.id ? { ...item, read: true } : item))
+        );
+        notifyNotificationsChanged({ source: "patient" });
+      } catch (markError) {
+        setError(markError.message);
+      }
+    }
+    const target = getPatientNotificationTarget(notification);
+    if (target?.path) {
+      navigate(target.path);
     }
   }
 
@@ -54,17 +71,27 @@ export function NotificationsPage() {
       <SectionHeading
         eyebrow="Care updates, when they matter"
         title="Notifications"
-        detail="Appointment confirmations and portal updates appear here."
+        detail="Tap a notification to open the related appointment, queue, or record."
       />
       {error && <p className="inline-alert inline-alert--error">{error}</p>}
       {notifications.length ? (
         <section className="notification-list glass-card">
           {notifications.map((notification) => {
             const Icon = icons[notification.type] || Info;
+            const target = getPatientNotificationTarget(notification);
             return (
               <article
-                className={`notification-row ${notification.read ? "" : "is-unread"}`}
+                className={`notification-row ${notification.read ? "" : "is-unread"} is-clickable`}
                 key={notification.id}
+                role="link"
+                tabIndex={0}
+                onClick={() => openNotification(notification)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    openNotification(notification);
+                  }
+                }}
               >
                 <span className="notification-row__icon"><Icon size={19} /></span>
                 <div>
@@ -72,11 +99,7 @@ export function NotificationsPage() {
                   <p>{notification.body}</p>
                   <small>{displayTime(notification.createdAt)}</small>
                 </div>
-                {!notification.read && (
-                  <button className="button button--secondary" onClick={() => markRead(notification.id)}>
-                    <CheckCheck size={16} /> Mark read
-                  </button>
-                )}
+                <span className="notification-row__action">{target?.label || "Open"}</span>
               </article>
             );
           })}

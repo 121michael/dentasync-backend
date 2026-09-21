@@ -9,9 +9,12 @@ import {
   RefreshCw,
   UserPlus,
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
 import { formatStaffDateTime } from "../staffUtils";
+import { notifyNotificationsChanged, onNotificationsChanged } from "../notificationEvents";
+import { getStaffNotificationTarget } from "../staffNotificationNav";
 
 const notificationIcons = {
   appointment: CalendarDays,
@@ -21,6 +24,7 @@ const notificationIcons = {
 };
 
 export function StaffNotificationsPage() {
+  const navigate = useNavigate();
   const [notifications, setNotifications] = useState(null);
   const [error, setError] = useState("");
   const [isMarkingAll, setIsMarkingAll] = useState(false);
@@ -38,7 +42,17 @@ export function StaffNotificationsPage() {
   useEffect(() => {
     load();
     const refresh = window.setInterval(load, 30000);
-    return () => window.clearInterval(refresh);
+    const stopListening = onNotificationsChanged((detail) => {
+      if (detail?.source === "staff" && detail.unread === 0) {
+        setNotifications((current) =>
+          current ? current.map((notification) => ({ ...notification, read: true })) : current
+        );
+      }
+    });
+    return () => {
+      window.clearInterval(refresh);
+      stopListening();
+    };
   }, [load]);
 
   async function markRead(notificationId) {
@@ -50,8 +64,19 @@ export function StaffNotificationsPage() {
           notification.id === notificationId ? { ...notification, read: true } : notification
         )
       );
+      notifyNotificationsChanged({ source: "staff" });
     } catch (markError) {
       setError(markError.message);
+    }
+  }
+
+  async function openNotification(notification) {
+    if (!notification.read) {
+      await markRead(notification.id);
+    }
+    const target = getStaffNotificationTarget(notification);
+    if (target?.path) {
+      navigate(target.path);
     }
   }
 
@@ -61,6 +86,7 @@ export function StaffNotificationsPage() {
     try {
       await api.markAllStaffNotificationsRead();
       setNotifications((current) => current.map((notification) => ({ ...notification, read: true })));
+      notifyNotificationsChanged({ source: "staff", unread: 0 });
     } catch (markError) {
       setError(markError.message);
     } finally {
@@ -97,8 +123,22 @@ export function StaffNotificationsPage() {
         <section className="staff-notification-list">
           {notifications.map((notification) => {
             const Icon = notificationIcons[notification.type] || Info;
+            const target = getStaffNotificationTarget(notification);
             return (
-              <article className={`staff-notification ${notification.read ? "" : "is-unread"}`} key={notification.id}>
+              <article
+                className={`staff-notification ${notification.read ? "" : "is-unread"} ${target ? "is-clickable" : ""}`}
+                key={notification.id}
+                role={target ? "link" : undefined}
+                tabIndex={target ? 0 : undefined}
+                onClick={() => openNotification(notification)}
+                onKeyDown={(event) => {
+                  if (!target) return;
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    openNotification(notification);
+                  }
+                }}
+              >
                 <span className="staff-notification__icon"><Icon size={20} /></span>
                 <div className="staff-notification__body">
                   <div>
@@ -108,11 +148,19 @@ export function StaffNotificationsPage() {
                   <p>{notification.body}</p>
                   <small>{formatStaffDateTime(notification.createdAt)}</small>
                 </div>
-                {!notification.read && (
-                  <button className="button button--secondary button--compact" onClick={() => markRead(notification.id)}>
+                {target ? (
+                  <span className="staff-notification__action">{target.label}</span>
+                ) : !notification.read ? (
+                  <button
+                    className="button button--secondary button--compact"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      markRead(notification.id);
+                    }}
+                  >
                     <CheckCheck size={15} /> Mark read
                   </button>
-                )}
+                ) : null}
               </article>
             );
           })}

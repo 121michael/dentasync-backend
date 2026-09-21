@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   Bell,
   CalendarDays,
@@ -11,8 +11,10 @@ import {
   UsersRound,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "../useAuth";
+import { api } from "../api";
+import { notifyNotificationsChanged, onNotificationsChanged } from "../notificationEvents";
 import { staffInitials } from "../staffUtils";
 
 const navigation = [
@@ -24,7 +26,7 @@ const navigation = [
   { to: "/staff/profile", label: "Profile", icon: UserRound },
 ];
 
-function StaffNavigation({ onNavigate }) {
+function StaffNavigation({ onNavigate, hasUnread }) {
   return (
     <nav className="staff-nav" aria-label="Staff dashboard navigation">
       {navigation.map(({ to, label, icon: Icon }) => (
@@ -36,6 +38,9 @@ function StaffNavigation({ onNavigate }) {
         >
           <Icon size={19} aria-hidden="true" />
           <span>{label}</span>
+          {to === "/staff/notifications" && hasUnread ? (
+            <span className="nav-alert-dot" aria-label="Unread notifications" />
+          ) : null}
         </NavLink>
       ))}
     </nav>
@@ -45,13 +50,68 @@ function StaffNavigation({ onNavigate }) {
 export function StaffLayout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const markedInboxRef = useRef(false);
   const date = new Intl.DateTimeFormat("en-US", {
     weekday: "long",
     month: "long",
     day: "numeric",
     year: "numeric",
   }).format(new Date());
+
+  const refreshUnread = useCallback(async () => {
+    try {
+      const dashboard = await api.getStaffDashboard();
+      setUnreadCount(Number(dashboard.metrics?.unreadNotifications || 0));
+    } catch {
+      // Keep the last known badge if the poll fails briefly.
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshUnread();
+    const timer = window.setInterval(refreshUnread, 20000);
+    const stopListening = onNotificationsChanged((detail) => {
+      if (detail?.source === "staff" && detail.unread === 0) {
+        setUnreadCount(0);
+        return;
+      }
+      refreshUnread();
+    });
+    return () => {
+      window.clearInterval(timer);
+      stopListening();
+    };
+  }, [refreshUnread]);
+
+  useEffect(() => {
+    if (!location.pathname.startsWith("/staff/notifications")) {
+      markedInboxRef.current = false;
+      return undefined;
+    }
+
+    setUnreadCount(0);
+    if (markedInboxRef.current) return undefined;
+    markedInboxRef.current = true;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        await api.markAllStaffNotificationsRead();
+        if (!cancelled) {
+          notifyNotificationsChanged({ source: "staff", unread: 0 });
+        }
+      } catch {
+        markedInboxRef.current = false;
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [location.pathname]);
 
   function handleLogout() {
     logout();
@@ -61,6 +121,8 @@ export function StaffLayout() {
   function closeMenu() {
     setIsMobileMenuOpen(false);
   }
+
+  const hasUnread = unreadCount > 0;
 
   return (
     <div className="staff-shell">
@@ -78,7 +140,7 @@ export function StaffLayout() {
           </button>
         </div>
 
-        <StaffNavigation onNavigate={closeMenu} />
+        <StaffNavigation onNavigate={closeMenu} hasUnread={hasUnread} />
 
         <div className="staff-sidebar__footer">
           <div className="staff-user-summary">
@@ -112,8 +174,13 @@ export function StaffLayout() {
           </div>
           <div className="staff-header__actions">
             <span className="staff-header__role">Staff / Secretary</span>
-            <NavLink to="/staff/notifications" className="icon-button" aria-label="Open notifications">
+            <NavLink
+              to="/staff/notifications"
+              className="icon-button"
+              aria-label={hasUnread ? `Open notifications, ${unreadCount} unread` : "Open notifications"}
+            >
               <Bell size={19} />
+              {hasUnread ? <span className="alert-dot" aria-hidden="true" /> : null}
             </NavLink>
           </div>
         </header>
@@ -130,7 +197,10 @@ export function StaffLayout() {
             to={to}
             className={({ isActive }) => `staff-mobile-nav__link ${isActive ? "is-active" : ""}`}
           >
-            <Icon size={18} aria-hidden="true" />
+            <span className="staff-mobile-nav__icon">
+              <Icon size={18} aria-hidden="true" />
+              {to === "/staff/notifications" && hasUnread ? <span className="nav-alert-dot" aria-hidden="true" /> : null}
+            </span>
             <span>{label.split(" ")[0]}</span>
           </NavLink>
         ))}

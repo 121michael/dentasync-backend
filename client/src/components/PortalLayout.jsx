@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   Bell,
   CalendarDays,
@@ -11,8 +11,11 @@ import {
   UserRound,
   UsersRound,
 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { BrandMark } from "./BrandMark";
 import { useAuth } from "../useAuth";
+import { api } from "../api";
+import { notifyNotificationsChanged, onNotificationsChanged } from "../notificationEvents";
 
 const navigation = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -30,6 +33,9 @@ function initials(user) {
 export function PortalLayout({ theme, onToggleTheme }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [unreadCount, setUnreadCount] = useState(0);
+  const markedInboxRef = useRef(false);
   const date = new Intl.DateTimeFormat("en-US", {
     weekday: "long",
     month: "long",
@@ -37,10 +43,64 @@ export function PortalLayout({ theme, onToggleTheme }) {
     year: "numeric",
   }).format(new Date());
 
+  const refreshUnread = useCallback(async () => {
+    try {
+      const dashboard = await api.getDashboard();
+      setUnreadCount(Number(dashboard.unreadNotifications || 0));
+    } catch {
+      // Keep the last known badge if the poll fails briefly.
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshUnread();
+    const timer = window.setInterval(refreshUnread, 20000);
+    const stopListening = onNotificationsChanged((detail) => {
+      if (detail?.source === "patient" && detail.unread === 0) {
+        setUnreadCount(0);
+        return;
+      }
+      refreshUnread();
+    });
+    return () => {
+      window.clearInterval(timer);
+      stopListening();
+    };
+  }, [refreshUnread]);
+
+  useEffect(() => {
+    if (!location.pathname.startsWith("/notifications")) {
+      markedInboxRef.current = false;
+      return undefined;
+    }
+
+    setUnreadCount(0);
+    if (markedInboxRef.current) return undefined;
+    markedInboxRef.current = true;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        await api.markAllNotificationsRead();
+        if (!cancelled) {
+          notifyNotificationsChanged({ source: "patient", unread: 0 });
+        }
+      } catch {
+        markedInboxRef.current = false;
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [location.pathname]);
+
   function handleLogout() {
     logout();
     navigate("/login", { replace: true });
   }
+
+  const hasUnread = unreadCount > 0;
 
   return (
     <div className="portal-shell">
@@ -55,6 +115,9 @@ export function PortalLayout({ theme, onToggleTheme }) {
             >
               <Icon size={19} aria-hidden="true" />
               <span>{label}</span>
+              {to === "/notifications" && hasUnread ? (
+                <span className="nav-alert-dot" aria-label="Unread notifications" />
+              ) : null}
             </NavLink>
           ))}
         </nav>
@@ -84,8 +147,13 @@ export function PortalLayout({ theme, onToggleTheme }) {
             >
               {theme === "dark" ? <Sun size={19} /> : <Moon size={19} />}
             </button>
-            <NavLink to="/notifications" className="icon-button notification-button" aria-label="Notifications">
+            <NavLink
+              to="/notifications"
+              className="icon-button notification-button"
+              aria-label={hasUnread ? `Notifications, ${unreadCount} unread` : "Notifications"}
+            >
               <Bell size={19} />
+              {hasUnread ? <span className="alert-dot" aria-hidden="true" /> : null}
             </NavLink>
             <NavLink to="/profile" className="avatar-button" aria-label="Open patient profile">
               {initials(user)}
