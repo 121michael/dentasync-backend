@@ -45,6 +45,8 @@ async function analyzeDentalImageBuffer({ buffer, mimeType, fileName, question }
 The patient uploaded a dental photo or X-ray${fileName ? ` named "${fileName}"` : ""}.
 Patient note: ${question || "(none)"}
 
+Reply in the same language the patient used (English, Filipino/Tagalog, or mixed Taglish). If the note is empty, use English.
+
 Provide PRELIMINARY observations only. You MUST NOT claim a diagnosis, prescribe treatment, or sound certain.
 If image quality is poor, say so and avoid guessing.
 

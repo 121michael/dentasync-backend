@@ -5,6 +5,7 @@ const test = require("node:test");
 const {
   DEFAULT_CLINIC,
   answerFromCatalog,
+  detectLanguage,
   loadClinicProfile,
 } = require("../services/clinicAssistant");
 const { SERVICES, DENTISTS } = require("../routes/patientPortal");
@@ -82,6 +83,41 @@ test("loadClinicProfile uses admin settings when present", async () => {
   });
   assert.match(answered.answer, /Tuesday/);
   assert.match(answered.answer, /10:00/);
+});
+
+test("Tagalog clinic-hour questions get a Tagalog answer from clinic facts", () => {
+  assert.equal(detectLanguage("Anong oras bukas ang klinika?"), "tl");
+  const result = answerFromCatalog("Anong oras bukas ang klinika?", options);
+  assert.equal(result.language, "tl");
+  assert.equal(result.source, "faq");
+  assert.match(result.answer, /Bukas ang/i);
+  assert.match(result.answer, /9:00/i);
+  assert.doesNotMatch(result.answer, /is open /);
+});
+
+test("Tagalog brushing questions are oral-care education, not a cleaning service", () => {
+  const result = answerFromCatalog("Paano maglinis ng ngipin?", options);
+  assert.equal(result.language, "tl");
+  assert.equal(result.source, "oral-health");
+  assert.match(result.answer, /Magsipilyo/i);
+  assert.match(result.answer, /hindi diagnosis/i);
+  assert.doesNotMatch(result.answer, /Oral Prophylaxis/i);
+});
+
+test("Taglish service questions still match the catalog", () => {
+  const result = answerFromCatalog("Magkano ang dental cleaning?", options);
+  assert.equal(result.language, "tl");
+  assert.equal(result.source, "catalog");
+  assert.match(result.answer, /Oral Prophylaxis/i);
+  assert.match(result.answer, /₱/);
+  assert.match(result.answer, /Mag-book sa Appointments/i);
+});
+
+test("English questions still receive English answers", () => {
+  assert.equal(detectLanguage("What time does the clinic open?"), "en");
+  const result = answerFromCatalog("What time does the clinic open?", options);
+  assert.equal(result.language, "en");
+  assert.match(result.answer, /is open/i);
 });
 
 test("loadClinicProfile falls back when the settings table is missing", async () => {

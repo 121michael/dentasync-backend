@@ -7,7 +7,7 @@ export function ClinicAssistantPage() {
   const [messages, setMessages] = useState([
     {
       role: "assistant",
-      text: "Hi — I can help with Amethyst Dental hours, location, services, booking, queue check-in, and questions about teeth and oral care. Use + to attach a dental photo or X-ray for a preliminary look. I cannot diagnose conditions or replace your dentist.",
+      text: "Hi — I can help with Amethyst Dental hours, location, services, booking, queue check-in, and questions about teeth and oral care. You can ask in English or Tagalog (or Taglish). Use + to attach a dental photo or X-ray for a preliminary look. I cannot diagnose conditions or replace your dentist.\n\nKumusta — makakatulong ako sa oras, lokasyon, serbisyo, booking, pila, at tanong tungkol sa ngipin. Puwede kang magtanong sa English o Tagalog. Hindi ako makakapag-diagnose o pumalit sa dentista.",
     },
   ]);
   const [input, setInput] = useState("");
@@ -103,7 +103,7 @@ export function ClinicAssistantPage() {
       <SectionHeading
         eyebrow="Clinic information"
         title="AI Clinic Assistant"
-        detail="Ask about teeth, oral care, clinic hours, services, and appointments. Attach a dental photo or X-ray with +. Preliminary notes are not a diagnosis."
+        detail="Ask in English or Tagalog about teeth, oral care, clinic hours, services, and appointments. Magtanong sa English o Tagalog. Attach a dental photo or X-ray with +. Preliminary notes are not a diagnosis."
       />
 
       <section className="glass-card assistant-panel">
@@ -190,7 +190,7 @@ export function ClinicAssistantPage() {
             <input
               value={input}
               onChange={(event) => setInput(event.target.value)}
-              placeholder="Ask about teeth, clinic hours, services…"
+              placeholder="Ask about teeth or the clinic · Magtanong tungkol sa ngipin o klinika…"
               disabled={busy}
               maxLength={800}
             />

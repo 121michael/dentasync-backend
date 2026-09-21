@@ -270,7 +270,7 @@ export function DashboardPage() {
             {[
               { label: "Book appointment", detail: "Choose a service and time", icon: CalendarDays, to: "/appointments/book" },
               { label: "Track live queue", detail: "See your place in line", icon: UsersRound, to: "/queue" },
-              { label: "AI Assistant", detail: "Ask about teeth or the clinic", icon: Sparkles, to: "/assistant" },
+              { label: "AI Assistant", detail: "Ask about teeth or the clinic · Magtanong sa English o Tagalog", icon: Sparkles, to: "/assistant" },
               { label: "Contact clinic", detail: "Get help from our care team", icon: ClipboardList, to: "/support" },
             ].map(({ label, detail, icon: Icon, to }) => (
               <button key={label} className="quick-action" onClick={() => navigate(to)}>
