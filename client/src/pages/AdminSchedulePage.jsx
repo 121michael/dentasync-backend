@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { AdminModal, AdminStatusBadge } from "../components/AdminUI";
 import { useAdminUi } from "../components/AdminLayout";
 import { formatAdminDate, formatAdminTime } from "../adminUtils";
+import { matchesNotificationFocus } from "../notificationFocus";
 
 const emptySchedule = {
   scheduleType: "dentist",
@@ -22,11 +24,15 @@ const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", 
 
 export function AdminSchedulePage() {
   const { pushToast, confirm } = useAdminUi();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState(emptySchedule);
   const [busy, setBusy] = useState(false);
+  const [focusKey, setFocusKey] = useState(() => searchParams.get("focus") || "");
+  const [focusedAppointment, setFocusedAppointment] = useState(null);
+  const focusedRowRef = useRef(null);
 
   const load = useCallback(async () => {
     try {
@@ -40,6 +46,50 @@ export function AdminSchedulePage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    const focus = searchParams.get("focus");
+    if (focus) setFocusKey(focus);
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!focusKey) return;
+    const listed = data?.appointments?.find((appointment) =>
+      matchesNotificationFocus(appointment, focusKey, ["id"])
+    );
+    if (listed) {
+      setFocusedAppointment(listed);
+      const timer = window.setTimeout(() => {
+        focusedRowRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 80);
+      const clearTimer = window.setTimeout(() => {
+        const next = new URLSearchParams(searchParams);
+        if (next.has("focus")) {
+          next.delete("focus");
+          setSearchParams(next, { replace: true });
+        }
+      }, 4000);
+      return () => {
+        window.clearTimeout(timer);
+        window.clearTimeout(clearTimer);
+      };
+    }
+
+    let cancelled = false;
+    api
+      .getAdminAppointments({ limit: 50 })
+      .then((response) => {
+        if (cancelled) return;
+        const match = (response.appointments || []).find((appointment) =>
+          matchesNotificationFocus(appointment, focusKey, ["id"])
+        );
+        if (match) setFocusedAppointment(match);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [focusKey, data, searchParams, setSearchParams]);
 
   async function saveSchedule(event) {
     event.preventDefault();
@@ -179,6 +229,12 @@ export function AdminSchedulePage() {
             <p>Live appointments synchronized with the booking system for the next two weeks.</p>
           </div>
         </div>
+        {focusedAppointment && !data.appointments?.some((item) => String(item.id) === String(focusedAppointment.id)) ? (
+          <p className="inline-alert" role="status">
+            Opened from notification: {focusedAppointment.patientName} — {focusedAppointment.treatment}{" "}
+            ({focusedAppointment.status}).
+          </p>
+        ) : null}
         {data.appointments?.length ? (
           <div className="admin-table-wrap">
             <table className="admin-table">
@@ -194,7 +250,17 @@ export function AdminSchedulePage() {
               </thead>
               <tbody>
                 {data.appointments.map((appointment) => (
-                  <tr key={appointment.id}>
+                  <tr
+                    key={appointment.id}
+                    ref={
+                      matchesNotificationFocus(appointment, focusKey, ["id"]) ? focusedRowRef : null
+                    }
+                    className={
+                      matchesNotificationFocus(appointment, focusKey, ["id"])
+                        ? "is-notification-focus"
+                        : undefined
+                    }
+                  >
                     <td><strong>{appointment.patientName}</strong></td>
                     <td>{appointment.treatment}</td>
                     <td>{appointment.dentistName}</td>

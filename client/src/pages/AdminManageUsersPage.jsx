@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Eye, KeyRound, Pencil, Plus, Search, ShieldCheck } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { AdminModal, AdminStatusBadge } from "../components/AdminUI";
 import { useAdminUi } from "../components/AdminLayout";
 import { formatAdminDate } from "../adminUtils";
+import { matchesNotificationFocus } from "../notificationFocus";
 
 const TABS = [
   { id: "staff", label: "Clinic Staff" },
@@ -39,7 +41,11 @@ function isApprovedAccount(user) {
 
 export function AdminManageUsersPage() {
   const { pushToast, confirm } = useAdminUi();
-  const [tab, setTab] = useState("staff");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [tab, setTab] = useState(() => {
+    const urlTab = searchParams.get("tab");
+    return TABS.some((item) => item.id === urlTab) ? urlTab : "staff";
+  });
   const [data, setData] = useState(null);
   const [pending, setPending] = useState([]);
   const [rejected, setRejected] = useState([]);
@@ -52,6 +58,8 @@ export function AdminManageUsersPage() {
   const [detail, setDetail] = useState(null);
   const [busy, setBusy] = useState(false);
   const [actionBusyId, setActionBusyId] = useState("");
+  const [focusKey, setFocusKey] = useState(() => searchParams.get("focus") || "");
+  const focusedRowRef = useRef(null);
 
   const load = useCallback(async () => {
     try {
@@ -79,6 +87,38 @@ export function AdminManageUsersPage() {
     if (!data) return [];
     return (tab === "patient" ? data.patients : tab === "staff" ? data.staff : data.dentists) || [];
   }, [data, tab]);
+
+  useEffect(() => {
+    const urlTab = searchParams.get("tab");
+    if (urlTab && TABS.some((item) => item.id === urlTab) && urlTab !== tab) {
+      setTab(urlTab);
+    }
+    const focus = searchParams.get("focus");
+    if (focus) setFocusKey(focus);
+  }, [searchParams, tab]);
+
+  useEffect(() => {
+    if (!focusKey || !users.length) return;
+    const match = users.find((user) =>
+      matchesNotificationFocus(user, focusKey, ["id", "email", "phone"])
+    );
+    if (!match) return;
+    setDetail(match);
+    const timer = window.setTimeout(() => {
+      focusedRowRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 80);
+    const clearTimer = window.setTimeout(() => {
+      const next = new URLSearchParams(searchParams);
+      if (next.has("focus")) {
+        next.delete("focus");
+        setSearchParams(next, { replace: true });
+      }
+    }, 4000);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [focusKey, users, searchParams, setSearchParams]);
 
   function openCreate() {
     if (tab === "patient") {
@@ -309,7 +349,15 @@ export function AdminManageUsersPage() {
                   const rejectedUser = isRejectedAccount(user);
                   const approvedUser = isApprovedAccount(user);
                   return (
-                    <tr key={user.id}>
+                    <tr
+                      key={user.id}
+                      ref={matchesNotificationFocus(user, focusKey, ["id", "email", "phone"]) ? focusedRowRef : null}
+                      className={
+                        matchesNotificationFocus(user, focusKey, ["id", "email", "phone"])
+                          ? "is-notification-focus"
+                          : undefined
+                      }
+                    >
                       <td><strong>{user.fullName}</strong></td>
                       <td><code>{user.id}</code></td>
                       <td>

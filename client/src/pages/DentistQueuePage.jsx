@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { PhoneCall, RefreshCw } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
 import { DentistModal, DentistStatusBadge } from "../components/DentistUI";
 import { TREATMENT_OPTIONS } from "../components/DentalChart/dentalChartData";
 import { formatDentistDateTime } from "../dentistUtils";
+import { matchesNotificationFocus } from "../notificationFocus";
 
 const tabs = [
   { id: "ongoing", label: "On Going" },
@@ -46,7 +48,11 @@ function formatWaitLabel(entry) {
 }
 
 export function DentistQueuePage() {
-  const [tab, setTab] = useState("inline");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [tab, setTab] = useState(() => {
+    const urlTab = searchParams.get("tab");
+    return tabs.some((item) => item.id === urlTab) ? urlTab : "inline";
+  });
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -55,6 +61,9 @@ export function DentistQueuePage() {
   const [durationMinutes, setDurationMinutes] = useState("");
   const [pendingStart, setPendingStart] = useState(null);
   const [startForm, setStartForm] = useState(emptyStartForm());
+  const [focusKey, setFocusKey] = useState(() => searchParams.get("focus") || "");
+  const focusedRowRef = useRef(null);
+  const triedTabsRef = useRef(new Set());
 
   const load = useCallback(async (options = {}) => {
     try {
@@ -70,6 +79,47 @@ export function DentistQueuePage() {
     const timer = window.setInterval(() => load({ silent: true }), 12000);
     return () => window.clearInterval(timer);
   }, [load]);
+
+  useEffect(() => {
+    const urlTab = searchParams.get("tab");
+    if (urlTab && tabs.some((item) => item.id === urlTab) && urlTab !== tab) {
+      setTab(urlTab);
+    }
+    const focus = searchParams.get("focus");
+    if (focus && focus !== focusKey) {
+      setFocusKey(focus);
+      triedTabsRef.current = new Set();
+    }
+  }, [searchParams, tab, focusKey]);
+
+  useEffect(() => {
+    if (!focusKey || !data) return;
+    const queue = data.queue || [];
+    const match = queue.find((entry) =>
+      matchesNotificationFocus(entry, focusKey, ["id", "token", "sequence", "appointmentId"])
+    );
+    if (match) {
+      const timer = window.setTimeout(() => {
+        focusedRowRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 80);
+      const clearTimer = window.setTimeout(() => {
+        const next = new URLSearchParams(searchParams);
+        if (next.has("focus")) {
+          next.delete("focus");
+          setSearchParams(next, { replace: true });
+        }
+      }, 4000);
+      return () => {
+        window.clearTimeout(timer);
+        window.clearTimeout(clearTimer);
+      };
+    }
+
+    const order = ["inline", "ongoing", "completed"];
+    triedTabsRef.current.add(tab);
+    const nextTab = order.find((item) => !triedTabsRef.current.has(item));
+    if (nextTab) setTab(nextTab);
+  }, [focusKey, data, tab, searchParams, setSearchParams]);
 
   async function callNext() {
     setBusy("call-next");
@@ -291,7 +341,19 @@ export function DentistQueuePage() {
               </thead>
               <tbody>
                 {queue.map((entry) => (
-                  <tr key={entry.id}>
+                  <tr
+                    key={entry.id}
+                    ref={
+                      matchesNotificationFocus(entry, focusKey, ["id", "token", "sequence", "appointmentId"])
+                        ? focusedRowRef
+                        : null
+                    }
+                    className={
+                      matchesNotificationFocus(entry, focusKey, ["id", "token", "sequence", "appointmentId"])
+                        ? "is-notification-focus"
+                        : undefined
+                    }
+                  >
                     <td>
                       <strong>#{String(entry.sequence).padStart(2, "0")}</strong>
                     </td>

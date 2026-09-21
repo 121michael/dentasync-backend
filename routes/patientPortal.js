@@ -338,6 +338,7 @@ function createPatientPortalRouter({
   uploadDirectory = path.join(process.cwd(), "uploads", "patient-portal"),
   notifyStaff = async () => {},
   notifyAdmin = async () => {},
+  notifyDentist = async () => {},
   clinicSms = null,
   jwtSecret = null,
 }) {
@@ -391,6 +392,14 @@ function createPatientPortalRouter({
       await notifyAdmin(notification);
     } catch (error) {
       console.warn("Unable to notify admins:", error.message);
+    }
+  }
+
+  async function notifyClinicDentists(notification) {
+    try {
+      await notifyDentist(notification);
+    } catch (error) {
+      console.warn("Unable to notify dentists:", error.message);
     }
   }
 
@@ -968,6 +977,15 @@ function createPatientPortalRouter({
         entityType: "appointment",
         entityId: appointmentId,
       });
+      await notifyClinicDentists({
+        type: "appointment",
+        title: "New Appointment Request",
+        body: `New appointment booking from ${patientName}. ${service.name} on ${appointmentDate} at ${appointmentTime}.`,
+        entityType: "appointment",
+        entityId: appointmentId,
+        dentistId: dentist.id,
+        dentistName: dentist.name,
+      });
 
       return res.status(201).json({
         message:
@@ -1018,6 +1036,15 @@ function createPatientPortalRouter({
         body: `A patient cancelled ${result.rows[0].service_name} scheduled for ${result.rows[0].appointment_date} at ${String(result.rows[0].appointment_time).slice(0, 5)}.`,
         entityType: "appointment",
         entityId: result.rows[0].id,
+      });
+      await notifyClinicDentists({
+        type: "appointment",
+        title: "Appointment cancellation",
+        body: `A patient cancelled ${result.rows[0].service_name} scheduled for ${result.rows[0].appointment_date} at ${String(result.rows[0].appointment_time).slice(0, 5)}.`,
+        entityType: "appointment",
+        entityId: result.rows[0].id,
+        dentistId: result.rows[0].dentist_id,
+        dentistName: result.rows[0].dentist_name,
       });
       return res.json({ appointment: mapAppointment(result.rows[0]) });
     } catch (error) {
@@ -1152,6 +1179,7 @@ function createPatientPortalRouter({
         appointment,
         staff: null,
         notifyClinicStaff,
+        notifyClinicDentists,
         checkInMethod: "portal",
       });
 
@@ -2419,6 +2447,7 @@ function createPatientPortalRouter({
         appointment,
         staff: null,
         notifyClinicStaff,
+        notifyClinicDentists,
         checkInMethod: "qr",
       });
 

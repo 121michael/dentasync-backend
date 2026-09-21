@@ -254,6 +254,7 @@ function createStaffPortalRouter({
   authenticateToken,
   passwordResetService,
   notifyStaff = async () => {},
+  notifyDentist = async () => {},
   clinicSms = null,
 }) {
   const router = express.Router();
@@ -400,6 +401,7 @@ function createStaffPortalRouter({
         sourceQueueId,
         staff: req.staff,
         notifyClinicStaff: notifyStaff,
+        notifyClinicDentists: notifyDentist,
       });
 
       await client.query("COMMIT");
@@ -1897,6 +1899,7 @@ function createStaffPortalRouter({
         appointment,
         staff: req.staff,
         notifyClinicStaff: notifyStaff,
+        notifyClinicDentists: notifyDentist,
         checkInMethod: method,
       });
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Camera, CheckCircle2, FileText, Image as ImageIcon, Plus, RefreshCw, Trash2, Upload, X } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { ApiError, api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { useAdminUi } from "../components/AdminLayout";
@@ -127,6 +128,7 @@ function syncFullName(patient) {
 
 export function AdminSyncPage() {
   const { pushToast, confirm } = useAdminUi();
+  const [searchParams, setSearchParams] = useSearchParams();
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const pdfInputRef = useRef(null);
@@ -148,6 +150,7 @@ export function AdminSyncPage() {
   const [busy, setBusy] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [matchInfo, setMatchInfo] = useState(null);
+  const focusHandledRef = useRef("");
 
   const clearPreviews = useCallback(() => {
     if (localPreviewRef.current) {
@@ -178,6 +181,19 @@ export function AdminSyncPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    const focus = searchParams.get("focus");
+    if (!focus || !loaded) return;
+    if (focusHandledRef.current === focus) return;
+    const match = jobs.find((job) => String(job.id) === String(focus));
+    if (!match) return;
+    focusHandledRef.current = focus;
+    openJob(match.id);
+    const next = new URLSearchParams(searchParams);
+    next.delete("focus");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, loaded, jobs]);
 
   useEffect(() => {
     return () => {
@@ -1016,7 +1032,10 @@ export function AdminSyncPage() {
               </thead>
               <tbody>
                 {jobs.map((job) => (
-                  <tr key={job.id}>
+                  <tr
+                    key={job.id}
+                    className={String(job.id) === String(searchParams.get("focus") || "") ? "is-notification-focus" : undefined}
+                  >
                     <td>
                       <strong>{job.originalName}</strong>
                       {job.errorMessage ? <div className="muted-copy">{job.errorMessage}</div> : null}

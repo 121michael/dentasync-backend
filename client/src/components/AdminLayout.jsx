@@ -41,6 +41,7 @@ const navigation = [
   { to: "/admin/patient-records", label: "Patient Record", icon: FolderOpen },
   { to: "/admin/rfid", label: "RFID Tags", icon: CreditCard },
   { to: "/admin/schedule", label: "Update Schedule", icon: CalendarDays },
+  { to: "/admin/notifications", label: "Notifications", icon: Bell },
   { to: "/admin/analytics", label: "General Analytics", icon: BarChart3 },
   { to: "/admin/ai-settings", label: "Manage AI Settings", icon: Bot },
   { to: "/admin/settings", label: "System Settings", icon: Settings },
@@ -54,6 +55,7 @@ const PAGE_TITLES = {
   "/admin/patient-records": "Patient Records Vault",
   "/admin/rfid": "RFID Tag Assignments",
   "/admin/schedule": "Clinic Schedule & Roster",
+  "/admin/notifications": "Notifications",
   "/admin/analytics": "General Operations Analytics",
   "/admin/ai-settings": "Amethyst AI Core Settings",
   "/admin/settings": "System Settings",
@@ -140,7 +142,13 @@ export function AdminLayout() {
     }
     loadStatus();
     const timer = window.setInterval(loadStatus, 20000);
-    const stopListening = onNotificationsChanged(() => loadStatus());
+    const stopListening = onNotificationsChanged((detail) => {
+      if (detail?.source === "admin" && detail.unread === 0) {
+        setAlerts((current) => ({ ...current, unreadNotifications: 0 }));
+        return;
+      }
+      loadStatus();
+    });
     return () => {
       active = false;
       window.clearInterval(timer);
@@ -184,12 +192,18 @@ export function AdminLayout() {
             {navigation.map(({ to, label, icon: Icon }) => {
               const showDot =
                 (to === "/admin/users" && alerts.pendingAccounts > 0) ||
-                (to === "/admin/schedule" && alerts.pendingAppointments > 0);
+                (to === "/admin/schedule" && alerts.pendingAppointments > 0) ||
+                (to === "/admin/notifications" && alerts.unreadNotifications > 0);
               return (
                 <NavLink
                   key={to}
                   to={to}
-                  onClick={() => setIsOpen(false)}
+                  onClick={() => {
+                    setIsOpen(false);
+                    if (to === "/admin/notifications") {
+                      setAlerts((current) => ({ ...current, unreadNotifications: 0 }));
+                    }
+                  }}
                   className={({ isActive }) => `admin-nav__link ${isActive ? "is-active" : ""}`}
                 >
                   <Icon size={18} aria-hidden="true" />
@@ -233,6 +247,7 @@ export function AdminLayout() {
               <NavLink
                 to="/admin/notifications"
                 className="icon-button"
+                onClick={() => setAlerts((current) => ({ ...current, unreadNotifications: 0 }))}
                 aria-label={
                   hasUnread
                     ? `Notifications, ${alerts.unreadNotifications} unread`
@@ -240,9 +255,7 @@ export function AdminLayout() {
                 }
               >
                 <Bell size={19} />
-                {hasUnread || alerts.pendingAppointments > 0 ? (
-                  <span className="alert-dot" aria-hidden="true" />
-                ) : null}
+                {hasUnread ? <span className="alert-dot" aria-hidden="true" /> : null}
               </NavLink>
               <button className="button button--primary button--compact" onClick={runSecurityAudit}>
                 <Shield size={15} /> Run Security Audit

@@ -260,6 +260,9 @@ export const api = {
     request(`/dentist/patients/${patientId}/xrays`, options),
   getDentistProfile: () => request("/dentist/profile"),
   updateDentistProfile: (body) => request("/dentist/profile", { method: "PUT", body }),
+  getDentistNotifications: (options = {}) => request("/dentist/notifications", options),
+  markDentistNotificationRead: (id) => request(`/dentist/notifications/${id}/read`, { method: "PATCH" }),
+  markAllDentistNotificationsRead: () => request("/dentist/notifications/read-all", { method: "PATCH" }),
   getAdminDashboard: (options = {}) => request("/admin/dashboard", options),
   getAdminStatus: (options = {}) => request("/admin/status", options),
   getAdminPatients: (params = {}) => {

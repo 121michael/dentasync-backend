@@ -56,6 +56,7 @@ const { createOtpService } = require("./services/otpService");
 const { createPasswordResetService } = require("./services/passwordResetService");
 const { notifyActiveStaff } = require("./services/staffNotifications");
 const { notifyActiveAdmins } = require("./services/adminNotifications");
+const { notifyDentists } = require("./services/dentistNotifications");
 const { authenticateToken } = require("./middleware/authMiddleware");
 
 const app = express();
@@ -363,6 +364,7 @@ app.use(
     authenticateToken,
     notifyStaff: (notification) => notifyActiveStaff(db, notification),
     notifyAdmin: (notification) => notifyActiveAdmins(db, notification),
+    notifyDentist: (notification) => notifyDentists(db, notification),
     clinicSms,
     jwtSecret: JWT_SECRET,
   })
@@ -375,6 +377,7 @@ app.use(
     authenticateToken,
     passwordResetService,
     notifyStaff: (notification) => notifyActiveStaff(db, notification),
+    notifyDentist: (notification) => notifyDentists(db, notification),
     clinicSms,
   })
 );
@@ -385,6 +388,7 @@ app.use(
     db,
     authenticateToken,
     clinicSms,
+    notifyDentist: (notification) => notifyDentists(db, notification),
   })
 );
 

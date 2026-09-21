@@ -43,6 +43,7 @@ import { DentistQueuePage } from "./pages/DentistQueuePage";
 import { DentistAppointmentsPage } from "./pages/DentistAppointmentsPage";
 import { DentistRecordsPage } from "./pages/DentistRecordsPage";
 import { DentistProfilePage } from "./pages/DentistProfilePage";
+import { DentistNotificationsPage } from "./pages/DentistNotificationsPage";
 import { WalkInCheckInPage } from "./pages/WalkInCheckInPage";
 import { useAuth } from "./useAuth";
 
@@ -185,6 +186,7 @@ function PortalRoutes() {
           <Route path="/dentist/queue" element={<DentistQueuePage />} />
           <Route path="/dentist/appointments" element={<DentistAppointmentsPage />} />
           <Route path="/dentist/patient-records" element={<DentistRecordsPage />} />
+          <Route path="/dentist/notifications" element={<DentistNotificationsPage />} />
           <Route path="/dentist/profile" element={<DentistProfilePage />} />
         </Route>
         <Route path="/access-denied" element={<AccessDeniedPage />} />

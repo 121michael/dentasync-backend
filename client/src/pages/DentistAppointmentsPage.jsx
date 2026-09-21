@@ -1,13 +1,18 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
 import { DentistStatusBadge } from "../components/DentistUI";
 import { formatDentistDate, formatDentistDateTime, formatDentistTime } from "../dentistUtils";
+import { matchesNotificationFocus } from "../notificationFocus";
 
 export function DentistAppointmentsPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
+  const [focusKey, setFocusKey] = useState(() => searchParams.get("focus") || "");
+  const focusedRowRef = useRef(null);
 
   const load = useCallback(async () => {
     try {
@@ -21,6 +26,32 @@ export function DentistAppointmentsPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    const focus = searchParams.get("focus");
+    if (focus) setFocusKey(focus);
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!focusKey || !data) return;
+    const rows = [...(data.todayAppointments || []), ...(data.upcomingAppointments || [])];
+    const match = rows.find((appointment) => matchesNotificationFocus(appointment, focusKey, ["id"]));
+    if (!match) return;
+    const timer = window.setTimeout(() => {
+      focusedRowRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 80);
+    const clearTimer = window.setTimeout(() => {
+      const next = new URLSearchParams(searchParams);
+      if (next.has("focus")) {
+        next.delete("focus");
+        setSearchParams(next, { replace: true });
+      }
+    }, 4000);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [focusKey, data, searchParams, setSearchParams]);
 
   if (error && !data) return <ErrorState message={error} onRetry={load} />;
   if (!data) return <LoadingState label="Loading dentist appointments…" />;
@@ -63,7 +94,15 @@ export function DentistAppointmentsPage() {
               </thead>
               <tbody>
                 {today.map((appointment) => (
-                  <tr key={appointment.id}>
+                  <tr
+                    key={appointment.id}
+                    ref={matchesNotificationFocus(appointment, focusKey, ["id"]) ? focusedRowRef : null}
+                    className={
+                      matchesNotificationFocus(appointment, focusKey, ["id"])
+                        ? "is-notification-focus"
+                        : undefined
+                    }
+                  >
                     <td>{formatDentistTime(String(appointment.time || "").slice(0, 5))}</td>
                     <td>
                       <strong>{appointment.patientName}</strong>
@@ -102,7 +141,15 @@ export function DentistAppointmentsPage() {
               </thead>
               <tbody>
                 {upcoming.map((appointment) => (
-                  <tr key={appointment.id}>
+                  <tr
+                    key={appointment.id}
+                    ref={matchesNotificationFocus(appointment, focusKey, ["id"]) ? focusedRowRef : null}
+                    className={
+                      matchesNotificationFocus(appointment, focusKey, ["id"])
+                        ? "is-notification-focus"
+                        : undefined
+                    }
+                  >
                     <td>{formatDentistDate(appointment.date)}</td>
                     <td>{formatDentistTime(String(appointment.time || "").slice(0, 5))}</td>
                     <td>{appointment.patientName}</td>

@@ -314,14 +314,15 @@ function requireDentistAccount(db) {
   };
 }
 
-function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) {
+function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, notifyDentist = async () => {} }) {
   const router = express.Router();
   router.use(authenticateToken, requireDentistAccount(db));
+  void notifyDentist;
 
   router.get("/dashboard", async (req, res) => {
     const scope = dentistScopeClause("appointment", req.dentist);
     try {
-      const [targetResult, remainingResult, completedResult, nextResult] = await Promise.all([
+      const [targetResult, remainingResult, completedResult, nextResult, unreadResult] = await Promise.all([
         db.query(
           `SELECT COUNT(*) AS count
            FROM patient_portal_appointments AS appointment
@@ -382,9 +383,20 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
                ELSE 3
              END,
              queue.position ASC
-           LIMIT 1`,
+             LIMIT 1`,
           scope.params
         ),
+        db.query(
+          `SELECT COUNT(*) AS count
+           FROM dentist_portal_notifications
+           WHERE user_id = $1 AND read_at IS NULL`,
+          [String(req.dentist.id)]
+        ).catch((error) => {
+          if (error.code === "42P01" || error.code === "42703") {
+            return { rows: [{ count: "0" }] };
+          }
+          throw error;
+        }),
       ]);
 
       const specialization =
@@ -403,6 +415,7 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
           todaysTarget: count(targetResult.rows[0]),
           remainingQueue: count(remainingResult.rows[0]),
           completedToday: count(completedResult.rows[0]),
+          unreadNotifications: count(unreadResult.rows[0]),
         },
         nextPatient: nextResult.rows[0] ? mapQueueEntry(nextResult.rows[0]) : null,
       });
@@ -2021,6 +2034,88 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null }) 
       }
       console.error("Dentist treatment delete error:", error.message);
       return res.status(500).json({ message: "Unable to delete the treatment." });
+    }
+  });
+
+  router.get("/notifications", async (req, res) => {
+    try {
+      const result = await db.query(
+        `SELECT id, type, title, body, entity_type, entity_id, read_at, created_at
+         FROM dentist_portal_notifications
+         WHERE user_id = $1
+         ORDER BY created_at DESC
+         LIMIT 100`,
+        [String(req.dentist.id)]
+      );
+      return res.json({
+        notifications: result.rows.map((notification) => ({
+          id: notification.id,
+          type: notification.type,
+          title: notification.title,
+          body: notification.body,
+          entityType: notification.entity_type,
+          entityId: notification.entity_id,
+          read: Boolean(notification.read_at),
+          createdAt: notification.created_at,
+        })),
+      });
+    } catch (error) {
+      if (error.code === "42P01") {
+        return res.status(503).json({
+          message: "Dentist notifications are not available. Run npm run migrate:dentist-notifications.",
+        });
+      }
+      console.error("Dentist notifications error:", error.message);
+      return res.status(500).json({ message: "Unable to load notifications." });
+    }
+  });
+
+  router.patch("/notifications/read-all", async (req, res) => {
+    try {
+      const result = await db.query(
+        `UPDATE dentist_portal_notifications
+         SET read_at = CURRENT_TIMESTAMP
+         WHERE user_id = $1 AND read_at IS NULL`,
+        [String(req.dentist.id)]
+      );
+      return res.json({ markedRead: result.rowCount || 0 });
+    } catch (error) {
+      if (error.code === "42P01") {
+        return res.status(503).json({
+          message: "Dentist notifications are not available. Run npm run migrate:dentist-notifications.",
+        });
+      }
+      console.error("Dentist mark all notifications read error:", error.message);
+      return res.status(500).json({ message: "Unable to update notifications." });
+    }
+  });
+
+  router.patch("/notifications/:id/read", async (req, res) => {
+    const notificationId = numericId(req.params.id);
+    if (!notificationId) {
+      return res.status(400).json({ message: "A valid notification is required." });
+    }
+
+    try {
+      const result = await db.query(
+        `UPDATE dentist_portal_notifications
+         SET read_at = CURRENT_TIMESTAMP
+         WHERE id = $1 AND user_id = $2
+         RETURNING id`,
+        [notificationId, String(req.dentist.id)]
+      );
+      if (!result.rows.length) {
+        return res.status(404).json({ message: "Notification not found." });
+      }
+      return res.json({ message: "Notification marked as read." });
+    } catch (error) {
+      if (error.code === "42P01") {
+        return res.status(503).json({
+          message: "Dentist notifications are not available. Run npm run migrate:dentist-notifications.",
+        });
+      }
+      console.error("Dentist notification update error:", error.message);
+      return res.status(500).json({ message: "Unable to update the notification." });
     }
   });
 

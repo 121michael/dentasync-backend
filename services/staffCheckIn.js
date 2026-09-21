@@ -186,7 +186,7 @@ async function listCheckInLog(db, query = {}) {
   }
 }
 
-async function restoreCheckInFromHistory(client, { sourceQueueId, staff, notifyClinicStaff }) {
+async function restoreCheckInFromHistory(client, { sourceQueueId, staff, notifyClinicStaff, notifyClinicDentists }) {
   const sourceId = numericId(sourceQueueId);
   if (!sourceId) {
     const error = new Error("Choose a check-in record to restore.");
@@ -237,6 +237,7 @@ async function restoreCheckInFromHistory(client, { sourceQueueId, staff, notifyC
     appointment: resolved.appointment,
     staff,
     notifyClinicStaff,
+    notifyClinicDentists,
     checkInMethod: "restore",
   });
 
@@ -793,7 +794,7 @@ async function insertQueueEntry(client, { userId, appointmentId, token, position
   }
 }
 
-async function performStaffCheckIn(client, { appointment, staff, notifyClinicStaff, checkInMethod = "rfid" }) {
+async function performStaffCheckIn(client, { appointment, staff, notifyClinicStaff, notifyClinicDentists, checkInMethod = "rfid" }) {
   const existingForPatient = await findActiveQueueForPatient(client, appointment.user_id);
   if (existingForPatient) {
     return {
@@ -852,18 +853,30 @@ async function performStaffCheckIn(client, { appointment, staff, notifyClinicSta
     }
   }
 
+  const patientName = appointment.patient_name || "Patient";
+  const queueEntry = queueResult.rows[0];
+  const checkInNotice = {
+    type: "check_in",
+    title: "Patient checked in",
+    body: `${patientName} has checked in. Queue #${token}`,
+    entityType: "queue",
+    entityId: queueEntry.id,
+    dentistId: appointment.dentist_id || null,
+    dentistName: appointment.dentist_name || null,
+    actorId: staff?.id,
+  };
+
   if (typeof notifyClinicStaff === "function") {
     try {
-      const patientName = appointment.patient_name || "Patient";
-      const queueEntry = queueResult.rows[0];
-      await notifyClinicStaff({
-        type: "check_in",
-        title: "Patient checked in",
-        body: `${patientName} has checked in. Queue #${token}`,
-        entityType: "queue",
-        entityId: queueEntry.id,
-        actorId: staff?.id,
-      });
+      await notifyClinicStaff(checkInNotice);
+    } catch {
+      // Non-blocking
+    }
+  }
+
+  if (typeof notifyClinicDentists === "function") {
+    try {
+      await notifyClinicDentists(checkInNotice);
     } catch {
       // Non-blocking
     }

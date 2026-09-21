@@ -3,21 +3,19 @@ import { Bell, CheckCheck, ExternalLink, Info, RefreshCw } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
-import { formatAdminDateTime } from "../adminUtils";
+import { formatDentistDateTime } from "../dentistUtils";
 import { notifyNotificationsChanged } from "../notificationEvents";
-import { getAdminNotificationTarget } from "../adminNotificationNav";
-import { useAdminUi } from "../components/AdminLayout";
+import { getDentistNotificationTarget } from "../dentistNotificationNav";
 
-export function AdminNotificationsPage() {
+export function DentistNotificationsPage() {
   const navigate = useNavigate();
-  const { pushToast } = useAdminUi();
   const [notifications, setNotifications] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async ({ markSeen = false } = {}) => {
     try {
-      const response = await api.getAdminNotifications();
+      const response = await api.getDentistNotifications();
       const items = response.notifications || [];
       setNotifications(items);
       setError("");
@@ -25,12 +23,12 @@ export function AdminNotificationsPage() {
       if (markSeen) {
         const unread = items.filter((item) => !item.read);
         if (unread.length) {
-          await api.markAllAdminNotificationsRead();
+          await api.markAllDentistNotificationsRead();
           setNotifications((current) =>
             (current || []).map((item) => ({ ...item, read: true }))
           );
         }
-        notifyNotificationsChanged({ source: "admin", unread: 0 });
+        notifyNotificationsChanged({ source: "dentist", unread: 0 });
       }
     } catch (loadError) {
       setError(loadError.message);
@@ -39,16 +37,16 @@ export function AdminNotificationsPage() {
 
   useEffect(() => {
     load({ markSeen: true });
-    const timer = window.setInterval(() => load({ markSeen: false }), 30000);
+    const timer = window.setInterval(() => load({ markSeen: false }), 20000);
     return () => window.clearInterval(timer);
   }, [load]);
 
   async function markAll() {
     setBusy(true);
     try {
-      await api.markAllAdminNotificationsRead();
-      setNotifications((current) => current.map((item) => ({ ...item, read: true })));
-      notifyNotificationsChanged({ source: "admin", unread: 0 });
+      await api.markAllDentistNotificationsRead();
+      setNotifications((current) => (current || []).map((item) => ({ ...item, read: true })));
+      notifyNotificationsChanged({ source: "dentist", unread: 0 });
     } catch (markError) {
       setError(markError.message);
     } finally {
@@ -58,11 +56,11 @@ export function AdminNotificationsPage() {
 
   async function markOne(id) {
     try {
-      await api.markAdminNotificationRead(id);
+      await api.markDentistNotificationRead(id);
       setNotifications((current) => {
-        const next = current.map((item) => (item.id === id ? { ...item, read: true } : item));
+        const next = (current || []).map((item) => (item.id === id ? { ...item, read: true } : item));
         notifyNotificationsChanged({
-          source: "admin",
+          source: "dentist",
           unread: next.filter((item) => !item.read).length,
         });
         return next;
@@ -73,23 +71,23 @@ export function AdminNotificationsPage() {
   }
 
   async function handleNotificationClick(notification) {
-    const target = getAdminNotificationTarget(notification);
+    const target = getDentistNotificationTarget(notification);
     if (!notification.read) {
       try {
-        await api.markAdminNotificationRead(notification.id);
+        await api.markDentistNotificationRead(notification.id);
         setNotifications((current) =>
           (current || []).map((item) =>
             item.id === notification.id ? { ...item, read: true } : item
           )
         );
-        notifyNotificationsChanged({ source: "admin" });
+        notifyNotificationsChanged({ source: "dentist" });
       } catch (markError) {
         setError(markError.message);
       }
     }
 
     if (!target?.path) {
-      pushToast("This notification has no linked record yet.", "error");
+      setError("This notification has no linked record yet.");
       return;
     }
 
@@ -97,23 +95,23 @@ export function AdminNotificationsPage() {
   }
 
   if (error && !notifications) return <ErrorState message={error} onRetry={() => load({ markSeen: true })} />;
-  if (!notifications) return <LoadingState label="Loading admin notifications…" />;
+  if (!notifications) return <LoadingState label="Loading dentist notifications…" />;
 
   const unread = notifications.filter((item) => !item.read).length;
 
   return (
-    <div className="admin-page">
+    <div className="dentist-page">
       <SectionHeading
-        eyebrow="Operations feed"
+        eyebrow="Chairside alerts"
         title="Notifications"
         detail={`${unread} unread ${unread === 1 ? "alert" : "alerts"}`}
         action={
-          <div className="admin-heading-actions">
-            <button className="button button--secondary" onClick={() => load({ markSeen: false })}>
+          <div className="dentist-heading-actions">
+            <button type="button" className="button button--secondary" onClick={() => load({ markSeen: false })}>
               <RefreshCw size={16} /> Refresh
             </button>
-            <button className="button button--primary" onClick={markAll} disabled={!unread || busy}>
-              <CheckCheck size={16} /> Mark All as Read
+            <button type="button" className="button button--primary" onClick={markAll} disabled={!unread || busy}>
+              <CheckCheck size={16} /> Mark all read
             </button>
           </div>
         }
@@ -121,16 +119,16 @@ export function AdminNotificationsPage() {
       {error ? <p className="inline-alert inline-alert--error">{error}</p> : null}
 
       {notifications.length ? (
-        <section className="admin-notification-list">
+        <section className="dentist-notification-list">
           {notifications.map((notification) => {
-            const target = getAdminNotificationTarget(notification);
+            const target = getDentistNotificationTarget(notification);
             const clickable = Boolean(target?.path);
             return (
               <article
                 key={notification.id}
                 role={clickable ? "button" : undefined}
                 tabIndex={clickable ? 0 : undefined}
-                className={`admin-notification ${notification.read ? "" : "is-unread"} ${
+                className={`dentist-notification ${notification.read ? "" : "is-unread"} ${
                   clickable ? "is-clickable" : ""
                 }`}
                 onClick={() => {
@@ -144,13 +142,13 @@ export function AdminNotificationsPage() {
                   }
                 }}
               >
-                <span className="admin-notification__icon"><Info size={18} /></span>
+                <span className="dentist-notification__icon"><Info size={18} /></span>
                 <div>
                   <h2>{notification.title}</h2>
                   <p>{notification.body}</p>
-                  <small>{formatAdminDateTime(notification.createdAt)}</small>
+                  <small>{formatDentistDateTime(notification.createdAt)}</small>
                 </div>
-                <div className="admin-notification__aside" onClick={(event) => event.stopPropagation()}>
+                <div className="dentist-notification__aside" onClick={(event) => event.stopPropagation()}>
                   {clickable ? (
                     <button
                       type="button"
@@ -162,6 +160,7 @@ export function AdminNotificationsPage() {
                   ) : null}
                   {!notification.read ? (
                     <button
+                      type="button"
                       className="button button--secondary button--compact"
                       onClick={() => markOne(notification.id)}
                     >
@@ -176,7 +175,7 @@ export function AdminNotificationsPage() {
       ) : (
         <EmptyState
           title="No notifications yet"
-          detail="Clinic alerts and appointment requests will appear here."
+          detail="Appointment requests and check-ins assigned to you will appear here."
           action={<span className="empty-state__icon"><Bell size={22} /></span>}
         />
       )}

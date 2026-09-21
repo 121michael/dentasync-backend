@@ -37,6 +37,26 @@ async function startDentistPortal({ tokenRole, databaseRole, catalogDentistId = 
         return { rows: [{ count: "0" }] };
       }
 
+      if (sql.includes("dentist_portal_notifications")) {
+        if (sql.includes("UPDATE dentist_portal_notifications")) {
+          return { rowCount: 1, rows: [{ id: 4 }] };
+        }
+        return {
+          rows: [
+            {
+              id: 4,
+              type: "appointment",
+              title: "New Appointment Request",
+              body: "Cleaning tomorrow.",
+              entity_type: "appointment",
+              entity_id: "88",
+              read_at: null,
+              created_at: "2026-09-21T00:00:00.000Z",
+            },
+          ],
+        };
+      }
+
       if (sql.includes("LIMIT 1") && sql.includes("patient_portal_queue_entries")) {
         return { rows: [] };
       }
@@ -109,6 +129,25 @@ test("dentist dashboard authorizes the live database role instead of a token rol
     assert.equal(body.metrics.todaysTarget, 0);
     assert.equal(body.metrics.remainingQueue, 0);
     assert.equal(body.metrics.completedToday, 0);
+    assert.equal(body.metrics.unreadNotifications, 0);
+  } finally {
+    await portal.close();
+  }
+});
+
+test("dentist notifications list and mark-all-read are available to dentist accounts", async () => {
+  const portal = await startDentistPortal({ tokenRole: "dentist", databaseRole: "dentist" });
+  try {
+    const list = await fetch(`${portal.url}/notifications`);
+    assert.equal(list.status, 200);
+    const body = await list.json();
+    assert.equal(body.notifications.length, 1);
+    assert.equal(body.notifications[0].entityType, "appointment");
+    assert.equal(body.notifications[0].read, false);
+
+    const markAll = await fetch(`${portal.url}/notifications/read-all`, { method: "PATCH" });
+    assert.equal(markAll.status, 200);
+    assert.equal((await markAll.json()).markedRead, 1);
   } finally {
     await portal.close();
   }

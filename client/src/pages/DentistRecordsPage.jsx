@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Plus, Search } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { DentalChart } from "../components/DentalChart";
 import {
@@ -10,6 +11,7 @@ import {
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
 import { DentistModal } from "../components/DentistUI";
 import { formatDentistDate } from "../dentistUtils";
+import { matchesNotificationFocus } from "../notificationFocus";
 
 const emptyForm = {
   firstName: "",
@@ -64,6 +66,7 @@ function nextAppointmentLabel(treatment, fallbackAppointment, patient) {
 }
 
 export function DentistRecordsPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [patients, setPatients] = useState(null);
   const [search, setSearch] = useState("");
   const [applied, setApplied] = useState("");
@@ -84,6 +87,9 @@ export function DentistRecordsPage() {
   const [ageSexOpen, setAgeSexOpen] = useState(false);
   const [ageSexForm, setAgeSexForm] = useState(emptyAgeSexForm);
   const treatmentFormRef = useRef(null);
+  const focusHandledRef = useRef("");
+  const focusedRowRef = useRef(null);
+  const [focusKey, setFocusKey] = useState(() => searchParams.get("focus") || "");
 
   const load = useCallback(async (options = {}) => {
     try {
@@ -98,6 +104,34 @@ export function DentistRecordsPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    const focusId = searchParams.get("focus");
+    if (focusId) setFocusKey(focusId);
+    if (!focusId || !patients?.length) return;
+    if (focusHandledRef.current === focusId) return;
+    const match = patients.find((patient) =>
+      matchesNotificationFocus(patient, focusId, ["id", "linkedUserId", "patientId", "recordCode"])
+    );
+    focusHandledRef.current = focusId;
+    if (match) {
+      viewPatient(match);
+    } else {
+      api
+        .getDentistPatient(focusId)
+        .then((response) => {
+          if (response?.patient) viewPatient(response.patient);
+        })
+        .catch(() => {});
+    }
+    const timer = window.setTimeout(() => {
+      focusedRowRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 80);
+    const next = new URLSearchParams(searchParams);
+    next.delete("focus");
+    setSearchParams(next, { replace: true });
+    return () => window.clearTimeout(timer);
+  }, [searchParams, setSearchParams, patients]);
 
   async function createPatient(event) {
     event.preventDefault();
@@ -370,7 +404,29 @@ export function DentistRecordsPage() {
               </thead>
               <tbody>
                 {patients.map((patient) => (
-                  <tr key={patient.id}>
+                  <tr
+                    key={patient.id}
+                    ref={
+                      matchesNotificationFocus(patient, focusKey, [
+                        "id",
+                        "linkedUserId",
+                        "patientId",
+                        "recordCode",
+                      ])
+                        ? focusedRowRef
+                        : null
+                    }
+                    className={
+                      matchesNotificationFocus(patient, focusKey, [
+                        "id",
+                        "linkedUserId",
+                        "patientId",
+                        "recordCode",
+                      ])
+                        ? "is-notification-focus"
+                        : undefined
+                    }
+                  >
                     <td>
                       <strong>{patient.fullName || patient.patientName}</strong>
                       <small>

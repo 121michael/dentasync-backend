@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Eye, Search } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { AdminModal, AdminStatusBadge } from "../components/AdminUI";
 import { useAdminUi } from "../components/AdminLayout";
 import { formatAdminDate } from "../adminUtils";
+import { matchesNotificationFocus } from "../notificationFocus";
 
 function formatMoney(value) {
   return `₱${Number(value || 0).toFixed(2)}`;
@@ -40,11 +42,15 @@ function nextAppointmentLabel(treatment, fallbackAppointment) {
 
 export function AdminPatientRecordsPage() {
   const { pushToast } = useAdminUi();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [data, setData] = useState(null);
   const [search, setSearch] = useState("");
   const [applied, setApplied] = useState("");
   const [error, setError] = useState("");
   const [detail, setDetail] = useState(null);
+  const [focusKey, setFocusKey] = useState(() => searchParams.get("focus") || "");
+  const focusedRowRef = useRef(null);
+  const focusHandledRef = useRef("");
 
   const load = useCallback(async () => {
     try {
@@ -58,6 +64,36 @@ export function AdminPatientRecordsPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    const focus = searchParams.get("focus");
+    if (focus) setFocusKey(focus);
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!focusKey || !data?.records?.length) return;
+    if (focusHandledRef.current === focusKey) return;
+    const match = data.records.find((item) =>
+      matchesNotificationFocus(item, focusKey, ["id", "linkedUserId", "patientId", "recordCode"])
+    );
+    if (!match) return;
+    focusHandledRef.current = focusKey;
+    viewRecord(match);
+    const timer = window.setTimeout(() => {
+      focusedRowRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 80);
+    const clearTimer = window.setTimeout(() => {
+      const next = new URLSearchParams(searchParams);
+      if (next.has("focus")) {
+        next.delete("focus");
+        setSearchParams(next, { replace: true });
+      }
+    }, 4000);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [focusKey, data, searchParams, setSearchParams]);
 
   async function viewRecord(record) {
     try {
@@ -143,7 +179,19 @@ export function AdminPatientRecordsPage() {
               </thead>
               <tbody>
                 {records.map((item) => (
-                  <tr key={item.id}>
+                  <tr
+                    key={item.id}
+                    ref={
+                      matchesNotificationFocus(item, focusKey, ["id", "linkedUserId", "patientId", "recordCode"])
+                        ? focusedRowRef
+                        : null
+                    }
+                    className={
+                      matchesNotificationFocus(item, focusKey, ["id", "linkedUserId", "patientId", "recordCode"])
+                        ? "is-notification-focus"
+                        : undefined
+                    }
+                  >
                     <td><code>{item.patientId || item.recordCode || item.id}</code></td>
                     <td>
                       <strong>{item.fullName}</strong>
