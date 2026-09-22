@@ -7,6 +7,7 @@ import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../compone
 import { DentistModal, DentistStatusBadge } from "../components/DentistUI";
 import { TREATMENT_OPTIONS } from "../components/DentalChart/dentalChartData";
 import { formatDentistDateTime } from "../dentistUtils";
+import { matchesNotificationFocus } from "../notificationFocus";
 import {
   callRangeFromEntry,
   durationFromEntry,
