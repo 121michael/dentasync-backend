@@ -2102,6 +2102,7 @@ strong {
 .dentist-table tr.is-queue-selected td { background: color-mix(in srgb, var(--primary, #5b3cc4) 8%, transparent); }
 .queue-visit-details { display: grid; gap: .85rem; }
 .queue-visit-details .visit-procedure-list li { grid-template-columns: 1fr auto; align-items: start; }
+.queue-treatment-timer { font-variant-numeric: tabular-nums; letter-spacing: .04em; }
 .queue-disclaimer strong { color: var(--text); font-size: .72rem; }
 
 .queue-empty-wrap { display: grid; gap: .9rem; }

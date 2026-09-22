@@ -250,13 +250,14 @@ export const api = {
     request(`/dentist/queue?tab=${encodeURIComponent(tab)}`, options),
   recalculateDentistQueueEstimates: () =>
     request("/dentist/queue/recalculate-estimates", { method: "POST" }),
-  callNextDentistPatient: () => request("/dentist/queue/call-next", { method: "POST" }),
-  updateDentistQueue: (queueEntryId, body) =>
-    request(`/dentist/queue/${queueEntryId}`, { method: "PATCH", body }),
-  startDentistTreatment: (queueEntryId, body) =>
-    request(`/dentist/queue/${queueEntryId}/start-treatment`, { method: "POST", body }),
-  addDentistQueueProcedure: (queueEntryId, body) =>
-    request(`/dentist/queue/${queueEntryId}/procedures`, { method: "POST", body }),
+  callNextDentistPatient: (options = {}) =>
+    request("/dentist/queue/call-next", { method: "POST", silent: true, ...options }),
+  updateDentistQueue: (queueEntryId, body, options = {}) =>
+    request(`/dentist/queue/${queueEntryId}`, { method: "PATCH", body, silent: true, ...options }),
+  startDentistTreatment: (queueEntryId, body, options = {}) =>
+    request(`/dentist/queue/${queueEntryId}/start-treatment`, { method: "POST", body, silent: true, ...options }),
+  addDentistQueueProcedure: (queueEntryId, body, options = {}) =>
+    request(`/dentist/queue/${queueEntryId}/procedures`, { method: "POST", body, silent: true, ...options }),
   getDentistAppointments: () => request("/dentist/appointments"),
   getDentistPatients: (search = "", options = {}) =>
     request(`/dentist/patients${search ? `?search=${encodeURIComponent(search)}` : ""}`, options),

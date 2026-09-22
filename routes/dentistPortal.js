@@ -197,7 +197,7 @@ async function listClinicalRecordIdsByUserIds(db, userIds) {
   if (!ids.length) return map;
   try {
     const result = await db.query(
-      `SELECT DISTINCT ON (linked_user_id) linked_user_id, id
+      `SELECT DISTINCT ON (linked_user_id) linked_user_id, id, record_code
        FROM clinic_patient_records
        WHERE linked_user_id = ANY($1::text[])
          AND COALESCE(is_archived, FALSE) = FALSE
@@ -205,7 +205,10 @@ async function listClinicalRecordIdsByUserIds(db, userIds) {
       [ids]
     );
     for (const row of result.rows) {
-      map.set(String(row.linked_user_id), Number(row.id));
+      map.set(String(row.linked_user_id), {
+        id: Number(row.id),
+        recordCode: row.record_code || null,
+      });
     }
   } catch (error) {
     if (error?.code !== "42P01" && error?.code !== "42703") throw error;
@@ -289,6 +292,8 @@ function mapQueueEntry(row) {
           : null,
     waitEstimate: staffWaitEstimate(waitEstimateFromRow(row)),
     checkedInAt: row.checked_in_at || null,
+    servingStartedAt: row.serving_started_at || null,
+    recordCode: row.record_code || row.recordCode || null,
     procedures: (row.procedures || []).map((procedure) => ({
       id: procedure.id,
       name: procedure.treatment || procedure.name,
@@ -505,7 +510,7 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
              ON appointment.id = queue.appointment_id
            WHERE ${scope.sql}
              AND ${clinicTodayQueueSql("queue")}
-             AND queue.status IN ('checked_in', 'waiting', 'preparing')`,
+             AND queue.status IN ('checked_in', 'waiting')`,
           scope.params
         ),
         db.query(
@@ -605,11 +610,11 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
     const tab = stringValue(req.query.tab, 40)?.toLowerCase() || "inline";
     let statusFilter;
     if (tab === "inline" || tab === "in_line") {
-      statusFilter = `queue.status IN ('checked_in', 'waiting', 'preparing')`;
+      statusFilter = `queue.status IN ('checked_in', 'waiting')`;
     } else if (tab === "completed") {
       statusFilter = `queue.status IN ('completed', 'no_show')`;
     } else {
-      statusFilter = `queue.status = 'dentist'`;
+      statusFilter = `queue.status IN ('preparing', 'dentist')`;
     }
 
     try {
@@ -653,8 +658,8 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
 
       const countsResult = await db.query(
         `SELECT
-           COUNT(*) FILTER (WHERE queue.status = 'dentist') AS ongoing,
-           COUNT(*) FILTER (WHERE queue.status IN ('checked_in', 'waiting', 'preparing')) AS inline,
+           COUNT(*) FILTER (WHERE queue.status IN ('preparing', 'dentist')) AS ongoing,
+           COUNT(*) FILTER (WHERE queue.status IN ('checked_in', 'waiting')) AS inline,
            COUNT(*) FILTER (WHERE queue.status IN ('completed', 'no_show')) AS completed
          FROM patient_portal_queue_entries AS queue
          JOIN patient_portal_appointments AS appointment
@@ -672,11 +677,15 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
         db,
         result.rows.map((row) => row.user_id)
       );
-      const queueRows = result.rows.map((row) => ({
-        ...row,
-        procedures: grouped.get(Number(row.id)) || [],
-        clinical_record_id: recordIdsByUser.get(String(row.user_id)) || null,
-      }));
+      const queueRows = result.rows.map((row) => {
+        const record = recordIdsByUser.get(String(row.user_id));
+        return {
+          ...row,
+          procedures: grouped.get(Number(row.id)) || [],
+          clinical_record_id: record?.id || null,
+          record_code: record?.recordCode || null,
+        };
+      });
 
       return res.json({
         updatedAt: new Date().toISOString(),
@@ -809,12 +818,11 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
 
       const updatedResult = await client.query(
         `UPDATE patient_portal_queue_entries
-         SET status = 'dentist', updated_at = CURRENT_TIMESTAMP
+         SET status = 'preparing', updated_at = CURRENT_TIMESTAMP
          WHERE id = $1
          RETURNING *`,
         [queueId]
       );
-      await markQueueServingStarted(client, queueId);
       await recomputeWaitsBehind(client, 1);
 
       if (current.appointment_id) {
@@ -835,6 +843,12 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
         entityId: current.id,
       });
 
+      const clinicalRecord = await clinicalPatients.findOrCreateClinicalRecordForUser(
+        client,
+        current.user_id,
+        { id: req.dentist.id, role: "dentist" }
+      );
+
       await client.query("COMMIT");
       transactionOpen = false;
 
@@ -842,7 +856,7 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
         clinicSms
           .notifyQueueSms({
             userId: current.user_id,
-            queueEntry: { ...updatedResult.rows[0], status: "dentist" },
+            queueEntry: { ...updatedResult.rows[0], status: "preparing" },
             actorRole: "dentist",
             actorId: req.dentist?.id,
           })
@@ -866,6 +880,7 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
            queue.serving_started_at,
            queue.checked_in_at,
            queue.appointment_id,
+           queue.user_id,
            appointment.service_name,
            appointment.dentist_id,
            appointment.dentist_name,
@@ -881,9 +896,17 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
         [updatedResult.rows[0].id]
       );
 
+      const grouped = await clinicalPatients.listTreatmentsForQueueEntries(db, [updatedResult.rows[0].id]);
+      const calledRow = {
+        ...detail.rows[0],
+        procedures: grouped.get(Number(updatedResult.rows[0].id)) || [],
+        clinical_record_id: clinicalRecord?.id || null,
+        record_code: clinicalRecord?.recordCode || null,
+      };
+
       return res.json({
-        message: "Next patient called.",
-        queueEntry: mapQueueEntry(detail.rows[0]),
+        message: "Next patient called. Fill out the treatment form, then press Start Treatment.",
+        queueEntry: mapQueueEntry(calledRow),
       });
     } catch (error) {
       if (transactionOpen) {
