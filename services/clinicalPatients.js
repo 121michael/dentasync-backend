@@ -1165,6 +1165,48 @@ async function addClinicalTreatment(db, recordId, input, actor = {}) {
   return mapped;
 }
 
+async function addClinicalTreatmentsBatch(db, recordId, inputs, actor = {}) {
+  if (!Array.isArray(inputs) || !inputs.length) {
+    const error = new Error("At least one procedure is required.");
+    error.status = 400;
+    throw error;
+  }
+
+  const ownsClient = typeof db.connect === "function";
+  const client = ownsClient ? await db.connect() : db;
+  let transactionOpen = false;
+  try {
+    await client.query("BEGIN");
+    transactionOpen = true;
+    const rows = [];
+    for (let index = 0; index < inputs.length; index += 1) {
+      try {
+        rows.push(await addClinicalTreatment(client, recordId, inputs[index], actor));
+      } catch (error) {
+        if (!String(error.message || "").startsWith("Procedure ")) {
+          error.message = `Procedure ${index + 1}: ${error.message}`;
+        }
+        error.procedureIndex = index;
+        throw error;
+      }
+    }
+    await client.query("COMMIT");
+    transactionOpen = false;
+    return rows;
+  } catch (error) {
+    if (transactionOpen) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // The original error is more useful than a rollback failure.
+      }
+    }
+    throw error;
+  } finally {
+    if (ownsClient) client.release();
+  }
+}
+
 async function updateClinicalTreatment(db, recordId, treatmentId, input, actor = {}) {
   const existing = await db.query(
     `SELECT *
@@ -1845,6 +1887,7 @@ module.exports = {
   updateClinicalRecord,
   archiveClinicalRecord,
   addClinicalTreatment,
+  addClinicalTreatmentsBatch,
   updateClinicalTreatment,
   deleteClinicalTreatment,
   updateTreatmentAmountPaid,

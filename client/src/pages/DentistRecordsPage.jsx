@@ -39,6 +39,89 @@ const emptyAgeSexForm = {
   dateOfBirth: "",
 };
 
+function todayIsoDate() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
+}
+
+function newProcedureDraft() {
+  return {
+    key: `proc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name: "",
+    treatmentDate: todayIsoDate(),
+    durationMinutes: "",
+    toothNumber: "",
+    diagnosisNotes: "",
+    amountCharged: "",
+  };
+}
+
+function parseToothList(value) {
+  return String(value || "")
+    .split(/[,\s]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function ProcedureFields({ draft, onChange, requiredTooth }) {
+  return (
+    <div className="field-grid field-grid--two">
+      <label className="field">
+        <span>Treatment Type</span>
+        <select required value={draft.name} onChange={(event) => onChange({ name: event.target.value })}>
+          <option value="">Select Treatment</option>
+          {PROCEDURE_FORM_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label || option.value}
+            </option>
+          ))}
+          {draft.name && !PROCEDURE_FORM_OPTIONS.some((option) => option.value === draft.name) ? (
+            <option value={draft.name}>{draft.name}</option>
+          ) : null}
+        </select>
+      </label>
+      <label className="field">
+        <span>Treatment Date</span>
+        <input
+          type="date"
+          required
+          value={draft.treatmentDate}
+          onChange={(event) => onChange({ treatmentDate: event.target.value })}
+        />
+      </label>
+      <label className="field">
+        <span>Amount</span>
+        <input
+          type="number"
+          min="0"
+          step="0.01"
+          inputMode="decimal"
+          value={draft.amountCharged}
+          onChange={(event) => onChange({ amountCharged: event.target.value })}
+          placeholder="₱"
+        />
+      </label>
+      <label className="field">
+        <span>Tooth Number{requiredTooth ? "" : " (optional)"}</span>
+        <input
+          value={draft.toothNumber}
+          onChange={(event) => onChange({ toothNumber: event.target.value })}
+          placeholder={requiredTooth ? "Click the tooth on the chart" : "Optional — or click the chart"}
+          required={requiredTooth}
+        />
+      </label>
+      <label className="field field--full">
+        <span>Diagnosis</span>
+        <textarea
+          rows="2"
+          value={draft.diagnosisNotes}
+          onChange={(event) => onChange({ diagnosisNotes: event.target.value })}
+          placeholder="e.g. Dental Caries"
+        />
+      </label>
+    </div>
+  );
+}
+
 function formatMoney(value) {
   return `₱${Number(value || 0).toFixed(2)}`;
 }
@@ -83,6 +166,9 @@ export function DentistRecordsPage() {
   const [detail, setDetail] = useState(null);
   const [xrays, setXrays] = useState([]);
   const [treatmentForm, setTreatmentForm] = useState(emptyTreatment);
+  const [treatmentDrafts, setTreatmentDrafts] = useState(() => [newProcedureDraft()]);
+  const [activeDraftIndex, setActiveDraftIndex] = useState(0);
+  const [procedureErrors, setProcedureErrors] = useState({});
   const [treatmentFormOpen, setTreatmentFormOpen] = useState(false);
   const [savingTreatment, setSavingTreatment] = useState(false);
   const [editingTreatmentId, setEditingTreatmentId] = useState(null);
@@ -171,6 +257,9 @@ export function DentistRecordsPage() {
   async function viewPatient(patient) {
     try {
       setTreatmentForm(emptyTreatment);
+      setTreatmentDrafts([newProcedureDraft()]);
+      setActiveDraftIndex(0);
+      setProcedureErrors({});
       setTreatmentFormOpen(false);
       setEditingTreatmentId(null);
       setDeleteTarget(null);
@@ -242,22 +331,71 @@ export function DentistRecordsPage() {
     setError("");
     setSuccess("");
     setEditingTreatmentId(null);
-    setTreatmentForm({ ...emptyTreatment, treatmentDate: todayIsoDate(), forCurrentVisit: false });
+    setTreatmentForm(emptyTreatment);
+    setTreatmentDrafts([newProcedureDraft()]);
+    setActiveDraftIndex(0);
+    setProcedureErrors({});
+    revealTreatmentForm();
+  }
+
+  function appendProcedureDraft() {
+    setEditingTreatmentId(null);
+    setTreatmentDrafts((current) => {
+      const next = [...current, newProcedureDraft()];
+      setActiveDraftIndex(next.length - 1);
+      return next;
+    });
+    setProcedureErrors((current) => ({ ...current }));
     revealTreatmentForm();
   }
 
   function openAddAnotherProcedure() {
     setError("");
     setSuccess("");
-    setEditingTreatmentId(null);
-    setTreatmentForm({ ...emptyTreatment, treatmentDate: todayIsoDate(), forCurrentVisit: true });
-    revealTreatmentForm();
+    if (treatmentFormOpen && !editingTreatmentId) {
+      appendProcedureDraft();
+      return;
+    }
+    openAddTreatment();
   }
 
   function closeTreatmentForm() {
     setTreatmentFormOpen(false);
     setTreatmentForm(emptyTreatment);
+    setTreatmentDrafts([newProcedureDraft()]);
+    setActiveDraftIndex(0);
+    setProcedureErrors({});
     setEditingTreatmentId(null);
+  }
+
+  function updateProcedureDraft(index, patch) {
+    setTreatmentDrafts((current) =>
+      current.map((draft, draftIndex) => (draftIndex === index ? { ...draft, ...patch } : draft))
+    );
+    setProcedureErrors((current) => {
+      if (current[index] == null) return current;
+      const next = { ...current };
+      delete next[index];
+      return next;
+    });
+  }
+
+  function removeProcedureDraft(index) {
+    setTreatmentDrafts((current) => {
+      if (current.length <= 1) return current;
+      const next = current.filter((_, draftIndex) => draftIndex !== index);
+      setActiveDraftIndex((active) => Math.min(active, next.length - 1));
+      return next;
+    });
+    setProcedureErrors((current) => {
+      const next = {};
+      Object.entries(current).forEach(([key, message]) => {
+        const from = Number(key);
+        if (from === index) return;
+        next[from > index ? from - 1 : from] = message;
+      });
+      return next;
+    });
   }
 
   function startEditTreatment(event, treatment) {
@@ -274,49 +412,109 @@ export function DentistRecordsPage() {
       diagnosisNotes: treatment.diagnosis || treatment.diagnosisNotes || "",
       amountCharged: treatment.amountCharged != null ? String(treatment.amountCharged) : "",
     });
+    setTreatmentDrafts([newProcedureDraft()]);
+    setActiveDraftIndex(0);
+    setProcedureErrors({});
     revealTreatmentForm();
+  }
+
+  function validateProcedureDraft(draft, index) {
+    if (!String(draft.name || "").trim()) {
+      return `Procedure ${index + 1}: Select a treatment type.`;
+    }
+    if (procedureRequiresTooth(draft.name) && !parseToothList(draft.toothNumber).length) {
+      return `Procedure ${index + 1}: Tooth is required for ${draft.name}. Select it on the dental chart.`;
+    }
+    if (draft.amountCharged !== "" && !Number.isFinite(Number(draft.amountCharged))) {
+      return `Procedure ${index + 1}: Enter a valid amount.`;
+    }
+    if (Number(draft.amountCharged) < 0) {
+      return `Procedure ${index + 1}: Amount cannot be negative.`;
+    }
+    return "";
   }
 
   async function saveTreatment(event) {
     event.preventDefault();
     if (!detail?.patient?.id) return;
-    if (procedureRequiresTooth(treatmentForm.name) && !String(treatmentForm.toothNumber || "").trim()) {
-      setError("Affected tooth is required for this treatment.");
-      return;
-    }
-    setSavingTreatment(true);
     setError("");
     setSuccess("");
+
+    if (editingTreatmentId) {
+      if (procedureRequiresTooth(treatmentForm.name) && !parseToothList(treatmentForm.toothNumber).length) {
+        setError("Affected tooth is required for this treatment.");
+        return;
+      }
+      setSavingTreatment(true);
+      try {
+        const payload = {
+          name: treatmentForm.name,
+          treatment: treatmentForm.name,
+          treatmentDate: treatmentForm.treatmentDate || todayIsoDate(),
+          durationMinutes: Number(treatmentForm.durationMinutes) || undefined,
+          diagnosisNotes: treatmentForm.diagnosisNotes,
+          diagnosis: treatmentForm.diagnosisNotes,
+          amountCharged: treatmentForm.amountCharged === "" ? 0 : Number(treatmentForm.amountCharged),
+          toothNumber: treatmentForm.toothNumber || "",
+        };
+        const response = await api.updateDentistTreatment(detail.patient.id, editingTreatmentId, payload);
+        setSuccess(response.message || "Treatment saved. Dental chart updated automatically.");
+        closeTreatmentForm();
+        await refreshPatientDetail(detail.patient.id, { silent: true });
+        setChartRefreshKey((key) => key + 1);
+        await load({ silent: true });
+      } catch (saveError) {
+        setError(saveError.message);
+      } finally {
+        setSavingTreatment(false);
+      }
+      return;
+    }
+
+    const errors = {};
+    treatmentDrafts.forEach((draft, index) => {
+      const message = validateProcedureDraft(draft, index);
+      if (message) errors[index] = message;
+    });
+    if (Object.keys(errors).length) {
+      setProcedureErrors(errors);
+      const first = errors[Math.min(...Object.keys(errors).map(Number))];
+      setError(first);
+      const firstIndex = Number(Object.keys(errors).sort((a, b) => Number(a) - Number(b))[0]);
+      setActiveDraftIndex(firstIndex);
+      return;
+    }
+
+    setSavingTreatment(true);
+    setProcedureErrors({});
     try {
-      const payload = {
-        name: treatmentForm.name,
-        treatment: treatmentForm.name,
-        treatmentDate: treatmentForm.treatmentDate || todayIsoDate(),
-        durationMinutes: Number(treatmentForm.durationMinutes) || undefined,
-        diagnosisNotes: treatmentForm.diagnosisNotes,
-        diagnosis: treatmentForm.diagnosisNotes,
-        amountCharged: treatmentForm.amountCharged === "" ? 0 : Number(treatmentForm.amountCharged),
-      };
-      const response = editingTreatmentId
-        ? await api.updateDentistTreatment(detail.patient.id, editingTreatmentId, {
-            ...payload,
-            // Sent even when empty so clearing the chart selection is saved.
-            toothNumber: treatmentForm.toothNumber || "",
-          })
-        : await api.addDentistTreatment(detail.patient.id, {
-            ...payload,
-            toothNumber: treatmentForm.toothNumber || undefined,
-            forCurrentVisit: Boolean(treatmentForm.forCurrentVisit),
-            queueEntryId: detail.currentVisit?.queueEntryId || undefined,
-            appointmentId: detail.currentVisit?.appointmentId || undefined,
-          });
-      setSuccess(response.message || "Treatment saved. Dental chart updated automatically.");
+      const attachToVisit = Boolean(detail.currentVisit?.queueEntryId);
+      const response = await api.addDentistTreatment(detail.patient.id, {
+        forCurrentVisit: attachToVisit,
+        queueEntryId: detail.currentVisit?.queueEntryId || undefined,
+        appointmentId: detail.currentVisit?.appointmentId || undefined,
+        procedures: treatmentDrafts.map((draft) => ({
+          name: draft.name,
+          treatment: draft.name,
+          treatmentDate: draft.treatmentDate || todayIsoDate(),
+          durationMinutes: Number(draft.durationMinutes) || undefined,
+          diagnosisNotes: draft.diagnosisNotes,
+          diagnosis: draft.diagnosisNotes,
+          amountCharged: draft.amountCharged === "" ? 0 : Number(draft.amountCharged),
+          toothNumber: draft.toothNumber || undefined,
+        })),
+      });
+      setSuccess(response.message || "Procedures saved. Dental chart updated automatically.");
       closeTreatmentForm();
       await refreshPatientDetail(detail.patient.id, { silent: true });
       setChartRefreshKey((key) => key + 1);
       await load({ silent: true });
     } catch (saveError) {
       setError(saveError.message);
+      if (Number.isInteger(saveError.data?.procedureIndex)) {
+        setProcedureErrors({ [saveError.data.procedureIndex]: saveError.message });
+        setActiveDraftIndex(saveError.data.procedureIndex);
+      }
     } finally {
       setSavingTreatment(false);
     }
@@ -707,18 +905,19 @@ export function DentistRecordsPage() {
             patientAge={detail.patient.age}
             refreshKey={chartRefreshKey}
             pickMode={treatmentFormOpen}
-            selectedTeeth={
-              String(treatmentForm.toothNumber || "")
-                .split(/[,\s]+/)
-                .map((part) => part.trim())
-                .filter(Boolean)
-            }
-            onTeethChange={(teeth) =>
-              setTreatmentForm((current) => ({
-                ...current,
-                toothNumber: teeth.join(", "),
-              }))
-            }
+            selectedTeeth={parseToothList(
+              editingTreatmentId
+                ? treatmentForm.toothNumber
+                : treatmentDrafts[activeDraftIndex]?.toothNumber
+            )}
+            onTeethChange={(teeth) => {
+              const toothNumber = teeth.join(", ");
+              if (editingTreatmentId) {
+                setTreatmentForm((current) => ({ ...current, toothNumber }));
+                return;
+              }
+              updateProcedureDraft(activeDraftIndex, { toothNumber });
+            }}
           />
 
           {detail.currentVisit?.procedures?.length || detail.currentVisit?.queueEntryId ? (
@@ -813,110 +1012,117 @@ export function DentistRecordsPage() {
                     <div className="dentist-panel__heading">
                       <div>
                         <span className="eyebrow">Clinical information</span>
-                        <h2>
-                          {editingTreatmentId
-                            ? "Edit Treatment"
-                            : treatmentForm.forCurrentVisit
-                              ? "Add Another Procedure"
-                              : "Add Treatment"}
-                        </h2>
+                        <h2>{editingTreatmentId ? "Edit Treatment" : "Add Treatment"}</h2>
                       </div>
                     </div>
                     <p className="muted-copy">
                       {editingTreatmentId
                         ? "The selected treatment is loaded below. Change any field and Save Changes to update this record only — the dental chart recalculates automatically."
-                        : "Choose the treatment type, date, and amount. Enter a tooth number for tooth-specific procedures, or click the tooth on the chart above."}
+                        : "Add every procedure for this visit here, then save once. Click a procedure section, then click its tooth on the dental chart. All procedures stay on the same check-in."}
                     </p>
                     <form className="dentist-form" onSubmit={saveTreatment}>
-                      <div className="field-grid field-grid--two">
-                        <label className="field">
-                          <span>Treatment Type</span>
-                          <select
-                            required
-                            value={treatmentForm.name}
-                            onChange={(event) =>
-                              setTreatmentForm((current) => ({
-                                ...current,
-                                name: event.target.value,
-                              }))
-                            }
+                      {editingTreatmentId ? (
+                        <ProcedureFields
+                          draft={treatmentForm}
+                          requiredTooth={toothRequired}
+                          onChange={(patch) =>
+                            setTreatmentForm((current) => ({
+                              ...current,
+                              ...patch,
+                            }))
+                          }
+                        />
+                      ) : (
+                        <>
+                          {treatmentDrafts.map((draft, index) => (
+                            <section
+                              key={draft.key}
+                              className={`procedure-draft ${activeDraftIndex === index ? "is-active" : ""}`}
+                              onClick={() => setActiveDraftIndex(index)}
+                            >
+                              <div className="procedure-draft__header">
+                                <strong>
+                                  Treatment {index + 1}
+                                  {draft.name ? ` · ${draft.name}` : ""}
+                                  {parseToothList(draft.toothNumber).length
+                                    ? ` · #${parseToothList(draft.toothNumber).join(", #")}`
+                                    : ""}
+                                </strong>
+                                {treatmentDrafts.length > 1 ? (
+                                  <button
+                                    type="button"
+                                    className="button button--secondary button--compact"
+                                    onClick={(event) => {
+                                      event.preventDefault();
+                                      event.stopPropagation();
+                                      removeProcedureDraft(index);
+                                    }}
+                                    disabled={savingTreatment}
+                                  >
+                                    Remove
+                                  </button>
+                                ) : null}
+                              </div>
+                              {activeDraftIndex === index ? (
+                                <p className="muted-copy">
+                                  This procedure is selected. Click its tooth on the dental chart above.
+                                </p>
+                              ) : (
+                                <p className="muted-copy">Click this section to assign teeth from the chart.</p>
+                              )}
+                              <ProcedureFields
+                                draft={draft}
+                                requiredTooth={procedureRequiresTooth(draft.name)}
+                                onChange={(patch) => {
+                                  setActiveDraftIndex(index);
+                                  updateProcedureDraft(index, patch);
+                                }}
+                              />
+                              {procedureErrors[index] ? (
+                                <p className="inline-alert inline-alert--error">{procedureErrors[index]}</p>
+                              ) : null}
+                            </section>
+                          ))}
+                          <button
+                            type="button"
+                            className="button button--secondary"
+                            onClick={(event) => {
+                              event.preventDefault();
+                              appendProcedureDraft();
+                            }}
+                            disabled={savingTreatment}
                           >
-                            <option value="">Select Treatment</option>
-                            {PROCEDURE_FORM_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label || option.value}
-                              </option>
-                            ))}
-                            {treatmentForm.name &&
-                            !PROCEDURE_FORM_OPTIONS.some(
-                              (option) => option.value === treatmentForm.name
-                            ) ? (
-                              <option value={treatmentForm.name}>{treatmentForm.name}</option>
-                            ) : null}
-                          </select>
-                        </label>
-                        <label className="field">
-                          <span>Treatment Date</span>
-                          <input
-                            type="date"
-                            required
-                            value={treatmentForm.treatmentDate}
-                            onChange={(event) =>
-                              setTreatmentForm((current) => ({
-                                ...current,
-                                treatmentDate: event.target.value,
-                              }))
-                            }
-                          />
-                        </label>
-                        <label className="field">
-                          <span>Amount</span>
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            inputMode="decimal"
-                            value={treatmentForm.amountCharged}
-                            onChange={(event) =>
-                              setTreatmentForm((current) => ({
-                                ...current,
-                                amountCharged: event.target.value,
-                              }))
-                            }
-                            placeholder="₱"
-                          />
-                        </label>
-                        <label className="field">
-                          <span>
-                            Tooth Number{toothRequired ? "" : " (optional)"}
-                          </span>
-                          <input
-                            value={treatmentForm.toothNumber}
-                            onChange={(event) =>
-                              setTreatmentForm((current) => ({
-                                ...current,
-                                toothNumber: event.target.value,
-                              }))
-                            }
-                            placeholder={toothRequired ? "e.g. 14" : "Optional"}
-                            required={toothRequired}
-                          />
-                        </label>
-                        <label className="field field--full">
-                          <span>Diagnosis</span>
-                          <textarea
-                            rows="2"
-                            value={treatmentForm.diagnosisNotes}
-                            onChange={(event) =>
-                              setTreatmentForm((current) => ({
-                                ...current,
-                                diagnosisNotes: event.target.value,
-                              }))
-                            }
-                            placeholder="e.g. Dental Caries"
-                          />
-                        </label>
-                      </div>
+                            <Plus size={16} /> Add Another Procedure
+                          </button>
+                          <div className="procedure-draft-summary">
+                            <strong>Current visit draft</strong>
+                            <ul>
+                              {treatmentDrafts.map((draft, index) => (
+                                <li key={`${draft.key}-summary`}>
+                                  Procedure {index + 1}: {draft.name || "Not selected"}
+                                  {parseToothList(draft.toothNumber).length
+                                    ? ` — #${parseToothList(draft.toothNumber).join(", #")}`
+                                    : ""}
+                                  {draft.amountCharged !== ""
+                                    ? ` — ${formatMoney(draft.amountCharged)}`
+                                    : ""}
+                                </li>
+                              ))}
+                            </ul>
+                            <span>
+                              Total procedures: {treatmentDrafts.length}
+                              {" · "}
+                              Total amount:{" "}
+                              {formatMoney(
+                                treatmentDrafts.reduce(
+                                  (sum, draft) => sum + (Number(draft.amountCharged) || 0),
+                                  0
+                                )
+                              )}
+                            </span>
+                          </div>
+                        </>
+                      )}
                       <div className="dentist-form__actions">
                         <button
                           type="button"
@@ -930,12 +1136,10 @@ export function DentistRecordsPage() {
                           {savingTreatment
                             ? editingTreatmentId
                               ? "Saving Changes…"
-                              : "Saving Treatment…"
+                              : "Saving Procedures…"
                             : editingTreatmentId
                               ? "Save Changes"
-                              : treatmentForm.forCurrentVisit
-                                ? "Add Procedure"
-                                : "Save Treatment"}
+                              : "Save All Procedures"}
                         </button>
                       </div>
                     </form>

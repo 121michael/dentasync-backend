@@ -229,3 +229,107 @@ test("patients behind a multi-procedure visit wait for the remaining total", asy
   assert.equal(estimate.estimatedWaitMinutes.max, 126);
   assert.equal(estimate.estimatedDurationMinutes, 35);
 });
+
+function createBatchDb({ failAfterFirstInsert = false } = {}) {
+  const sqls = [];
+  const inserted = [];
+  const db = {
+    async query(sql, params = []) {
+      const compact = String(sql).replace(/\s+/g, " ").trim();
+      sqls.push(compact);
+      if (
+        compact === "BEGIN" ||
+        compact === "COMMIT" ||
+        compact === "ROLLBACK" ||
+        compact.startsWith("SAVEPOINT") ||
+        compact.startsWith("RELEASE") ||
+        compact.startsWith("ROLLBACK TO")
+      ) {
+        return { rows: [] };
+      }
+      if (compact.includes("FROM clinic_patient_records")) {
+        return { rows: [{ id: 3 }] };
+      }
+      if (compact.startsWith("INSERT INTO clinic_patient_treatments")) {
+        if (failAfterFirstInsert && inserted.length >= 1) {
+          const error = new Error("simulated failure");
+          error.status = 500;
+          throw error;
+        }
+        const row = {
+          id: inserted.length + 1,
+          clinical_record_id: 3,
+          treatment: params[1],
+          dentist_name: params[2],
+          clinic_location: params[3],
+          coverage_status: params[4],
+          status: params[5],
+          treatment_date: params[6],
+          notes: params[7],
+          duration_minutes: params[8],
+          tooth_number: params[9],
+          diagnosis_notes: params[10],
+          procedure_details: params[11],
+          amount_charged: params[12],
+          amount_paid: params[13],
+          appointment_id: params[14],
+          queue_entry_id: params[15],
+          visit_sequence: params[16],
+        };
+        inserted.push(row);
+        return { rows: [row] };
+      }
+      if (compact.startsWith("UPDATE clinic_patient_records")) {
+        return { rows: [{ id: 3 }] };
+      }
+      if (compact.includes("clinic_dental_chart") || compact.includes("FROM clinic_patient_treatments")) {
+        return { rows: inserted };
+      }
+      return { rows: [] };
+    },
+  };
+  return { db, sqls, inserted };
+}
+
+test("addClinicalTreatmentsBatch inserts every procedure in one transaction", async () => {
+  const { db, sqls, inserted } = createBatchDb();
+  const rows = await clinicalPatients.addClinicalTreatmentsBatch(
+    db,
+    3,
+    [
+      { treatment: "Restoration", toothNumber: "14", amountCharged: 1500, diagnosis: "Dental Caries", queueEntryId: 9, visitSequence: 1 },
+      { treatment: "Extraction", toothNumber: "36", amountCharged: 2000, diagnosis: "Non-restorable tooth", queueEntryId: 9, visitSequence: 2 },
+      { treatment: "Crown / Fixed Bridge", toothNumber: "24", amountCharged: 5000, diagnosis: "Damaged tooth", queueEntryId: 9, visitSequence: 3 },
+    ],
+    { id: "dentist-1", role: "dentist" }
+  );
+
+  assert.equal(rows.length, 3);
+  assert.equal(inserted.length, 3);
+  assert.equal(rows[0].treatment, "Restoration");
+  assert.equal(rows[1].treatment, "Extraction");
+  assert.equal(rows[2].treatment, "Crown / Fixed Bridge");
+  assert.ok(sqls.includes("BEGIN"));
+  assert.ok(sqls.includes("COMMIT"));
+  assert.equal(sqls.includes("ROLLBACK"), false);
+});
+
+test("addClinicalTreatmentsBatch rolls back if a later procedure fails", async () => {
+  const { db, sqls } = createBatchDb({ failAfterFirstInsert: true });
+  await assert.rejects(
+    () =>
+      clinicalPatients.addClinicalTreatmentsBatch(
+        db,
+        3,
+        [
+          { treatment: "Oral Prophylaxis", amountCharged: 1000, queueEntryId: 9, visitSequence: 1 },
+          { treatment: "Extraction", toothNumber: "36", amountCharged: 2000, queueEntryId: 9, visitSequence: 2 },
+        ],
+        { id: "dentist-1", role: "dentist" }
+      ),
+    /Procedure 2:/
+  );
+  assert.ok(sqls.includes("BEGIN"));
+  assert.ok(sqls.includes("ROLLBACK"));
+  assert.equal(sqls.includes("COMMIT"), false);
+});

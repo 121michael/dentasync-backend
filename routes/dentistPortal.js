@@ -2033,24 +2033,40 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
         stringValue(req.body?.dentistName, 160) ||
         `Dr. ${`${req.dentist.first_name || ""} ${req.dentist.last_name || ""}`.trim()}`.trim();
 
+      const procedureBodies = Array.isArray(req.body?.procedures)
+        ? req.body.procedures
+        : [req.body];
+      if (!procedureBodies.length) {
+        return res.status(400).json({ message: "At least one procedure is required." });
+      }
+
       let appointmentId =
         Number.isSafeInteger(Number(req.body?.appointmentId)) && Number(req.body.appointmentId) > 0
           ? Number(req.body.appointmentId)
-          : null;
+          : Number.isSafeInteger(Number(procedureBodies[0]?.appointmentId)) &&
+              Number(procedureBodies[0].appointmentId) > 0
+            ? Number(procedureBodies[0].appointmentId)
+            : null;
       let queueEntryId =
         Number.isSafeInteger(Number(req.body?.queueEntryId)) && Number(req.body.queueEntryId) > 0
           ? Number(req.body.queueEntryId)
-          : null;
+          : Number.isSafeInteger(Number(procedureBodies[0]?.queueEntryId)) &&
+              Number(procedureBodies[0].queueEntryId) > 0
+            ? Number(procedureBodies[0].queueEntryId)
+            : null;
 
       const detail = await clinicalPatients.getClinicalRecord(db, recordId).catch(() => null);
-      const forCurrentVisit = Boolean(req.body?.forCurrentVisit);
-      if (!queueEntryId && forCurrentVisit && detail?.record?.linkedUserId) {
+      const requestedCurrentVisit = Boolean(
+        req.body?.forCurrentVisit ?? procedureBodies.some((item) => item?.forCurrentVisit)
+      );
+      if (!queueEntryId && detail?.record?.linkedUserId && (requestedCurrentVisit || procedureBodies.length > 1)) {
         const activeQueue = await clinicalPatients.findActiveQueueForUser(db, detail.record.linkedUserId);
         if (activeQueue) {
           queueEntryId = Number(activeQueue.id);
           appointmentId = appointmentId || Number(activeQueue.appointment_id) || null;
         }
       }
+      const forCurrentVisit = Boolean(requestedCurrentVisit || queueEntryId);
 
       if (!appointmentId) {
         try {
@@ -2059,7 +2075,9 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
               limit: 100,
             });
             const treatmentDate =
-              stringValue(req.body?.treatmentDate, 10) || new Date().toISOString().slice(0, 10);
+              stringValue(procedureBodies[0]?.treatmentDate, 10) ||
+              stringValue(req.body?.treatmentDate, 10) ||
+              new Date().toISOString().slice(0, 10);
             const sameDay = appointments.find((appointment) => {
               const dateText =
                 typeof appointment.date === "string"
@@ -2076,76 +2094,101 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
         }
       }
 
-      let status = stringValue(req.body?.status, 40);
-      let visitSequence = null;
-      if (forCurrentVisit) {
-        if (!queueEntryId) {
-          return res.status(400).json({
-            message: "This patient does not have an active visit/check-in to attach another procedure to.",
-          });
-        }
-        visitSequence = await clinicalPatients.nextVisitSequence(db, queueEntryId);
-        const visitTreatments = await clinicalPatients.listTreatmentsForVisit(db, {
-          queueEntryId,
-          appointmentId,
+      if (forCurrentVisit && !queueEntryId) {
+        return res.status(400).json({
+          message: "This patient does not have an active visit/check-in to attach procedures to.",
         });
-        const hasInProgress = visitTreatments.some(
-          (item) => String(item.status || "").toLowerCase() === "in_progress"
-        );
-        if (!status) {
-          status = hasInProgress ? "planned" : "in_progress";
-        }
       }
 
-      const row = await clinicalPatients.addClinicalTreatment(
-        db,
-        recordId,
-        {
-          treatment: req.body?.treatment || req.body?.name,
-          procedureDetails: req.body?.procedureDetails,
-          diagnosisNotes: req.body?.diagnosisNotes || req.body?.diagnosis || req.body?.notes,
-          durationMinutes: req.body?.durationMinutes,
-          toothNumber: req.body?.toothNumber || req.body?.affectedTooth || req.body?.affectedTeeth,
-          treatmentDate: req.body?.treatmentDate,
+      let visitSequence = forCurrentVisit ? await clinicalPatients.nextVisitSequence(db, queueEntryId) : null;
+      const visitTreatments = forCurrentVisit
+        ? await clinicalPatients.listTreatmentsForVisit(db, { queueEntryId, appointmentId })
+        : [];
+      let hasInProgress = visitTreatments.some(
+        (item) => String(item.status || "").toLowerCase() === "in_progress"
+      );
+
+      const inputs = procedureBodies.map((body, index) => {
+        const requestedStatus = stringValue(body?.status, 40);
+        let status = requestedStatus;
+        if (!status && forCurrentVisit) {
+          status = hasInProgress ? "planned" : "in_progress";
+        }
+        if (String(status || "").toLowerCase() === "in_progress") {
+          hasInProgress = true;
+        }
+        const sequence = forCurrentVisit ? visitSequence + index : null;
+        return {
+          treatment: body?.treatment || body?.name,
+          procedureDetails: body?.procedureDetails,
+          diagnosisNotes: body?.diagnosisNotes || body?.diagnosis || body?.notes,
+          durationMinutes: body?.durationMinutes,
+          toothNumber: body?.toothNumber || body?.affectedTooth || body?.affectedTeeth,
+          treatmentDate: body?.treatmentDate || req.body?.treatmentDate,
           status: status || "completed",
-          notes: req.body?.diagnosisNotes || req.body?.diagnosis || req.body?.notes,
+          notes: body?.diagnosisNotes || body?.diagnosis || body?.notes,
           dentistName,
-          clinicLocation: req.body?.clinicLocation,
-          coverageStatus: req.body?.coverageStatus,
-          amountCharged: req.body?.amountCharged,
-          // Amount paid is staff-managed on the shared clinical record.
+          clinicLocation: body?.clinicLocation || req.body?.clinicLocation,
+          coverageStatus: body?.coverageStatus,
+          amountCharged: body?.amountCharged,
           amountPaid: 0,
           appointmentId,
           queueEntryId: forCurrentVisit ? queueEntryId : null,
-          visitSequence: forCurrentVisit ? visitSequence : null,
-        },
-        { id: req.dentist.id, role: "dentist" }
-      );
+          visitSequence: sequence,
+        };
+      });
 
-      if (String(row.status || "").toLowerCase() === "in_progress" && queueEntryId) {
+      const rows =
+        inputs.length === 1
+          ? [await clinicalPatients.addClinicalTreatment(db, recordId, inputs[0], { id: req.dentist.id, role: "dentist" })]
+          : await clinicalPatients.addClinicalTreatmentsBatch(db, recordId, inputs, {
+              id: req.dentist.id,
+              role: "dentist",
+            });
+
+      const started = rows.find((row) => String(row.status || "").toLowerCase() === "in_progress");
+      if (started && queueEntryId) {
         await recordTreatmentStart(db, {
           patientUserId: detail?.record?.linkedUserId || null,
           appointmentId,
           queueEntryId,
-          procedureType: row.treatment,
+          procedureType: started.treatment,
           dentistId: req.dentist?.id,
-          treatmentId: row.id,
+          treatmentId: started.id,
         });
         await markQueueServingStarted(db, queueEntryId);
       }
 
       await safeRecalculateQueueWaitEstimates(db, { fromPosition: 1 });
 
-      auditDentistTreatment(db, req, "Treatment Added", recordId, row, `Tooth: ${row.toothNumber || "—"}. Date: ${row.treatmentDate}.`);
+      for (const row of rows) {
+        auditDentistTreatment(
+          db,
+          req,
+          "Treatment Added",
+          recordId,
+          row,
+          `Tooth: ${row.toothNumber || "—"}. Date: ${row.treatmentDate}.`
+        );
+      }
 
+      const serialized = rows.map(serializeDentistTreatment);
+      const count = serialized.length;
       return res.status(201).json({
-        message: "Treatment record saved successfully. Dental chart updated from this treatment.",
-        treatment: serializeDentistTreatment(row),
-        chartSynced: Boolean(row.toothNumber),
+        message:
+          count === 1
+            ? "Treatment record saved successfully. Dental chart updated from this treatment."
+            : `${count} procedures saved together. Dental chart and queue estimates updated.`,
+        treatment: serialized[0],
+        treatments: serialized,
+        chartSynced: serialized.some((row) => Boolean(row.toothNumber)),
       });
     } catch (error) {
       if (error.status) {
-        return res.status(error.status).json({ message: error.message });
+        return res.status(error.status).json({
+          message: error.message,
+          procedureIndex: error.procedureIndex,
+        });
       }
       if (clinicalPatients.isMissingRelation(error)) {
         return res.status(503).json({

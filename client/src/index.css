@@ -5589,10 +5589,42 @@ strong {
 }
 
 .dentist-treatment-form__panel.is-open {
-  max-height: 1400px;
+  max-height: none;
   opacity: 1;
   transform: none;
   pointer-events: auto;
+}
+
+.procedure-draft {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0 0 0.85rem;
+  padding: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-muted, transparent);
+}
+.procedure-draft.is-active {
+  border-color: var(--primary, #5b3cc4);
+  box-shadow: 0 0 0 1px var(--primary, #5b3cc4);
+}
+.procedure-draft__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.procedure-draft-summary {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.25rem 0 0.75rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--primary, #5b3cc4) 6%, transparent);
+}
+.procedure-draft-summary ul {
+  margin: 0;
+  padding-left: 1.1rem;
 }
 
 .fdi-pick-chips {
