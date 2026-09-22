@@ -2347,13 +2347,16 @@ function createStaffPortalRouter({
           errorDetail,
         ]
       );
-      return res.status(deliveryStatus === "failed" ? 202 : 201).json({
+      const failedMessage = errorDetail
+        ? `SMS could not be sent. ${errorDetail}`
+        : "SMS could not be sent. Delivery was logged as failed.";
+      return res.status(deliveryStatus === "failed" ? 502 : deliveryStatus === "sent" ? 201 : 202).json({
         message:
           deliveryStatus === "sent"
             ? "Notification sent successfully."
             : deliveryStatus === "pending"
               ? "SMS notification logged as pending."
-              : "SMS could not be sent. Delivery was logged as failed.",
+              : failedMessage,
         sms: {
           id: result.rows[0].id,
           clinicLogId,

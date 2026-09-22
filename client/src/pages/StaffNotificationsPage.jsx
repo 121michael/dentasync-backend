@@ -110,6 +110,11 @@ export function StaffNotificationsPage() {
     setBusy("sms");
     try {
       const response = await api.sendStaffSms(smsForm);
+      const status = response.sms?.status;
+      if (status === "failed" || status === "pending") {
+        pushToast(response.message || "SMS was not delivered.", "error");
+        return;
+      }
       pushToast(response.message || "Notification sent successfully.");
       setSmsOpen(false);
       setSmsForm({ phone: "", message: "", messageType: "manual", patientUserId: "" });

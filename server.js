@@ -420,6 +420,11 @@ if (require.main === module) {
     console.log(`✅ DentaSync server running on http://localhost:${PORT}`);
     console.log("Mounted APIs: /api/auth, /api/patient, /api/staff, /api/dentist, /api/admin");
     console.log("If the patient dashboard returns 404, you are not running this backend.");
+    if (process.env.SEMAPHORE_API_KEY) {
+      console.log("Clinic SMS: Semaphore API key loaded.");
+    } else {
+      console.log("Clinic SMS: SEMAPHORE_API_KEY is missing — staff/patient SMS will fail.");
+    }
     cleaningReminderJob.start();
     console.log("Cleaning reminder SMS job scheduled (every 4–6 months based on last visit).");
   });
