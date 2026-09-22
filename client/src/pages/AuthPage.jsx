@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   ArrowRight,
@@ -10,9 +10,12 @@ import {
   Mail,
   Phone,
   ShieldCheck,
+  X,
 } from "lucide-react";
 import { ApiError, api } from "../api";
 import { BrandMark } from "../components/BrandMark";
+import { LegalDocument } from "../components/LegalDocument";
+import { legalDocumentById } from "../legal/dentasyncLegal";
 import { useAuth } from "../useAuth";
 
 const PENDING_OTP_KEY = "amethyst_pending_otp";
@@ -27,9 +30,10 @@ function initialPendingOtp() {
 
 export function AuthPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const { startSession } = useAuth();
-  const [mode, setMode] = useState("login");
+  const [mode, setMode] = useState(() => (location.pathname.includes("register") ? "register" : "login"));
   const [screen, setScreen] = useState(() => (initialPendingOtp() ? "otp" : "form"));
   const [pendingOtp, setPendingOtp] = useState(initialPendingOtp);
   const [showPassword, setShowPassword] = useState(false);
@@ -43,7 +47,10 @@ export function AuthPage() {
     password: "",
     otp: "",
     patientCategory: "regular",
+    acceptedTerms: false,
+    acceptedPrivacy: false,
   });
+  const [legalPreview, setLegalPreview] = useState(null);
 
   function safeNextPath() {
     const next = String(searchParams.get("next") || "").trim();
@@ -57,8 +64,18 @@ export function AuthPage() {
     }
   }, [screen]);
 
+  useEffect(() => {
+    if (location.pathname.includes("register") && mode !== "register") {
+      setMode("register");
+    }
+  }, [location.pathname, mode]);
+
   function updateForm(event) {
-    setForm((current) => ({ ...current, [event.target.name]: event.target.value }));
+    const { name, type, checked, value } = event.target;
+    setForm((current) => ({
+      ...current,
+      [name]: type === "checkbox" ? checked : value,
+    }));
   }
 
   function savePendingOtp(nextPendingOtp) {
@@ -114,6 +131,12 @@ export function AuthPage() {
   async function submitRegistration(event) {
     event.preventDefault();
     setMessage("");
+    if (!form.acceptedTerms || !form.acceptedPrivacy) {
+      setMessage(
+        "Please read and agree to the Terms and Conditions and Privacy Notice before creating an account."
+      );
+      return;
+    }
     setIsBusy(true);
     try {
       const response = await api.register({
@@ -124,6 +147,8 @@ export function AuthPage() {
         password: form.password,
         role: "patient",
         patientCategory: form.patientCategory || "regular",
+        acceptedTerms: true,
+        acceptedPrivacy: true,
       });
       savePendingOtp({
         email: form.email,
@@ -366,12 +391,49 @@ export function AuthPage() {
                 Forgot password?
               </button>
             )}
+            {isRegistration ? (
+              <fieldset className="auth-consent">
+                <legend>Privacy &amp; Terms</legend>
+                <label className="auth-consent__check">
+                  <input
+                    type="checkbox"
+                    name="acceptedTerms"
+                    checked={form.acceptedTerms}
+                    onChange={updateForm}
+                  />
+                  <span>I have read and agree to the Terms and Conditions.</span>
+                </label>
+                <label className="auth-consent__check">
+                  <input
+                    type="checkbox"
+                    name="acceptedPrivacy"
+                    checked={form.acceptedPrivacy}
+                    onChange={updateForm}
+                  />
+                  <span>
+                    I acknowledge the DentaSync Privacy Notice and consent to the processing of my
+                    personal and health information for the purposes described therein.
+                  </span>
+                </label>
+                <div className="auth-consent__actions">
+                  <button type="button" className="button button--secondary" onClick={() => setLegalPreview("terms")}>
+                    Terms &amp; Conditions
+                  </button>
+                  <button type="button" className="button button--secondary" onClick={() => setLegalPreview("privacy")}>
+                    Privacy Notice
+                  </button>
+                </div>
+              </fieldset>
+            ) : null}
             {message && <p className="form-message">{message}</p>}
-            <button className="button button--primary button--wide" disabled={isBusy}>
+            <button
+              className="button button--primary button--wide"
+              disabled={isBusy || (isRegistration && (!form.acceptedTerms || !form.acceptedPrivacy))}
+            >
               {isBusy
                 ? "Please wait…"
                 : isRegistration
-                  ? "Create secure account"
+                  ? "Create account"
                   : "Enter your portal"}{" "}
               <ArrowRight size={18} />
             </button>
@@ -382,6 +444,7 @@ export function AuthPage() {
                 onClick={() => {
                   setMode("login");
                   setMessage("");
+                  navigate("/login");
                 }}
               >
                 Sign in
@@ -392,6 +455,7 @@ export function AuthPage() {
                 onClick={() => {
                   setMode("register");
                   setMessage("");
+                  navigate("/register");
                 }}
               >
                 Create account
@@ -402,7 +466,47 @@ export function AuthPage() {
         <p className="auth-security-note">
           <LockKeyhole size={15} /> Your health information is protected with account-level access controls.
         </p>
+        <p className="auth-legal-links">
+          <Link to="/terms">Terms &amp; Conditions</Link>
+          <span aria-hidden="true"> · </span>
+          <Link to="/privacy">Privacy Notice</Link>
+        </p>
       </section>
+      {legalPreview ? (
+        <div
+          className="legal-modal-backdrop"
+          role="presentation"
+          onMouseDown={() => setLegalPreview(null)}
+        >
+          <section
+            className="legal-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label={legalPreview === "privacy" ? "Privacy Notice" : "Terms and Conditions"}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <header className="legal-modal__header">
+              <strong>{legalPreview === "privacy" ? "Privacy Notice" : "Terms & Conditions"}</strong>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Close"
+                onClick={() => setLegalPreview(null)}
+              >
+                <X size={18} />
+              </button>
+            </header>
+            <div className="legal-modal__body">
+              <LegalDocument document={legalDocumentById(legalPreview)} />
+            </div>
+            <div className="legal-modal__actions">
+              <button type="button" className="button button--primary" onClick={() => setLegalPreview(null)}>
+                Close
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }

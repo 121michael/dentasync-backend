@@ -173,6 +173,15 @@ function createAuthRouter({
       });
     }
 
+    const acceptedTerms = req.body?.acceptedTerms === true || req.body?.acceptedTerms === "true";
+    const acceptedPrivacy = req.body?.acceptedPrivacy === true || req.body?.acceptedPrivacy === "true";
+    if (!acceptedTerms || !acceptedPrivacy) {
+      return res.status(400).json({
+        message:
+          "You must agree to the Terms and Conditions and acknowledge the Privacy Notice before creating an account.",
+      });
+    }
+
     const computedFirstName = firstName || (fullName ? fullName.split(" ")[0] : "");
     const computedLastName =
       lastName || (fullName ? fullName.split(" ").slice(1).join(" ") : "");

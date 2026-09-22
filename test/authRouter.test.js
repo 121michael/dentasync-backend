@@ -234,6 +234,8 @@ test("register reclaims an archived patient email/phone instead of blocking sign
       email: "returning@example.test",
       phone: "09171234567",
       password: "SecurePass123",
+      acceptedTerms: true,
+      acceptedPrivacy: true,
     }),
   });
   const body = await response.json();
@@ -244,6 +246,50 @@ test("register reclaims an archived patient email/phone instead of blocking sign
   assert.equal(issuedFor.id, 99);
   assert.ok(queries.some((entry) => /UPDATE users/i.test(entry.sql)));
   assert.ok(!queries.some((entry) => /INSERT INTO users/i.test(entry.sql)));
+});
+
+test("register requires Terms and Privacy Notice consent", async (t) => {
+  let queried = false;
+  const app = express();
+  app.use(express.json());
+  app.use(
+    "/api/auth",
+    createAuthRouter({
+      db: {
+        async query() {
+          queried = true;
+          return { rows: [] };
+        },
+      },
+      otpService: {
+        async issueOtp() {
+          throw new Error("OTP should not be issued without consent");
+        },
+      },
+      authenticateToken: (_req, _res, next) => next(),
+      jwtSecret: "test-jwt-secret",
+    })
+  );
+
+  const server = await startServer(app);
+  t.after(server.close);
+
+  const response = await fetch(`${server.baseUrl}/api/auth/register`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      firstName: "New",
+      lastName: "Patient",
+      email: "new@example.test",
+      phone: "09171234567",
+      password: "SecurePass123",
+    }),
+  });
+  const body = await response.json();
+
+  assert.equal(response.status, 400);
+  assert.match(body.message, /Terms and Conditions/i);
+  assert.equal(queried, false);
 });
 
 test("forgot-password accepts active verified accounts across all supported roles", async (t) => {
