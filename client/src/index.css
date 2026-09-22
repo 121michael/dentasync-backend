@@ -4693,12 +4693,10 @@ strong {
     linear-gradient(180deg, color-mix(in srgb, var(--amethyst-100) 55%, #fff) 0%, #fff 42%);
   box-shadow: 0 10px 28px rgba(74, 36, 112, 0.06);
 }
-.treatment-record__header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: .8rem;
-  margin-bottom: .85rem;
+.treatment-record__header .button,
+.dentist-panel__heading .button {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .treatment-record__header h2 {
   margin: .18rem 0 0;

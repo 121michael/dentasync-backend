@@ -780,15 +780,38 @@ export function DentistRecordsPage() {
                 <span className="eyebrow">Shared patient record</span>
                 <h2>Patient Information</h2>
               </div>
-              {!isProfileLocked(detail.patient) ? (
+              <div className="treatment-record__actions">
+                {!isProfileLocked(detail.patient) ? (
+                  <button
+                    type="button"
+                    className="button button--secondary button--compact"
+                    onClick={openAgeSexEditor}
+                  >
+                    Edit Age and Sex
+                  </button>
+                ) : null}
                 <button
                   type="button"
-                  className="button button--secondary button--compact"
-                  onClick={openAgeSexEditor}
+                  className={`button ${treatmentFormOpen && !editingTreatmentId ? "button--secondary" : "button--primary"}`}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (treatmentFormOpen && !editingTreatmentId) {
+                      closeTreatmentForm();
+                    } else {
+                      openAddTreatment();
+                    }
+                  }}
                 >
-                  Edit Age and Sex
+                  {treatmentFormOpen && !editingTreatmentId ? (
+                    "− Close Treatment Form"
+                  ) : (
+                    <>
+                      <Plus size={16} /> Add Treatment
+                    </>
+                  )}
                 </button>
-              ) : null}
+              </div>
             </div>
             <div className="dentist-detail-grid">
               <p>
@@ -899,6 +922,157 @@ export function DentistRecordsPage() {
             </form>
           ) : null}
 
+          <div
+            ref={treatmentFormRef}
+            className={`dentist-treatment-form dentist-treatment-form--inline ${
+              treatmentFormOpen ? "is-open" : ""
+            }`}
+          >
+            <div
+              className={`dentist-treatment-form__panel ${treatmentFormOpen ? "is-open" : ""}`}
+              aria-hidden={!treatmentFormOpen}
+            >
+              {treatmentFormOpen ? (
+                <>
+                  <div className="dentist-panel__heading">
+                    <div>
+                      <span className="eyebrow">Clinical information</span>
+                      <h2>{editingTreatmentId ? "Edit Treatment" : "Add Treatment"}</h2>
+                    </div>
+                  </div>
+                  <p className="muted-copy">
+                    {editingTreatmentId
+                      ? "The selected treatment is loaded below. Change any field and Save Changes to update this record only — the dental chart recalculates automatically."
+                      : "Add every procedure for this visit here, then save once. Click a procedure section, then click its tooth on the dental chart below. All procedures stay on the same check-in."}
+                  </p>
+                  <form className="dentist-form" onSubmit={saveTreatment}>
+                    {editingTreatmentId ? (
+                      <ProcedureFields
+                        draft={treatmentForm}
+                        requiredTooth={toothRequired}
+                        onChange={(patch) =>
+                          setTreatmentForm((current) => ({
+                            ...current,
+                            ...patch,
+                          }))
+                        }
+                      />
+                    ) : (
+                      <>
+                        {treatmentDrafts.map((draft, index) => (
+                          <section
+                            key={draft.key}
+                            className={`procedure-draft ${activeDraftIndex === index ? "is-active" : ""}`}
+                            onClick={() => setActiveDraftIndex(index)}
+                          >
+                            <div className="procedure-draft__header">
+                              <strong>
+                                Treatment {index + 1}
+                                {draft.name ? ` · ${draft.name}` : ""}
+                                {parseToothList(draft.toothNumber).length
+                                  ? ` · #${parseToothList(draft.toothNumber).join(", #")}`
+                                  : ""}
+                              </strong>
+                              {treatmentDrafts.length > 1 ? (
+                                <button
+                                  type="button"
+                                  className="button button--secondary button--compact"
+                                  onClick={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    removeProcedureDraft(index);
+                                  }}
+                                  disabled={savingTreatment}
+                                >
+                                  Remove
+                                </button>
+                              ) : null}
+                            </div>
+                            {activeDraftIndex === index ? (
+                              <p className="muted-copy">
+                                This procedure is selected. Click its tooth on the dental chart below.
+                              </p>
+                            ) : (
+                              <p className="muted-copy">Click this section to assign teeth from the chart.</p>
+                            )}
+                            <ProcedureFields
+                              draft={draft}
+                              requiredTooth={procedureRequiresTooth(draft.name)}
+                              onChange={(patch) => {
+                                setActiveDraftIndex(index);
+                                updateProcedureDraft(index, patch);
+                              }}
+                            />
+                            {procedureErrors[index] ? (
+                              <p className="inline-alert inline-alert--error">{procedureErrors[index]}</p>
+                            ) : null}
+                          </section>
+                        ))}
+                        <button
+                          type="button"
+                          className="button button--secondary"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            appendProcedureDraft();
+                          }}
+                          disabled={savingTreatment}
+                        >
+                          <Plus size={16} /> Add Another Procedure
+                        </button>
+                        <div className="procedure-draft-summary">
+                          <strong>Current visit draft</strong>
+                          <ul>
+                            {treatmentDrafts.map((draft, index) => (
+                              <li key={`${draft.key}-summary`}>
+                                Procedure {index + 1}: {draft.name || "Not selected"}
+                                {parseToothList(draft.toothNumber).length
+                                  ? ` — #${parseToothList(draft.toothNumber).join(", #")}`
+                                  : ""}
+                                {draft.amountCharged !== ""
+                                  ? ` — ${formatMoney(draft.amountCharged)}`
+                                  : ""}
+                              </li>
+                            ))}
+                          </ul>
+                          <span>
+                            Total procedures: {treatmentDrafts.length}
+                            {" · "}
+                            Total amount:{" "}
+                            {formatMoney(
+                              treatmentDrafts.reduce(
+                                (sum, draft) => sum + (Number(draft.amountCharged) || 0),
+                                0
+                              )
+                            )}
+                          </span>
+                        </div>
+                      </>
+                    )}
+                    <div className="dentist-form__actions">
+                      <button
+                        type="button"
+                        className="button button--secondary"
+                        onClick={closeTreatmentForm}
+                        disabled={savingTreatment}
+                      >
+                        Cancel
+                      </button>
+                      <button type="submit" className="button button--primary" disabled={savingTreatment}>
+                        {savingTreatment
+                          ? editingTreatmentId
+                            ? "Saving Changes…"
+                            : "Saving Procedures…"
+                          : editingTreatmentId
+                            ? "Save Changes"
+                            : "Save All Procedures"}
+                      </button>
+                    </div>
+                  </form>
+                </>
+              ) : null}
+            </div>
+          </div>
+
           <DentalChart
             patientId={detail.patient.id}
             patientCategory={detail.patient.patientCategory}
@@ -930,19 +1104,22 @@ export function DentistRecordsPage() {
                     Queue {detail.currentVisit.token || "—"}. All procedures stay on this same check-in.
                   </p>
                 </div>
-                {(detail.currentVisit.procedures || []).length ? (
-                  <button
-                    type="button"
-                    className="button button--primary"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      openAddAnotherProcedure();
-                    }}
-                  >
-                    <Plus size={16} /> Add Another Procedure
-                  </button>
-                ) : null}
+                <button
+                  type="button"
+                  className={`button ${treatmentFormOpen && !editingTreatmentId ? "button--secondary" : "button--primary"}`}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (treatmentFormOpen && !editingTreatmentId) {
+                      appendProcedureDraft();
+                    } else {
+                      openAddTreatment();
+                    }
+                  }}
+                >
+                  <Plus size={16} />{" "}
+                  {treatmentFormOpen && !editingTreatmentId ? "Add Another Procedure" : "Add Treatment"}
+                </button>
               </div>
               {(detail.currentVisit.procedures || []).length ? (
                 <ol className="visit-procedure-list">
@@ -996,157 +1173,6 @@ export function DentistRecordsPage() {
               Amount Paid stays in this table. Staff update payments; the dental chart updates from
               these treatment rows.
             </p>
-
-            <div
-              ref={treatmentFormRef}
-              className={`dentist-treatment-form dentist-treatment-form--inline ${
-                treatmentFormOpen ? "is-open" : ""
-              }`}
-            >
-              <div
-                className={`dentist-treatment-form__panel ${treatmentFormOpen ? "is-open" : ""}`}
-                aria-hidden={!treatmentFormOpen}
-              >
-                {treatmentFormOpen ? (
-                  <>
-                    <div className="dentist-panel__heading">
-                      <div>
-                        <span className="eyebrow">Clinical information</span>
-                        <h2>{editingTreatmentId ? "Edit Treatment" : "Add Treatment"}</h2>
-                      </div>
-                    </div>
-                    <p className="muted-copy">
-                      {editingTreatmentId
-                        ? "The selected treatment is loaded below. Change any field and Save Changes to update this record only — the dental chart recalculates automatically."
-                        : "Add every procedure for this visit here, then save once. Click a procedure section, then click its tooth on the dental chart. All procedures stay on the same check-in."}
-                    </p>
-                    <form className="dentist-form" onSubmit={saveTreatment}>
-                      {editingTreatmentId ? (
-                        <ProcedureFields
-                          draft={treatmentForm}
-                          requiredTooth={toothRequired}
-                          onChange={(patch) =>
-                            setTreatmentForm((current) => ({
-                              ...current,
-                              ...patch,
-                            }))
-                          }
-                        />
-                      ) : (
-                        <>
-                          {treatmentDrafts.map((draft, index) => (
-                            <section
-                              key={draft.key}
-                              className={`procedure-draft ${activeDraftIndex === index ? "is-active" : ""}`}
-                              onClick={() => setActiveDraftIndex(index)}
-                            >
-                              <div className="procedure-draft__header">
-                                <strong>
-                                  Treatment {index + 1}
-                                  {draft.name ? ` · ${draft.name}` : ""}
-                                  {parseToothList(draft.toothNumber).length
-                                    ? ` · #${parseToothList(draft.toothNumber).join(", #")}`
-                                    : ""}
-                                </strong>
-                                {treatmentDrafts.length > 1 ? (
-                                  <button
-                                    type="button"
-                                    className="button button--secondary button--compact"
-                                    onClick={(event) => {
-                                      event.preventDefault();
-                                      event.stopPropagation();
-                                      removeProcedureDraft(index);
-                                    }}
-                                    disabled={savingTreatment}
-                                  >
-                                    Remove
-                                  </button>
-                                ) : null}
-                              </div>
-                              {activeDraftIndex === index ? (
-                                <p className="muted-copy">
-                                  This procedure is selected. Click its tooth on the dental chart above.
-                                </p>
-                              ) : (
-                                <p className="muted-copy">Click this section to assign teeth from the chart.</p>
-                              )}
-                              <ProcedureFields
-                                draft={draft}
-                                requiredTooth={procedureRequiresTooth(draft.name)}
-                                onChange={(patch) => {
-                                  setActiveDraftIndex(index);
-                                  updateProcedureDraft(index, patch);
-                                }}
-                              />
-                              {procedureErrors[index] ? (
-                                <p className="inline-alert inline-alert--error">{procedureErrors[index]}</p>
-                              ) : null}
-                            </section>
-                          ))}
-                          <button
-                            type="button"
-                            className="button button--secondary"
-                            onClick={(event) => {
-                              event.preventDefault();
-                              appendProcedureDraft();
-                            }}
-                            disabled={savingTreatment}
-                          >
-                            <Plus size={16} /> Add Another Procedure
-                          </button>
-                          <div className="procedure-draft-summary">
-                            <strong>Current visit draft</strong>
-                            <ul>
-                              {treatmentDrafts.map((draft, index) => (
-                                <li key={`${draft.key}-summary`}>
-                                  Procedure {index + 1}: {draft.name || "Not selected"}
-                                  {parseToothList(draft.toothNumber).length
-                                    ? ` — #${parseToothList(draft.toothNumber).join(", #")}`
-                                    : ""}
-                                  {draft.amountCharged !== ""
-                                    ? ` — ${formatMoney(draft.amountCharged)}`
-                                    : ""}
-                                </li>
-                              ))}
-                            </ul>
-                            <span>
-                              Total procedures: {treatmentDrafts.length}
-                              {" · "}
-                              Total amount:{" "}
-                              {formatMoney(
-                                treatmentDrafts.reduce(
-                                  (sum, draft) => sum + (Number(draft.amountCharged) || 0),
-                                  0
-                                )
-                              )}
-                            </span>
-                          </div>
-                        </>
-                      )}
-                      <div className="dentist-form__actions">
-                        <button
-                          type="button"
-                          className="button button--secondary"
-                          onClick={closeTreatmentForm}
-                          disabled={savingTreatment}
-                        >
-                          Cancel
-                        </button>
-                        <button type="submit" className="button button--primary" disabled={savingTreatment}>
-                          {savingTreatment
-                            ? editingTreatmentId
-                              ? "Saving Changes…"
-                              : "Saving Procedures…"
-                            : editingTreatmentId
-                              ? "Save Changes"
-                              : "Save All Procedures"}
-                        </button>
-                      </div>
-                    </form>
-                  </>
-                ) : null}
-              </div>
-            </div>
 
             <div className="treatment-record__table-wrap">
               {(detail.treatments || []).length ? (
