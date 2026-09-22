@@ -1898,6 +1898,7 @@ module.exports = {
   listCurrentVisitForRecord,
   findActiveQueueForUser,
   nextVisitSequence,
+  promoteNextVisitProcedure,
   mapClinicalTreatment,
   verifyClinicalRecordIdentity,
   linkClinicalRecordsToUser,

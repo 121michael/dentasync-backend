@@ -36,7 +36,7 @@ function matchesFocus(entry, focus) {
 function procedureStatusLabel(status) {
   const value = String(status || "").toLowerCase();
   if (value === "planned" || value === "pending") return "Pending";
-  if (value === "in_progress") return "In Progress";
+  if (value === "in_progress") return "In Treatment";
   if (value === "completed") return "Completed";
   return status ? String(status).replaceAll("_", " ") : "";
 }

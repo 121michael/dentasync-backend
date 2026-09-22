@@ -132,6 +132,8 @@ function mapCheckIn(row) {
       name: procedure.treatment || procedure.name,
       status: procedure.status,
       toothNumber: procedure.toothNumber || null,
+      diagnosis: procedure.diagnosis || procedure.diagnosisNotes || null,
+      durationMinutes: procedure.durationMinutes || null,
     })),
     currentProcedure: (() => {
       const list = row.procedures || [];

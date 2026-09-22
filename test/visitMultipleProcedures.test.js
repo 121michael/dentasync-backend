@@ -193,6 +193,43 @@ test("completed procedures on the same visit are not counted again", async () =>
   assert.equal(remaining.procedureCount, 2);
 });
 
+test("waiting planned procedures before start all count toward visit duration", async () => {
+  invalidateDurationStatsCache();
+  const now = new Date("2026-09-22T08:00:00.000Z");
+  const db = durationDb({
+    5: [
+      {
+        id: 21,
+        treatment: "Restoration",
+        status: "planned",
+        duration_minutes: 45,
+        visit_sequence: 1,
+        queue_entry_id: 5,
+      },
+      {
+        id: 22,
+        treatment: "Extraction",
+        status: "planned",
+        duration_minutes: 40,
+        visit_sequence: 2,
+        queue_entry_id: 5,
+      },
+      {
+        id: 23,
+        treatment: "Crown / Fixed Bridge",
+        status: "planned",
+        duration_minutes: 90,
+        visit_sequence: 3,
+        queue_entry_id: 5,
+      },
+    ],
+  });
+
+  const estimate = await expectedMinutesForEntry(db, { id: 5, status: "waiting" }, getPredictionSettings(), now);
+  assert.equal(estimate.minutes, 175);
+  assert.equal(estimate.procedureCount, 3);
+});
+
 test("patients behind a multi-procedure visit wait for the remaining total", async () => {
   invalidateDurationStatsCache();
   const now = new Date("2026-09-22T14:25:00.000Z");

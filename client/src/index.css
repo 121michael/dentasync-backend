@@ -2099,6 +2099,9 @@ strong {
 .queue-procedure-cell li { line-height: 1.35; }
 .queue-procedure-cell small { color: var(--text-muted); }
 .queue-procedure-cell strong { display: block; font-size: .82rem; }
+.dentist-table tr.is-queue-selected td { background: color-mix(in srgb, var(--primary, #5b3cc4) 8%, transparent); }
+.queue-visit-details { display: grid; gap: .85rem; }
+.queue-visit-details .visit-procedure-list li { grid-template-columns: 1fr auto; align-items: start; }
 .queue-disclaimer strong { color: var(--text); font-size: .72rem; }
 
 .queue-empty-wrap { display: grid; gap: .9rem; }

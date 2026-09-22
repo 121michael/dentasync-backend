@@ -8,7 +8,6 @@ import { DentistModal, DentistStatusBadge } from "../components/DentistUI";
 import { DentalChart } from "../components/DentalChart";
 import {
   PROCEDURE_FORM_OPTIONS,
-  TREATMENT_OPTIONS,
   procedureRequiresTooth,
 } from "../components/DentalChart/dentalChartData";
 import { formatDentistDateTime } from "../dentistUtils";
@@ -30,21 +29,9 @@ function clinicTodayIso() {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
 }
 
-function emptyStartForm(entry = null) {
+function emptyProcedureDraft() {
   return {
-    patientName: entry?.patientName || "",
-    procedureType: "",
-    procedureName: entry?.procedure || "",
-    toothNumber: "",
-    amountCharged: "",
-    durationMinutes: "",
-    treatmentDate: clinicTodayIso(),
-    notes: "",
-  };
-}
-
-function emptyAddForm() {
-  return {
+    key: `draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     name: "",
     diagnosisNotes: "",
     toothNumber: "",
@@ -52,6 +39,29 @@ function emptyAddForm() {
     durationMinutes: "",
     treatmentDate: clinicTodayIso(),
   };
+}
+
+function formatMoney(value) {
+  return `₱${Number(value || 0).toLocaleString("en-PH", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+}
+
+function formatDurationMinutes(minutes) {
+  const n = Number(minutes);
+  if (!Number.isFinite(n) || n <= 0) return "—";
+  const hours = Math.floor(n / 60);
+  const mins = Math.round(n % 60);
+  if (hours && mins) return `${hours} hr ${mins} min`;
+  if (hours) return `${hours} hr`;
+  return `${mins} min`;
+}
+
+function procedureStatusKey(status) {
+  return String(status || "").toLowerCase();
+}
+
+function isPlannedStatus(status) {
+  const value = procedureStatusKey(status);
+  return value === "planned" || value === "pending";
 }
 
 function parseToothList(value) {
@@ -62,9 +72,9 @@ function parseToothList(value) {
 }
 
 function procedureStatusLabel(status) {
-  const value = String(status || "").toLowerCase();
+  const value = procedureStatusKey(status);
   if (value === "planned" || value === "pending") return "Pending";
-  if (value === "in_progress") return "In Progress";
+  if (value === "in_progress") return "In Treatment";
   if (value === "completed") return "Completed";
   return status ? String(status).replaceAll("_", " ") : "";
 }
@@ -75,20 +85,48 @@ function procedureLine(procedure) {
   return `${name}${tooth}`;
 }
 
+function currentVisitProcedure(entry) {
+  return (
+    (entry?.procedures || []).find((procedure) => procedureStatusKey(procedure.status) === "in_progress") ||
+    entry?.currentProcedure ||
+    null
+  );
+}
+
+function plannedVisitProcedures(entry) {
+  return (entry?.procedures || []).filter((procedure) => isPlannedStatus(procedure.status));
+}
+
+function visitDurationMinutes(entry) {
+  const fromProcedures = (entry?.procedures || []).reduce((sum, procedure) => {
+    if (procedureStatusKey(procedure.status) === "completed") return sum;
+    const minutes = Number(procedure.durationMinutes);
+    return Number.isFinite(minutes) && minutes > 0 ? sum + minutes : sum;
+  }, 0);
+  if (fromProcedures > 0) return fromProcedures;
+  const estimate = Number(entry?.estimatedDurationMinutes ?? entry?.durationMinutes ?? entry?.waitMinutes);
+  return Number.isFinite(estimate) && estimate > 0 ? estimate : 0;
+}
+
 function QueueProcedureList({ entry }) {
   const procedures = entry.procedures || [];
   if (!procedures.length) {
-    return entry.procedure || entry.appointment?.treatment || "—";
+    return (
+      <div className="queue-procedure-cell">
+        <small>Procedures</small>
+        <strong>No procedures added yet</strong>
+      </div>
+    );
   }
-  const current =
-    procedures.find((procedure) => String(procedure.status || "").toLowerCase() === "in_progress") ||
-    null;
-  const additional = current
-    ? procedures.filter((procedure) => String(procedure.id) !== String(current.id))
-    : procedures;
+  const inChair = entry.status === "in_chair";
+  const current = currentVisitProcedure(entry);
+  const upcoming = plannedVisitProcedures(entry);
   return (
     <div className="queue-procedure-cell">
-      {current ? (
+      <small>
+        {inChair ? "In Treatment" : "Planned procedures"} · {procedures.length}
+      </small>
+      {inChair && current ? (
         <>
           <small>Current</small>
           <strong>
@@ -96,11 +134,11 @@ function QueueProcedureList({ entry }) {
           </strong>
         </>
       ) : null}
-      {additional.length ? (
+      {(inChair ? upcoming : procedures).length ? (
         <>
-          <small>{current ? "Additional" : "Procedures"}</small>
+          {inChair ? <small>Pending</small> : null}
           <ul>
-            {additional.map((procedure) => (
+            {(inChair ? upcoming : procedures).map((procedure) => (
               <li key={procedure.id || procedureLine(procedure)}>
                 {procedureLine(procedure)}
                 {procedure.status ? ` · ${procedureStatusLabel(procedure.status)}` : ""}
@@ -124,6 +162,68 @@ function formatWaitLabel(entry) {
   return waitRangeFromEntry(entry);
 }
 
+function ProcedureFields({ draft, onChange, requiredTooth }) {
+  return (
+    <div className="field-grid field-grid--two">
+      <label className="field">
+        <span>Treatment Type</span>
+        <select required value={draft.name} onChange={(event) => onChange({ name: event.target.value })}>
+          <option value="">Select Treatment</option>
+          {PROCEDURE_FORM_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label || option.value}
+            </option>
+          ))}
+          {draft.name && !PROCEDURE_FORM_OPTIONS.some((option) => option.value === draft.name) ? (
+            <option value={draft.name}>{draft.name}</option>
+          ) : null}
+        </select>
+      </label>
+      <label className="field">
+        <span>Amount</span>
+        <input
+          type="number"
+          min="0"
+          step="0.01"
+          inputMode="decimal"
+          value={draft.amountCharged}
+          onChange={(event) => onChange({ amountCharged: event.target.value })}
+          placeholder="₱"
+        />
+      </label>
+      <label className="field">
+        <span>Expected duration (minutes, optional)</span>
+        <input
+          type="number"
+          min="1"
+          step="1"
+          value={draft.durationMinutes}
+          onChange={(event) => onChange({ durationMinutes: event.target.value })}
+          placeholder="Uses historical average if blank"
+        />
+      </label>
+      <label className="field">
+        <span>Tooth Number{requiredTooth ? "" : " (optional)"}</span>
+        <input
+          value={draft.toothNumber}
+          onChange={(event) => onChange({ toothNumber: event.target.value })}
+          placeholder={requiredTooth ? "Click the tooth on the chart" : "Not required"}
+          required={requiredTooth}
+        />
+      </label>
+      <label className="field field--full">
+        <span>Diagnosis</span>
+        <textarea
+          rows="2"
+          value={draft.diagnosisNotes}
+          onChange={(event) => onChange({ diagnosisNotes: event.target.value })}
+          placeholder="e.g. Dental Caries"
+        />
+      </label>
+    </div>
+  );
+}
+
 export function DentistQueuePage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [tab, setTab] = useState(() => {
@@ -137,10 +237,16 @@ export function DentistQueuePage() {
   const [pendingComplete, setPendingComplete] = useState(null);
   const [durationMinutes, setDurationMinutes] = useState("");
   const [pendingStart, setPendingStart] = useState(null);
-  const [startForm, setStartForm] = useState(emptyStartForm());
+  const [selectedId, setSelectedId] = useState(null);
   const [pendingAdd, setPendingAdd] = useState(null);
-  const [addForm, setAddForm] = useState(emptyAddForm());
+  const [procedureDrafts, setProcedureDrafts] = useState(() => [emptyProcedureDraft()]);
+  const [activeDraftIndex, setActiveDraftIndex] = useState(0);
   const [addError, setAddError] = useState("");
+  const [procedureErrors, setProcedureErrors] = useState({});
+  const [pendingEdit, setPendingEdit] = useState(null);
+  const [editForm, setEditForm] = useState(emptyProcedureDraft());
+  const [editError, setEditError] = useState("");
+  const [pendingRemove, setPendingRemove] = useState(null);
   const [focusKey, setFocusKey] = useState(() => searchParams.get("focus") || "");
   const focusedRowRef = useRef(null);
   const triedTabsRef = useRef(new Set());
@@ -282,9 +388,12 @@ export function DentistQueuePage() {
   }
 
   function openAddProcedure(entry) {
+    setSelectedId(entry.id);
     setPendingAdd(entry);
-    setAddForm(emptyAddForm());
+    setProcedureDrafts([emptyProcedureDraft()]);
+    setActiveDraftIndex(0);
     setAddError("");
+    setProcedureErrors({});
     setError("");
     setSuccess("");
   }
@@ -292,44 +401,67 @@ export function DentistQueuePage() {
   function closeAddProcedure() {
     if (busy.startsWith("add-")) return;
     setPendingAdd(null);
-    setAddForm(emptyAddForm());
+    setProcedureDrafts([emptyProcedureDraft()]);
+    setActiveDraftIndex(0);
     setAddError("");
+    setProcedureErrors({});
+  }
+
+  function updateProcedureDraft(index, patch) {
+    setProcedureDrafts((current) =>
+      current.map((draft, draftIndex) => (draftIndex === index ? { ...draft, ...patch } : draft))
+    );
+  }
+
+  function validateDraft(draft, index) {
+    if (!draft.name) return "Select a treatment type.";
+    if (procedureRequiresTooth(draft.name) && !parseToothList(draft.toothNumber).length) {
+      return `Tooth is required for ${draft.name}. Click it on the dental chart.`;
+    }
+    if (draft.amountCharged !== "" && !Number.isFinite(Number(draft.amountCharged))) {
+      return "Enter a valid amount.";
+    }
+    if (draft.durationMinutes !== "" && !(Number(draft.durationMinutes) > 0)) {
+      return "Enter a valid duration in minutes.";
+    }
+    return "";
   }
 
   async function submitAddProcedure(event) {
     event.preventDefault();
     if (!pendingAdd) return;
-    if (!addForm.name) {
-      setAddError("Select a treatment type.");
-      return;
-    }
-    if (procedureRequiresTooth(addForm.name) && !parseToothList(addForm.toothNumber).length) {
-      setAddError(`Tooth is required for ${addForm.name}. Click it on the dental chart.`);
-      return;
-    }
-    if (addForm.amountCharged !== "" && !Number.isFinite(Number(addForm.amountCharged))) {
-      setAddError("Enter a valid amount.");
+    const errors = {};
+    procedureDrafts.forEach((draft, index) => {
+      const message = validateDraft(draft, index);
+      if (message) errors[index] = message;
+    });
+    if (Object.keys(errors).length) {
+      setProcedureErrors(errors);
+      setAddError("Complete every procedure before saving.");
       return;
     }
 
     setBusy(`add-${pendingAdd.id}`);
     setAddError("");
+    setProcedureErrors({});
     setError("");
     setSuccess("");
     try {
       const response = await api.addDentistQueueProcedure(pendingAdd.id, {
-        name: addForm.name,
-        treatment: addForm.name,
-        diagnosisNotes: addForm.diagnosisNotes,
-        diagnosis: addForm.diagnosisNotes,
-        toothNumber: addForm.toothNumber || undefined,
-        amountCharged: addForm.amountCharged === "" ? 0 : Number(addForm.amountCharged),
-        durationMinutes: Number(addForm.durationMinutes) > 0 ? Number(addForm.durationMinutes) : undefined,
-        treatmentDate: addForm.treatmentDate || clinicTodayIso(),
+        procedures: procedureDrafts.map((draft) => ({
+          name: draft.name,
+          treatment: draft.name,
+          diagnosisNotes: draft.diagnosisNotes,
+          diagnosis: draft.diagnosisNotes,
+          toothNumber: draft.toothNumber || undefined,
+          amountCharged: draft.amountCharged === "" ? 0 : Number(draft.amountCharged),
+          durationMinutes: Number(draft.durationMinutes) > 0 ? Number(draft.durationMinutes) : undefined,
+          treatmentDate: draft.treatmentDate || clinicTodayIso(),
+        })),
       });
-      setSuccess(response.message || `${addForm.name} added to this visit.`);
+      setSuccess(response.message || "Procedures saved for this visit.");
       setPendingAdd(null);
-      setAddForm(emptyAddForm());
+      setProcedureDrafts([emptyProcedureDraft()]);
       await load({ silent: true });
     } catch (addProcError) {
       setAddError(addProcError.message);
@@ -339,71 +471,109 @@ export function DentistQueuePage() {
   }
 
   function openStartTreatment(entry) {
+    setSelectedId(entry.id);
+    const planned = (entry.procedures || []).filter(
+      (procedure) => procedureStatusKey(procedure.status) !== "completed"
+    );
+    if (!planned.length) {
+      openAddProcedure(entry);
+      setError("Add at least one procedure before starting ongoing treatment.");
+      return;
+    }
     setPendingStart(entry);
-    setStartForm(emptyStartForm(entry));
     setError("");
     setSuccess("");
-  }
-
-  function updateStartForm(field, value) {
-    setStartForm((current) => {
-      const next = { ...current, [field]: value };
-      if (field === "procedureType") {
-        const selected = TREATMENT_OPTIONS.find((option) => option.value === value);
-        if (selected && selected.value !== "other") {
-          next.procedureName = selected.label;
-        }
-      }
-      return next;
-    });
   }
 
   async function submitStartTreatment(event) {
     event.preventDefault();
     if (!pendingStart) return;
-
-    const minutes = Number(startForm.durationMinutes);
-    const amount = Number(startForm.amountCharged);
-    if (!startForm.procedureType) {
-      setError("Select the type of procedure.");
-      return;
-    }
-    if (!String(startForm.procedureName || "").trim()) {
-      setError("Enter the procedure / treatment name.");
-      return;
-    }
-    if (!Number.isFinite(minutes) || minutes <= 0) {
-      setError("Enter how long the treatment will take in minutes.");
-      return;
-    }
-    if (!Number.isFinite(amount) || amount < 0) {
-      setError("Enter a valid treatment price.");
-      return;
-    }
-
     setBusy(`start-${pendingStart.id}`);
     setError("");
     setSuccess("");
     try {
-      const response = await api.startDentistTreatment(pendingStart.id, {
-        procedureType: startForm.procedureType,
-        procedureName: String(startForm.procedureName).trim(),
-        toothNumber: String(startForm.toothNumber || "").trim() || undefined,
-        durationMinutes: minutes,
-        amountCharged: amount,
-        treatmentDate: startForm.treatmentDate || clinicTodayIso(),
-        notes: String(startForm.notes || "").trim() || undefined,
-      });
+      const response = await api.startDentistTreatment(pendingStart.id, {});
       setSuccess(
         response.message ||
-          `${pendingStart.patientName}'s ongoing treatment started. Press Done when finished to save the record.`
+          `${pendingStart.patientName}'s ongoing treatment started. All planned procedures are on this visit.`
       );
       setPendingStart(null);
-      setStartForm(emptyStartForm());
       setTab("ongoing");
       setData(await api.getDentistQueue("ongoing"));
     } catch (startError) {
       setError(startError.message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  function openEditProcedure(entry, procedure) {
+    setPendingEdit({ entry, procedure });
+    setEditForm({
+      ...emptyProcedureDraft(),
+      name: procedure.name || procedure.treatment || "",
+      diagnosisNotes: procedure.diagnosis || procedure.diagnosisNotes || "",
+      toothNumber: procedure.toothNumber || "",
+      amountCharged:
+        procedure.amountCharged == null || procedure.amountCharged === ""
+          ? ""
+          : String(procedure.amountCharged),
+      durationMinutes: procedure.durationMinutes ? String(procedure.durationMinutes) : "",
+    });
+    setEditError("");
+  }
+
+  async function submitEditProcedure(event) {
+    event.preventDefault();
+    if (!pendingEdit) return;
+    const recordId = pendingEdit.entry.clinicalRecordId;
+    if (!recordId) {
+      setEditError("This patient record is not available yet.");
+      return;
+    }
+    const message = validateDraft(editForm, 0);
+    if (message) {
+      setEditError(message);
+      return;
+    }
+    setBusy(`edit-${pendingEdit.procedure.id}`);
+    setEditError("");
+    try {
+      await api.updateDentistTreatment(recordId, pendingEdit.procedure.id, {
+        name: editForm.name,
+        treatment: editForm.name,
+        diagnosisNotes: editForm.diagnosisNotes,
+        diagnosis: editForm.diagnosisNotes,
+        toothNumber: editForm.toothNumber || undefined,
+        amountCharged: editForm.amountCharged === "" ? 0 : Number(editForm.amountCharged),
+        durationMinutes: Number(editForm.durationMinutes) > 0 ? Number(editForm.durationMinutes) : undefined,
+      });
+      setSuccess(`${editForm.name} updated.`);
+      setPendingEdit(null);
+      await load({ silent: true });
+    } catch (editProcError) {
+      setEditError(editProcError.message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function confirmRemoveProcedure() {
+    if (!pendingRemove) return;
+    const recordId = pendingRemove.entry.clinicalRecordId;
+    if (!recordId) {
+      setError("This patient record is not available yet.");
+      return;
+    }
+    setBusy(`remove-${pendingRemove.procedure.id}`);
+    setError("");
+    try {
+      await api.deleteDentistTreatment(recordId, pendingRemove.procedure.id);
+      setSuccess("Planned procedure removed.");
+      setPendingRemove(null);
+      await load({ silent: true });
+    } catch (removeError) {
+      setError(removeError.message);
     } finally {
       setBusy("");
     }
@@ -427,6 +597,7 @@ export function DentistQueuePage() {
   if (!data) return <LoadingState label="Loading live patient treatment queue…" />;
 
   const queue = data.queue || [];
+  const selectedEntry = queue.find((entry) => String(entry.id) === String(selectedId)) || null;
 
   return (
     <div className="dentist-page">
@@ -461,6 +632,122 @@ export function DentistQueuePage() {
 
       {error ? <p className="inline-alert inline-alert--error">{error}</p> : null}
       {success ? <p className="inline-alert inline-alert--success">{success}</p> : null}
+
+      {selectedEntry ? (
+        <section className="dentist-panel queue-visit-details">
+          <div className="dentist-panel__heading">
+            <div>
+              <span className="eyebrow">{selectedEntry.token || `A${String(selectedEntry.sequence).padStart(3, "0")}`}</span>
+              <h2>{selectedEntry.patientName}</h2>
+              <p>
+                Status: {selectedEntry.status === "in_chair" ? "In Treatment" : selectedEntry.status === "called" ? "Called" : "Waiting"}
+                {selectedEntry.patientId ? ` · Patient ID ${selectedEntry.patientId}` : ""}
+              </p>
+            </div>
+          </div>
+          {selectedEntry.status === "in_chair" && currentVisitProcedure(selectedEntry) ? (
+            <div className="procedure-draft-summary">
+              <strong>Current procedure</strong>
+              <p>
+                {procedureLine(currentVisitProcedure(selectedEntry))} ·{" "}
+                {procedureStatusLabel(currentVisitProcedure(selectedEntry).status)}
+              </p>
+              {plannedVisitProcedures(selectedEntry).length ? (
+                <>
+                  <strong>Upcoming procedures</strong>
+                  <ul>
+                    {plannedVisitProcedures(selectedEntry).map((procedure) => (
+                      <li key={procedure.id}>
+                        {procedureLine(procedure)} · {procedureStatusLabel(procedure.status)}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+            </div>
+          ) : (
+            <div className="procedure-draft-summary">
+              <strong>Planned procedures</strong>
+              {selectedEntry.procedures?.length ? (
+                <>
+                  <ol className="visit-procedure-list">
+                    {selectedEntry.procedures.map((procedure, index) => (
+                      <li key={procedure.id || index}>
+                        <div>
+                          <strong>
+                            {index + 1}. {procedureLine(procedure)}
+                          </strong>
+                          <span>Diagnosis: {procedure.diagnosis || "—"}</span>
+                          <span>Amount: {formatMoney(procedure.amountCharged)}</span>
+                          <span>Status: {procedureStatusLabel(procedure.status) || "Pending"}</span>
+                        </div>
+                        {isPlannedStatus(procedure.status) || selectedEntry.status !== "in_chair" ? (
+                          <div className="dentist-row-actions">
+                            <button
+                              type="button"
+                              className="button button--secondary button--compact"
+                              disabled={Boolean(busy)}
+                              onClick={() => openEditProcedure(selectedEntry, procedure)}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="button button--secondary button--compact"
+                              disabled={Boolean(busy)}
+                              onClick={() => setPendingRemove({ entry: selectedEntry, procedure })}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ol>
+                  <span>
+                    Total procedures: {selectedEntry.procedures.length}
+                    {" · Estimated visit duration: "}
+                    {formatDurationMinutes(visitDurationMinutes(selectedEntry))}
+                  </span>
+                </>
+              ) : (
+                <p>No procedures added yet</p>
+              )}
+            </div>
+          )}
+          <div className="dentist-row-actions">
+            {selectedEntry.status !== "completed" && selectedEntry.status !== "no_show" ? (
+              <button
+                type="button"
+                className="button button--secondary"
+                disabled={Boolean(busy)}
+                onClick={() => openAddProcedure(selectedEntry)}
+              >
+                + Add Procedure
+              </button>
+            ) : null}
+            {selectedEntry.status === "in_chair" ? (
+              <button
+                type="button"
+                className="button button--primary"
+                disabled={Boolean(busy)}
+                onClick={() => openComplete(selectedEntry)}
+              >
+                Complete Treatment
+              </button>
+            ) : selectedEntry.status !== "completed" && selectedEntry.status !== "no_show" ? (
+              <button
+                type="button"
+                className="button button--primary"
+                disabled={Boolean(busy)}
+                onClick={() => openStartTreatment(selectedEntry)}
+              >
+                Start Ongoing Treatment
+              </button>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
 
       <section className="dentist-panel dentist-panel--table">
         <div className="dentist-panel__heading">
@@ -511,10 +798,16 @@ export function DentistQueuePage() {
                         : null
                     }
                     className={
-                      matchesNotificationFocus(entry, focusKey, ["id", "token", "sequence", "appointmentId"])
-                        ? "is-notification-focus"
-                        : undefined
+                      [
+                        matchesNotificationFocus(entry, focusKey, ["id", "token", "sequence", "appointmentId"])
+                          ? "is-notification-focus"
+                          : "",
+                        String(selectedId) === String(entry.id) ? "is-queue-selected" : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" ") || undefined
                     }
+                    onClick={() => setSelectedId(entry.id)}
                   >
                     <td>
                       <strong>#{String(entry.sequence).padStart(2, "0")}</strong>
@@ -527,7 +820,9 @@ export function DentistQueuePage() {
                       <QueueProcedureList entry={entry} />
                     </td>
                     <td>
-                      {durationFromEntry(entry)}
+                      {formatDurationMinutes(visitDurationMinutes(entry)) !== "—"
+                        ? formatDurationMinutes(visitDurationMinutes(entry))
+                        : durationFromEntry(entry)}
                     </td>
                     <td>
                       <strong>{formatWaitLabel(entry)}</strong>
@@ -544,14 +839,17 @@ export function DentistQueuePage() {
                     </td>
                     <td>
                       <div className="dentist-row-actions">
-                        {entry.status === "in_chair" ? (
+                        {entry.status !== "completed" && entry.status !== "no_show" ? (
                           <button
                             type="button"
                             className="button button--secondary button--compact"
                             disabled={Boolean(busy)}
-                            onClick={() => openAddProcedure(entry)}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              openAddProcedure(entry);
+                            }}
                           >
-                            {busy === `add-${entry.id}` ? "Adding…" : "+ Add Procedure"}
+                            {busy === `add-${entry.id}` ? "Saving…" : "+ Add Procedure"}
                           </button>
                         ) : null}
                         {entry.status === "in_chair" ? (
@@ -559,9 +857,12 @@ export function DentistQueuePage() {
                             type="button"
                             className="button button--primary button--compact"
                             disabled={Boolean(busy)}
-                            onClick={() => openComplete(entry)}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              openComplete(entry);
+                            }}
                           >
-                            {busy === `complete-${entry.id}` ? "Saving…" : "Done"}
+                            {busy === `complete-${entry.id}` ? "Saving…" : "Complete Treatment"}
                           </button>
                         ) : null}
                         {entry.status === "in_chair" ? (
@@ -569,60 +870,43 @@ export function DentistQueuePage() {
                             type="button"
                             className="button button--secondary button--compact"
                             disabled={Boolean(busy)}
-                            onClick={() => setWaiting(entry)}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setWaiting(entry);
+                            }}
                           >
                             Return to Waiting
                           </button>
                         ) : null}
-                        {entry.status === "called" ? (
+                        {entry.status !== "completed" &&
+                        entry.status !== "no_show" &&
+                        entry.status !== "in_chair" ? (
                           <button
                             type="button"
                             className="button button--primary button--compact"
                             disabled={Boolean(busy)}
-                            onClick={() => openStartTreatment(entry)}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              openStartTreatment(entry);
+                            }}
                           >
-                            Start treatment
+                            Start Ongoing Treatment
                           </button>
                         ) : null}
                         {entry.status !== "completed" &&
                         entry.status !== "no_show" &&
                         entry.status !== "in_chair" &&
                         entry.status !== "called" ? (
-                          <>
-                            <button
-                              type="button"
-                              className="button button--secondary button--compact"
-                              disabled={Boolean(busy)}
-                              onClick={() => markCalled(entry)}
-                            >
-                              Call patient
-                            </button>
-                            <button
-                              type="button"
-                              className="button button--primary button--compact"
-                              disabled={Boolean(busy)}
-                              onClick={() => openStartTreatment(entry)}
-                            >
-                              Start treatment
-                            </button>
-                            <button
-                              type="button"
-                              className="button button--secondary button--compact"
-                              disabled={Boolean(busy)}
-                              onClick={() => openComplete(entry)}
-                            >
-                              Done
-                            </button>
-                          </>
-                        ) : null}
-                        {entry.status === "called" ? (
                           <button
                             type="button"
                             className="button button--secondary button--compact"
                             disabled={Boolean(busy)}
-                            onClick={() => openComplete(entry)}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              markCalled(entry);
+                            }}
                           >
-                            Done
+                            Call patient
                           </button>
                         ) : null}
                       </div>
@@ -642,112 +926,42 @@ export function DentistQueuePage() {
 
       {pendingStart ? (
         <DentistModal
-          title="Start ongoing treatment"
+          title="Start Ongoing Treatment"
           wide
           onClose={() => {
-            if (!busy) {
-              setPendingStart(null);
-              setStartForm(emptyStartForm());
-            }
+            if (!busy) setPendingStart(null);
           }}
         >
           <form className="dentist-form" onSubmit={submitStartTreatment}>
             <p className="dentist-confirm-copy">
-              Capture the procedure for <strong>{pendingStart.patientName}</strong>. This starts an
-              ongoing treatment. It is finalized to the patient record only when you press{" "}
-              <strong>Done</strong>. Waiting patients will see an estimated wait based on the
-              duration you enter.
+              Start treatment for <strong>{pendingStart.patientName}</strong> on queue{" "}
+              <strong>{pendingStart.token || pendingStart.sequence}</strong>. The patient stays on this
+              same visit. The first procedure becomes In Treatment and the rest stay Pending.
             </p>
-
-            <div className="field-grid field-grid--two">
-              <label className="field">
-                <span>Patient name</span>
-                <input value={startForm.patientName} readOnly />
-              </label>
-              <label className="field">
-                <span>Treatment date</span>
-                <input type="date" value={startForm.treatmentDate} readOnly />
-              </label>
-              <label className="field">
-                <span>Type of procedure</span>
-                <select
-                  required
-                  value={startForm.procedureType}
-                  onChange={(event) => updateStartForm("procedureType", event.target.value)}
-                >
-                  <option value="">Select procedure type</option>
-                  {TREATMENT_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                <span>Procedure / treatment name</span>
-                <input
-                  required
-                  value={startForm.procedureName}
-                  onChange={(event) => updateStartForm("procedureName", event.target.value)}
-                  placeholder="e.g. Upper molar composite filling"
-                />
-              </label>
-              <label className="field">
-                <span>Tooth number (if needed)</span>
-                <input
-                  value={startForm.toothNumber}
-                  onChange={(event) => updateStartForm("toothNumber", event.target.value)}
-                  placeholder="FDI e.g. 16 or 11,21"
-                />
-              </label>
-              <label className="field">
-                <span>Price / amount charged (₱)</span>
-                <input
-                  required
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={startForm.amountCharged}
-                  onChange={(event) => updateStartForm("amountCharged", event.target.value)}
-                  placeholder="1500"
-                />
-              </label>
-              <label className="field">
-                <span>Duration (minutes)</span>
-                <input
-                  required
-                  type="number"
-                  min="1"
-                  step="1"
-                  value={startForm.durationMinutes}
-                  onChange={(event) => updateStartForm("durationMinutes", event.target.value)}
-                  placeholder="e.g. 45"
-                />
-              </label>
-              <label className="field">
-                <span>Notes (optional)</span>
-                <input
-                  value={startForm.notes}
-                  onChange={(event) => updateStartForm("notes", event.target.value)}
-                  placeholder="Chairside notes"
-                />
-              </label>
+            <div className="procedure-draft-summary">
+              <strong>Procedures that will start together</strong>
+              <ol className="visit-procedure-list">
+                {(pendingStart.procedures || []).map((procedure, index) => (
+                  <li key={procedure.id || index}>
+                    <strong>
+                      {index + 1}. {procedureLine(procedure)}
+                    </strong>
+                    <span>{index === 0 ? "Will become In Treatment" : "Will remain Pending"}</span>
+                  </li>
+                ))}
+              </ol>
             </div>
-
             <div className="dentist-modal__actions">
               <button
                 type="button"
                 className="button button--secondary"
                 disabled={Boolean(busy)}
-                onClick={() => {
-                  setPendingStart(null);
-                  setStartForm(emptyStartForm());
-                }}
+                onClick={() => setPendingStart(null)}
               >
                 Cancel
               </button>
               <button type="submit" className="button button--primary" disabled={Boolean(busy)}>
-                {busy.startsWith("start-") ? "Starting…" : "Start ongoing treatment"}
+                {busy.startsWith("start-") ? "Starting…" : "Start Ongoing Treatment"}
               </button>
             </div>
           </form>
@@ -755,16 +969,18 @@ export function DentistQueuePage() {
       ) : null}
 
       {pendingAdd ? (
-        <DentistModal title="Add Procedure" wide stacked onClose={closeAddProcedure}>
+        <DentistModal title="Add Procedures" wide stacked onClose={closeAddProcedure}>
           <form className="dentist-form" onSubmit={submitAddProcedure}>
             <p className="dentist-confirm-copy">
-              Add another procedure for <strong>{pendingAdd.patientName}</strong> on queue{" "}
-              <strong>{pendingAdd.token || pendingAdd.sequence}</strong>. The current treatment stays in
-              progress on this same visit.
+              Prepare procedures for <strong>{pendingAdd.patientName}</strong> on queue{" "}
+              <strong>{pendingAdd.token || pendingAdd.sequence}</strong>
+              {pendingAdd.status === "in_chair"
+                ? ". New procedures are added to this same visit without replacing the current treatment."
+                : ". Saving procedures does not start treatment or change Waiting status."}
             </p>
             {pendingAdd.procedures?.length ? (
               <div className="procedure-draft-summary">
-                <strong>Current visit</strong>
+                <strong>Already on this visit</strong>
                 <ul>
                   {pendingAdd.procedures.map((procedure) => (
                     <li key={procedure.id || procedureLine(procedure)}>
@@ -775,89 +991,70 @@ export function DentistQueuePage() {
               </div>
             ) : null}
             {addError ? <p className="inline-alert inline-alert--error">{addError}</p> : null}
-            <div className="field-grid field-grid--two">
-              <label className="field">
-                <span>Treatment Type</span>
-                <select
-                  required
-                  value={addForm.name}
-                  onChange={(event) => setAddForm((current) => ({ ...current, name: event.target.value }))}
-                >
-                  <option value="">Select Treatment</option>
-                  {PROCEDURE_FORM_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label || option.value}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                <span>Treatment Date</span>
-                <input type="date" value={addForm.treatmentDate} readOnly />
-              </label>
-              <label className="field">
-                <span>Amount</span>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  inputMode="decimal"
-                  value={addForm.amountCharged}
-                  onChange={(event) =>
-                    setAddForm((current) => ({ ...current, amountCharged: event.target.value }))
-                  }
-                  placeholder="₱"
+            {procedureDrafts.map((draft, index) => (
+              <section
+                key={draft.key}
+                className={`procedure-draft ${activeDraftIndex === index ? "is-active" : ""}`}
+                onClick={() => setActiveDraftIndex(index)}
+              >
+                <div className="procedure-draft__header">
+                  <strong>
+                    Procedure {index + 1}
+                    {draft.name ? ` · ${draft.name}` : ""}
+                    {parseToothList(draft.toothNumber).length
+                      ? ` · #${parseToothList(draft.toothNumber).join(", #")}`
+                      : ""}
+                  </strong>
+                  {procedureDrafts.length > 1 ? (
+                    <button
+                      type="button"
+                      className="button button--secondary button--compact"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setProcedureDrafts((current) => current.filter((_, draftIndex) => draftIndex !== index));
+                        setActiveDraftIndex((current) => Math.max(0, Math.min(current, procedureDrafts.length - 2)));
+                      }}
+                      disabled={busy.startsWith("add-")}
+                    >
+                      Remove
+                    </button>
+                  ) : null}
+                </div>
+                <ProcedureFields
+                  draft={draft}
+                  requiredTooth={procedureRequiresTooth(draft.name)}
+                  onChange={(patch) => {
+                    setActiveDraftIndex(index);
+                    updateProcedureDraft(index, patch);
+                  }}
                 />
-              </label>
-              <label className="field">
-                <span>Expected duration (minutes, optional)</span>
-                <input
-                  type="number"
-                  min="1"
-                  step="1"
-                  value={addForm.durationMinutes}
-                  onChange={(event) =>
-                    setAddForm((current) => ({ ...current, durationMinutes: event.target.value }))
-                  }
-                  placeholder="Uses historical average if blank"
-                />
-              </label>
-              <label className="field">
-                <span>
-                  Tooth Number{procedureRequiresTooth(addForm.name) ? "" : " (optional)"}
-                </span>
-                <input
-                  value={addForm.toothNumber}
-                  onChange={(event) =>
-                    setAddForm((current) => ({ ...current, toothNumber: event.target.value }))
-                  }
-                  placeholder={
-                    procedureRequiresTooth(addForm.name)
-                      ? "Click the tooth on the chart"
-                      : "Optional"
-                  }
-                  required={procedureRequiresTooth(addForm.name)}
-                />
-              </label>
-              <label className="field field--full">
-                <span>Diagnosis</span>
-                <textarea
-                  rows="2"
-                  value={addForm.diagnosisNotes}
-                  onChange={(event) =>
-                    setAddForm((current) => ({ ...current, diagnosisNotes: event.target.value }))
-                  }
-                  placeholder="e.g. Non-restorable tooth"
-                />
-              </label>
-            </div>
+                {procedureErrors[index] ? (
+                  <p className="inline-alert inline-alert--error">{procedureErrors[index]}</p>
+                ) : null}
+              </section>
+            ))}
+            <button
+              type="button"
+              className="button button--secondary"
+              onClick={(event) => {
+                event.preventDefault();
+                setProcedureDrafts((current) => {
+                  setActiveDraftIndex(current.length);
+                  return [...current, emptyProcedureDraft()];
+                });
+              }}
+              disabled={busy.startsWith("add-")}
+            >
+              + Add Another Procedure
+            </button>
             {pendingAdd.clinicalRecordId ? (
               <DentalChart
                 patientId={pendingAdd.clinicalRecordId}
                 pickMode
-                selectedTeeth={parseToothList(addForm.toothNumber)}
+                selectedTeeth={parseToothList(procedureDrafts[activeDraftIndex]?.toothNumber)}
                 onTeethChange={(teeth) =>
-                  setAddForm((current) => ({ ...current, toothNumber: teeth.join(", ") }))
+                  updateProcedureDraft(activeDraftIndex, { toothNumber: teeth.join(", ") })
                 }
               />
             ) : (
@@ -873,10 +1070,76 @@ export function DentistQueuePage() {
                 Cancel
               </button>
               <button type="submit" className="button button--primary" disabled={busy.startsWith("add-")}>
-                {busy.startsWith("add-") ? "Adding Procedure…" : "Add Procedure"}
+                {busy.startsWith("add-") ? "Saving Procedures…" : "Save Procedures"}
               </button>
             </div>
           </form>
+        </DentistModal>
+      ) : null}
+
+      {pendingEdit ? (
+        <DentistModal
+          title="Edit planned procedure"
+          wide
+          stacked
+          onClose={() => {
+            if (!busy.startsWith("edit-")) setPendingEdit(null);
+          }}
+        >
+          <form className="dentist-form" onSubmit={submitEditProcedure}>
+            {editError ? <p className="inline-alert inline-alert--error">{editError}</p> : null}
+            <ProcedureFields
+              draft={editForm}
+              requiredTooth={procedureRequiresTooth(editForm.name)}
+              onChange={(patch) => setEditForm((current) => ({ ...current, ...patch }))}
+            />
+            {pendingEdit.entry.clinicalRecordId ? (
+              <DentalChart
+                patientId={pendingEdit.entry.clinicalRecordId}
+                pickMode
+                selectedTeeth={parseToothList(editForm.toothNumber)}
+                onTeethChange={(teeth) =>
+                  setEditForm((current) => ({ ...current, toothNumber: teeth.join(", ") }))
+                }
+              />
+            ) : null}
+            <div className="dentist-modal__actions">
+              <button
+                type="button"
+                className="button button--secondary"
+                disabled={busy.startsWith("edit-")}
+                onClick={() => setPendingEdit(null)}
+              >
+                Cancel
+              </button>
+              <button type="submit" className="button button--primary" disabled={busy.startsWith("edit-")}>
+                {busy.startsWith("edit-") ? "Saving…" : "Save Changes"}
+              </button>
+            </div>
+          </form>
+        </DentistModal>
+      ) : null}
+
+      {pendingRemove ? (
+        <DentistModal title="Remove planned procedure?" onClose={() => setPendingRemove(null)}>
+          <p className="dentist-confirm-copy">
+            Remove {procedureLine(pendingRemove.procedure)} from {pendingRemove.entry.patientName}&apos;s
+            planned visit? Queue number {pendingRemove.entry.token || pendingRemove.entry.sequence} stays
+            the same.
+          </p>
+          <div className="dentist-modal__actions">
+            <button type="button" className="button button--secondary" onClick={() => setPendingRemove(null)}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="button button--primary"
+              onClick={confirmRemoveProcedure}
+              disabled={Boolean(busy)}
+            >
+              {busy.startsWith("remove-") ? "Removing…" : "Remove"}
+            </button>
+          </div>
         </DentistModal>
       ) : null}
 

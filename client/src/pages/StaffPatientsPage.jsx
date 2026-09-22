@@ -550,7 +550,9 @@ export function StaffPatientsPage() {
                       Status:{" "}
                       {String(procedure.status || "").toLowerCase() === "planned"
                         ? "Pending"
-                        : String(procedure.status || "").replaceAll("_", " ")}
+                        : String(procedure.status || "").toLowerCase() === "in_progress"
+                          ? "In Treatment"
+                          : String(procedure.status || "").replaceAll("_", " ")}
                     </span>
                   </li>
                 ))}

@@ -100,6 +100,119 @@ function serializeDentistTreatment(row) {
   };
 }
 
+const QUEUE_PROCEDURE_STATUSES = new Set(["checked_in", "waiting", "preparing", "called", "dentist"]);
+
+async function saveVisitProcedureRows(client, {
+  queue,
+  clinicalRecordId,
+  dentist,
+  dentistName,
+  procedureBodies,
+  plannedOnly = false,
+}) {
+  const created = [];
+  if (!Array.isArray(procedureBodies) || !procedureBodies.length) return created;
+
+  const existing = await clinicalPatients.listTreatmentsForVisit(client, {
+    queueEntryId: queue.id,
+    appointmentId: queue.appointment_id || null,
+  });
+  let hasInProgress = existing.some((item) => String(item.status || "").toLowerCase() === "in_progress");
+  let visitSequence = await clinicalPatients.nextVisitSequence(client, queue.id);
+  const queueIsServing = String(queue.status || "").toLowerCase() === "dentist";
+
+  for (const body of procedureBodies) {
+    const name = stringValue(body?.treatment || body?.name || body?.procedureName, 200);
+    if (!name) {
+      const error = new Error("Select a treatment type for every procedure.");
+      error.status = 400;
+      throw error;
+    }
+    const durationMinutes = Number.parseInt(body?.durationMinutes, 10);
+    const hasDuration = Number.isSafeInteger(durationMinutes) && durationMinutes > 0;
+    const forcePlanned = plannedOnly || hasInProgress || !queueIsServing;
+    const status = forcePlanned ? "planned" : "in_progress";
+    const row = await clinicalPatients.addClinicalTreatment(
+      client,
+      clinicalRecordId,
+      {
+        treatment: name,
+        procedureDetails: stringValue(body?.procedureType, 80)
+          ? `Procedure type: ${stringValue(body?.procedureType, 80)}`
+          : stringValue(body?.procedureDetails, 2000),
+        toothNumber: body?.toothNumber || body?.affectedTooth || body?.affectedTeeth,
+        durationMinutes: hasDuration ? durationMinutes : null,
+        amountCharged: body?.amountCharged ?? body?.price ?? body?.cost ?? 0,
+        amountPaid: 0,
+        treatmentDate: body?.treatmentDate,
+        status,
+        notes: stringValue(body?.notes || body?.diagnosisNotes || body?.diagnosis, 2000),
+        diagnosisNotes: stringValue(body?.diagnosisNotes || body?.diagnosis || body?.notes, 2000),
+        dentistName,
+        appointmentId: queue.appointment_id || null,
+        queueEntryId: queue.id,
+        visitSequence,
+      },
+      { id: dentist.id, role: "dentist" }
+    );
+    created.push(row);
+    visitSequence += 1;
+    if (status === "in_progress") hasInProgress = true;
+
+    if (hasDuration) {
+      const durationServiceId = `procedure-${name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 80) || "custom"}`;
+      await client
+        .query(
+          `INSERT INTO clinic_service_durations (service_id, service_name, default_duration_minutes, updated_at)
+           VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+           ON CONFLICT (service_id) DO UPDATE SET
+             service_name = EXCLUDED.service_name,
+             default_duration_minutes = EXCLUDED.default_duration_minutes,
+             updated_at = CURRENT_TIMESTAMP`,
+          [durationServiceId, name, durationMinutes]
+        )
+        .catch((error) => {
+          if (error?.code !== "42P01") throw error;
+        });
+    }
+  }
+  return created;
+}
+
+function procedureBodiesFromRequest(req) {
+  if (Array.isArray(req.body?.procedures)) return req.body.procedures;
+  const name =
+    stringValue(req.body?.procedureName || req.body?.treatment || req.body?.name, 200) ||
+    stringValue(req.body?.procedureType, 80);
+  return name ? [req.body] : [];
+}
+
+async function listClinicalRecordIdsByUserIds(db, userIds) {
+  const ids = [...new Set((userIds || []).map((value) => String(value || "").trim()).filter(Boolean))];
+  const map = new Map();
+  if (!ids.length) return map;
+  try {
+    const result = await db.query(
+      `SELECT DISTINCT ON (linked_user_id) linked_user_id, id
+       FROM clinic_patient_records
+       WHERE linked_user_id = ANY($1::text[])
+         AND COALESCE(is_archived, FALSE) = FALSE
+       ORDER BY linked_user_id, updated_at DESC, id DESC`,
+      [ids]
+    );
+    for (const row of result.rows) {
+      map.set(String(row.linked_user_id), Number(row.id));
+    }
+  } catch (error) {
+    if (error?.code !== "42P01" && error?.code !== "42703") throw error;
+  }
+  return map;
+}
+
 function auditDentistTreatment(db, req, action, recordId, row, detail) {
   writeAdminAudit(db, {
     actorId: String(req.dentist.id),
@@ -182,12 +295,16 @@ function mapQueueEntry(row) {
       treatment: procedure.treatment || procedure.name,
       status: procedure.status,
       toothNumber: procedure.toothNumber || null,
+      diagnosis: procedure.diagnosis || procedure.diagnosisNotes || null,
       durationMinutes: procedure.durationMinutes,
+      amountCharged: procedure.amountCharged ?? 0,
       visitSequence: procedure.visitSequence,
       clinicalRecordId: procedure.clinicalRecordId || null,
     })),
     clinicalRecordId:
-      (row.procedures || []).map((procedure) => procedure.clinicalRecordId).find(Boolean) || null,
+      (row.procedures || []).map((procedure) => procedure.clinicalRecordId).find(Boolean) ||
+      row.clinical_record_id ||
+      null,
     currentProcedure: (() => {
       const list = row.procedures || [];
       const raw =
@@ -514,6 +631,7 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
            queue.serving_started_at,
            queue.checked_in_at,
            queue.appointment_id,
+           queue.user_id,
            appointment.service_name,
            appointment.dentist_id,
            appointment.dentist_name,
@@ -550,9 +668,14 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
         db,
         result.rows.map((row) => row.id)
       );
+      const recordIdsByUser = await listClinicalRecordIdsByUserIds(
+        db,
+        result.rows.map((row) => row.user_id)
+      );
       const queueRows = result.rows.map((row) => ({
         ...row,
         procedures: grouped.get(Number(row.id)) || [],
+        clinical_record_id: recordIdsByUser.get(String(row.user_id)) || null,
       }));
 
       return res.json({
@@ -775,29 +898,10 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
 
   router.post("/queue/:id/start-treatment", async (req, res) => {
     const queueId = numericId(req.params.id);
-    const procedureType = stringValue(req.body?.procedureType, 80);
-    const procedureName =
-      stringValue(req.body?.procedureName || req.body?.treatment || req.body?.name, 200) ||
-      procedureType;
-    const toothNumber = stringValue(req.body?.toothNumber, 40);
-    const durationMinutes = Number.parseInt(req.body?.durationMinutes, 10);
-    const amountChargedRaw = req.body?.amountCharged ?? req.body?.price ?? req.body?.cost;
-    const clinicTz = process.env.CLINIC_TIMEZONE || "Asia/Manila";
-    const treatmentDate =
-      stringValue(req.body?.treatmentDate, 10) ||
-      new Date().toLocaleDateString("en-CA", { timeZone: clinicTz });
+    const procedureBodies = procedureBodiesFromRequest(req);
 
     if (!queueId) {
       return res.status(400).json({ message: "A valid queue entry id is required." });
-    }
-    if (!procedureName) {
-      return res.status(400).json({ message: "Procedure name is required." });
-    }
-    if (!Number.isSafeInteger(durationMinutes) || durationMinutes <= 0) {
-      return res.status(400).json({ message: "Duration minutes must be a positive number." });
-    }
-    if (amountChargedRaw === undefined || amountChargedRaw === null || amountChargedRaw === "") {
-      return res.status(400).json({ message: "Treatment price / amount charged is required." });
     }
 
     const client = await db.connect();
@@ -811,6 +915,13 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
         await client.query("ROLLBACK");
         transactionOpen = false;
         return res.status(404).json({ message: "Queue entry not found for this dentist." });
+      }
+
+      const queueStatus = String(current.status || "").toLowerCase();
+      if (queueStatus === "completed" || queueStatus === "no_show") {
+        await client.query("ROLLBACK");
+        transactionOpen = false;
+        return res.status(409).json({ message: "This queue entry is no longer eligible to start treatment." });
       }
 
       const patientResult = await client.query(
@@ -839,90 +950,68 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
         { id: req.dentist.id, role: "dentist" }
       );
 
-      const visitSequence = await clinicalPatients.nextVisitSequence(client, queueId);
-      const existingVisit = await clinicalPatients.listTreatmentsForVisit(client, {
+      if (procedureBodies.length) {
+        await saveVisitProcedureRows(client, {
+          queue: current,
+          clinicalRecordId: clinicalRecord.id,
+          dentist: req.dentist,
+          dentistName,
+          procedureBodies,
+          plannedOnly: true,
+        });
+      }
+
+      const visitTreatments = await clinicalPatients.listTreatmentsForVisit(client, {
         queueEntryId: queueId,
         appointmentId: current.appointment_id || null,
       });
-      const hasInProgress = existingVisit.some(
-        (item) => String(item.status || "").toLowerCase() === "in_progress"
-      );
-
-      const treatment = await clinicalPatients.addClinicalTreatment(
-        client,
-        clinicalRecord.id,
-        {
-          treatment: procedureName,
-          procedureDetails: procedureType
-            ? `Procedure type: ${procedureType}`
-            : stringValue(req.body?.procedureDetails, 2000),
-          toothNumber,
-          durationMinutes,
-          amountCharged: amountChargedRaw,
-          amountPaid: req.body?.amountPaid ?? 0,
-          treatmentDate,
-          status: hasInProgress ? "planned" : "in_progress",
-          notes: stringValue(req.body?.notes, 2000),
-          diagnosisNotes: stringValue(req.body?.diagnosisNotes, 2000),
-          dentistName,
-          appointmentId: current.appointment_id || null,
-          queueEntryId: queueId,
-          visitSequence,
-        },
-        { id: req.dentist.id, role: "dentist" }
-      );
-
-      let appointmentServiceId = null;
-      let appointmentServiceName = null;
-      if (current.appointment_id) {
-        const appointmentResult = await client.query(
-          `SELECT service_id, service_name
-           FROM patient_portal_appointments
-           WHERE id = $1
-           LIMIT 1`,
-          [current.appointment_id]
-        );
-        appointmentServiceId = appointmentResult.rows[0]?.service_id || null;
-        appointmentServiceName = appointmentResult.rows[0]?.service_name || null;
+      const remaining = visitTreatments.filter((item) => {
+        const status = String(item.status || "").toLowerCase();
+        return status !== "completed" && status !== "cancelled";
+      });
+      if (!remaining.length) {
+        await client.query("ROLLBACK");
+        transactionOpen = false;
+        return res.status(400).json({
+          message: "Add at least one procedure before starting ongoing treatment.",
+        });
       }
 
-      const durationServiceId =
-        appointmentServiceId ||
-        `procedure-${procedureName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 80) || "custom"}`;
-      const durationServiceName = procedureName || appointmentServiceName || "Dental visit";
-
-      await client
-        .query(
-          `INSERT INTO clinic_service_durations (service_id, service_name, default_duration_minutes, updated_at)
-           VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
-           ON CONFLICT (service_id) DO UPDATE SET
-             service_name = EXCLUDED.service_name,
-             default_duration_minutes = EXCLUDED.default_duration_minutes,
-             updated_at = CURRENT_TIMESTAMP`,
-          [durationServiceId, durationServiceName, durationMinutes]
-        )
-        .catch((error) => {
-          if (error?.code !== "42P01") throw error;
+      const alreadyServing = queueStatus === "dentist";
+      let currentProcedure =
+        remaining.find((item) => String(item.status || "").toLowerCase() === "in_progress") || null;
+      if (!currentProcedure) {
+        currentProcedure = await clinicalPatients.promoteNextVisitProcedure(client, {
+          clinicalRecordId: clinicalRecord.id,
+          queueEntryId: queueId,
+          appointmentId: current.appointment_id || null,
+          actorId: String(req.dentist.id),
         });
+      }
+      if (!currentProcedure) {
+        const error = new Error("Unable to activate the first procedure for this visit.");
+        error.status = 500;
+        throw error;
+      }
 
       const updatedResult = await client.query(
         `UPDATE patient_portal_queue_entries
          SET status = 'dentist',
-             estimated_wait_minutes = CASE WHEN $3::boolean THEN estimated_wait_minutes ELSE $2 END,
              updated_at = CURRENT_TIMESTAMP
          WHERE id = $1
          RETURNING *`,
-        [queueId, durationMinutes, hasInProgress]
+        [queueId]
       );
 
-      if (!hasInProgress) {
+      if (!alreadyServing) {
+        await markQueueServingStarted(client, queueId);
         await recordTreatmentStart(client, {
           patientUserId: current.user_id,
           appointmentId: current.appointment_id || null,
           queueEntryId: queueId,
-          procedureType: procedureName,
+          procedureType: currentProcedure.treatment,
           dentistId: req.dentist?.id,
-          treatmentId: treatment.id,
+          treatmentId: currentProcedure.id,
         });
       }
 
@@ -938,28 +1027,39 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
 
       await recomputeWaitsBehind(client, current.position);
 
-      await notifyPatient(client, {
-        userId: current.user_id,
-        type: "queue",
-        title: "Treatment started",
-        body: `Your ${procedureName} treatment has started with ${dentistName}.`,
-        entityType: "queue",
-        entityId: current.id,
-      });
+      if (!alreadyServing) {
+        await notifyPatient(client, {
+          userId: current.user_id,
+          type: "queue",
+          title: "Treatment started",
+          body: `Your ${currentProcedure.treatment} treatment has started with ${dentistName}.`,
+          entityType: "queue",
+          entityId: current.id,
+        });
+      }
 
       await client.query("COMMIT");
       transactionOpen = false;
 
-      return res.status(201).json({
-        message:
-          "Ongoing treatment started. It will be finalized to the patient record when you press Done.",
+      const procedures = await clinicalPatients.listTreatmentsForVisit(db, {
+        queueEntryId: queueId,
+        appointmentId: current.appointment_id || null,
+      });
+      const serialized = procedures.map(serializeDentistTreatment);
+      const currentSerialized =
+        serialized.find((item) => String(item.status || "").toLowerCase() === "in_progress") ||
+        serializeDentistTreatment(currentProcedure);
+
+      return res.status(alreadyServing ? 200 : 201).json({
+        message: alreadyServing
+          ? "Visit procedures are already in treatment."
+          : "Ongoing treatment started. All planned procedures are on this same visit.",
         queueEntry: {
           id: updatedResult.rows[0].id,
           token: updatedResult.rows[0].token,
           sequence: updatedResult.rows[0].position,
           status: displayQueueStatus(updatedResult.rows[0].status),
           waitMinutes: Number(updatedResult.rows[0].estimated_wait_minutes || 0),
-          durationMinutes,
         },
         patient: {
           id: clinicalRecord.id,
@@ -967,21 +1067,8 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
           fullName: clinicalRecord.fullName || patient.full_name || "Patient",
           recordCode: clinicalRecord.recordCode || null,
         },
-        treatment: {
-          id: treatment.id,
-          name: treatment.treatment,
-          treatment: treatment.treatment,
-          procedureType: procedureType || null,
-          toothNumber: treatment.toothNumber,
-          durationMinutes: treatment.durationMinutes,
-          amountCharged: treatment.amountCharged ?? 0,
-          amountPaid: treatment.amountPaid ?? 0,
-          treatmentDate: treatment.treatmentDate,
-          status: treatment.status,
-          dentist: treatment.dentistName,
-          clinicalRecordId: clinicalRecord.id,
-          appointmentId: treatment.appointmentId,
-        },
+        treatment: currentSerialized,
+        procedures: serialized,
       });
     } catch (error) {
       if (transactionOpen) {
@@ -1008,22 +1095,12 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
 
   router.post("/queue/:id/procedures", async (req, res) => {
     const queueId = numericId(req.params.id);
-    const procedureName =
-      stringValue(req.body?.procedureName || req.body?.treatment || req.body?.name, 200);
-    const procedureType = stringValue(req.body?.procedureType, 80);
-    const toothNumber = stringValue(req.body?.toothNumber, 40);
-    const durationMinutes = Number.parseInt(req.body?.durationMinutes, 10);
-    const hasDuration = Number.isSafeInteger(durationMinutes) && durationMinutes > 0;
-    const amountChargedRaw = req.body?.amountCharged ?? req.body?.price ?? req.body?.cost ?? 0;
-    const clinicTz = process.env.CLINIC_TIMEZONE || "Asia/Manila";
-    const treatmentDate =
-      stringValue(req.body?.treatmentDate, 10) ||
-      new Date().toLocaleDateString("en-CA", { timeZone: clinicTz });
+    const procedureBodies = procedureBodiesFromRequest(req);
 
     if (!queueId) {
       return res.status(400).json({ message: "A valid queue entry id is required." });
     }
-    if (!procedureName) {
+    if (!procedureBodies.length) {
       return res.status(400).json({ message: "Select a treatment type." });
     }
 
@@ -1039,11 +1116,13 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
         transactionOpen = false;
         return res.status(404).json({ message: "Queue entry not found for this dentist." });
       }
-      if (String(current.status || "").toLowerCase() !== "dentist") {
+
+      const queueStatus = String(current.status || "").toLowerCase();
+      if (!QUEUE_PROCEDURE_STATUSES.has(queueStatus)) {
         await client.query("ROLLBACK");
         transactionOpen = false;
         return res.status(409).json({
-          message: "Add Procedure is available only while the patient is in treatment.",
+          message: "Procedures can be added while the patient is waiting or already in treatment.",
         });
       }
 
@@ -1058,81 +1137,40 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
         { id: req.dentist.id, role: "dentist" }
       );
 
-      const existingVisit = await clinicalPatients.listTreatmentsForVisit(client, {
-        queueEntryId: queueId,
-        appointmentId: current.appointment_id || null,
+      const created = await saveVisitProcedureRows(client, {
+        queue: current,
+        clinicalRecordId: clinicalRecord.id,
+        dentist: req.dentist,
+        dentistName,
+        procedureBodies,
+        plannedOnly: queueStatus !== "dentist",
       });
-      const hasInProgress = existingVisit.some(
-        (item) => String(item.status || "").toLowerCase() === "in_progress"
-      );
-      const visitSequence = await clinicalPatients.nextVisitSequence(client, queueId);
 
-      const treatment = await clinicalPatients.addClinicalTreatment(
-        client,
-        clinicalRecord.id,
-        {
-          treatment: procedureName,
-          procedureDetails: procedureType
-            ? `Procedure type: ${procedureType}`
-            : stringValue(req.body?.procedureDetails, 2000),
-          toothNumber,
-          durationMinutes: hasDuration ? durationMinutes : null,
-          amountCharged: amountChargedRaw,
-          amountPaid: 0,
-          treatmentDate,
-          status: hasInProgress ? "planned" : "in_progress",
-          notes: stringValue(req.body?.notes || req.body?.diagnosisNotes || req.body?.diagnosis, 2000),
-          diagnosisNotes: stringValue(req.body?.diagnosisNotes || req.body?.diagnosis || req.body?.notes, 2000),
-          dentistName,
-          appointmentId: current.appointment_id || null,
-          queueEntryId: queueId,
-          visitSequence,
-        },
-        { id: req.dentist.id, role: "dentist" }
-      );
-
-      if (hasDuration) {
-        const durationServiceId = `procedure-${procedureName
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, "-")
-          .replace(/^-|-$/g, "")
-          .slice(0, 80) || "custom"}`;
-        await client
-          .query(
-            `INSERT INTO clinic_service_durations (service_id, service_name, default_duration_minutes, updated_at)
-             VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
-             ON CONFLICT (service_id) DO UPDATE SET
-               service_name = EXCLUDED.service_name,
-               default_duration_minutes = EXCLUDED.default_duration_minutes,
-               updated_at = CURRENT_TIMESTAMP`,
-            [durationServiceId, procedureName, durationMinutes]
-          )
-          .catch((error) => {
-            if (error?.code !== "42P01") throw error;
-          });
-      }
-
-      if (!hasInProgress && String(treatment.status || "").toLowerCase() === "in_progress") {
+      const startedNow = created.find((item) => String(item.status || "").toLowerCase() === "in_progress");
+      if (startedNow && queueStatus === "dentist") {
         await recordTreatmentStart(client, {
           patientUserId: current.user_id,
           appointmentId: current.appointment_id || null,
           queueEntryId: queueId,
-          procedureType: procedureName,
+          procedureType: startedNow.treatment,
           dentistId: req.dentist?.id,
-          treatmentId: treatment.id,
+          treatmentId: startedNow.id,
         });
       }
 
       await recomputeWaitsBehind(client, 1);
 
-      await notifyPatient(client, {
-        userId: current.user_id,
-        type: "queue",
-        title: "Additional procedure added",
-        body: `Another procedure (${procedureName}) was added to your current visit.`,
-        entityType: "queue",
-        entityId: current.id,
-      });
+      if (queueStatus === "dentist") {
+        const names = created.map((item) => item.treatment).filter(Boolean).join(", ");
+        await notifyPatient(client, {
+          userId: current.user_id,
+          type: "queue",
+          title: "Additional procedure added",
+          body: `Another procedure (${names || "additional treatment"}) was added to your current visit.`,
+          entityType: "queue",
+          entityId: current.id,
+        });
+      }
 
       await client.query("COMMIT");
       transactionOpen = false;
@@ -1141,10 +1179,19 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
         queueEntryId: queueId,
         appointmentId: current.appointment_id || null,
       });
+      const count = created.length;
 
       return res.status(201).json({
-        message: `${procedureName} added to this visit. The current treatment continues.`,
-        treatment: serializeDentistTreatment(treatment),
+        message:
+          queueStatus === "dentist"
+            ? count === 1
+              ? `${created[0].treatment} added to this visit. The current treatment continues.`
+              : `${count} procedures added to this visit. The current treatment continues.`
+            : count === 1
+              ? `${created[0].treatment} saved as a planned procedure. Start ongoing treatment when ready.`
+              : `${count} procedures saved as a planned visit. Start ongoing treatment when ready.`,
+        treatment: serializeDentistTreatment(created[0]),
+        treatments: created.map(serializeDentistTreatment),
         procedures: procedures.map(serializeDentistTreatment),
         queueEntry: {
           id: current.id,
