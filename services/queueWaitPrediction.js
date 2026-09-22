@@ -303,10 +303,82 @@ function remainingServingMinutes(entry, fullMinutes, now = new Date()) {
   return Math.max(1, roundMinutes((fullMinutes || 0) - elapsed));
 }
 
+async function loadVisitProcedures(db, entry) {
+  const queueEntryId = Number(entry.id || entry.queue_entry_id || entry.queueEntryId) || null;
+  const appointmentId = Number(entry.appointment_id || entry.appointmentId) || null;
+  if (!queueEntryId && !appointmentId) return [];
+  try {
+    const result = await db.query(
+      `SELECT id, treatment, status, duration_minutes, started_at, visit_sequence, queue_entry_id, appointment_id
+       FROM clinic_patient_treatments
+       WHERE ($1::bigint IS NOT NULL AND queue_entry_id = $1)
+          OR ($1::bigint IS NULL AND $2::bigint IS NOT NULL AND appointment_id = $2)
+       ORDER BY visit_sequence ASC NULLS LAST, id ASC`,
+      [queueEntryId, appointmentId]
+    );
+    return result.rows;
+  } catch (error) {
+    if (error?.code === "42703" && appointmentId) {
+      const result = await db.query(
+        `SELECT id, treatment, status, duration_minutes
+         FROM clinic_patient_treatments
+         WHERE appointment_id = $1
+         ORDER BY id ASC`,
+        [appointmentId]
+      );
+      return result.rows;
+    }
+    if (error?.code === "42P01" || error?.code === "42703") return [];
+    throw error;
+  }
+}
+
+function isActiveProcedure(row) {
+  const status = String(row.status || "").toLowerCase();
+  return status === "in_progress" || status === "planned" || status === "pending";
+}
+
 async function expectedMinutesForEntry(db, entry, settings, now) {
+  const procedures = await loadVisitProcedures(db, entry);
+  const remainingRows = procedures.filter(isActiveProcedure);
+  if (remainingRows.length) {
+    let remaining = 0;
+    const statsList = [];
+    for (const procedure of remainingRows) {
+      const estimated = await estimateProcedureDuration(
+        db,
+        { service_name: procedure.treatment, duration_minutes: procedure.duration_minutes },
+        settings
+      );
+      const full = Number(procedure.duration_minutes) > 0 ? Number(procedure.duration_minutes) : estimated.minutes;
+      const status = String(procedure.status || "").toLowerCase();
+      if (status === "in_progress") {
+        remaining += remainingServingMinutes(
+          {
+            status: "dentist",
+            serving_started_at: procedure.started_at || entry.serving_started_at,
+            duration_minutes: full,
+          },
+          full,
+          now
+        );
+      } else {
+        remaining += Math.max(0, roundMinutes(full));
+      }
+      statsList.push(estimated.stats);
+    }
+    return {
+      minutes: remaining,
+      remainingMinutes: remaining,
+      stats: statsList[0] || null,
+      source: "visit_procedures",
+      procedureCount: remainingRows.length,
+    };
+  }
+
   const estimated = await estimateProcedureDuration(db, entry, settings);
   const remaining = remainingServingMinutes(entry, estimated.minutes, now);
-  return { ...estimated, remainingMinutes: remaining };
+  return { ...estimated, remainingMinutes: remaining, procedureCount: 1 };
 }
 
 function addMinutes(date, minutes) {
@@ -529,10 +601,26 @@ async function estimateWaitForQueueContext(db, { entry, aheadEntries = [], now =
   });
 }
 
-async function persistEstimate(db, entryId, estimate, waitPoint) {
+async function persistEstimate(db, entryId, estimate, waitPoint, { serving = false } = {}) {
   const midpoint = roundMinutes(
     ((estimate.estimatedWaitMinutes?.min || 0) + (estimate.estimatedWaitMinutes?.max || 0)) / 2
   );
+  if (serving) {
+    try {
+      await db.query(
+        `UPDATE patient_portal_queue_entries
+         SET wait_estimate_duration_minutes = $2,
+             wait_estimate_at = CURRENT_TIMESTAMP,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1
+           AND status IN ('dentist')`,
+        [entryId, estimate.estimatedDurationMinutes]
+      );
+    } catch (error) {
+      if (error?.code !== "42703") throw error;
+    }
+    return;
+  }
   try {
     await db.query(
       `UPDATE patient_portal_queue_entries
@@ -582,8 +670,14 @@ async function recalculateQueueWaitEstimates(db, { fromPosition = 0 } = {}) {
     let updated = 0;
     for (const entry of active) {
       const position = Number(entry.position) || 0;
-      if (position < fromPosition) continue;
       const status = String(entry.status || "").toLowerCase();
+      if (SERVING_STATUSES.has(status)) {
+        const estimate = await estimateWaitForQueueContext(db, { entry, aheadEntries: [], now });
+        await persistEstimate(db, entry.id, estimate, 0, { serving: true });
+        updated += 1;
+        continue;
+      }
+      if (position < fromPosition) continue;
       if (!WAITING_STATUSES.has(status)) continue;
       const ahead = active.filter((row) => Number(row.position) < position);
       const estimate = await estimateWaitForQueueContext(db, { entry, aheadEntries: ahead, now });
@@ -626,10 +720,12 @@ module.exports = {
   WAITING_STATUSES,
   createPredictionService,
   estimateWaitForQueueContext,
+  expectedMinutesForEntry,
   getHistoricalDurationStats,
   getPredictionSettings,
   invalidateDurationStatsCache,
   remainingServingMinutes,
+  loadVisitProcedures,
   publicWaitEstimate,
   recalculateQueueWaitEstimates,
   safeRecalculateQueueWaitEstimates,

@@ -33,6 +33,20 @@ function matchesFocus(entry, focus) {
   );
 }
 
+function procedureStatusLabel(status) {
+  const value = String(status || "").toLowerCase();
+  if (value === "planned" || value === "pending") return "Pending";
+  if (value === "in_progress") return "In Progress";
+  if (value === "completed") return "Completed";
+  return status ? String(status).replaceAll("_", " ") : "";
+}
+
+function procedureLine(procedure) {
+  const name = procedure?.name || procedure?.treatment || "Procedure";
+  const tooth = procedure?.toothNumber ? ` #${procedure.toothNumber}` : "";
+  return `${name}${tooth}`;
+}
+
 export function StaffQueuePage() {
   const { pushToast, confirm } = useStaffUi();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -239,7 +253,25 @@ export function StaffQueuePage() {
                         <strong>{entry.patientName}</strong>
                       </td>
                       <td>{formatStaffTime(String(entry.appointment?.time || "").slice(0, 5))}</td>
-                      <td>{entry.appointment?.treatment || "—"}</td>
+                      <td>
+                        {entry.procedures?.length ? (
+                          <div className="queue-procedure-cell">
+                            <ul>
+                              {entry.procedures.map((procedure) => (
+                                <li key={procedure.id || procedureLine(procedure)}>
+                                  {procedureLine(procedure)}
+                                  {procedure.status ? ` · ${procedureStatusLabel(procedure.status)}` : ""}
+                                </li>
+                              ))}
+                            </ul>
+                            {entry.currentProcedure ? (
+                              <small>Current: {procedureLine(entry.currentProcedure)}</small>
+                            ) : null}
+                          </div>
+                        ) : (
+                          entry.appointment?.treatment || "—"
+                        )}
+                      </td>
                       <td>{entry.appointment?.dentist || "—"}</td>
                       <td>{formatStaffDateTime(entry.timestamp)}</td>
                       <td>
@@ -248,8 +280,6 @@ export function StaffQueuePage() {
                       <td>
                         {entry.status === "completed" || entry.status === "no_show" || entry.status === "skipped"
                           ? "—"
-                          : entry.status === "in_chair" || entry.status === "in_treatment"
-                          ? durationFromEntry({ ...entry, estimatedDurationMinutes: entry.waitMinutes })
                           : durationFromEntry(entry)}
                       </td>
                       <td>

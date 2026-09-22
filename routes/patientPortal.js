@@ -8,7 +8,7 @@ const patientData = require("../services/patientData");
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
-const { linkClinicalRecordsToUser } = require("../services/clinicalPatients");
+const { linkClinicalRecordsToUser, listTreatmentsForVisit } = require("../services/clinicalPatients");
 const { publicWaitEstimate, waitEstimateFromRow } = require("../services/queueWaitPrediction");
 const { answerWithOptionalGemini, loadClinicProfile } = require("../services/clinicAssistant");
 const { analyzeDentalImageBuffer, DISCLAIMER: IMAGE_ANALYSIS_DISCLAIMER } = require("../services/dentalImageAnalysis");
@@ -1083,7 +1083,7 @@ function createPatientPortalRouter({
     try {
       const [currentResult, nowServingResult, preferenceResult] = await Promise.all([
         db.query(
-          `SELECT id, token, position, status, estimated_wait_minutes, checked_in_at, check_in_method,
+          `SELECT id, token, position, status, estimated_wait_minutes, checked_in_at, check_in_method, appointment_id,
                   wait_estimate_min_minutes, wait_estimate_max_minutes, wait_estimate_duration_minutes,
                   wait_estimate_call_start, wait_estimate_call_end, wait_estimate_at
            FROM patient_portal_queue_entries
@@ -1125,6 +1125,20 @@ function createPatientPortalRouter({
       const current = currentResult.rows[0] || null;
       const nowServing = nowServingResult.rows[0] || null;
       const waitEstimate = publicWaitEstimate(waitEstimateFromRow(current));
+      const visitProcedures = current
+        ? await listTreatmentsForVisit(db, {
+            queueEntryId: current.id,
+            appointmentId: current.appointment_id || null,
+          }).catch(() => [])
+        : [];
+      const remainingProcedures = visitProcedures.filter((item) =>
+        ["in_progress", "planned", "pending"].includes(String(item.status || "").toLowerCase())
+      );
+      const currentProcedure =
+        remainingProcedures.find((item) => String(item.status).toLowerCase() === "in_progress") ||
+        remainingProcedures[0] ||
+        null;
+      const additionalProcedureCount = Math.max(0, remainingProcedures.length - (currentProcedure ? 1 : 0));
 
       return res.json({
         nowServing: nowServing?.token || null,
@@ -1142,6 +1156,10 @@ function createPatientPortalRouter({
               estimatedCallStart: waitEstimate.estimatedCallTime?.start || null,
               estimatedCallEnd: waitEstimate.estimatedCallTime?.end || null,
               waitEstimate,
+              currentProcedure: currentProcedure
+                ? { name: currentProcedure.treatment, status: currentProcedure.status }
+                : null,
+              additionalProcedureCount,
               checkedInAt: current.checked_in_at,
               steps: queueSteps(current.status),
             }

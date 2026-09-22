@@ -530,6 +530,34 @@ export function StaffPatientsPage() {
             loadChartApi={api.getStaffDentalChart}
           />
 
+          {detail.currentVisit?.procedures?.length ? (
+            <section className="treatment-record" style={{ marginTop: "1.25rem" }}>
+              <div className="treatment-record__header">
+                <div>
+                  <span className="eyebrow">Current visit</span>
+                  <h2>Today&apos;s Procedures</h2>
+                </div>
+                <span className="staff-readonly-badge">View only</span>
+              </div>
+              <ol className="visit-procedure-list">
+                {detail.currentVisit.procedures.map((procedure, index) => (
+                  <li key={procedure.id || index}>
+                    <strong>
+                      {index + 1}. {procedure.treatment || procedure.name}
+                    </strong>
+                    <span>Tooth: {procedure.toothNumber ? `#${procedure.toothNumber}` : "—"}</span>
+                    <span>
+                      Status:{" "}
+                      {String(procedure.status || "").toLowerCase() === "planned"
+                        ? "Pending"
+                        : String(procedure.status || "").replaceAll("_", " ")}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          ) : null}
+
           <section className="treatment-record" style={{ marginTop: "1.25rem" }}>
             <div className="treatment-record__header">
               <div>
@@ -550,6 +578,7 @@ export function StaffPatientsPage() {
                       <th>Date</th>
                       <th>Tooth</th>
                       <th>Procedure</th>
+                      <th>Status</th>
                       <th>Diagnosis</th>
                       <th>Dentist</th>
                       <th>Amount Charged</th>
@@ -564,6 +593,13 @@ export function StaffPatientsPage() {
                         <td>{formatDentistDate(treatment.date || treatment.treatmentDate)}</td>
                         <td>{treatment.toothNumber ? `#${treatment.toothNumber}` : "—"}</td>
                         <td>{treatment.treatment || treatment.name || "—"}</td>
+                        <td>
+                          {String(treatment.status || "").toLowerCase() === "planned"
+                            ? "Pending"
+                            : treatment.status
+                              ? String(treatment.status).replaceAll("_", " ")
+                              : "—"}
+                        </td>
                         <td>{treatment.diagnosis || treatment.diagnosisNotes || "—"}</td>
                         <td>{treatment.dentist || "—"}</td>
                         <td>{formatMoney(treatment.amountCharged)}</td>

@@ -104,6 +104,10 @@ function mapClinicalTreatment(row) {
     amountPaid: row.amount_paid != null ? Number(row.amount_paid) : 0,
     ...paymentFields(row.amount_charged, row.amount_paid),
     appointmentId: row.appointment_id != null ? Number(row.appointment_id) : null,
+    queueEntryId: row.queue_entry_id != null ? Number(row.queue_entry_id) : null,
+    visitSequence: row.visit_sequence != null ? Number(row.visit_sequence) : null,
+    startedAt: row.started_at || null,
+    completedAt: row.completed_at || null,
     createdBy: row.created_by || null,
     createdByRole: row.created_by_role || null,
     updatedBy: row.updated_by || null,
@@ -1069,6 +1073,17 @@ async function addClinicalTreatment(db, recordId, input, actor = {}) {
       ? Number(input.appointmentId)
       : null;
 
+  const queueEntryId =
+    Number.isSafeInteger(Number(input.queueEntryId || input.queue_entry_id)) &&
+    Number(input.queueEntryId || input.queue_entry_id) > 0
+      ? Number(input.queueEntryId || input.queue_entry_id)
+      : null;
+  const visitSequence =
+    Number.isSafeInteger(Number(input.visitSequence || input.visit_sequence)) &&
+    Number(input.visitSequence || input.visit_sequence) > 0
+      ? Number(input.visitSequence || input.visit_sequence)
+      : null;
+
   let result;
   try {
     result = await withSavepoint(db, "clinical_treatment_full", async () =>
@@ -1077,8 +1092,11 @@ async function addClinicalTreatment(db, recordId, input, actor = {}) {
            clinical_record_id, treatment, dentist_name, clinic_location, coverage_status,
            status, treatment_date, notes, duration_minutes, tooth_number, diagnosis_notes,
            procedure_details, amount_charged, amount_paid, appointment_id,
+           queue_entry_id, visit_sequence, started_at,
            created_by, created_by_role, updated_by
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $16)
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
+           CASE WHEN LOWER(COALESCE($6, '')) = 'in_progress' THEN CURRENT_TIMESTAMP ELSE NULL END,
+           $18, $19, $18)
          RETURNING *`,
         [
           recordId,
@@ -1096,6 +1114,8 @@ async function addClinicalTreatment(db, recordId, input, actor = {}) {
           amountCharged,
           amountPaid,
           appointmentId,
+          queueEntryId,
+          visitSequence,
           actor.id ? String(actor.id) : null,
           actor.role || null,
         ]
@@ -1351,6 +1371,10 @@ async function completeInProgressTreatmentForUser(db, userId, options = {}, acto
     Number.isSafeInteger(Number(options.appointmentId)) && Number(options.appointmentId) > 0
       ? Number(options.appointmentId)
       : null;
+  const queueEntryId =
+    Number.isSafeInteger(Number(options.queueEntryId)) && Number(options.queueEntryId) > 0
+      ? Number(options.queueEntryId)
+      : null;
   const durationMinutes =
     Number.isFinite(Number(options.durationMinutes)) && Number(options.durationMinutes) > 0
       ? Math.round(Number(options.durationMinutes))
@@ -1383,6 +1407,7 @@ async function completeInProgressTreatmentForUser(db, userId, options = {}, acto
       `UPDATE clinic_patient_treatments
        SET status = 'completed',
            duration_minutes = COALESCE($1, duration_minutes),
+           completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP),
            updated_at = CURRENT_TIMESTAMP,
            updated_by = $2
        WHERE id = (
@@ -1391,13 +1416,16 @@ async function completeInProgressTreatmentForUser(db, userId, options = {}, acto
          WHERE clinical_record_id = $3
            AND LOWER(COALESCE(status, '')) = 'in_progress'
            AND ($4::int IS NULL OR appointment_id = $4 OR appointment_id IS NULL)
+           AND ($5::bigint IS NULL OR queue_entry_id = $5 OR queue_entry_id IS NULL)
          ORDER BY
+           CASE WHEN queue_entry_id = $5 THEN 0 ELSE 1 END,
            CASE WHEN appointment_id = $4 THEN 0 ELSE 1 END,
+           visit_sequence ASC NULLS LAST,
            id DESC
          LIMIT 1
        )
        RETURNING *`,
-      [durationMinutes, actorId, clinicalRecordId, appointmentId]
+      [durationMinutes, actorId, clinicalRecordId, appointmentId, queueEntryId]
     );
   } catch (error) {
     if (error?.code === "42703") {
@@ -1436,6 +1464,179 @@ async function completeInProgressTreatmentForUser(db, userId, options = {}, acto
   );
 
   return mapClinicalTreatment(result.rows[0]);
+}
+
+async function nextVisitSequence(db, queueEntryId) {
+  if (!queueEntryId) return 1;
+  try {
+    const result = await db.query(
+      `SELECT COALESCE(MAX(visit_sequence), 0) + 1 AS next
+       FROM clinic_patient_treatments
+       WHERE queue_entry_id = $1`,
+      [queueEntryId]
+    );
+    return Number(result.rows[0]?.next) || 1;
+  } catch (error) {
+    if (error?.code === "42703" || error?.code === "42P01") return 1;
+    throw error;
+  }
+}
+
+async function findActiveQueueForUser(db, userId) {
+  if (!userId) return null;
+  const tz = process.env.CLINIC_TIMEZONE || "Asia/Manila";
+  try {
+    const result = await db.query(
+      `SELECT id, token, appointment_id, status, position, user_id
+       FROM patient_portal_queue_entries
+       WHERE user_id = $1
+         AND (checked_in_at AT TIME ZONE $2)::date = (CURRENT_TIMESTAMP AT TIME ZONE $2)::date
+         AND status NOT IN ('completed', 'no_show')
+       ORDER BY id DESC
+       LIMIT 1`,
+      [String(userId), tz]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    if (error?.code !== "42P01") {
+      try {
+        const result = await db.query(
+          `SELECT id, token, appointment_id, status, position, user_id
+           FROM patient_portal_queue_entries
+           WHERE user_id = $1
+             AND DATE(checked_in_at) = CURRENT_DATE
+             AND status NOT IN ('completed', 'no_show')
+           ORDER BY id DESC
+           LIMIT 1`,
+          [String(userId)]
+        );
+        return result.rows[0] || null;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+}
+
+async function listTreatmentsForVisit(db, { queueEntryId = null, appointmentId = null } = {}) {
+  if (!queueEntryId && !appointmentId) return [];
+  try {
+    const result = await db.query(
+      `SELECT *
+       FROM clinic_patient_treatments
+       WHERE ($1::bigint IS NOT NULL AND queue_entry_id = $1)
+          OR (
+            $1::bigint IS NULL
+            AND $2::bigint IS NOT NULL
+            AND appointment_id = $2
+          )
+       ORDER BY visit_sequence ASC NULLS LAST, id ASC`,
+      [queueEntryId || null, appointmentId || null]
+    );
+    return result.rows.map(mapClinicalTreatment);
+  } catch (error) {
+    if (error?.code === "42703" && appointmentId) {
+      const result = await db.query(
+        `SELECT * FROM clinic_patient_treatments WHERE appointment_id = $1 ORDER BY id ASC`,
+        [appointmentId]
+      );
+      return result.rows.map(mapClinicalTreatment);
+    }
+    if (error?.code === "42P01" || error?.code === "42703") return [];
+    throw error;
+  }
+}
+
+async function listTreatmentsForQueueEntries(db, queueEntryIds) {
+  const ids = (queueEntryIds || []).map((id) => Number(id)).filter((id) => Number.isSafeInteger(id) && id > 0);
+  if (!ids.length) return new Map();
+  try {
+    const result = await db.query(
+      `SELECT *
+       FROM clinic_patient_treatments
+       WHERE queue_entry_id = ANY($1::bigint[])
+       ORDER BY visit_sequence ASC NULLS LAST, id ASC`,
+      [ids]
+    );
+    const grouped = new Map();
+    for (const row of result.rows) {
+      const key = Number(row.queue_entry_id);
+      const list = grouped.get(key) || [];
+      list.push(mapClinicalTreatment(row));
+      grouped.set(key, list);
+    }
+    return grouped;
+  } catch (error) {
+    if (error?.code === "42P01" || error?.code === "42703") return new Map();
+    throw error;
+  }
+}
+
+async function listCurrentVisitForRecord(db, record) {
+  if (!record) return null;
+  const queue = await findActiveQueueForUser(db, record.linkedUserId);
+  const queueEntryId = queue?.id ? Number(queue.id) : null;
+  const appointmentId = queue?.appointment_id ? Number(queue.appointment_id) : null;
+  const procedures = await listTreatmentsForVisit(db, { queueEntryId, appointmentId });
+  if (!queue && !procedures.length) return null;
+  return {
+    queueEntryId,
+    appointmentId,
+    token: queue?.token || null,
+    status: queue?.status || null,
+    position: queue?.position != null ? Number(queue.position) : null,
+    procedures,
+  };
+}
+
+async function promoteNextVisitProcedure(db, { clinicalRecordId, queueEntryId = null, appointmentId = null, actorId = null }) {
+  try {
+    const result = await db.query(
+      `UPDATE clinic_patient_treatments
+       SET status = 'in_progress',
+           started_at = COALESCE(started_at, CURRENT_TIMESTAMP),
+           updated_at = CURRENT_TIMESTAMP,
+           updated_by = $1
+       WHERE id = (
+         SELECT id
+         FROM clinic_patient_treatments
+         WHERE clinical_record_id = $2
+           AND LOWER(COALESCE(status, '')) IN ('planned', 'pending')
+           AND (
+             ($3::bigint IS NOT NULL AND queue_entry_id = $3)
+             OR ($3::bigint IS NULL AND $4::bigint IS NOT NULL AND appointment_id = $4)
+             OR ($3::bigint IS NULL AND $4::bigint IS NULL)
+           )
+         ORDER BY visit_sequence ASC NULLS LAST, id ASC
+         LIMIT 1
+       )
+       RETURNING *`,
+      [actorId, clinicalRecordId, queueEntryId, appointmentId]
+    );
+    return result.rows[0] ? mapClinicalTreatment(result.rows[0]) : null;
+  } catch (error) {
+    if (error?.code === "42703" || error?.code === "42P01") return null;
+    throw error;
+  }
+}
+
+async function completeCurrentVisitProcedure(db, userId, options = {}, actor = {}) {
+  const completed = await completeInProgressTreatmentForUser(db, userId, options, actor);
+  if (!completed) {
+    return { completed: null, next: null, visitComplete: true };
+  }
+  const next = await promoteNextVisitProcedure(db, {
+    clinicalRecordId: completed.clinicalRecordId,
+    queueEntryId: options.queueEntryId || completed.queueEntryId,
+    appointmentId: options.appointmentId || completed.appointmentId,
+    actorId: actor.id ? String(actor.id) : null,
+  });
+  return {
+    completed,
+    next,
+    visitComplete: !next,
+  };
 }
 
 async function verifyClinicalRecordIdentity(db, recordId, status, actor = {}) {
@@ -1648,6 +1849,12 @@ module.exports = {
   deleteClinicalTreatment,
   updateTreatmentAmountPaid,
   completeInProgressTreatmentForUser,
+  completeCurrentVisitProcedure,
+  listTreatmentsForVisit,
+  listTreatmentsForQueueEntries,
+  listCurrentVisitForRecord,
+  findActiveQueueForUser,
+  nextVisitSequence,
   mapClinicalTreatment,
   verifyClinicalRecordIdentity,
   linkClinicalRecordsToUser,

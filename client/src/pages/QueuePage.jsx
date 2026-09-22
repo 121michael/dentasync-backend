@@ -124,6 +124,21 @@ export function QueuePage() {
               ))}
             </div>
             <p className="queue-disclaimer">
+              {current.currentProcedure ? (
+                <>
+                  <strong>Current procedure</strong>
+                  <span>{current.currentProcedure.name}</span>
+                </>
+              ) : null}
+              {current.additionalProcedureCount > 0 ? (
+                <>
+                  <strong>Additional procedure(s)</strong>
+                  <span>
+                    {current.additionalProcedureCount} more procedure
+                    {current.additionalProcedureCount === 1 ? "" : "s"}
+                  </span>
+                </>
+              ) : null}
               <strong>Estimated waiting time</strong>
               <span>
                 {current.status === "dentist"

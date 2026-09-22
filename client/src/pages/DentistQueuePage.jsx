@@ -38,6 +38,41 @@ function emptyStartForm(entry = null) {
   };
 }
 
+function procedureStatusLabel(status) {
+  const value = String(status || "").toLowerCase();
+  if (value === "planned" || value === "pending") return "Pending";
+  if (value === "in_progress") return "In Progress";
+  if (value === "completed") return "Completed";
+  return status ? String(status).replaceAll("_", " ") : "";
+}
+
+function procedureLine(procedure) {
+  const name = procedure?.name || procedure?.treatment || "Procedure";
+  const tooth = procedure?.toothNumber ? ` #${procedure.toothNumber}` : "";
+  return `${name}${tooth}`;
+}
+
+function QueueProcedureList({ entry }) {
+  const procedures = entry.procedures || [];
+  if (!procedures.length) {
+    return entry.procedure || entry.appointment?.treatment || "—";
+  }
+  const current = entry.currentProcedure;
+  return (
+    <div className="queue-procedure-cell">
+      <ul>
+        {procedures.map((procedure) => (
+          <li key={procedure.id || procedureLine(procedure)}>
+            {procedureLine(procedure)}
+            {procedure.status ? ` · ${procedureStatusLabel(procedure.status)}` : ""}
+          </li>
+        ))}
+      </ul>
+      {current ? <small>Current: {procedureLine(current)}</small> : null}
+    </div>
+  );
+}
+
 function formatWaitLabel(entry) {
   if (entry.status === "in_chair") {
     const minutes = entry.durationMinutes || entry.waitMinutes;
@@ -388,14 +423,11 @@ export function DentistQueuePage() {
                       <strong>{entry.patientName}</strong>
                       <small>{entry.patientPhone || entry.token || "Checked in"}</small>
                     </td>
-                    <td>{entry.procedure}</td>
                     <td>
-                      {entry.status === "in_chair"
-                        ? durationFromEntry({
-                            ...entry,
-                            estimatedDurationMinutes: entry.durationMinutes || entry.waitMinutes,
-                          })
-                        : durationFromEntry(entry)}
+                      <QueueProcedureList entry={entry} />
+                    </td>
+                    <td>
+                      {durationFromEntry(entry)}
                     </td>
                     <td>
                       <strong>{formatWaitLabel(entry)}</strong>
@@ -615,7 +647,8 @@ export function DentistQueuePage() {
       {pendingComplete ? (
         <DentistModal title="Mark treatment Done?" onClose={() => setPendingComplete(null)}>
           <p className="dentist-confirm-copy">
-            Mark {pendingComplete.patientName}&apos;s {pendingComplete.procedure} as Done? This
+            Mark {pendingComplete.patientName}&apos;s{" "}
+            {procedureLine(pendingComplete.currentProcedure) || pendingComplete.procedure} as Done? This
             finalizes the ongoing treatment into the patient clinical record and frees the chair for
             the next patient.
           </p>

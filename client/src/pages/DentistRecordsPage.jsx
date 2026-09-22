@@ -30,6 +30,7 @@ const emptyTreatment = {
   toothNumber: "",
   diagnosisNotes: "",
   amountCharged: "",
+  forCurrentVisit: false,
 };
 
 const emptyAgeSexForm = {
@@ -42,8 +43,12 @@ function formatMoney(value) {
   return `₱${Number(value || 0).toFixed(2)}`;
 }
 
-function todayIsoDate() {
-  return new Date().toISOString().slice(0, 10);
+function procedureStatusLabel(status) {
+  const value = String(status || "").toLowerCase();
+  if (value === "planned" || value === "pending") return "Pending";
+  if (value === "in_progress") return "In Progress";
+  if (value === "completed") return "Completed";
+  return status ? String(status).replaceAll("_", " ") : "—";
 }
 
 function treatmentBalance(treatment) {
@@ -237,7 +242,15 @@ export function DentistRecordsPage() {
     setError("");
     setSuccess("");
     setEditingTreatmentId(null);
-    setTreatmentForm({ ...emptyTreatment, treatmentDate: todayIsoDate() });
+    setTreatmentForm({ ...emptyTreatment, treatmentDate: todayIsoDate(), forCurrentVisit: false });
+    revealTreatmentForm();
+  }
+
+  function openAddAnotherProcedure() {
+    setError("");
+    setSuccess("");
+    setEditingTreatmentId(null);
+    setTreatmentForm({ ...emptyTreatment, treatmentDate: todayIsoDate(), forCurrentVisit: true });
     revealTreatmentForm();
   }
 
@@ -293,6 +306,9 @@ export function DentistRecordsPage() {
         : await api.addDentistTreatment(detail.patient.id, {
             ...payload,
             toothNumber: treatmentForm.toothNumber || undefined,
+            forCurrentVisit: Boolean(treatmentForm.forCurrentVisit),
+            queueEntryId: detail.currentVisit?.queueEntryId || undefined,
+            appointmentId: detail.currentVisit?.appointmentId || undefined,
           });
       setSuccess(response.message || "Treatment saved. Dental chart updated automatically.");
       closeTreatmentForm();
@@ -705,6 +721,50 @@ export function DentistRecordsPage() {
             }
           />
 
+          {detail.currentVisit?.procedures?.length || detail.currentVisit?.queueEntryId ? (
+            <section className="treatment-record" style={{ marginTop: "1.25rem" }}>
+              <div className="treatment-record__header">
+                <div>
+                  <span className="eyebrow">Current visit</span>
+                  <h2>Today&apos;s Procedures</h2>
+                  <p className="muted-copy">
+                    Queue {detail.currentVisit.token || "—"}. All procedures stay on this same check-in.
+                  </p>
+                </div>
+                {(detail.currentVisit.procedures || []).length ? (
+                  <button
+                    type="button"
+                    className="button button--primary"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      openAddAnotherProcedure();
+                    }}
+                  >
+                    <Plus size={16} /> Add Another Procedure
+                  </button>
+                ) : null}
+              </div>
+              {(detail.currentVisit.procedures || []).length ? (
+                <ol className="visit-procedure-list">
+                  {(detail.currentVisit.procedures || []).map((procedure, index) => (
+                    <li key={procedure.id || index}>
+                      <strong>
+                        {index + 1}. {procedure.treatment || procedure.name}
+                      </strong>
+                      <span>
+                        Tooth: {procedure.toothNumber ? `#${procedure.toothNumber}` : "—"}
+                      </span>
+                      <span>Status: {procedureStatusLabel(procedure.status)}</span>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <p className="muted-copy">No procedures recorded for this visit yet.</p>
+              )}
+            </section>
+          ) : null}
+
           <section className="treatment-record" style={{ marginTop: "1.25rem" }}>
             <div className="treatment-record__header">
               <div>
@@ -753,7 +813,13 @@ export function DentistRecordsPage() {
                     <div className="dentist-panel__heading">
                       <div>
                         <span className="eyebrow">Clinical information</span>
-                        <h2>{editingTreatmentId ? "Edit Treatment" : "Add Treatment"}</h2>
+                        <h2>
+                          {editingTreatmentId
+                            ? "Edit Treatment"
+                            : treatmentForm.forCurrentVisit
+                              ? "Add Another Procedure"
+                              : "Add Treatment"}
+                        </h2>
                       </div>
                     </div>
                     <p className="muted-copy">
@@ -867,7 +933,9 @@ export function DentistRecordsPage() {
                               : "Saving Treatment…"
                             : editingTreatmentId
                               ? "Save Changes"
-                              : "Save Treatment"}
+                              : treatmentForm.forCurrentVisit
+                                ? "Add Procedure"
+                                : "Save Treatment"}
                         </button>
                       </div>
                     </form>
@@ -884,6 +952,7 @@ export function DentistRecordsPage() {
                       <th>Date</th>
                       <th>Tooth</th>
                       <th>Procedure</th>
+                      <th>Status</th>
                       <th>Diagnosis</th>
                       <th>Dentist</th>
                       <th>Amount Charged</th>
@@ -903,6 +972,7 @@ export function DentistRecordsPage() {
                             : "—"}
                         </td>
                         <td>{treatment.name || treatment.treatment || "—"}</td>
+                        <td>{procedureStatusLabel(treatment.status)}</td>
                         <td>{treatment.diagnosis || treatment.diagnosisNotes || "—"}</td>
                         <td>{treatment.dentist || "—"}</td>
                         <td>{formatMoney(treatment.amountCharged)}</td>

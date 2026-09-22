@@ -127,6 +127,28 @@ function mapCheckIn(row) {
     estimatedDurationMinutes:
       row.wait_estimate_duration_minutes != null ? Number(row.wait_estimate_duration_minutes) : null,
     waitEstimate: staffWaitEstimate(waitEstimateFromRow(row)),
+    procedures: (row.procedures || []).map((procedure) => ({
+      id: procedure.id,
+      name: procedure.treatment || procedure.name,
+      status: procedure.status,
+      toothNumber: procedure.toothNumber || null,
+    })),
+    currentProcedure: (() => {
+      const list = row.procedures || [];
+      const raw =
+        list.find((procedure) => String(procedure.status || "").toLowerCase() === "in_progress") ||
+        list.find((procedure) =>
+          ["planned", "pending"].includes(String(procedure.status || "").toLowerCase())
+        ) ||
+        null;
+      if (!raw) return null;
+      return {
+        id: raw.id,
+        name: raw.treatment || raw.name,
+        status: raw.status,
+        toothNumber: raw.toothNumber || null,
+      };
+    })(),
   };
 }
 
@@ -508,9 +530,15 @@ function createStaffPortalRouter({
            CASE WHEN queue.status IN ('completed', 'no_show') THEN 1 ELSE 0 END,
            queue.position ASC`
       );
+      const grouped = await clinicalPatients.listTreatmentsForQueueEntries(
+        db,
+        result.rows.map((row) => row.id)
+      );
       return res.json({
         updatedAt: new Date().toISOString(),
-        queue: result.rows.map(mapCheckIn),
+        queue: result.rows.map((row) =>
+          mapCheckIn({ ...row, procedures: grouped.get(Number(row.id)) || [] })
+        ),
       });
     } catch (error) {
       if (error.code === "42703") {
@@ -538,9 +566,15 @@ function createStaffPortalRouter({
                CASE WHEN queue.status IN ('completed', 'no_show') THEN 1 ELSE 0 END,
                queue.position ASC`
           );
+          const grouped = await clinicalPatients.listTreatmentsForQueueEntries(
+            db,
+            result.rows.map((row) => row.id)
+          );
           return res.json({
             updatedAt: new Date().toISOString(),
-            queue: result.rows.map(mapCheckIn),
+            queue: result.rows.map((row) =>
+              mapCheckIn({ ...row, procedures: grouped.get(Number(row.id)) || [] })
+            ),
           });
         } catch (fallbackError) {
           console.error("Staff queue error:", fallbackError.message);
@@ -1441,9 +1475,13 @@ function createStaffPortalRouter({
               diagnosisNotes: record.diagnosisNotes || record.diagnosis || record.notes || "",
               toothNumber: record.toothNumber,
               durationMinutes: record.durationMinutes,
+              appointmentId: record.appointmentId || null,
+              queueEntryId: record.queueEntryId || null,
+              visitSequence: record.visitSequence || null,
               ...payment,
             };
           }),
+          currentVisit: await clinicalPatients.listCurrentVisitForRecord(db, detail.record),
         },
       });
     } catch (error) {
