@@ -2098,6 +2098,7 @@ strong {
 .queue-procedure-cell ul { margin: 0; padding-left: 1.05rem; }
 .queue-procedure-cell li { line-height: 1.35; }
 .queue-procedure-cell small { color: var(--text-muted); }
+.queue-procedure-cell strong { display: block; font-size: .82rem; }
 .queue-disclaimer strong { color: var(--text); font-size: .72rem; }
 
 .queue-empty-wrap { display: grid; gap: .9rem; }

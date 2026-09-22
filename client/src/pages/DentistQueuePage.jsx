@@ -5,7 +5,12 @@ import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
 import { DentistModal, DentistStatusBadge } from "../components/DentistUI";
-import { TREATMENT_OPTIONS } from "../components/DentalChart/dentalChartData";
+import { DentalChart } from "../components/DentalChart";
+import {
+  PROCEDURE_FORM_OPTIONS,
+  TREATMENT_OPTIONS,
+  procedureRequiresTooth,
+} from "../components/DentalChart/dentalChartData";
 import { formatDentistDateTime } from "../dentistUtils";
 import { matchesNotificationFocus } from "../notificationFocus";
 import {
@@ -38,6 +43,24 @@ function emptyStartForm(entry = null) {
   };
 }
 
+function emptyAddForm() {
+  return {
+    name: "",
+    diagnosisNotes: "",
+    toothNumber: "",
+    amountCharged: "",
+    durationMinutes: "",
+    treatmentDate: clinicTodayIso(),
+  };
+}
+
+function parseToothList(value) {
+  return String(value || "")
+    .split(/[,\s]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
 function procedureStatusLabel(status) {
   const value = String(status || "").toLowerCase();
   if (value === "planned" || value === "pending") return "Pending";
@@ -57,26 +80,43 @@ function QueueProcedureList({ entry }) {
   if (!procedures.length) {
     return entry.procedure || entry.appointment?.treatment || "—";
   }
-  const current = entry.currentProcedure;
+  const current =
+    procedures.find((procedure) => String(procedure.status || "").toLowerCase() === "in_progress") ||
+    null;
+  const additional = current
+    ? procedures.filter((procedure) => String(procedure.id) !== String(current.id))
+    : procedures;
   return (
     <div className="queue-procedure-cell">
-      <ul>
-        {procedures.map((procedure) => (
-          <li key={procedure.id || procedureLine(procedure)}>
-            {procedureLine(procedure)}
-            {procedure.status ? ` · ${procedureStatusLabel(procedure.status)}` : ""}
-          </li>
-        ))}
-      </ul>
-      {current ? <small>Current: {procedureLine(current)}</small> : null}
+      {current ? (
+        <>
+          <small>Current</small>
+          <strong>
+            {procedureLine(current)} · {procedureStatusLabel(current.status) || "In Treatment"}
+          </strong>
+        </>
+      ) : null}
+      {additional.length ? (
+        <>
+          <small>{current ? "Additional" : "Procedures"}</small>
+          <ul>
+            {additional.map((procedure) => (
+              <li key={procedure.id || procedureLine(procedure)}>
+                {procedureLine(procedure)}
+                {procedure.status ? ` · ${procedureStatusLabel(procedure.status)}` : ""}
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
     </div>
   );
 }
 
 function formatWaitLabel(entry) {
   if (entry.status === "in_chair") {
-    const minutes = entry.durationMinutes || entry.waitMinutes;
-    return minutes ? `${minutes} min procedure` : "In service";
+    const remaining = durationFromEntry(entry);
+    return remaining && remaining !== "—" ? `${remaining} remaining` : "In treatment";
   }
   if (entry.status === "completed" || entry.status === "no_show") {
     return "—";
@@ -98,6 +138,9 @@ export function DentistQueuePage() {
   const [durationMinutes, setDurationMinutes] = useState("");
   const [pendingStart, setPendingStart] = useState(null);
   const [startForm, setStartForm] = useState(emptyStartForm());
+  const [pendingAdd, setPendingAdd] = useState(null);
+  const [addForm, setAddForm] = useState(emptyAddForm());
+  const [addError, setAddError] = useState("");
   const [focusKey, setFocusKey] = useState(() => searchParams.get("focus") || "");
   const focusedRowRef = useRef(null);
   const triedTabsRef = useRef(new Set());
@@ -233,6 +276,63 @@ export function DentistQueuePage() {
       await load();
     } catch (waitError) {
       setError(waitError.message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  function openAddProcedure(entry) {
+    setPendingAdd(entry);
+    setAddForm(emptyAddForm());
+    setAddError("");
+    setError("");
+    setSuccess("");
+  }
+
+  function closeAddProcedure() {
+    if (busy.startsWith("add-")) return;
+    setPendingAdd(null);
+    setAddForm(emptyAddForm());
+    setAddError("");
+  }
+
+  async function submitAddProcedure(event) {
+    event.preventDefault();
+    if (!pendingAdd) return;
+    if (!addForm.name) {
+      setAddError("Select a treatment type.");
+      return;
+    }
+    if (procedureRequiresTooth(addForm.name) && !parseToothList(addForm.toothNumber).length) {
+      setAddError(`Tooth is required for ${addForm.name}. Click it on the dental chart.`);
+      return;
+    }
+    if (addForm.amountCharged !== "" && !Number.isFinite(Number(addForm.amountCharged))) {
+      setAddError("Enter a valid amount.");
+      return;
+    }
+
+    setBusy(`add-${pendingAdd.id}`);
+    setAddError("");
+    setError("");
+    setSuccess("");
+    try {
+      const response = await api.addDentistQueueProcedure(pendingAdd.id, {
+        name: addForm.name,
+        treatment: addForm.name,
+        diagnosisNotes: addForm.diagnosisNotes,
+        diagnosis: addForm.diagnosisNotes,
+        toothNumber: addForm.toothNumber || undefined,
+        amountCharged: addForm.amountCharged === "" ? 0 : Number(addForm.amountCharged),
+        durationMinutes: Number(addForm.durationMinutes) > 0 ? Number(addForm.durationMinutes) : undefined,
+        treatmentDate: addForm.treatmentDate || clinicTodayIso(),
+      });
+      setSuccess(response.message || `${addForm.name} added to this visit.`);
+      setPendingAdd(null);
+      setAddForm(emptyAddForm());
+      await load({ silent: true });
+    } catch (addProcError) {
+      setAddError(addProcError.message);
     } finally {
       setBusy("");
     }
@@ -447,6 +547,16 @@ export function DentistQueuePage() {
                         {entry.status === "in_chair" ? (
                           <button
                             type="button"
+                            className="button button--secondary button--compact"
+                            disabled={Boolean(busy)}
+                            onClick={() => openAddProcedure(entry)}
+                          >
+                            {busy === `add-${entry.id}` ? "Adding…" : "+ Add Procedure"}
+                          </button>
+                        ) : null}
+                        {entry.status === "in_chair" ? (
+                          <button
+                            type="button"
                             className="button button--primary button--compact"
                             disabled={Boolean(busy)}
                             onClick={() => openComplete(entry)}
@@ -644,13 +754,142 @@ export function DentistQueuePage() {
         </DentistModal>
       ) : null}
 
+      {pendingAdd ? (
+        <DentistModal title="Add Procedure" wide stacked onClose={closeAddProcedure}>
+          <form className="dentist-form" onSubmit={submitAddProcedure}>
+            <p className="dentist-confirm-copy">
+              Add another procedure for <strong>{pendingAdd.patientName}</strong> on queue{" "}
+              <strong>{pendingAdd.token || pendingAdd.sequence}</strong>. The current treatment stays in
+              progress on this same visit.
+            </p>
+            {pendingAdd.procedures?.length ? (
+              <div className="procedure-draft-summary">
+                <strong>Current visit</strong>
+                <ul>
+                  {pendingAdd.procedures.map((procedure) => (
+                    <li key={procedure.id || procedureLine(procedure)}>
+                      {procedureLine(procedure)} — {procedureStatusLabel(procedure.status) || "—"}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {addError ? <p className="inline-alert inline-alert--error">{addError}</p> : null}
+            <div className="field-grid field-grid--two">
+              <label className="field">
+                <span>Treatment Type</span>
+                <select
+                  required
+                  value={addForm.name}
+                  onChange={(event) => setAddForm((current) => ({ ...current, name: event.target.value }))}
+                >
+                  <option value="">Select Treatment</option>
+                  {PROCEDURE_FORM_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label || option.value}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Treatment Date</span>
+                <input type="date" value={addForm.treatmentDate} readOnly />
+              </label>
+              <label className="field">
+                <span>Amount</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  inputMode="decimal"
+                  value={addForm.amountCharged}
+                  onChange={(event) =>
+                    setAddForm((current) => ({ ...current, amountCharged: event.target.value }))
+                  }
+                  placeholder="₱"
+                />
+              </label>
+              <label className="field">
+                <span>Expected duration (minutes, optional)</span>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={addForm.durationMinutes}
+                  onChange={(event) =>
+                    setAddForm((current) => ({ ...current, durationMinutes: event.target.value }))
+                  }
+                  placeholder="Uses historical average if blank"
+                />
+              </label>
+              <label className="field">
+                <span>
+                  Tooth Number{procedureRequiresTooth(addForm.name) ? "" : " (optional)"}
+                </span>
+                <input
+                  value={addForm.toothNumber}
+                  onChange={(event) =>
+                    setAddForm((current) => ({ ...current, toothNumber: event.target.value }))
+                  }
+                  placeholder={
+                    procedureRequiresTooth(addForm.name)
+                      ? "Click the tooth on the chart"
+                      : "Optional"
+                  }
+                  required={procedureRequiresTooth(addForm.name)}
+                />
+              </label>
+              <label className="field field--full">
+                <span>Diagnosis</span>
+                <textarea
+                  rows="2"
+                  value={addForm.diagnosisNotes}
+                  onChange={(event) =>
+                    setAddForm((current) => ({ ...current, diagnosisNotes: event.target.value }))
+                  }
+                  placeholder="e.g. Non-restorable tooth"
+                />
+              </label>
+            </div>
+            {pendingAdd.clinicalRecordId ? (
+              <DentalChart
+                patientId={pendingAdd.clinicalRecordId}
+                pickMode
+                selectedTeeth={parseToothList(addForm.toothNumber)}
+                onTeethChange={(teeth) =>
+                  setAddForm((current) => ({ ...current, toothNumber: teeth.join(", ") }))
+                }
+              />
+            ) : (
+              <p className="muted-copy">Select the affected tooth in the Tooth Number field if needed.</p>
+            )}
+            <div className="dentist-modal__actions">
+              <button
+                type="button"
+                className="button button--secondary"
+                disabled={busy.startsWith("add-")}
+                onClick={closeAddProcedure}
+              >
+                Cancel
+              </button>
+              <button type="submit" className="button button--primary" disabled={busy.startsWith("add-")}>
+                {busy.startsWith("add-") ? "Adding Procedure…" : "Add Procedure"}
+              </button>
+            </div>
+          </form>
+        </DentistModal>
+      ) : null}
+
       {pendingComplete ? (
         <DentistModal title="Mark treatment Done?" onClose={() => setPendingComplete(null)}>
           <p className="dentist-confirm-copy">
             Mark {pendingComplete.patientName}&apos;s{" "}
-            {procedureLine(pendingComplete.currentProcedure) || pendingComplete.procedure} as Done? This
-            finalizes the ongoing treatment into the patient clinical record and frees the chair for
-            the next patient.
+            {procedureLine(pendingComplete.currentProcedure) || pendingComplete.procedure} as Done?
+            {pendingComplete.procedures?.filter((procedure) =>
+              ["planned", "pending"].includes(String(procedure.status || "").toLowerCase())
+            ).length
+              ? " Additional procedures are still pending, so this visit stays in treatment."
+              : " This finalizes the visit and frees the chair for the next patient."}
           </p>
           {pendingComplete.status === "in_chair" ? (
             <label className="field" style={{ marginBottom: "1rem" }}>

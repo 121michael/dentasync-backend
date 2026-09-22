@@ -184,7 +184,10 @@ function mapQueueEntry(row) {
       toothNumber: procedure.toothNumber || null,
       durationMinutes: procedure.durationMinutes,
       visitSequence: procedure.visitSequence,
+      clinicalRecordId: procedure.clinicalRecordId || null,
     })),
+    clinicalRecordId:
+      (row.procedures || []).map((procedure) => procedure.clinicalRecordId).find(Boolean) || null,
     currentProcedure: (() => {
       const list = row.procedures || [];
       const raw =
@@ -998,6 +1001,172 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
         detail: error.message,
         code: error.code || undefined,
       });
+    } finally {
+      client.release();
+    }
+  });
+
+  router.post("/queue/:id/procedures", async (req, res) => {
+    const queueId = numericId(req.params.id);
+    const procedureName =
+      stringValue(req.body?.procedureName || req.body?.treatment || req.body?.name, 200);
+    const procedureType = stringValue(req.body?.procedureType, 80);
+    const toothNumber = stringValue(req.body?.toothNumber, 40);
+    const durationMinutes = Number.parseInt(req.body?.durationMinutes, 10);
+    const hasDuration = Number.isSafeInteger(durationMinutes) && durationMinutes > 0;
+    const amountChargedRaw = req.body?.amountCharged ?? req.body?.price ?? req.body?.cost ?? 0;
+    const clinicTz = process.env.CLINIC_TIMEZONE || "Asia/Manila";
+    const treatmentDate =
+      stringValue(req.body?.treatmentDate, 10) ||
+      new Date().toLocaleDateString("en-CA", { timeZone: clinicTz });
+
+    if (!queueId) {
+      return res.status(400).json({ message: "A valid queue entry id is required." });
+    }
+    if (!procedureName) {
+      return res.status(400).json({ message: "Select a treatment type." });
+    }
+
+    const client = await db.connect();
+    let transactionOpen = false;
+    try {
+      await client.query("BEGIN");
+      transactionOpen = true;
+
+      const current = await assertQueueBelongsToDentist(client, queueId, req.dentist);
+      if (!current) {
+        await client.query("ROLLBACK");
+        transactionOpen = false;
+        return res.status(404).json({ message: "Queue entry not found for this dentist." });
+      }
+      if (String(current.status || "").toLowerCase() !== "dentist") {
+        await client.query("ROLLBACK");
+        transactionOpen = false;
+        return res.status(409).json({
+          message: "Add Procedure is available only while the patient is in treatment.",
+        });
+      }
+
+      const dentistName =
+        stringValue(req.body?.dentistName, 160) ||
+        `Dr. ${`${req.dentist.first_name || ""} ${req.dentist.last_name || ""}`.trim()}`.trim() ||
+        "Clinic Dentist";
+
+      const clinicalRecord = await clinicalPatients.findOrCreateClinicalRecordForUser(
+        client,
+        current.user_id,
+        { id: req.dentist.id, role: "dentist" }
+      );
+
+      const existingVisit = await clinicalPatients.listTreatmentsForVisit(client, {
+        queueEntryId: queueId,
+        appointmentId: current.appointment_id || null,
+      });
+      const hasInProgress = existingVisit.some(
+        (item) => String(item.status || "").toLowerCase() === "in_progress"
+      );
+      const visitSequence = await clinicalPatients.nextVisitSequence(client, queueId);
+
+      const treatment = await clinicalPatients.addClinicalTreatment(
+        client,
+        clinicalRecord.id,
+        {
+          treatment: procedureName,
+          procedureDetails: procedureType
+            ? `Procedure type: ${procedureType}`
+            : stringValue(req.body?.procedureDetails, 2000),
+          toothNumber,
+          durationMinutes: hasDuration ? durationMinutes : null,
+          amountCharged: amountChargedRaw,
+          amountPaid: 0,
+          treatmentDate,
+          status: hasInProgress ? "planned" : "in_progress",
+          notes: stringValue(req.body?.notes || req.body?.diagnosisNotes || req.body?.diagnosis, 2000),
+          diagnosisNotes: stringValue(req.body?.diagnosisNotes || req.body?.diagnosis || req.body?.notes, 2000),
+          dentistName,
+          appointmentId: current.appointment_id || null,
+          queueEntryId: queueId,
+          visitSequence,
+        },
+        { id: req.dentist.id, role: "dentist" }
+      );
+
+      if (hasDuration) {
+        const durationServiceId = `procedure-${procedureName
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-|-$/g, "")
+          .slice(0, 80) || "custom"}`;
+        await client
+          .query(
+            `INSERT INTO clinic_service_durations (service_id, service_name, default_duration_minutes, updated_at)
+             VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+             ON CONFLICT (service_id) DO UPDATE SET
+               service_name = EXCLUDED.service_name,
+               default_duration_minutes = EXCLUDED.default_duration_minutes,
+               updated_at = CURRENT_TIMESTAMP`,
+            [durationServiceId, procedureName, durationMinutes]
+          )
+          .catch((error) => {
+            if (error?.code !== "42P01") throw error;
+          });
+      }
+
+      if (!hasInProgress && String(treatment.status || "").toLowerCase() === "in_progress") {
+        await recordTreatmentStart(client, {
+          patientUserId: current.user_id,
+          appointmentId: current.appointment_id || null,
+          queueEntryId: queueId,
+          procedureType: procedureName,
+          dentistId: req.dentist?.id,
+          treatmentId: treatment.id,
+        });
+      }
+
+      await recomputeWaitsBehind(client, 1);
+
+      await notifyPatient(client, {
+        userId: current.user_id,
+        type: "queue",
+        title: "Additional procedure added",
+        body: `Another procedure (${procedureName}) was added to your current visit.`,
+        entityType: "queue",
+        entityId: current.id,
+      });
+
+      await client.query("COMMIT");
+      transactionOpen = false;
+
+      const procedures = await clinicalPatients.listTreatmentsForVisit(db, {
+        queueEntryId: queueId,
+        appointmentId: current.appointment_id || null,
+      });
+
+      return res.status(201).json({
+        message: `${procedureName} added to this visit. The current treatment continues.`,
+        treatment: serializeDentistTreatment(treatment),
+        procedures: procedures.map(serializeDentistTreatment),
+        queueEntry: {
+          id: current.id,
+          token: current.token,
+          sequence: current.position,
+          status: displayQueueStatus(current.status),
+        },
+      });
+    } catch (error) {
+      if (transactionOpen) {
+        await client.query("ROLLBACK");
+      }
+      if (error.status) {
+        return res.status(error.status).json({ message: error.message });
+      }
+      if (clinicalPatients.isMissingRelation(error)) {
+        return res.status(503).json({
+          message: "Clinical patient records are not available. Run npm run migrate:clinical-records.",
+        });
+      }
+      console.error("Dentist queue add-procedure error:", error.message);
+      return res.status(500).json({ message: "Unable to add the procedure to this visit." });
     } finally {
       client.release();
     }
