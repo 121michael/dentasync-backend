@@ -201,6 +201,8 @@ export const api = {
     request("/patient/walk-in-check-in", { method: "POST", body: { token } }),
   getStaffQueue: (options = {}) => request("/staff/queue", options),
   getStaffQueueSummary: (options = {}) => request("/staff/queue/summary", options),
+  recalculateStaffQueueEstimates: () =>
+    request("/staff/queue/recalculate-estimates", { method: "POST" }),
   resetStaffQueue: () => request("/staff/queue/reset", { method: "POST" }),
   updateStaffQueue: (queueEntryId, body) =>
     request(`/staff/queue/${queueEntryId}`, { method: "PATCH", body }),
@@ -246,6 +248,8 @@ export const api = {
   getDentistDashboard: (options = {}) => request("/dentist/dashboard", options),
   getDentistQueue: (tab = "ongoing", options = {}) =>
     request(`/dentist/queue?tab=${encodeURIComponent(tab)}`, options),
+  recalculateDentistQueueEstimates: () =>
+    request("/dentist/queue/recalculate-estimates", { method: "POST" }),
   callNextDentistPatient: () => request("/dentist/queue/call-next", { method: "POST" }),
   updateDentistQueue: (queueEntryId, body) =>
     request(`/dentist/queue/${queueEntryId}`, { method: "PATCH", body }),

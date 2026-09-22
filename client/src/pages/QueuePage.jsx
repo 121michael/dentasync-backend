@@ -10,6 +10,11 @@ import { api } from "../api";
 import { PatientQrCheckInScanner } from "../components/PatientQrCheckInScanner";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
 import { displayQueueStatus } from "../utils/walkInQr";
+import {
+  callRangeFromEntry,
+  QUEUE_WAIT_DISCLAIMER,
+  waitRangeFromEntry,
+} from "../utils/queueWaitEstimate";
 
 export function QueuePage() {
   const [queueData, setQueueData] = useState(null);
@@ -119,8 +124,17 @@ export function QueuePage() {
               ))}
             </div>
             <p className="queue-disclaimer">
-              Estimated wait ~{current.estimatedWaitMinutes || 0} min. This is the same queue number Staff and
-              Dentist see.
+              <strong>Estimated waiting time</strong>
+              <span>
+                {current.status === "dentist"
+                  ? "Now — you are being seen"
+                  : waitRangeFromEntry(current)}
+              </span>
+              <strong>Estimated call time</strong>
+              <span>
+                {current.status === "dentist" ? "Now" : callRangeFromEntry(current)}
+              </span>
+              {QUEUE_WAIT_DISCLAIMER}
             </p>
             <label className="queue-toggle">
               <span>

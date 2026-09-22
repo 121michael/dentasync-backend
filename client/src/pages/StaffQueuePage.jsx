@@ -6,6 +6,12 @@ import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { StaffStatusBadge, StaffSummaryCard } from "../components/StaffUI";
 import { useStaffUi } from "../components/StaffLayout";
 import { formatStaffDateTime, formatStaffTime } from "../staffUtils";
+import {
+  callRangeFromEntry,
+  durationFromEntry,
+  QUEUE_WAIT_DISCLAIMER,
+  waitRangeFromEntry,
+} from "../utils/queueWaitEstimate";
 
 const QUEUE_ACTIONS = [
   { value: "waiting", label: "Waiting" },
@@ -107,6 +113,19 @@ export function StaffQueuePage() {
     }
   }
 
+  async function recalculateEstimates() {
+    setBusy("recalculate");
+    try {
+      const response = await api.recalculateStaffQueueEstimates();
+      pushToast(response.message || "Estimates recalculated.");
+      await load();
+    } catch (recalcError) {
+      pushToast(recalcError.message, "error");
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function resetQueue() {
     const ok = await confirm({
       title: "Clear live queue",
@@ -167,11 +186,18 @@ export function StaffQueuePage() {
           <div>
             <span className="eyebrow">Real-time synchronization</span>
             <h2>Live Patient Queue</h2>
-            <p>Monitor queue activity and make minor adjustments. Clinical treatment controls stay with dentists.</p>
+            <p>Monitor queue activity and make minor adjustments. Clinical treatment controls stay with dentists. {QUEUE_WAIT_DISCLAIMER}</p>
           </div>
           <div className="staff-heading-actions">
             <button className="button button--secondary" onClick={load} disabled={Boolean(busy)}>
               <RefreshCw size={16} /> Refresh
+            </button>
+            <button
+              className="button button--secondary"
+              onClick={recalculateEstimates}
+              disabled={Boolean(busy)}
+            >
+              Recalculate Estimates
             </button>
             <button className="button button--danger" onClick={resetQueue} disabled={Boolean(busy)}>
               <RotateCcw size={16} /> Clear Queue
@@ -191,7 +217,9 @@ export function StaffQueuePage() {
                   <th>Dentist</th>
                   <th>Check-In Time</th>
                   <th>Queue Status</th>
-                  <th>Estimated Wait</th>
+                  <th>Est. Duration</th>
+                  <th>Est. Wait</th>
+                  <th>Est. Call</th>
                   <th>Action</th>
                 </tr>
               </thead>
@@ -217,7 +245,27 @@ export function StaffQueuePage() {
                       <td>
                         <StaffStatusBadge status={entry.status} />
                       </td>
-                      <td>{entry.waitMinutes ?? 0} min</td>
+                      <td>
+                        {entry.status === "completed" || entry.status === "no_show" || entry.status === "skipped"
+                          ? "—"
+                          : entry.status === "in_chair" || entry.status === "in_treatment"
+                          ? durationFromEntry({ ...entry, estimatedDurationMinutes: entry.waitMinutes })
+                          : durationFromEntry(entry)}
+                      </td>
+                      <td>
+                        {entry.status === "completed" || entry.status === "no_show" || entry.status === "skipped"
+                          ? "—"
+                          : entry.status === "in_chair" || entry.status === "in_treatment"
+                          ? "Now"
+                          : waitRangeFromEntry(entry)}
+                      </td>
+                      <td>
+                        {entry.status === "completed" || entry.status === "no_show" || entry.status === "skipped"
+                          ? "—"
+                          : entry.status === "in_chair" || entry.status === "in_treatment"
+                          ? "Now"
+                          : callRangeFromEntry(entry)}
+                      </td>
                       <td>
                         <label className="staff-inline-select">
                           <span className="sr-only">Update queue status</span>

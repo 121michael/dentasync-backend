@@ -7,7 +7,12 @@ import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../compone
 import { DentistModal, DentistStatusBadge } from "../components/DentistUI";
 import { TREATMENT_OPTIONS } from "../components/DentalChart/dentalChartData";
 import { formatDentistDateTime } from "../dentistUtils";
-import { matchesNotificationFocus } from "../notificationFocus";
+import {
+  callRangeFromEntry,
+  durationFromEntry,
+  QUEUE_WAIT_DISCLAIMER,
+  waitRangeFromEntry,
+} from "../utils/queueWaitEstimate";
 
 const tabs = [
   { id: "ongoing", label: "On Going" },
@@ -40,11 +45,7 @@ function formatWaitLabel(entry) {
   if (entry.status === "completed" || entry.status === "no_show") {
     return "—";
   }
-  const minutes = Number(entry.waitMinutes);
-  if (!Number.isFinite(minutes) || minutes <= 0) {
-    return "Next / ~0 min";
-  }
-  return `Est. wait ${minutes} min`;
+  return waitRangeFromEntry(entry);
 }
 
 export function DentistQueuePage() {
@@ -120,6 +121,20 @@ export function DentistQueuePage() {
     const nextTab = order.find((item) => !triedTabsRef.current.has(item));
     if (nextTab) setTab(nextTab);
   }, [focusKey, data, tab, searchParams, setSearchParams]);
+
+  async function recalculateEstimates() {
+    setBusy("recalculate");
+    setError("");
+    try {
+      const response = await api.recalculateDentistQueueEstimates();
+      setSuccess(response.message || "Estimates recalculated.");
+      await load();
+    } catch (recalcError) {
+      setError(recalcError.message);
+    } finally {
+      setBusy("");
+    }
+  }
 
   async function callNext() {
     setBusy("call-next");
@@ -290,6 +305,14 @@ export function DentistQueuePage() {
             </button>
             <button
               type="button"
+              className="button button--secondary"
+              onClick={recalculateEstimates}
+              disabled={Boolean(busy)}
+            >
+              Recalculate Estimates
+            </button>
+            <button
+              type="button"
               className="button button--primary"
               onClick={callNext}
               disabled={Boolean(busy)}
@@ -308,6 +331,7 @@ export function DentistQueuePage() {
           <div>
             <span className="eyebrow">Treatment priority stream</span>
             <h2>Patient Queue</h2>
+            <p>{QUEUE_WAIT_DISCLAIMER}</p>
           </div>
           <div className="dentist-tabs" role="tablist" aria-label="Queue tabs">
             {tabs.map((item) => (
@@ -334,7 +358,9 @@ export function DentistQueuePage() {
                   <th>Sequence</th>
                   <th>Patient Profile</th>
                   <th>Procedure Schema</th>
+                  <th>Est. Duration</th>
                   <th>Est. Wait</th>
+                  <th>Est. Call</th>
                   <th>Status Check</th>
                   <th>Operational Control</th>
                 </tr>
@@ -363,13 +389,22 @@ export function DentistQueuePage() {
                     </td>
                     <td>{entry.procedure}</td>
                     <td>
+                      {entry.status === "in_chair"
+                        ? durationFromEntry({
+                            ...entry,
+                            estimatedDurationMinutes: entry.durationMinutes || entry.waitMinutes,
+                          })
+                        : durationFromEntry(entry)}
+                    </td>
+                    <td>
                       <strong>{formatWaitLabel(entry)}</strong>
-                      {entry.status !== "in_chair" &&
-                      entry.status !== "completed" &&
-                      entry.status !== "no_show" &&
-                      Number(entry.waitMinutes) > 0 ? (
-                        <small>Based on current procedure length ahead</small>
-                      ) : null}
+                    </td>
+                    <td>
+                      {entry.status === "in_chair"
+                        ? "Now"
+                        : entry.status === "completed" || entry.status === "no_show"
+                          ? "—"
+                          : callRangeFromEntry(entry)}
                     </td>
                     <td>
                       <DentistStatusBadge status={entry.status} />

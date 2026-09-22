@@ -9,7 +9,7 @@ const express = require("express");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
 const { linkClinicalRecordsToUser } = require("../services/clinicalPatients");
-const { estimateWaitMinutesForPosition } = require("../services/waitTime");
+const { publicWaitEstimate, waitEstimateFromRow } = require("../services/queueWaitPrediction");
 const { answerWithOptionalGemini, loadClinicProfile } = require("../services/clinicAssistant");
 const { analyzeDentalImageBuffer, DISCLAIMER: IMAGE_ANALYSIS_DISCLAIMER } = require("../services/dentalImageAnalysis");
 const staffCheckIn = require("../services/staffCheckIn");
@@ -1083,7 +1083,9 @@ function createPatientPortalRouter({
     try {
       const [currentResult, nowServingResult, preferenceResult] = await Promise.all([
         db.query(
-          `SELECT id, token, position, status, estimated_wait_minutes, checked_in_at, check_in_method
+          `SELECT id, token, position, status, estimated_wait_minutes, checked_in_at, check_in_method,
+                  wait_estimate_min_minutes, wait_estimate_max_minutes, wait_estimate_duration_minutes,
+                  wait_estimate_call_start, wait_estimate_call_end, wait_estimate_at
            FROM patient_portal_queue_entries
            WHERE user_id = $1
              AND DATE(checked_in_at) = CURRENT_DATE
@@ -1122,6 +1124,7 @@ function createPatientPortalRouter({
 
       const current = currentResult.rows[0] || null;
       const nowServing = nowServingResult.rows[0] || null;
+      const waitEstimate = publicWaitEstimate(waitEstimateFromRow(current));
 
       return res.json({
         nowServing: nowServing?.token || null,
@@ -1134,6 +1137,11 @@ function createPatientPortalRouter({
               status: current.status,
               checkInMethod: current.check_in_method || null,
               estimatedWaitMinutes: current.estimated_wait_minutes,
+              estimatedWaitMinMinutes: waitEstimate.estimatedWaitMinutes?.min ?? null,
+              estimatedWaitMaxMinutes: waitEstimate.estimatedWaitMinutes?.max ?? null,
+              estimatedCallStart: waitEstimate.estimatedCallTime?.start || null,
+              estimatedCallEnd: waitEstimate.estimatedCallTime?.end || null,
+              waitEstimate,
               checkedInAt: current.checked_in_at,
               steps: queueSteps(current.status),
             }
@@ -1146,6 +1154,7 @@ function createPatientPortalRouter({
                 queueNumber: current.token,
                 status: current.status,
                 estimatedWaitMinutes: current.estimated_wait_minutes,
+                waitEstimate,
                 isCurrentPatient: true,
               },
             ]

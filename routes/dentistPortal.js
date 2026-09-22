@@ -9,9 +9,18 @@ const patientData = require("../services/patientData");
 const { writeAdminAudit } = require("../services/adminAudit");
 const { insertPatientNotification } = require("../services/patientPortalNotifications");
 const {
-  estimateWaitMinutesForPosition,
   getServiceDurationMinutes,
 } = require("../services/waitTime");
+const {
+  safeRecalculateQueueWaitEstimates,
+  staffWaitEstimate,
+  waitEstimateFromRow,
+} = require("../services/queueWaitPrediction");
+const {
+  markQueueServingStarted,
+  recordTreatmentComplete,
+  recordTreatmentStart,
+} = require("../services/treatmentDuration");
 
 const QUEUE_STATUS_MAP = {
   checked_in: "checked_in",
@@ -151,6 +160,13 @@ function mapQueueEntry(row) {
     waitMinutes,
     // For in-chair patients, estimated_wait_minutes stores the live procedure length.
     durationMinutes: status === "in_chair" ? waitMinutes : null,
+    estimatedDurationMinutes:
+      status === "in_chair"
+        ? waitMinutes
+        : row.wait_estimate_duration_minutes != null
+          ? Number(row.wait_estimate_duration_minutes)
+          : null,
+    waitEstimate: staffWaitEstimate(waitEstimateFromRow(row)),
     checkedInAt: row.checked_in_at || null,
   };
 }
@@ -355,6 +371,14 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
              queue.position,
              queue.status,
              queue.estimated_wait_minutes,
+             queue.wait_estimate_min_minutes,
+             queue.wait_estimate_max_minutes,
+             queue.wait_estimate_duration_minutes,
+             queue.wait_estimate_call_start,
+             queue.wait_estimate_call_end,
+             queue.wait_estimate_method,
+             queue.wait_estimate_at,
+             queue.serving_started_at,
              queue.checked_in_at,
              queue.appointment_id,
              appointment.service_name,
@@ -443,6 +467,14 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
            queue.position,
            queue.status,
            queue.estimated_wait_minutes,
+           queue.wait_estimate_min_minutes,
+           queue.wait_estimate_max_minutes,
+           queue.wait_estimate_duration_minutes,
+           queue.wait_estimate_call_start,
+           queue.wait_estimate_call_end,
+           queue.wait_estimate_method,
+           queue.wait_estimate_at,
+           queue.serving_started_at,
            queue.checked_in_at,
            queue.appointment_id,
            appointment.service_name,
@@ -515,6 +547,22 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
     return result.rows[0] || null;
   }
 
+  router.post("/queue/recalculate-estimates", async (_req, res) => {
+    try {
+      const result = await safeRecalculateQueueWaitEstimates(db, { fromPosition: 1 });
+      return res.json({
+        message: result.ok
+          ? "Queue wait estimates recalculated."
+          : "Queue wait estimates could not be fully recalculated.",
+        updated: result.updated || 0,
+        calculatedAt: result.calculatedAt || new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error("Dentist wait estimate recalculation error:", error.message);
+      return res.status(500).json({ message: "Unable to recalculate queue estimates." });
+    }
+  });
+
   router.post("/queue/call-next", async (req, res) => {
     const client = await db.connect();
     let transactionOpen = false;
@@ -558,6 +606,18 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
       }
 
       // Complete any previous in-chair patient for this dentist before calling next.
+      const previousServing = await client.query(
+        `SELECT queue.id, queue.user_id, queue.appointment_id
+         FROM patient_portal_queue_entries AS queue
+         JOIN patient_portal_appointments AS appointment
+           ON appointment.id = queue.appointment_id
+         WHERE ${scope.sql}
+           AND ${clinicTodayQueueSql("queue")}
+           AND queue.status = 'dentist'
+           AND queue.id <> $${scope.params.length + 1}`,
+        [...scope.params, queueId]
+      );
+
       await client.query(
         `UPDATE patient_portal_queue_entries AS queue
          SET status = 'completed', updated_at = CURRENT_TIMESTAMP
@@ -570,6 +630,14 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
         [...scope.params, queueId]
       );
 
+      for (const previous of previousServing.rows) {
+        await recordTreatmentComplete(client, {
+          patientUserId: previous.user_id,
+          appointmentId: previous.appointment_id,
+          queueEntryId: previous.id,
+        });
+      }
+
       const updatedResult = await client.query(
         `UPDATE patient_portal_queue_entries
          SET status = 'dentist', updated_at = CURRENT_TIMESTAMP
@@ -577,6 +645,8 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
          RETURNING *`,
         [queueId]
       );
+      await markQueueServingStarted(client, queueId);
+      await recomputeWaitsBehind(client, 1);
 
       if (current.appointment_id) {
         await client.query(
@@ -617,6 +687,14 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
            queue.position,
            queue.status,
            queue.estimated_wait_minutes,
+           queue.wait_estimate_min_minutes,
+           queue.wait_estimate_max_minutes,
+           queue.wait_estimate_duration_minutes,
+           queue.wait_estimate_call_start,
+           queue.wait_estimate_call_end,
+           queue.wait_estimate_method,
+           queue.wait_estimate_at,
+           queue.serving_started_at,
            queue.checked_in_at,
            queue.appointment_id,
            appointment.service_name,
@@ -781,6 +859,14 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
         [queueId, durationMinutes]
       );
 
+      await recordTreatmentStart(client, {
+        patientUserId: current.user_id,
+        appointmentId: current.appointment_id || null,
+        queueEntryId: queueId,
+        procedureType: procedureName,
+        dentistId: req.dentist?.id,
+      });
+
       if (current.appointment_id) {
         await client.query(
           `UPDATE patient_portal_appointments
@@ -921,6 +1007,17 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
           },
           { id: req.dentist.id, role: "dentist" }
         );
+        await recordTreatmentComplete(client, {
+          patientUserId: current.user_id,
+          appointmentId: current.appointment_id || null,
+          queueEntryId: queueId,
+          durationMinutes: hasDuration ? durationMinutes : completedTreatment?.durationMinutes,
+        });
+        await recomputeWaitsBehind(client, current.position);
+      } else {
+        if (databaseStatus === "dentist") {
+          await markQueueServingStarted(client, queueId);
+        }
         await recomputeWaitsBehind(client, current.position);
       }
 
@@ -986,50 +1083,9 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
   });
 
   async function recomputeWaitsBehind(client, afterPosition) {
-    const waitingResult = await client.query(
-      `SELECT
-         queue.id,
-         queue.position,
-         appointment.service_id,
-         appointment.service_name
-       FROM patient_portal_queue_entries AS queue
-       LEFT JOIN patient_portal_appointments AS appointment
-         ON appointment.id = queue.appointment_id
-       WHERE ${clinicTodayQueueSql("queue")}
-         AND queue.status IN ('checked_in', 'waiting', 'preparing')
-         AND queue.position > $1
-       ORDER BY queue.position ASC`,
-      [afterPosition]
-    );
-
-    for (const entry of waitingResult.rows) {
-      const aheadResult = await client.query(
-        `SELECT
-           queue.status,
-           queue.estimated_wait_minutes,
-           appointment.service_id,
-           appointment.service_name
-         FROM patient_portal_queue_entries AS queue
-         LEFT JOIN patient_portal_appointments AS appointment
-           ON appointment.id = queue.appointment_id
-         WHERE ${clinicTodayQueueSql("queue")}
-           AND queue.status NOT IN ('completed', 'no_show')
-           AND queue.position < $1
-         ORDER BY queue.position ASC`,
-        [entry.position]
-      );
-      const waitMinutes = await estimateWaitMinutesForPosition(client, {
-        position: entry.position,
-        aheadEntries: aheadResult.rows,
-      });
-      await client.query(
-        `UPDATE patient_portal_queue_entries
-         SET estimated_wait_minutes = $1,
-             updated_at = CURRENT_TIMESTAMP
-         WHERE id = $2`,
-        [waitMinutes, entry.id]
-      );
-    }
+    await safeRecalculateQueueWaitEstimates(client, {
+      fromPosition: Math.max(1, Number(afterPosition) || 1),
+    });
   }
 
   router.patch("/queue/:id/duration", async (req, res) => {

@@ -1,6 +1,7 @@
 "use strict";
 
 const { insertPatientNotification } = require("./patientPortalNotifications");
+const { safeRecalculateQueueWaitEstimates } = require("./queueWaitPrediction");
 
 function stringValue(value, maxLength = 500) {
   if (typeof value !== "string" && typeof value !== "number") {
@@ -851,6 +852,16 @@ async function performStaffCheckIn(client, { appointment, staff, notifyClinicSta
     // Missing notifications table (or optional columns) must not abort check-in.
     if (error.code !== "42P01" && error.code !== "42703") {
       throw error;
+    }
+  }
+
+  try {
+    await withSavepoint(client, "queue_wait_estimates", async () => {
+      await safeRecalculateQueueWaitEstimates(client, { fromPosition: 1 });
+    });
+  } catch (error) {
+    if (error.code !== "42P01" && error.code !== "42703") {
+      console.warn("Check-in wait estimate skipped:", error.message);
     }
   }
 

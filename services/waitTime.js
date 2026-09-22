@@ -2,13 +2,19 @@
 
 /**
  * Estimate waiting time from queue position and known procedure durations.
- * Uses clinic_service_durations and recent completed treatments when available.
+ * Delegates remaining-time math to the historical-average prediction service.
  * This is a deterministic clinic heuristic — not a machine-learning model.
  */
+
+const {
+  remainingServingMinutes,
+  getPredictionSettings,
+} = require("./queueWaitPrediction");
 
 const DEFAULT_MINUTES = 45;
 
 async function getServiceDurationMinutes(db, serviceId, serviceName) {
+  const settings = getPredictionSettings();
   try {
     if (serviceId) {
       const byId = await db.query(
@@ -53,12 +59,13 @@ async function getServiceDurationMinutes(db, serviceId, serviceName) {
     }
   }
 
-  return DEFAULT_MINUTES;
+  return settings.fallbackMinutes || DEFAULT_MINUTES;
 }
 
 async function estimateWaitMinutesForPosition(db, {
   position,
   aheadEntries = [],
+  now = new Date(),
 } = {}) {
   const safePosition = Math.max(1, Number(position) || 1);
   if (safePosition <= 1) {
@@ -68,33 +75,28 @@ async function estimateWaitMinutesForPosition(db, {
   if (aheadEntries.length) {
     let total = 0;
     for (const entry of aheadEntries) {
-      const status = String(entry.status || "").toLowerCase();
-      const inService = status === "dentist" || status === "in_chair" || status === "in_treatment";
-      const procedureDuration = Number(
+      const stored = Number(
         entry.procedureDurationMinutes ??
           entry.procedure_duration_minutes ??
           entry.durationMinutes ??
           entry.duration_minutes ??
+          entry.estimated_wait_minutes ??
+          entry.estimatedWaitMinutes ??
           0
       );
-      const queuedDuration = Number(entry.estimated_wait_minutes ?? entry.estimatedWaitMinutes ?? 0);
-
-      // In-chair patients use the live procedure duration captured at Start / duration save.
-      if (inService && (procedureDuration > 0 || queuedDuration > 0)) {
-        total += procedureDuration > 0 ? procedureDuration : queuedDuration;
-        continue;
-      }
-
-      total += await getServiceDurationMinutes(
-        db,
-        entry.serviceId || entry.service_id,
-        entry.serviceName || entry.service_name || entry.procedure
-      );
+      const full =
+        stored > 0
+          ? stored
+          : await getServiceDurationMinutes(
+              db,
+              entry.serviceId || entry.service_id,
+              entry.serviceName || entry.service_name || entry.procedure
+            );
+      total += remainingServingMinutes(entry, full, now);
     }
     return total;
   }
 
-  // Fallback when ahead rows are not provided: average clinic duration × people ahead.
   const avg = await db
     .query(
       `SELECT COALESCE(AVG(default_duration_minutes), $1)::int AS avg_minutes

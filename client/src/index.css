@@ -2091,7 +2091,8 @@ strong {
 .settings-toggle input:checked + i { background: var(--amethyst-700); }
 .queue-toggle input:checked + i::after,
 .settings-toggle input:checked + i::after { transform: translateX(16px); }
-.queue-disclaimer { margin: .8rem 0 0; color: var(--text-muted); font-size: .65rem; }
+.queue-disclaimer { margin: .8rem 0 0; color: var(--text-muted); font-size: .65rem; display: grid; gap: .28rem; }
+.queue-disclaimer strong { color: var(--text); font-size: .72rem; }
 
 .queue-empty-wrap { display: grid; gap: .9rem; }
 .checkin-card { display: flex; align-items: center; justify-content: space-between; gap: 1.2rem; padding: 1.25rem; border: 1px solid var(--border); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow-sm); flex-wrap: wrap; }

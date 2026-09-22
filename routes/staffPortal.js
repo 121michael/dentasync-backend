@@ -10,6 +10,12 @@ const staffCheckIn = require("../services/staffCheckIn");
 const staffWalkInQr = require("../services/staffWalkInQr");
 const { insertPatientNotification } = require("../services/patientPortalNotifications");
 const staffRfidEvents = require("../services/staffRfidEvents");
+const {
+  safeRecalculateQueueWaitEstimates,
+  staffWaitEstimate,
+  waitEstimateFromRow,
+} = require("../services/queueWaitPrediction");
+const { markQueueServingStarted, recordTreatmentComplete } = require("../services/treatmentDuration");
 
 const QUEUE_STATUS_MAP = {
   checked_in: "checked_in",
@@ -118,6 +124,9 @@ function mapCheckIn(row) {
     },
     status: displayQueueStatus(row.status),
     waitMinutes: Number(row.estimated_wait_minutes || 0),
+    estimatedDurationMinutes:
+      row.wait_estimate_duration_minutes != null ? Number(row.wait_estimate_duration_minutes) : null,
+    waitEstimate: staffWaitEstimate(waitEstimateFromRow(row)),
   };
 }
 
@@ -475,6 +484,14 @@ function createStaffPortalRouter({
            queue.position,
            queue.status,
            queue.estimated_wait_minutes,
+           queue.wait_estimate_min_minutes,
+           queue.wait_estimate_max_minutes,
+           queue.wait_estimate_duration_minutes,
+           queue.wait_estimate_call_start,
+           queue.wait_estimate_call_end,
+           queue.wait_estimate_method,
+           queue.wait_estimate_at,
+           queue.serving_started_at,
            queue.checked_in_at,
            queue.appointment_id,
            appointment.service_name,
@@ -496,6 +513,40 @@ function createStaffPortalRouter({
         queue: result.rows.map(mapCheckIn),
       });
     } catch (error) {
+      if (error.code === "42703") {
+        try {
+          const result = await db.query(
+            `SELECT
+               queue.id,
+               queue.token,
+               queue.position,
+               queue.status,
+               queue.estimated_wait_minutes,
+               queue.checked_in_at,
+               queue.appointment_id,
+               appointment.service_name,
+               appointment.dentist_name,
+               appointment.appointment_date,
+               appointment.appointment_time,
+               patient.id AS patient_id,
+               CONCAT_WS(' ', patient.first_name, patient.last_name) AS patient_name
+             FROM patient_portal_queue_entries AS queue
+             JOIN users AS patient ON patient.id::text = queue.user_id
+             LEFT JOIN patient_portal_appointments AS appointment ON appointment.id = queue.appointment_id
+             WHERE DATE(queue.checked_in_at) = CURRENT_DATE
+             ORDER BY
+               CASE WHEN queue.status IN ('completed', 'no_show') THEN 1 ELSE 0 END,
+               queue.position ASC`
+          );
+          return res.json({
+            updatedAt: new Date().toISOString(),
+            queue: result.rows.map(mapCheckIn),
+          });
+        } catch (fallbackError) {
+          console.error("Staff queue error:", fallbackError.message);
+          return res.status(500).json({ message: "Unable to load the live queue." });
+        }
+      }
       console.error("Staff queue error:", error.message);
       return res.status(500).json({ message: "Unable to load the live queue." });
     }
@@ -576,6 +627,18 @@ function createStaffPortalRouter({
         entityType: "queue",
         entityId: current.id,
       });
+
+      if (databaseStatus === "dentist") {
+        await markQueueServingStarted(client, queueId);
+      }
+      if (databaseStatus === "completed" || databaseStatus === "no_show") {
+        await recordTreatmentComplete(client, {
+          patientUserId: current.user_id,
+          appointmentId: current.appointment_id,
+          queueEntryId: queueId,
+        });
+      }
+      await safeRecalculateQueueWaitEstimates(client, { fromPosition: current.position });
 
       await client.query("COMMIT");
       transactionOpen = false;
@@ -2100,6 +2163,22 @@ function createStaffPortalRouter({
     }
   });
 
+  router.post("/queue/recalculate-estimates", async (_req, res) => {
+    try {
+      const result = await safeRecalculateQueueWaitEstimates(db, { fromPosition: 1 });
+      return res.json({
+        message: result.ok
+          ? "Queue wait estimates recalculated."
+          : "Queue wait estimates could not be fully recalculated.",
+        updated: result.updated || 0,
+        calculatedAt: result.calculatedAt || new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error("Staff wait estimate recalculation error:", error.message);
+      return res.status(500).json({ message: "Unable to recalculate queue estimates." });
+    }
+  });
+
   router.post("/queue/reset", async (req, res) => {
     const client = await db.connect();
     let transactionOpen = false;
@@ -2113,6 +2192,7 @@ function createStaffPortalRouter({
            AND status NOT IN ('completed', 'no_show')
          RETURNING id`
       );
+      await safeRecalculateQueueWaitEstimates(client, { fromPosition: 1 });
       await client.query("COMMIT");
       transactionOpen = false;
       return res.json({
@@ -2368,7 +2448,7 @@ function createStaffPortalRouter({
       });
     } catch (error) {
       if (isMissingRelation(error)) {
-        return res.status(deliveryStatus === "sent" ? 201 : 202).json({
+        return res.status(deliveryStatus === "sent" ? 201 : deliveryStatus === "failed" ? 502 : 202).json({
           message:
             deliveryStatus === "sent"
               ? "Notification sent successfully."
