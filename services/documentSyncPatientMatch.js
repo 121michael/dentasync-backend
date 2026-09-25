@@ -1,5 +1,7 @@
 "use strict";
 
+const { withSavepoint } = require("./clinicalPatients");
+
 function normalizePersonName(value) {
   return String(value || "")
     .normalize("NFKD")
@@ -72,13 +74,42 @@ function phoneVariants(phone) {
   return [...new Set(variants.filter(Boolean))];
 }
 
-const CANDIDATE_COLUMNS = `
-  id, record_code, patient_id, first_name, last_name, email, phone, date_of_birth, updated_at
-`;
+const CANDIDATE_COLUMNS = {
+  withPatientId:
+    "id, record_code, patient_id, first_name, last_name, email, phone, date_of_birth, address, updated_at",
+  legacy:
+    "id, record_code, first_name, last_name, email, phone, date_of_birth, updated_at",
+};
+
+async function queryCandidates(client, savepoint, sqlWithId, sqlLegacy, params) {
+  try {
+    return await withSavepoint(client, savepoint, async () =>
+      client.query(sqlWithId, params)
+    );
+  } catch (error) {
+    if (error?.code !== "42703") {
+      try {
+        return await withSavepoint(client, `${savepoint}_legacy`, async () =>
+          client.query(sqlLegacy, params)
+        );
+      } catch {
+        return { rows: [] };
+      }
+    }
+    try {
+      return await withSavepoint(client, `${savepoint}_legacy`, async () =>
+        client.query(sqlLegacy, params)
+      );
+    } catch {
+      return { rows: [] };
+    }
+  }
+}
 
 /**
  * Find every reasonable existing patient for extracted identity.
  * Never returns only results[0] as an automatic merge target.
+ * Queries use savepoints so a missing column cannot abort Confirm & Save.
  */
 async function findMatchingClinicalPatients(client, patient = {}) {
   const candidates = [];
@@ -88,65 +119,81 @@ async function findMatchingClinicalPatients(client, patient = {}) {
   const compact = compactPersonName(fullName);
 
   if (email || phones.length) {
-    try {
-      const byContact = await client.query(
-        `SELECT ${CANDIDATE_COLUMNS}
-         FROM clinic_patient_records
-         WHERE COALESCE(is_archived, FALSE) = FALSE
-           AND (
-             ($1::text IS NOT NULL AND LOWER(email) = LOWER($1))
-             OR ($2::text[] IS NOT NULL AND phone = ANY($2))
-           )
-         ORDER BY updated_at DESC
-         LIMIT 25`,
-        [email, phones.length ? phones : null]
-      );
-      for (const row of byContact.rows) {
-        const reason =
-          email && String(row.email || "").toLowerCase() === email ? "email" : "phone";
-        candidates.push(mapCandidate(row, reason));
-      }
-    } catch {
-      // Optional columns must not abort matching.
+    const byContact = await queryCandidates(
+      client,
+      "match_by_contact",
+      `SELECT ${CANDIDATE_COLUMNS.withPatientId}
+       FROM clinic_patient_records
+       WHERE COALESCE(is_archived, FALSE) = FALSE
+         AND (
+           ($1::text IS NOT NULL AND LOWER(email) = LOWER($1))
+           OR ($2::text[] IS NOT NULL AND phone = ANY($2))
+         )
+       ORDER BY updated_at DESC
+       LIMIT 25`,
+      `SELECT ${CANDIDATE_COLUMNS.legacy}
+       FROM clinic_patient_records
+       WHERE COALESCE(is_archived, FALSE) = FALSE
+         AND (
+           ($1::text IS NOT NULL AND LOWER(email) = LOWER($1))
+           OR ($2::text[] IS NOT NULL AND phone = ANY($2))
+         )
+       ORDER BY updated_at DESC
+       LIMIT 25`,
+      [email, phones.length ? phones : null]
+    );
+    for (const row of byContact.rows) {
+      const reason =
+        email && String(row.email || "").toLowerCase() === email ? "email" : "phone";
+      candidates.push(mapCandidate(row, reason));
     }
   }
 
   if (compact) {
+    const nameSql = (columns) =>
+      `SELECT ${columns}
+       FROM clinic_patient_records
+       WHERE COALESCE(is_archived, FALSE) = FALSE
+         AND regexp_replace(
+           lower(trim(both from concat_ws(' ', first_name, last_name))),
+           '[^a-z0-9]+',
+           '',
+           'g'
+         ) = $1
+       ORDER BY updated_at DESC
+       LIMIT 25`;
+    let nameRows = [];
     try {
-      const byName = await client.query(
-        `SELECT ${CANDIDATE_COLUMNS}
-         FROM clinic_patient_records
-         WHERE COALESCE(is_archived, FALSE) = FALSE
-           AND regexp_replace(
-             lower(trim(both from concat_ws(' ', first_name, last_name))),
-             '[^a-z0-9]+',
-             '',
-             'g'
-           ) = $1
-         ORDER BY updated_at DESC
-         LIMIT 25`,
-        [compact]
+      const byName = await withSavepoint(client, "match_by_name", async () =>
+        client.query(nameSql(CANDIDATE_COLUMNS.withPatientId), [compact])
       );
-      for (const row of byName.rows) {
-        candidates.push(mapCandidate(row, "normalized_name"));
-      }
+      nameRows = byName.rows;
     } catch {
-      // Fallback without regexp_replace if the database rejects it.
       try {
-        const fallback = await client.query(
-          `SELECT ${CANDIDATE_COLUMNS}
-           FROM clinic_patient_records
-           WHERE COALESCE(is_archived, FALSE) = FALSE
-           ORDER BY updated_at DESC
-           LIMIT 200`
+        const byName = await withSavepoint(client, "match_by_name_legacy", async () =>
+          client.query(nameSql(CANDIDATE_COLUMNS.legacy), [compact])
         );
-        for (const row of fallback.rows) {
-          if (namesMatch(displayName(row), fullName)) {
-            candidates.push(mapCandidate(row, "normalized_name"));
-          }
-        }
+        nameRows = byName.rows;
       } catch {
-        // Continue without name matches.
+        try {
+          const fallback = await withSavepoint(client, "match_by_name_scan", async () =>
+            client.query(
+              `SELECT ${CANDIDATE_COLUMNS.legacy}
+               FROM clinic_patient_records
+               WHERE COALESCE(is_archived, FALSE) = FALSE
+               ORDER BY updated_at DESC
+               LIMIT 200`
+            )
+          );
+          nameRows = fallback.rows.filter((row) => namesMatch(displayName(row), fullName));
+        } catch {
+          nameRows = [];
+        }
+      }
+    }
+    for (const row of nameRows) {
+      if (namesMatch(displayName(row), fullName) || compactPersonName(displayName(row)) === compact) {
+        candidates.push(mapCandidate(row, "normalized_name"));
       }
     }
   }

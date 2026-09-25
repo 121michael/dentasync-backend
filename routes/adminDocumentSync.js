@@ -206,18 +206,35 @@ function sanitizePayload(input) {
 
 async function loadClinicalRecord(client, recordId) {
   if (!recordId) return null;
+  const params = [String(recordId)];
   try {
-    const result = await client.query(
-      `SELECT id, record_code, patient_id, first_name, last_name, email, phone, date_of_birth, address
-       FROM clinic_patient_records
-       WHERE id::text = $1
-         AND COALESCE(is_archived, FALSE) = FALSE
-       LIMIT 1`,
-      [String(recordId)]
+    const result = await clinicalPatients.withSavepoint(client, "load_match_record", async () =>
+      client.query(
+        `SELECT id, record_code, patient_id, first_name, last_name, email, phone, date_of_birth, address
+         FROM clinic_patient_records
+         WHERE id::text = $1
+           AND COALESCE(is_archived, FALSE) = FALSE
+         LIMIT 1`,
+        params
+      )
     );
     return result.rows[0] || null;
   } catch {
-    return null;
+    try {
+      const result = await clinicalPatients.withSavepoint(client, "load_match_record_legacy", async () =>
+        client.query(
+          `SELECT id, record_code, first_name, last_name, email, phone, date_of_birth
+           FROM clinic_patient_records
+           WHERE id::text = $1
+             AND COALESCE(is_archived, FALSE) = FALSE
+           LIMIT 1`,
+          params
+        )
+      );
+      return result.rows[0] || null;
+    } catch {
+      return null;
+    }
   }
 }
 
