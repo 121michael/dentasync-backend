@@ -59,10 +59,55 @@ async function discardJobSourceDocument(db, uploadDirectory, jobId, storedName) 
 }
 
 /**
+ * Delete expired temporary scans (24 hours from upload, server clock).
+ * Permanent patient / treatment rows are never touched.
+ */
+async function expireTemporaryDocumentScans(db, uploadDirectory) {
+  if (!db) return 0;
+  let expired = 0;
+  try {
+    const due = await db.query(
+      `SELECT id, stored_name, status, linked_patient_id
+       FROM admin_portal_document_sync_jobs
+       WHERE expires_at IS NOT NULL
+         AND expires_at <= CURRENT_TIMESTAMP
+         AND (
+           stored_name IS NOT NULL
+           OR raw_text IS NOT NULL
+           OR status IN ('uploaded', 'extracted', 'reviewed')
+         )`
+    );
+    for (const row of due.rows) {
+      discardTemporaryDocumentFile(uploadDirectory, row.stored_name);
+      if (row.status === "synced" || row.linked_patient_id) {
+        await db.query(
+          `UPDATE admin_portal_document_sync_jobs
+           SET stored_name = NULL,
+               raw_text = NULL,
+               byte_size = 0,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $1`,
+          [row.id]
+        );
+      } else {
+        await db.query(`DELETE FROM admin_portal_document_sync_jobs WHERE id = $1`, [row.id]);
+      }
+      expired += 1;
+    }
+  } catch (error) {
+    if (error?.code !== "42P01" && error?.code !== "42703") {
+      console.warn("Expired document scan cleanup skipped:", error.message);
+    }
+  }
+  return expired;
+}
+
+/**
  * Remove leftover temp files for finished jobs and unreferenced disk files.
  */
 async function cleanupFinishedDocumentTemps(db, uploadDirectory) {
   if (!db || !uploadDirectory) return;
+  await expireTemporaryDocumentScans(db, uploadDirectory);
 
   try {
     const leftover = await db.query(
@@ -104,5 +149,6 @@ module.exports = {
   discardTemporaryDocumentFile,
   temporaryDocumentExists,
   discardJobSourceDocument,
+  expireTemporaryDocumentScans,
   cleanupFinishedDocumentTemps,
 };

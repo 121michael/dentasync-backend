@@ -933,3 +933,22 @@ test("dental chart with only name+amount still flags missing Age Procedure Date"
   payload.procedure.treatmentDate = "SEPT 7, 2024";
   assert.equal(dentalChartMissingCriticalFields(payload), false);
 });
+
+test("treatment extraction creates a row for every dated procedure, not a fixed cap", () => {
+  const lines = [
+    "01/05/2026 | Oral Prophylaxis | 1000",
+    "01/18/2026 | Restoration | 1500",
+    "02/02/2026 | Extraction | 2000",
+    "02/15/2026 | Dentures | 8000",
+    "03/01/2026 | Oral Surgery | 5000",
+    "03/15/2026 | Ortho Adjustment | 1200",
+    "04/01/2026 | Retainers | 3000",
+    "04/20/2026 | Crown / Fixed Bridge | 5000",
+    "05/02/2026 | Cleaning | 900",
+    "05/20/2026 | Dental Filling | 1400",
+  ];
+  const { payload } = extractStructuredPayload(`TREATMENT RECORD\nName: Sample Patient\n${lines.join("\n")}`);
+  assert.ok(payload.procedure.visits.length >= 8, `expected many rows, got ${payload.procedure.visits.length}`);
+  assert.ok(payload.procedure.visits.some((row) => /prophylaxis|cleaning/i.test(row.treatment)));
+  assert.ok(payload.procedure.visits.some((row) => /restoration|filling/i.test(row.treatment)));
+});

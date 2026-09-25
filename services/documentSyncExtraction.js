@@ -8,10 +8,13 @@ const { extractFieldsWithGemini } = require("./documentVisionExtraction");
 const { extractTextWithOcrSpace } = require("./cloudOcrExtraction");
 
 const INVALID_DOCUMENT_MESSAGE =
-  "Invalid document. Please upload or scan a document containing readable patient or treatment information.";
+  "Document Not Recognized. The uploaded file does not appear to be a supported patient or dental document. Please upload a valid patient record, dental treatment record, patient information form, or scanned dental document.";
 
 const UNSUPPORTED_DOCUMENT_MESSAGE =
-  "Invalid document. The uploaded file does not appear to contain a readable document. Please upload a PDF, PNG, or JPEG document.";
+  "Document Not Recognized. The uploaded file does not appear to contain a readable document. Please upload a PDF, PNG, or JPEG patient or dental document.";
+
+const DOCUMENT_NEEDS_REVIEW_MESSAGE =
+  "Document Needs Review. We found text, but we could not confidently identify this as a patient or dental record.";
 
 const UNREADABLE_DOCUMENT_MESSAGE =
   "Unable to read the uploaded or scanned document. No patient or treatment fields could be detected. Please upload a clearer scan or photo and try again.";
@@ -55,7 +58,7 @@ const CLINIC_PROCEDURE_KEYWORDS = [
   },
   {
     value: "Restoration",
-    pattern: /\bresto\b|restor(?:ation|e|ative)?|\bfilling\b/i,
+    pattern: /\bresto\b|restor(?:ation|e|ative)?|\bfilling\b|dental\s*filling/i,
   },
   {
     value: "Retainer",
@@ -68,6 +71,10 @@ const CLINIC_PROCEDURE_KEYWORDS = [
   {
     value: "Denture",
     pattern: /\bdenture?s?\b|\bdentur\b|partial\s*denture|complete\s*denture/i,
+  },
+  {
+    value: "Crown / Fixed Bridge",
+    pattern: /crown\s*\/\s*fixed|crown\s*and\s*bridge/i,
   },
   {
     value: "FPD",
@@ -2884,7 +2891,16 @@ function assessDocumentLikeness(rawText, method) {
     };
   }
 
-  return { isDocument: true, reason: "ok", score };
+  const needsReview = Boolean(
+    (hasKeywords || hasLabeledFields) && score < 10 && alphaNumeric < 80
+  );
+  return {
+    isDocument: true,
+    reason: needsReview ? "low_confidence" : "ok",
+    needsReview,
+    score,
+    message: needsReview ? DOCUMENT_NEEDS_REVIEW_MESSAGE : null,
+  };
 }
 
 function looksLikeDentalChartDocument(text = "", fields = {}) {
@@ -2906,7 +2922,7 @@ function dentalChartMissingCriticalFields(payload) {
   return ageMissing || procedureMissing || dateMissing;
 }
 
-const MAX_OCR_PDF_PAGES = 8;
+const MAX_OCR_PDF_PAGES = 40;
 
 /**
  * True when a PDF's text layer carries no readable patient/treatment values —
@@ -3299,6 +3315,8 @@ async function extractDocumentData(filePath, mimeType, originalName) {
     .filter(Boolean)
     .join(" ");
 
+  const needsReview = Boolean(likeness.needsReview) && filledCount > 0;
+
   return {
     rawText: extracted.text,
     payload: structured.payload,
@@ -3306,6 +3324,7 @@ async function extractDocumentData(filePath, mimeType, originalName) {
     extractionNotes: notes,
     method: vision ? `${extracted.method}+vision` : extracted.method,
     validation: likeness,
+    needsReview,
     orientationDegrees: extracted.orientationDegrees || 0,
     autoFilledCount: filledCount,
   };
@@ -3315,6 +3334,7 @@ module.exports = {
   INVALID_DOCUMENT_MESSAGE,
   UNSUPPORTED_DOCUMENT_MESSAGE,
   UNREADABLE_DOCUMENT_MESSAGE,
+  DOCUMENT_NEEDS_REVIEW_MESSAGE,
   DocumentValidationError,
   emptyPayload,
   extractDocumentData,

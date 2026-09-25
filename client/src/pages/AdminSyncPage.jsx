@@ -3,8 +3,21 @@ import { Camera, CheckCircle2, FileText, Image as ImageIcon, Plus, RefreshCw, Tr
 import { useSearchParams } from "react-router-dom";
 import { ApiError, api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
+import { AdminModal } from "../components/AdminUI";
 import { useAdminUi } from "../components/AdminLayout";
 import { formatAdminDateTime } from "../adminUtils";
+
+function hoursFromNow(iso) {
+  if (!iso) return null;
+  const ms = new Date(iso).getTime() - Date.now();
+  return Math.max(0, Math.round(ms / (60 * 60 * 1000)));
+}
+
+function hoursAgo(iso) {
+  if (!iso) return null;
+  const ms = Date.now() - new Date(iso).getTime();
+  return Math.max(0, Math.round(ms / (60 * 60 * 1000)));
+}
 
 function emptyVisitRow() {
   return {
@@ -127,7 +140,7 @@ function syncFullName(patient) {
 }
 
 export function AdminSyncPage() {
-  const { pushToast, confirm } = useAdminUi();
+  const { pushToast } = useAdminUi();
   const [searchParams, setSearchParams] = useSearchParams();
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -150,6 +163,11 @@ export function AdminSyncPage() {
   const [busy, setBusy] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [matchInfo, setMatchInfo] = useState(null);
+  const [decision, setDecision] = useState(null);
+  const [selectedMatchId, setSelectedMatchId] = useState("");
+  const [conflictIndex, setConflictIndex] = useState(0);
+  const [fieldResolutions, setFieldResolutions] = useState({});
+  const [manualFields, setManualFields] = useState({});
   const focusHandledRef = useRef("");
 
   const clearPreviews = useCallback(() => {
@@ -381,6 +399,18 @@ export function AdminSyncPage() {
 
     try {
       const response = await api.uploadAdminDocumentSync(file, nextSourceType);
+      if (response.needsReview) {
+        const nextPayload = normalizePayload(
+          response.job.editedPayload || response.job.extractedPayload || emptyPayload
+        );
+        setActiveJob(response.job);
+        setPayload(nextPayload);
+        setStep("needs-review");
+        setMessage(response.message);
+        await loadServerPreview(response.job.id);
+        await load();
+        return;
+      }
       const nextPayload = normalizePayload(
         response.job.editedPayload || response.job.extractedPayload || emptyPayload
       );
@@ -432,10 +462,14 @@ export function AdminSyncPage() {
       await loadServerPreview(response.job.id);
       await load();
     } catch (scanError) {
-      setStep("choose");
+      const unrecognized =
+        scanError instanceof ApiError &&
+        (scanError.data?.code === "INVALID_DOCUMENT" ||
+          /document not recognized|invalid document|does not appear/i.test(scanError.message || ""));
+      setStep(unrecognized ? "unrecognized" : "choose");
       setError(scanError.message);
       pushToast(scanError.message, "error");
-      clearPreviews();
+      if (!unrecognized) clearPreviews();
       await load();
     } finally {
       setBusy("");
@@ -473,6 +507,24 @@ export function AdminSyncPage() {
     processFile(file, "soft_copy");
   }
 
+  async function finishCommit({ confirmNewPatient = false, selectedPatientId = "", resolutions = {}, manuals = {} } = {}) {
+    const response = await api.commitAdminDocumentSync(activeJob.id, {
+      payload,
+      confirmNewPatient,
+      selectedPatientId: selectedPatientId || undefined,
+      fieldResolutions: resolutions,
+      manualFields: manuals,
+    });
+    setActiveJob(response.job);
+    setPayload(normalizePayload(response.job.editedPayload));
+    setMessage(response.message);
+    setStep("done");
+    setEditing(false);
+    setDecision(null);
+    pushToast(response.message || "Document successfully imported and data saved.");
+    await load();
+  }
+
   async function confirmAndSave() {
     if (!activeJob) return;
     setBusy("sync");
@@ -483,80 +535,99 @@ export function AdminSyncPage() {
       await api.updateAdminDocumentSync(activeJob.id, { payload });
       const matchPreview = await api.previewAdminDocumentSyncMatch(activeJob.id, { payload });
       setMatchInfo(matchPreview);
+      setSelectedMatchId(matchPreview.match?.id || "");
+      setFieldResolutions({});
+      setManualFields({});
+      setConflictIndex(0);
 
+      if (matchPreview.needsSelection) {
+        setDecision("multiple");
+        return;
+      }
+      if (matchPreview.needsMergeDecision) {
+        setDecision("merge");
+        return;
+      }
       if (matchPreview.isNewPatient) {
-        const ok = await confirm({
-          title: "New patient record detected",
-          message: `No matching patient was found for ${
-            matchPreview.proposedPatient?.fullName || "this document"
-          }. Create a new clinical patient record and save the imported information?`,
-          confirmLabel: "Create Patient & Save",
-          tone: "primary",
-        });
-        if (!ok) {
-          setBusy("");
-          return;
-        }
-      } else {
-        const ok = await confirm({
-          title: "Confirm & save import",
-          message: `Save reviewed document data to existing patient ${
-            matchPreview.match?.fullName || matchPreview.match?.id
-          }? Treatment information will be attached as historical/imported data.`,
-          confirmLabel: "Confirm & Save",
-          tone: "primary",
-        });
-        if (!ok) {
-          setBusy("");
-          return;
-        }
+        setDecision("new");
+        return;
       }
 
-      const response = await api.commitAdminDocumentSync(activeJob.id, {
-        payload,
-        confirmNewPatient: Boolean(matchPreview.isNewPatient),
-      });
-      setActiveJob(response.job);
-      setPayload(normalizePayload(response.job.editedPayload));
-      setMessage(response.message);
-      setStep("done");
-      setEditing(false);
-      pushToast(response.message || "Document successfully imported and data saved.");
-      await load();
+      await finishCommit({ confirmNewPatient: true });
     } catch (syncError) {
+      if (syncError instanceof ApiError && syncError.data?.needsSelection) {
+        setMatchInfo((current) => ({ ...current, matches: syncError.data.matches || [] }));
+        setDecision("multiple");
+        return;
+      }
+      if (syncError instanceof ApiError && syncError.data?.needsMergeDecision) {
+        setMatchInfo((current) => ({
+          ...current,
+          match: syncError.data.match,
+          matches: syncError.data.matches || [syncError.data.match].filter(Boolean),
+          conflicts: syncError.data.conflicts || [],
+        }));
+        setDecision("merge");
+        return;
+      }
       if (syncError instanceof ApiError && syncError.data?.needsNewPatientConfirmation) {
-        const ok = await confirm({
-          title: "New patient record detected",
-          message: syncError.message,
-          confirmLabel: "Create Patient & Save",
-          tone: "primary",
-        });
-        if (!ok) {
-          setBusy("");
-          return;
-        }
-        try {
-          const response = await api.commitAdminDocumentSync(activeJob.id, {
-            payload,
-            confirmNewPatient: true,
-          });
-          setActiveJob(response.job);
-          setPayload(normalizePayload(response.job.editedPayload));
-          setMessage(response.message);
-          setStep("done");
-          setEditing(false);
-          pushToast(response.message || "Document successfully imported and data saved.");
-          await load();
-        } catch (retryError) {
-          setError(retryError.message);
-          pushToast(retryError.message, "error");
-        } finally {
-          setBusy("");
-        }
+        setDecision("new");
         return;
       }
       setError(syncError.message);
       pushToast(syncError.message, "error");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function chooseCreateNew() {
+    setBusy("sync");
+    try {
+      await finishCommit({ confirmNewPatient: true });
+    } catch (error) {
+      setError(error.message);
+      pushToast(error.message, "error");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  function resolveConflict(field, choice) {
+    const nextResolutions = { ...fieldResolutions, [field]: choice };
+    setFieldResolutions(nextResolutions);
+    const conflicts = matchInfo?.conflicts || [];
+    const nextIndex = conflictIndex + 1;
+    if (nextIndex < conflicts.length) {
+      setConflictIndex(nextIndex);
+      return;
+    }
+    chooseMerge(selectedMatchId || matchInfo?.match?.id, nextResolutions);
+  }
+
+  async function chooseMerge(patientId, resolutions = fieldResolutions) {
+    const conflicts = matchInfo?.conflicts || [];
+    if (conflicts.length && !conflicts.every((item) => resolutions[item.field])) {
+      setSelectedMatchId(patientId);
+      setDecision("conflicts");
+      setConflictIndex(0);
+      return;
+    }
+    setBusy("sync");
+    try {
+      await finishCommit({
+        selectedPatientId: patientId,
+        resolutions,
+        manuals: manualFields,
+      });
+    } catch (error) {
+      if (error instanceof ApiError && error.data?.needsMergeDecision && (error.data.conflicts || []).length) {
+        setMatchInfo((current) => ({ ...current, conflicts: error.data.conflicts }));
+        setDecision("conflicts");
+        return;
+      }
+      setError(error.message);
+      pushToast(error.message, "error");
     } finally {
       setBusy("");
     }
@@ -599,6 +670,10 @@ export function AdminSyncPage() {
     setActiveJob(null);
     setPayload(emptyPayload);
     setMatchInfo(null);
+    setDecision(null);
+    setSelectedMatchId("");
+    setFieldResolutions({});
+    setManualFields({});
     setMessage("");
     setError("");
     setEditing(true);
@@ -627,8 +702,9 @@ export function AdminSyncPage() {
           <p>
             Scan a hard-copy paper or upload a PDF / PNG / JPEG. The system reads what it can from the document
             (name, date of birth, age, cellphone, procedure, treatment date, amount), lets you correct mistakes,
-            then saves only that structured text to the database. Face photos and non-documents are rejected.
-            Scanned files are temporary for reading only — they are not stored.
+            then saves only that structured text to the database after you review it. Face photos and
+            non-documents are rejected. Uploaded scans stay in Recent Scans for 24 hours, then the
+            temporary file is deleted. Permanent patient records are never removed with the scan.
           </p>
           <div className="admin-heading-actions" style={{ marginTop: "0.85rem" }}>
             <button type="button" className="button button--secondary" onClick={load}>
@@ -718,6 +794,52 @@ export function AdminSyncPage() {
               </div>
             </div>
           ) : null}
+        </section>
+      ) : null}
+
+      {step === "unrecognized" ? (
+        <section className="admin-panel">
+          <h2>Document Not Recognized</h2>
+          <p>
+            The uploaded file does not appear to be a supported patient or dental document.
+          </p>
+          <p className="muted-copy">Please upload a valid:</p>
+          <ul className="muted-copy">
+            <li>Patient record</li>
+            <li>Dental treatment record</li>
+            <li>Patient information form</li>
+            <li>Scanned dental document</li>
+          </ul>
+          <div className="admin-heading-actions">
+            <button type="button" className="button button--primary" onClick={startOver}>
+              <Upload size={16} /> Upload Another Document
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      {step === "needs-review" && activeJob ? (
+        <section className="admin-panel">
+          <h2>Document Needs Review</h2>
+          <p>
+            We found text, but we could not confidently identify this as a patient or dental record.
+            The original file is kept for 24 hours so you can review it.
+          </p>
+          <div className="admin-heading-actions">
+            <button
+              type="button"
+              className="button button--primary"
+              onClick={() => {
+                setEditing(true);
+                setStep("review");
+              }}
+            >
+              Review Extraction
+            </button>
+            <button type="button" className="button button--secondary" onClick={startOver}>
+              Upload Another Document
+            </button>
+          </div>
         </section>
       ) : null}
 
@@ -993,22 +1115,10 @@ export function AdminSyncPage() {
                 </div>
               </section>
 
-              {matchInfo?.isNewPatient === false && matchInfo?.match ? (
+              {matchInfo?.match ? (
                 <p className="inline-alert inline-alert--success">
-                  Existing patient match: {matchInfo.match.fullName} (ID {matchInfo.match.id})
-                </p>
-              ) : null}
-
-              {matchInfo?.conflicts?.length ? (
-                <p className="inline-alert inline-alert--error">
-                  This document disagrees with the saved record — review before saving:{" "}
-                  {matchInfo.conflicts
-                    .map(
-                      (conflict) =>
-                        `${conflict.field}: document says ${conflict.documentValue}, record has ${conflict.existingValue}`
-                    )
-                    .join("; ")}
-                  . Saved patient details are kept unchanged.
+                  Existing patient: {matchInfo.match.fullName} (Patient ID{" "}
+                  {matchInfo.match.patientId || matchInfo.match.id})
                 </p>
               ) : null}
             </div>
@@ -1017,16 +1127,20 @@ export function AdminSyncPage() {
       ) : null}
 
       <section className="admin-panel">
-        <h2>Recent document imports</h2>
+        <h2>Recent Scans</h2>
+        <p className="muted-copy">
+          Temporary uploaded or scanned files remain available for 24 hours on the server clock, then
+          they are deleted automatically. Saved patient and treatment records stay.
+        </p>
         {jobs.length ? (
           <div className="admin-table-wrap">
             <table className="admin-table">
               <thead>
                 <tr>
-                  <th>Document</th>
+                  <th>Scan</th>
                   <th>Source</th>
-                  <th>Status</th>
-                  <th>Updated</th>
+                  <th>Uploaded</th>
+                  <th>Expires</th>
                   <th />
                 </tr>
               </thead>
@@ -1037,14 +1151,24 @@ export function AdminSyncPage() {
                     className={String(job.id) === String(searchParams.get("focus") || "") ? "is-notification-focus" : undefined}
                   >
                     <td>
-                      <strong>{job.originalName}</strong>
-                      {job.errorMessage ? <div className="muted-copy">{job.errorMessage}</div> : null}
+                      <strong>{job.extractedName || "Unnamed scan"}</strong>
+                      <div className="muted-copy">{job.originalName}</div>
                     </td>
                     <td>{job.sourceLabel || job.sourceType.replaceAll("_", " ")}</td>
                     <td>
-                      <span className={`admin-status admin-status--${job.status}`}>{job.status}</span>
+                      {hoursAgo(job.uploadedAt || job.createdAt) != null
+                        ? `Uploaded ${hoursAgo(job.uploadedAt || job.createdAt)} hour${
+                            hoursAgo(job.uploadedAt || job.createdAt) === 1 ? "" : "s"
+                          } ago`
+                        : formatAdminDateTime(job.createdAt)}
                     </td>
-                    <td>{formatAdminDateTime(job.updatedAt || job.createdAt)}</td>
+                    <td>
+                      {job.expiresAt
+                        ? `Expires in ${hoursFromNow(job.expiresAt)} hour${
+                            hoursFromNow(job.expiresAt) === 1 ? "" : "s"
+                          }`
+                        : "Within 24 hours"}
+                    </td>
                     <td>
                       <button
                         type="button"
@@ -1062,11 +1186,182 @@ export function AdminSyncPage() {
           </div>
         ) : (
           <EmptyState
-            title="No document imports yet."
-            detail="Scan a hard copy or upload a PDF/PNG/JPEG document to begin extraction."
+            title="No recent scans."
+            detail="Scan a hard copy or upload a PDF/PNG/JPEG. Temporary files appear here until they expire."
           />
         )}
       </section>
+
+      {decision === "merge" && matchInfo?.match ? (
+        <AdminModal title="Possible Existing Patient Found" onClose={() => setDecision(null)}>
+          <p>Extracted from document:</p>
+          <p>
+            <strong>{payload.patient.fullName || matchInfo.proposedPatient?.fullName}</strong>
+          </p>
+          <p>Existing patient:</p>
+          <p>
+            <strong>{matchInfo.match.fullName}</strong>
+            <br />
+            Patient ID: {matchInfo.match.patientId || matchInfo.match.id}
+          </p>
+          <p>What would you like to do?</p>
+          <div className="admin-modal__actions">
+            <button type="button" className="button button--primary" onClick={() => chooseMerge(matchInfo.match.id)}>
+              Merge With Existing Patient
+            </button>
+            <button type="button" className="button button--secondary" onClick={chooseCreateNew}>
+              Create New Patient
+            </button>
+          </div>
+        </AdminModal>
+      ) : null}
+
+      {decision === "multiple" && matchInfo?.matches?.length ? (
+        <AdminModal title="Possible Matches" onClose={() => setDecision(null)} wide>
+          <p>Please select the correct patient:</p>
+          <div className="admin-table-wrap">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th />
+                  <th>Name</th>
+                  <th>Patient ID</th>
+                  <th>Birthdate</th>
+                </tr>
+              </thead>
+              <tbody>
+                {matchInfo.matches.map((row) => (
+                  <tr key={row.id}>
+                    <td>
+                      <input
+                        type="radio"
+                        name="sync-match"
+                        checked={String(selectedMatchId) === String(row.id)}
+                        onChange={() => setSelectedMatchId(row.id)}
+                      />
+                    </td>
+                    <td>{row.fullName}</td>
+                    <td>{row.patientId || row.id}</td>
+                    <td>{row.dateOfBirth ? String(row.dateOfBirth).slice(0, 10) : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="admin-modal__actions">
+            <button
+              type="button"
+              className="button button--primary"
+              disabled={!selectedMatchId}
+              onClick={() => chooseMerge(selectedMatchId)}
+            >
+              Select Patient
+            </button>
+            <button type="button" className="button button--secondary" onClick={chooseCreateNew}>
+              Create New Patient
+            </button>
+          </div>
+        </AdminModal>
+      ) : null}
+
+      {decision === "new" ? (
+        <AdminModal title="Create New Patient" onClose={() => setDecision(null)}>
+          <p>
+            No existing patient was selected. Create a new clinical patient from the extracted
+            information? The Patient ID is generated by the server.
+          </p>
+          <p>
+            <strong>{payload.patient.fullName}</strong>
+          </p>
+          <div className="admin-modal__actions">
+            <button type="button" className="button button--secondary" onClick={() => setDecision(null)}>
+              Cancel
+            </button>
+            <button type="button" className="button button--primary" onClick={chooseCreateNew}>
+              Create New Patient
+            </button>
+          </div>
+        </AdminModal>
+      ) : null}
+
+      {decision === "conflicts" && matchInfo?.conflicts?.length ? (
+        <AdminModal title="Data Conflict" onClose={() => setDecision(null)}>
+          {(() => {
+            const conflict = matchInfo.conflicts[conflictIndex] || matchInfo.conflicts[0];
+            return (
+              <>
+                <p>
+                  <strong>{conflict.field}</strong>
+                </p>
+                <p>
+                  Existing:
+                  <br />
+                  <strong>{conflict.existingValue}</strong>
+                </p>
+                <p>
+                  Document:
+                  <br />
+                  <strong>{conflict.documentValue}</strong>
+                </p>
+                {fieldResolutions[conflict.field] === "manual" ? (
+                  <label className="field">
+                    <span>Edit manually</span>
+                    <input
+                      value={
+                        manualFields[
+                          conflict.field === "Phone"
+                            ? "phone"
+                            : conflict.field === "Email"
+                              ? "email"
+                              : conflict.field === "Address"
+                                ? "address"
+                                : "dateOfBirth"
+                        ] || ""
+                      }
+                      onChange={(event) => {
+                        const key =
+                          conflict.field === "Phone"
+                            ? "phone"
+                            : conflict.field === "Email"
+                              ? "email"
+                              : conflict.field === "Address"
+                                ? "address"
+                                : "dateOfBirth";
+                        setManualFields((current) => ({ ...current, [key]: event.target.value }));
+                      }}
+                    />
+                  </label>
+                ) : null}
+                <div className="admin-modal__actions">
+                  <button
+                    type="button"
+                    className="button button--secondary"
+                    onClick={() => resolveConflict(conflict.field, "existing")}
+                  >
+                    Keep Existing
+                  </button>
+                  <button
+                    type="button"
+                    className="button button--primary"
+                    onClick={() => resolveConflict(conflict.field, "document")}
+                  >
+                    Use Document
+                  </button>
+                  <button
+                    type="button"
+                    className="button button--secondary"
+                    onClick={() =>
+                      setFieldResolutions((current) => ({ ...current, [conflict.field]: "manual" }))
+                    }
+                  >
+                    Edit Manually
+                  </button>
+                </div>
+              </>
+            );
+          })()}
+        </AdminModal>
+      ) : null}
     </div>
   );
 }

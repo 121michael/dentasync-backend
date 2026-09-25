@@ -18,11 +18,18 @@ const clinicalPatients = require("../services/clinicalPatients");
 const patientData = require("../services/patientData");
 const { writeAdminAudit } = require("../services/adminAudit");
 const {
+  findMatchingClinicalPatients,
+  findPatientConflicts,
+  inferPatientCategory,
+} = require("../services/documentSyncPatientMatch");
+const {
   discardTemporaryDocumentFile,
   temporaryDocumentExists,
   cleanupFinishedDocumentTemps,
   resolveTempDocumentPath,
 } = require("../services/documentSyncTempStorage");
+
+const MAX_VISIT_ROWS = 500;
 
 const ALLOWED_TYPES = new Set([
   "application/pdf",
@@ -75,7 +82,20 @@ function auditActor(req) {
   };
 }
 
+function extractedPatientName(payload) {
+  const patient = payload?.patient || {};
+  return String(patient.fullName || `${patient.firstName || ""} ${patient.lastName || ""}`).trim();
+}
+
 function mapJob(row) {
+  const extracted = row.extracted_payload || emptyPayload();
+  const edited = row.edited_payload || emptyPayload();
+  const expiresAt = row.expires_at || null;
+  const expired = Boolean(expiresAt && new Date(expiresAt).getTime() <= Date.now());
+  const previewable =
+    Boolean(row.stored_name) &&
+    !expired &&
+    ["uploaded", "extracted", "reviewed"].includes(row.status);
   return {
     id: row.id,
     originalName: row.original_name,
@@ -84,9 +104,9 @@ function mapJob(row) {
     sourceType: row.source_type,
     sourceLabel: sourceLabel(row.source_type, row.mime_type, row.original_name),
     status: row.status,
-    rawText: "", // OCR dump is temporary server-side only; never shown in Admin UI
-    extractedPayload: row.extracted_payload || emptyPayload(),
-    editedPayload: row.edited_payload || emptyPayload(),
+    rawText: "",
+    extractedPayload: extracted,
+    editedPayload: edited,
     extractionNotes: row.extraction_notes || "",
     linkedPatientId: row.linked_patient_id || null,
     linkedTreatmentId: row.linked_treatment_id || null,
@@ -94,11 +114,13 @@ function mapJob(row) {
     syncedAt: row.synced_at || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    // Preview is temporary only while Admin reviews; never after commit/reject.
-    hasPreview:
-      Boolean(row.stored_name) &&
-      ["uploaded", "extracted", "reviewed"].includes(row.status),
-    sourceDocumentRetained: false,
+    uploadedAt: row.created_at,
+    expiresAt,
+    expired,
+    extractedName: extractedPatientName(edited) || extractedPatientName(extracted),
+    needsReview: Boolean(extracted?.documentQuality?.needsReview),
+    hasPreview: previewable,
+    sourceDocumentRetained: previewable,
   };
 }
 
@@ -131,6 +153,13 @@ function sanitizePayload(input) {
       (Array.isArray(procedure.visits) && procedure.visits.length > 0 && /treatment|tooth/i.test(JSON.stringify(procedure.visits)))
         ? "treatment_record"
         : stringValue(input?.documentForm, 40) || "generic",
+    documentQuality:
+      input?.documentQuality && typeof input.documentQuality === "object"
+        ? {
+            needsReview: Boolean(input.documentQuality.needsReview),
+            reason: stringValue(input.documentQuality.reason, 80) || "",
+          }
+        : undefined,
     patient: {
       firstName,
       lastName,
@@ -160,7 +189,7 @@ function sanitizePayload(input) {
       notes: stringValue(procedure.notes, 2000) || "",
       coverageStatus: stringValue(procedure.coverageStatus, 120) || "",
       visits: Array.isArray(procedure.visits)
-        ? procedure.visits.slice(0, 80).map((row) => ({
+        ? procedure.visits.slice(0, MAX_VISIT_ROWS).map((row) => ({
             treatmentDate: stringValue(row?.treatmentDate || row?.date || "", 40) || "",
             toothNos: stringValue(row?.toothNos || row?.toothNumber || "", 40) || "",
             treatment: stringValue(row?.treatment || row?.procedure || "", 180) || "",
@@ -175,145 +204,38 @@ function sanitizePayload(input) {
   };
 }
 
-async function findMatchingClinicalPatient(client, patient) {
-  const phoneCandidates = [];
-  if (patient.phone) {
-    phoneCandidates.push(patient.phone);
-    const digits = String(patient.phone).replace(/\D/g, "");
-    if (/^0\d{10}$/.test(digits)) phoneCandidates.push(`63${digits.slice(1)}`);
-    if (/^63\d{10}$/.test(digits)) phoneCandidates.push(`0${digits.slice(2)}`);
-    if (/^9\d{9}$/.test(digits)) {
-      phoneCandidates.push(`0${digits}`);
-      phoneCandidates.push(`63${digits}`);
-    }
+async function loadClinicalRecord(client, recordId) {
+  if (!recordId) return null;
+  try {
+    const result = await client.query(
+      `SELECT id, record_code, patient_id, first_name, last_name, email, phone, date_of_birth, address
+       FROM clinic_patient_records
+       WHERE id::text = $1
+         AND COALESCE(is_archived, FALSE) = FALSE
+       LIMIT 1`,
+      [String(recordId)]
+    );
+    return result.rows[0] || null;
+  } catch {
+    return null;
   }
-  const uniquePhones = [...new Set(phoneCandidates.filter(Boolean))];
-
-  if (patient.email || uniquePhones.length) {
-    try {
-      const byContact = await clinicalPatients.withSavepoint(client, "match_by_contact", async () =>
-        client.query(
-          `SELECT id, record_code, first_name, last_name, email, phone, date_of_birth
-           FROM clinic_patient_records
-           WHERE COALESCE(is_archived, FALSE) = FALSE
-             AND (
-               ($1::text IS NOT NULL AND LOWER(email) = LOWER($1))
-               OR ($2::text[] IS NOT NULL AND phone = ANY($2))
-             )
-           ORDER BY updated_at DESC
-           LIMIT 1`,
-          [patient.email || null, uniquePhones.length ? uniquePhones : null]
-        )
-      );
-      if (byContact.rows.length) {
-        return {
-          record: byContact.rows[0],
-          matchReason: patient.email && byContact.rows[0].email?.toLowerCase() === patient.email.toLowerCase()
-            ? "email"
-            : "phone",
-        };
-      }
-    } catch {
-      // Optional column / type mismatches must not abort the outer Confirm & Save transaction.
-    }
-  }
-
-  if (patient.firstName && patient.lastName && patient.dateOfBirth) {
-    const dobIso = normalizeDate(patient.dateOfBirth) || (isIsoDate(patient.dateOfBirth) ? patient.dateOfBirth : "");
-    if (dobIso) {
-      try {
-        const byIdentity = await clinicalPatients.withSavepoint(client, "match_by_identity", async () =>
-          client.query(
-            `SELECT id, record_code, first_name, last_name, email, phone, date_of_birth
-             FROM clinic_patient_records
-             WHERE COALESCE(is_archived, FALSE) = FALSE
-               AND LOWER(first_name) = LOWER($1)
-               AND LOWER(last_name) = LOWER($2)
-               AND date_of_birth = $3::date
-             ORDER BY updated_at DESC
-             LIMIT 1`,
-            [patient.firstName, patient.lastName, dobIso]
-          )
-        );
-        if (byIdentity.rows.length) {
-          return { record: byIdentity.rows[0], matchReason: "name_and_date_of_birth" };
-        }
-      } catch {
-        // Continue without an identity match.
-      }
-    }
-  }
-
-  if (patient.fullName && patient.dateOfBirth) {
-    const dobIso = normalizeDate(patient.dateOfBirth) || (isIsoDate(patient.dateOfBirth) ? patient.dateOfBirth : "");
-    if (dobIso) {
-      try {
-        const byFullName = await clinicalPatients.withSavepoint(client, "match_by_fullname", async () =>
-          client.query(
-            `SELECT id, record_code, first_name, last_name, email, phone, date_of_birth
-             FROM clinic_patient_records
-             WHERE COALESCE(is_archived, FALSE) = FALSE
-               AND LOWER(TRIM(CONCAT(first_name, ' ', last_name))) = LOWER($1)
-               AND date_of_birth = $2::date
-             ORDER BY updated_at DESC
-             LIMIT 1`,
-            [patient.fullName, dobIso]
-          )
-        );
-        if (byFullName.rows.length) {
-          return { record: byFullName.rows[0], matchReason: "full_name_and_date_of_birth" };
-        }
-      } catch {
-        // Continue without a full-name match.
-      }
-    }
-  }
-
-  return { record: null, matchReason: null };
 }
 
-/**
- * Values the document disagrees with on the matched record. Saving never
- * overwrites stored demographics, so the Admin is told instead of silently
- * keeping one of the two values.
- */
-function findPatientConflicts(payload, record) {
-  if (!record) return [];
-  const compare = [
-    { field: "Phone", documentValue: payload.phone, existingValue: record.phone },
-    {
-      field: "Date of Birth",
-      documentValue: payload.dateOfBirth,
-      existingValue: record.date_of_birth
-        ? new Date(record.date_of_birth).toISOString().slice(0, 10)
-        : "",
-    },
-    { field: "Email", documentValue: payload.email, existingValue: record.email },
-  ];
-  return compare
-    .filter(({ documentValue, existingValue }) => {
-      const left = String(documentValue || "").trim().toLowerCase();
-      const right = String(existingValue || "").trim().toLowerCase();
-      return left && right && left !== right;
-    })
-    .map(({ field, documentValue, existingValue }) => ({
-      field,
-      documentValue: String(documentValue),
-      existingValue: String(existingValue),
-    }));
-}
-
-function mapMatchRecord(row) {
-  if (!row) return null;
+function mapMatchRecord(candidate) {
+  if (!candidate) return null;
   return {
-    id: String(row.id),
-    recordCode: row.record_code || null,
-    firstName: row.first_name || "",
-    lastName: row.last_name || "",
-    fullName: `${row.first_name || ""} ${row.last_name || ""}`.trim(),
-    email: row.email || "",
-    phone: row.phone || "",
-    dateOfBirth: row.date_of_birth || null,
+    id: String(candidate.id),
+    recordCode: candidate.recordCode || candidate.record_code || null,
+    patientId: candidate.patientId || candidate.patient_id || candidate.recordCode || null,
+    firstName: candidate.firstName || candidate.first_name || "",
+    lastName: candidate.lastName || candidate.last_name || "",
+    fullName:
+      candidate.fullName ||
+      `${candidate.firstName || candidate.first_name || ""} ${candidate.lastName || candidate.last_name || ""}`.trim(),
+    email: candidate.email || "",
+    phone: candidate.phone || "",
+    dateOfBirth: candidate.dateOfBirth || candidate.date_of_birth || null,
+    matchReason: candidate.matchReason || null,
   };
 }
 
@@ -349,16 +271,20 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
       const result = await db.query(
         `SELECT *
          FROM admin_portal_document_sync_jobs
+         WHERE stored_name IS NOT NULL
+           AND status IN ('uploaded', 'extracted', 'reviewed')
          ORDER BY created_at DESC
          LIMIT 40`
       );
       return res.json({
-        jobs: result.rows.map((row) => {
-          const job = mapJob(row);
-          job.hasPreview =
-            job.hasPreview && temporaryDocumentExists(uploadDirectory, row.stored_name);
-          return job;
-        }),
+        jobs: result.rows
+          .map((row) => {
+            const job = mapJob(row);
+            job.hasPreview =
+              job.hasPreview && temporaryDocumentExists(uploadDirectory, row.stored_name);
+            return job;
+          })
+          .filter((job) => !job.expired),
       });
     } catch (error) {
       if (error.code === "42P01") {
@@ -394,7 +320,7 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
   router.get("/sync/documents/:id/file", async (req, res) => {
     try {
       const result = await db.query(
-        `SELECT stored_name, mime_type, original_name, status
+        `SELECT stored_name, mime_type, original_name, status, expires_at
          FROM admin_portal_document_sync_jobs
          WHERE id = $1
          LIMIT 1`,
@@ -404,6 +330,12 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
         return res.status(404).json({ message: "Document sync job not found." });
       }
       const job = result.rows[0];
+      if (job.expires_at && new Date(job.expires_at).getTime() <= Date.now()) {
+        return res.status(410).json({
+          message: "Document no longer available. This temporary scan expired after 24 hours.",
+          code: "SCAN_EXPIRED",
+        });
+      }
       if (!["uploaded", "extracted", "reviewed"].includes(job.status) || !job.stored_name) {
         return res.status(410).json({
           message:
@@ -463,20 +395,39 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
 
       let jobId = null;
       try {
-        const inserted = await db.query(
-          `INSERT INTO admin_portal_document_sync_jobs (
-             uploaded_by, original_name, stored_name, mime_type, byte_size, source_type, status
-           ) VALUES ($1, $2, $3, $4, $5, $6, 'uploaded')
-           RETURNING id`,
-          [
-            String(req.admin.id),
-            req.file.originalname,
-            req.file.filename,
-            req.file.mimetype,
-            req.file.size,
-            sourceType,
-          ]
-        );
+        let inserted;
+        try {
+          inserted = await db.query(
+            `INSERT INTO admin_portal_document_sync_jobs (
+               uploaded_by, original_name, stored_name, mime_type, byte_size, source_type, status, expires_at
+             ) VALUES ($1, $2, $3, $4, $5, $6, 'uploaded', CURRENT_TIMESTAMP + INTERVAL '24 hours')
+             RETURNING id`,
+            [
+              String(req.admin.id),
+              req.file.originalname,
+              req.file.filename,
+              req.file.mimetype,
+              req.file.size,
+              sourceType,
+            ]
+          );
+        } catch (insertError) {
+          if (insertError.code !== "42703") throw insertError;
+          inserted = await db.query(
+            `INSERT INTO admin_portal_document_sync_jobs (
+               uploaded_by, original_name, stored_name, mime_type, byte_size, source_type, status
+             ) VALUES ($1, $2, $3, $4, $5, $6, 'uploaded')
+             RETURNING id`,
+            [
+              String(req.admin.id),
+              req.file.originalname,
+              req.file.filename,
+              req.file.mimetype,
+              req.file.size,
+              sourceType,
+            ]
+          );
+        }
         jobId = inserted.rows[0].id;
 
         const extraction = await extractDocumentData(
@@ -485,6 +436,13 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
           req.file.originalname
         );
 
+        const storedPayload = {
+          ...extraction.payload,
+          documentQuality: {
+            needsReview: Boolean(extraction.needsReview),
+            reason: extraction.validation?.reason || "",
+          },
+        };
         const updated = await db.query(
           `UPDATE admin_portal_document_sync_jobs
            SET status = 'extracted',
@@ -495,7 +453,7 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
                updated_at = CURRENT_TIMESTAMP
            WHERE id = $4
            RETURNING *`,
-          [extraction.rawText, JSON.stringify(extraction.payload), extraction.extractionNotes, jobId]
+          [extraction.rawText, JSON.stringify(storedPayload), extraction.extractionNotes, jobId]
         );
 
         await writeAdminAudit(db, {
@@ -518,11 +476,14 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
           (String(extraction.extractionNotes || "").match(/autofill-build:\s*[\w.-]+/i) || [])[0] ||
           "autofill-build: treatment-zone-v7";
         return res.status(201).json({
-          message: `Document read successfully — populated ${filled} field${filled === 1 ? "" : "s"} to match the scan. Review them, then Confirm & Save. (${buildTag})`,
+          message: extraction.needsReview
+            ? `Document Needs Review. We found text, but we could not confidently identify this as a patient or dental record. (${buildTag})`
+            : `Document read successfully — populated ${filled} field${filled === 1 ? "" : "s"} to match the scan. Review them, then Confirm & Save. (${buildTag})`,
           job: mapJob(updated.rows[0]),
           fieldStatuses: extraction.fieldStatuses || {},
           autoFilledCount: filled,
           extractionNotes: extraction.extractionNotes || "",
+          needsReview: Boolean(extraction.needsReview),
         });
       } catch (error) {
         const isValidation =
@@ -610,12 +571,17 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
         return res.status(404).json({ message: "Document sync job not found." });
       }
       const payload = sanitizePayload(req.body?.payload || jobResult.rows[0].edited_payload);
-      const match = await findMatchingClinicalPatient(db, payload.patient);
+      const found = await findMatchingClinicalPatients(db, payload.patient);
+      const matches = found.candidates.map(mapMatchRecord);
+      const single = matches.length === 1 ? matches[0] : null;
       return res.json({
-        match: mapMatchRecord(match.record),
-        matchReason: match.matchReason,
-        isNewPatient: !match.record,
-        conflicts: findPatientConflicts(payload.patient, match.record),
+        matches,
+        match: single,
+        matchReason: found.matchReason,
+        isNewPatient: matches.length === 0,
+        needsSelection: matches.length > 1,
+        needsMergeDecision: matches.length === 1,
+        conflicts: single ? findPatientConflicts(payload.patient, single) : [],
         proposedPatient: {
           fullName: payload.patient.fullName,
           dateOfBirth: payload.patient.dateOfBirth || null,
@@ -663,6 +629,13 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
       const patient = payload.patient;
       const procedure = payload.procedure;
       const confirmNewPatient = Boolean(req.body?.confirmNewPatient);
+      const selectedPatientId = stringValue(req.body?.selectedPatientId, 80);
+      const fieldResolutions =
+        req.body?.fieldResolutions && typeof req.body.fieldResolutions === "object"
+          ? req.body.fieldResolutions
+          : {};
+      const manualFields =
+        req.body?.manualFields && typeof req.body.manualFields === "object" ? req.body.manualFields : {};
       const label = sourceLabel(job.source_type, job.mime_type, job.original_name);
 
       if (!patient.firstName || !patient.lastName) {
@@ -706,11 +679,47 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
         if (!procedure.treatmentDate) procedure.treatmentDate = datedVisitRows[0].treatmentDate;
       }
 
-      const match = await findMatchingClinicalPatient(client, patient);
-      let clinicalRecordId = match.record ? match.record.id : null;
+      const found = await findMatchingClinicalPatients(client, patient);
+      const matches = found.candidates.map(mapMatchRecord);
       let createdNewPatient = false;
+      let matchReason = found.matchReason;
+      let clinicalRecordId = null;
+      let matchedRecord = null;
 
-      if (!clinicalRecordId && !confirmNewPatient) {
+      if (confirmNewPatient) {
+        clinicalRecordId = null;
+        matchReason = null;
+      } else if (selectedPatientId) {
+        const chosen =
+          matches.find((row) => String(row.id) === String(selectedPatientId)) ||
+          mapMatchRecord(await loadClinicalRecord(client, selectedPatientId));
+        if (!chosen) {
+          await client.query("ROLLBACK");
+          transactionOpen = false;
+          return res.status(400).json({ message: "The selected patient could not be found." });
+        }
+        clinicalRecordId = chosen.id;
+        matchReason = chosen.matchReason || "admin_selected";
+        matchedRecord = await loadClinicalRecord(client, chosen.id);
+      } else if (matches.length > 1) {
+        await client.query("ROLLBACK");
+        transactionOpen = false;
+        return res.status(409).json({
+          message: "More than one existing patient matches this name. Select the correct record or create a new patient.",
+          needsSelection: true,
+          matches,
+        });
+      } else if (matches.length === 1) {
+        await client.query("ROLLBACK");
+        transactionOpen = false;
+        return res.status(409).json({
+          message: "Possible existing patient found. Choose Merge With Existing Patient or Create New Patient.",
+          needsMergeDecision: true,
+          match: matches[0],
+          matches,
+          conflicts: findPatientConflicts(patient, matches[0]),
+        });
+      } else if (!confirmNewPatient) {
         await client.query("ROLLBACK");
         transactionOpen = false;
         return res.status(409).json({
@@ -726,9 +735,7 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
         });
       }
 
-      if (clinicalRecordId) {
-        // Existing patient: only append new treatment rows — never overwrite synced demographics.
-      } else {
+      if (!clinicalRecordId) {
         const notesParts = ["Imported via Admin Document Data Extraction"];
         if (patient.age) notesParts.push(`Age at import: ${patient.age}`);
         const created = await clinicalPatients.createClinicalRecord(
@@ -745,11 +752,43 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
             gender: patient.gender,
             address: patient.address,
             notes: notesParts.join(". "),
+            patientCategory: inferPatientCategory(patient.age),
           },
           { id: req.admin.id, role: "admin-sync" }
         );
         clinicalRecordId = created.id;
         createdNewPatient = true;
+      } else if (matchedRecord) {
+        const conflicts = findPatientConflicts(patient, matchedRecord);
+        const updates = {};
+        for (const conflict of conflicts) {
+          const choice = String(fieldResolutions[conflict.field] || "").toLowerCase();
+          if (choice === "document" || choice === "use document") {
+            if (conflict.field === "Phone") updates.phone = patient.phone;
+            if (conflict.field === "Email") updates.email = patient.email;
+            if (conflict.field === "Date of Birth") updates.dateOfBirth = patient.dateOfBirth;
+            if (conflict.field === "Address") updates.address = patient.address;
+          } else if (choice === "manual" || choice === "edit manually") {
+            if (conflict.field === "Phone") updates.phone = stringValue(manualFields.phone, 40) || patient.phone;
+            if (conflict.field === "Email") updates.email = normalizeEmail(manualFields.email) || patient.email;
+            if (conflict.field === "Date of Birth") {
+              updates.dateOfBirth = toIsoDocumentDate(manualFields.dateOfBirth) || patient.dateOfBirth;
+            }
+            if (conflict.field === "Address") updates.address = stringValue(manualFields.address, 300) || patient.address;
+          }
+        }
+        if (Object.keys(updates).length) {
+          try {
+            await clinicalPatients.updateClinicalRecord(
+              client,
+              clinicalRecordId,
+              updates,
+              { id: req.admin.id, role: "admin-sync" }
+            );
+          } catch (updateError) {
+            if (updateError.status !== 403) throw updateError;
+          }
+        }
       }
 
       let treatment = null;
@@ -905,10 +944,10 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
           `Source: ${label}`,
           `Result: Successful`,
           `Patient: ${clinicalRecordId}`,
-          createdNewPatient ? "Created new patient record" : "Linked existing patient record without changing synced demographics",
+          createdNewPatient ? "Created new patient record" : "Merged with existing patient after admin confirmation",
           treatment?.id ? `Treatments saved: ${savedTreatments.length}` : "No treatment row (patient info only)",
           skippedDuplicates ? `Duplicates skipped: ${skippedDuplicates}` : null,
-          match.matchReason ? `Match: ${match.matchReason}` : null,
+          matchReason ? `Match: ${matchReason}` : null,
           "Temporary source document deleted; only structured data retained",
         ]
           .filter(Boolean)
@@ -935,7 +974,7 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
           clinicalRecordId: String(clinicalRecordId),
           treatmentId: treatment?.id || null,
           createdNewPatient,
-          matchReason: match.matchReason,
+          matchReason,
         },
       });
     } catch (error) {

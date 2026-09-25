@@ -68,7 +68,7 @@ function countFilledFields(fields) {
     }
   ).length;
   const visits = Array.isArray(fields.visits) ? fields.visits : [];
-  return base + Math.min(visits.filter((row) => String(row?.treatment || "").trim()).length, 8);
+  return base + visits.filter((row) => String(row?.treatment || "").trim()).length;
 }
 
 function mergeEasyOcrResults(primary, secondary) {

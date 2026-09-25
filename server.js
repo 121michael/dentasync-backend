@@ -195,6 +195,8 @@ async function sendPasswordResetEmail({ to, token, expiresAt, recipientName }) {
 
 const { createClinicSmsService } = require("./services/clinicSms");
 const { createCleaningReminderJob } = require("./services/cleaningReminders");
+const { createDocumentSyncCleanupJob } = require("./services/documentSyncCleanupJob");
+const path = require("path");
 
 const clinicSms = createClinicSmsService({
   db,
@@ -415,6 +417,10 @@ app.use(
 // ==========================================
 const PORT = process.env.PORT || 5000;
 const cleaningReminderJob = createCleaningReminderJob({ db, clinicSms });
+const documentSyncCleanupJob = createDocumentSyncCleanupJob({
+  db,
+  uploadDirectory: path.join(process.cwd(), "uploads", "admin-document-sync"),
+});
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`✅ DentaSync server running on http://localhost:${PORT}`);
@@ -426,7 +432,9 @@ if (require.main === module) {
       console.log("Clinic SMS: SEMAPHORE_API_KEY is missing — staff/patient SMS will fail.");
     }
     cleaningReminderJob.start();
+    documentSyncCleanupJob.start();
     console.log("Cleaning reminder SMS job scheduled (every 4–6 months based on last visit).");
+    console.log("Document sync temporary scans expire after 24 hours (server clock).");
   });
 }
 
