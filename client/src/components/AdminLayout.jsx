@@ -37,7 +37,6 @@ export function useAdminUi() {
 const navigation = [
   { to: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { to: "/admin/users", label: "Manage User", icon: Users },
-  { to: "/admin/archived-records", label: "Archive", icon: Archive },
   { to: "/admin/patient-records", label: "Patient Record", icon: FolderOpen },
   { to: "/admin/rfid", label: "RFID Tags", icon: CreditCard },
   { to: "/admin/schedule", label: "Clinic Schedule", icon: CalendarDays },
@@ -46,11 +45,13 @@ const navigation = [
   { to: "/admin/ai-settings", label: "Manage AI Settings", icon: Bot },
   { to: "/admin/settings", label: "System Settings", icon: Settings },
   { to: "/admin/sync-data", label: "Sync Data", icon: Cloud },
+  { to: "/admin/archived-records", label: "Archive", icon: Archive },
 ];
 
 const PAGE_TITLES = {
   "/admin/dashboard": "Dashboard Overview",
   "/admin/users": "User Management",
+  "/admin/archived-records": "Archive Records",
   "/admin/patient-records": "Patient Records Vault",
   "/admin/rfid": "RFID Tag Assignments",
   "/admin/schedule": "Clinic Schedule & Roster",

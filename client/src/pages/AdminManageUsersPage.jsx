@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Archive, Eye, Pencil, Plus, Search } from "lucide-react";
-import { useSearchParams } from "react-router-dom";
+import { Navigate, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { AdminModal, AdminStatusBadge } from "../components/AdminUI";
@@ -9,13 +9,6 @@ import { formatAdminDate } from "../adminUtils";
 import { matchesNotificationFocus } from "../notificationFocus";
 
 const TABS = [
-  { id: "staff", label: "Clinic Staff" },
-  { id: "dentist", label: "Dentists" },
-  { id: "patient", label: "Patients" },
-  { id: "archive", label: "Archive Records" },
-];
-
-const ARCHIVE_ROLES = [
   { id: "staff", label: "Clinic Staff" },
   { id: "dentist", label: "Dentists" },
   { id: "patient", label: "Patients" },
@@ -68,10 +61,6 @@ export function AdminManageUsersPage() {
     const urlTab = searchParams.get("tab");
     return TABS.some((item) => item.id === urlTab) ? urlTab : "staff";
   });
-  const [archiveRole, setArchiveRole] = useState(() => {
-    const urlRole = searchParams.get("archiveRole");
-    return ARCHIVE_ROLES.some((item) => item.id === urlRole) ? urlRole : "staff";
-  });
   const [data, setData] = useState(null);
   const [pending, setPending] = useState([]);
   const [rejected, setRejected] = useState([]);
@@ -87,22 +76,8 @@ export function AdminManageUsersPage() {
   const [focusKey, setFocusKey] = useState(() => searchParams.get("focus") || "");
   const focusedRowRef = useRef(null);
 
-  const isArchiveTab = tab === "archive";
-
   const load = useCallback(async () => {
     try {
-      if (isArchiveTab) {
-        const list = await api.getAdminArchivedRecords({
-          search: applied,
-          role: archiveRole,
-          limit: 50,
-        });
-        setData(list);
-        setPending([]);
-        setRejected([]);
-        setError("");
-        return;
-      }
       const loader =
         tab === "patient" ? api.getAdminPatients : tab === "staff" ? api.getAdminStaff : api.getAdminDentists;
       const [list, pendingResponse, rejectedResponse] = await Promise.all([
@@ -117,7 +92,7 @@ export function AdminManageUsersPage() {
     } catch (loadError) {
       setError(loadError.message);
     }
-  }, [applied, archiveRole, isArchiveTab, tab]);
+  }, [applied, tab]);
 
   useEffect(() => {
     load();
@@ -125,25 +100,20 @@ export function AdminManageUsersPage() {
 
   const users = useMemo(() => {
     if (!data) return [];
-    if (isArchiveTab) return data.records || [];
     return (tab === "patient" ? data.patients : tab === "staff" ? data.staff : data.dentists) || [];
-  }, [data, isArchiveTab, tab]);
+  }, [data, tab]);
 
   useEffect(() => {
     const urlTab = searchParams.get("tab");
     if (urlTab && TABS.some((item) => item.id === urlTab) && urlTab !== tab) {
       setTab(urlTab);
     }
-    const urlRole = searchParams.get("archiveRole");
-    if (urlRole && ARCHIVE_ROLES.some((item) => item.id === urlRole) && urlRole !== archiveRole) {
-      setArchiveRole(urlRole);
-    }
     const focus = searchParams.get("focus");
     if (focus) setFocusKey(focus);
-  }, [archiveRole, searchParams, tab]);
+  }, [searchParams, tab]);
 
   useEffect(() => {
-    if (!focusKey || !users.length || isArchiveTab) return;
+    if (!focusKey || !users.length) return;
     const match = users.find((user) =>
       matchesNotificationFocus(user, focusKey, ["id", "email", "phone", "patientId"])
     );
@@ -163,7 +133,7 @@ export function AdminManageUsersPage() {
       window.clearTimeout(timer);
       window.clearTimeout(clearTimer);
     };
-  }, [focusKey, isArchiveTab, users, searchParams, setSearchParams]);
+  }, [focusKey, users, searchParams, setSearchParams]);
 
   function selectTab(nextTab) {
     setTab(nextTab);
@@ -172,24 +142,11 @@ export function AdminManageUsersPage() {
     setData(null);
     const next = new URLSearchParams(searchParams);
     next.set("tab", nextTab);
-    if (nextTab !== "archive") next.delete("archiveRole");
-    else next.set("archiveRole", archiveRole);
-    setSearchParams(next, { replace: true });
-  }
-
-  function selectArchiveRole(nextRole) {
-    setArchiveRole(nextRole);
-    setSearch("");
-    setApplied("");
-    setData(null);
-    const next = new URLSearchParams(searchParams);
-    next.set("tab", "archive");
-    next.set("archiveRole", nextRole);
     setSearchParams(next, { replace: true });
   }
 
   function openCreate() {
-    if (tab === "patient" || isArchiveTab) {
+    if (tab === "patient") {
       pushToast("Patients self-register. Approve pending requests below.", "warning");
       return;
     }
@@ -202,7 +159,7 @@ export function AdminManageUsersPage() {
   }
 
   function openEdit(user) {
-    if (tab === "patient" || isArchiveTab) {
+    if (tab === "patient") {
       pushToast("Patient portal accounts are self-registered. Use Approve or Reject instead.", "warning");
       return;
     }
@@ -222,7 +179,7 @@ export function AdminManageUsersPage() {
 
   async function saveUser(event) {
     event.preventDefault();
-    if (tab === "patient" || isArchiveTab) {
+    if (tab === "patient") {
       pushToast("Administrators cannot create patient login accounts.", "error");
       return;
     }
@@ -248,7 +205,7 @@ export function AdminManageUsersPage() {
 
   async function archiveUser(user) {
     const name = user.fullName || user.email;
-    const category = archiveCategoryLabel(isArchiveTab ? archiveRole : tab);
+    const category = archiveCategoryLabel(tab);
     const ok = await confirm({
       title: "Archive User",
       message: `Are you sure you want to archive ${name}? The ${category} record will be moved to Archive Records and will no longer appear in the active user list.`,
@@ -343,21 +300,15 @@ export function AdminManageUsersPage() {
     }
   }
 
+  if (searchParams.get("tab") === "archive") {
+    return <Navigate to="/admin/archived-records" replace />;
+  }
+
   if (error && !data) return <ErrorState message={error} onRetry={load} />;
   if (!data) return <LoadingState label="Loading user accounts…" />;
 
   const heading =
-    isArchiveTab
-      ? archiveRole === "staff"
-        ? "Archived Clinic Staff"
-        : archiveRole === "dentist"
-          ? "Archived Dentists"
-          : "Archived Patients"
-      : tab === "staff"
-        ? "Staff Accounts"
-        : tab === "dentist"
-          ? "Dentist Accounts"
-          : "Patient Portal Accounts";
+    tab === "staff" ? "Staff Accounts" : tab === "dentist" ? "Dentist Accounts" : "Patient Portal Accounts";
 
   return (
     <div className="admin-page">
@@ -378,36 +329,18 @@ export function AdminManageUsersPage() {
       <section className="admin-panel">
         <div className="admin-panel__heading">
           <div>
-            <span className="eyebrow">{isArchiveTab ? "Archive Records" : "Account operations"}</span>
+            <span className="eyebrow">Account operations</span>
             <h2>{heading}</h2>
             <p>
-              {isArchiveTab
-                ? "Archived accounts are read-only. Original details stay unchanged and related clinical records remain attached."
-                : tab === "patient"
-                  ? "Patients create their own accounts. Approve them here so they can sign in, open the dashboard, and book appointments. Admin does not create patient accounts."
-                  : "Admin can create dentist and staff accounts only. Active accounts can be edited or archived."}
+              {tab === "patient"
+                ? "Patients create their own accounts. Approve them here so they can sign in, open the dashboard, and book appointments. Admin does not create patient accounts."
+                : "Admin can create dentist and staff accounts only. Active accounts can be edited or archived."}
             </p>
           </div>
-          {!isArchiveTab && tab !== "patient" ? (
+          {tab !== "patient" ? (
             <button className="button button--primary" onClick={openCreate}><Plus size={16} /> Provision Profile</button>
           ) : null}
         </div>
-
-        {isArchiveTab ? (
-          <div className="admin-tabs" role="tablist" aria-label="Archived records by category">
-            {ARCHIVE_ROLES.map((item) => (
-              <button
-                key={item.id}
-                role="tab"
-                aria-selected={archiveRole === item.id}
-                className={`admin-tab ${archiveRole === item.id ? "is-active" : ""}`}
-                onClick={() => selectArchiveRole(item.id)}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-        ) : null}
 
         <form
           className="admin-toolbar"
@@ -422,13 +355,9 @@ export function AdminManageUsersPage() {
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder={
-                isArchiveTab
-                  ? archiveRole === "patient"
-                    ? "Search archived patients by name, email, or Patient ID"
-                    : `Search archived ${archiveRole} accounts`
-                  : tab === "patient"
-                    ? "Search patients by name, email, or Patient ID"
-                    : `Search ${tab} accounts`
+                tab === "patient"
+                  ? "Search patients by name, email, or Patient ID"
+                  : `Search ${tab} accounts`
               }
             />
           </label>
@@ -440,18 +369,15 @@ export function AdminManageUsersPage() {
             <table className="admin-table">
               <thead>
                 <tr>
-                  {isArchiveTab && archiveRole === "patient" ? <th>Patient ID</th> : null}
-                  {!isArchiveTab && tab === "patient" ? <th>Patient ID</th> : null}
-                  <th>{isArchiveTab || tab === "patient" ? "Name" : "Account Name"}</th>
-                  {isArchiveTab && archiveRole === "patient" ? <th>Category</th> : null}
-                  {isArchiveTab && archiveRole !== "patient" ? <th>Email</th> : null}
-                  {!isArchiveTab && tab !== "patient" ? <th>System ID</th> : null}
-                  {!isArchiveTab && tab === "staff" ? <th>Operational Role</th> : null}
-                  {!isArchiveTab && tab === "dentist" ? <th>Specialization</th> : null}
-                  {!isArchiveTab && tab === "patient" ? <th>Phone</th> : null}
-                  {!isArchiveTab && tab !== "patient" ? <th>Contact Endpoint</th> : null}
-                  <th>{isArchiveTab ? "Original Status" : tab === "patient" ? "Status" : "Operational Status"}</th>
-                  {isArchiveTab ? <th>Archived Date</th> : <th>Actions</th>}
+                  {tab === "patient" ? <th>Patient ID</th> : null}
+                  <th>{tab === "patient" ? "Name" : "Account Name"}</th>
+                  {tab !== "patient" ? <th>System ID</th> : null}
+                  {tab === "staff" ? <th>Operational Role</th> : null}
+                  {tab === "dentist" ? <th>Specialization</th> : null}
+                  {tab === "patient" ? <th>Phone</th> : null}
+                  {tab !== "patient" ? <th>Contact Endpoint</th> : null}
+                  <th>{tab === "patient" ? "Status" : "Operational Status"}</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -459,7 +385,6 @@ export function AdminManageUsersPage() {
                   const pendingUser = isPendingAccount(user);
                   const rejectedUser = isRejectedAccount(user);
                   const approvedUser = isApprovedAccount(user);
-                  const originalStatus = user.originalStatus || user.status;
                   return (
                     <tr
                       key={user.id}
@@ -470,117 +395,97 @@ export function AdminManageUsersPage() {
                           : undefined
                       }
                     >
-                      {isArchiveTab && archiveRole === "patient" ? (
-                        <td><code>{user.patientId || user.id}</code></td>
-                      ) : null}
-                      {!isArchiveTab && tab === "patient" ? (
+                      {tab === "patient" ? (
                         <td><code>{user.patientId || user.id}</code></td>
                       ) : null}
                       <td><strong>{user.fullName}</strong></td>
-                      {isArchiveTab && archiveRole === "patient" ? (
-                        <td>{categoryLabel(user.patientCategory)}</td>
-                      ) : null}
-                      {isArchiveTab && archiveRole !== "patient" ? <td>{user.email}</td> : null}
-                      {!isArchiveTab && tab !== "patient" ? <td><code>{user.id}</code></td> : null}
-                      {!isArchiveTab && tab === "staff" ? (
+                      {tab !== "patient" ? <td><code>{user.id}</code></td> : null}
+                      {tab === "staff" ? (
                         <td>{user.operationalRole || user.position || "Clinic Staff"}</td>
                       ) : null}
-                      {!isArchiveTab && tab === "dentist" ? (
+                      {tab === "dentist" ? (
                         <td>{user.specialization || "General Dentistry"}</td>
                       ) : null}
-                      {!isArchiveTab && tab === "patient" ? <td>{user.phone || "—"}</td> : null}
-                      {!isArchiveTab && tab !== "patient" ? <td>{user.email}</td> : null}
+                      {tab === "patient" ? <td>{user.phone || "—"}</td> : null}
+                      {tab !== "patient" ? <td>{user.email}</td> : null}
                       <td>
                         <AdminStatusBadge
                           status={
-                            isArchiveTab
-                              ? originalStatus
-                              : rejectedUser
-                                ? "rejected"
-                                : pendingUser
-                                  ? "pending"
-                                  : approvedUser
-                                    ? "active"
-                                    : user.status
+                            rejectedUser
+                              ? "rejected"
+                              : pendingUser
+                                ? "pending"
+                                : approvedUser
+                                  ? "active"
+                                  : user.status
                           }
                         />
                       </td>
-                      {isArchiveTab ? (
-                        <td>
-                          <div className="admin-row-actions">
-                            <span>{formatAdminDate(user.archivedAt)}</span>
-                            <button className="button button--secondary button--compact" onClick={() => setDetail(user)}>
-                              <Eye size={14} /> View
-                            </button>
-                          </div>
-                        </td>
-                      ) : (
-                        <td>
-                          <div className="admin-row-actions">
-                            {tab === "patient" ? (
-                              <>
-                                <button className="button button--secondary button--compact" onClick={() => setDetail(user)}>
-                                  <Eye size={14} /> View
-                                </button>
-                                {pendingUser ? (
-                                  <>
-                                    <button
-                                      className="button button--primary button--compact"
-                                      disabled={actionBusyId === `${user.id}:approve`}
-                                      onClick={() =>
-                                        runLifecycle(
-                                          user,
-                                          "approve",
-                                          `Approve ${user.fullName} so they can open the patient dashboard and book appointments?`
-                                        )
-                                      }
-                                    >
-                                      Approve
-                                    </button>
-                                    <button
-                                      className="button button--danger button--compact"
-                                      disabled={actionBusyId === `${user.id}:reject`}
-                                      onClick={() =>
-                                        runLifecycle(user, "reject", "Are you sure you want to reject this patient account?")
-                                      }
-                                    >
-                                      Reject
-                                    </button>
-                                  </>
-                                ) : null}
-                                {approvedUser ? (
+                      <td>
+                        <div className="admin-row-actions">
+                          {tab === "patient" ? (
+                            <>
+                              <button className="button button--secondary button--compact" onClick={() => setDetail(user)}>
+                                <Eye size={14} /> View
+                              </button>
+                              {pendingUser ? (
+                                <>
                                   <button
-                                    className="button button--secondary button--compact"
-                                    onClick={() => runLifecycle(user, "suspend", `Suspend ${user.fullName}?`)}
+                                    className="button button--primary button--compact"
+                                    disabled={actionBusyId === `${user.id}:approve`}
+                                    onClick={() =>
+                                      runLifecycle(
+                                        user,
+                                        "approve",
+                                        `Approve ${user.fullName} so they can open the patient dashboard and book appointments?`
+                                      )
+                                    }
                                   >
-                                    Suspend
+                                    Approve
                                   </button>
-                                ) : null}
+                                  <button
+                                    className="button button--danger button--compact"
+                                    disabled={actionBusyId === `${user.id}:reject`}
+                                    onClick={() =>
+                                      runLifecycle(user, "reject", "Are you sure you want to reject this patient account?")
+                                    }
+                                  >
+                                    Reject
+                                  </button>
+                                </>
+                              ) : null}
+                              {approvedUser ? (
                                 <button
                                   className="button button--secondary button--compact"
-                                  disabled={actionBusyId === `${user.id}:archive`}
-                                  onClick={() => archiveUser(user)}
+                                  onClick={() => runLifecycle(user, "suspend", `Suspend ${user.fullName}?`)}
                                 >
-                                  <Archive size={14} /> Archive
+                                  Suspend
                                 </button>
-                              </>
-                            ) : (
-                              <>
-                                <button className="button button--secondary button--compact" onClick={() => openEdit(user)}>
-                                  <Pencil size={14} /> Edit
-                                </button>
-                                <button
-                                  className="button button--secondary button--compact"
-                                  disabled={actionBusyId === `${user.id}:archive`}
-                                  onClick={() => archiveUser(user)}
-                                >
-                                  <Archive size={14} /> Archive
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        </td>
-                      )}
+                              ) : null}
+                              <button
+                                className="button button--secondary button--compact"
+                                disabled={actionBusyId === `${user.id}:archive`}
+                                onClick={() => archiveUser(user)}
+                              >
+                                <Archive size={14} /> Archive
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button className="button button--secondary button--compact" onClick={() => openEdit(user)}>
+                                <Pencil size={14} /> Edit
+                              </button>
+                              <button
+                                className="button button--secondary button--compact"
+                                disabled={actionBusyId === `${user.id}:archive`}
+                                onClick={() => archiveUser(user)}
+                              >
+                                <Archive size={14} /> Archive
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}
@@ -589,25 +494,17 @@ export function AdminManageUsersPage() {
           </div>
         ) : (
           <EmptyState
-            title={
-              isArchiveTab
-                ? `No archived ${archiveRole === "patient" ? "patients" : archiveRole === "dentist" ? "dentists" : "clinic staff"}`
-                : tab === "patient"
-                  ? "No patient portal accounts yet"
-                  : "No accounts found"
-            }
+            title={tab === "patient" ? "No patient portal accounts yet" : "No accounts found"}
             detail={
-              isArchiveTab
-                ? "Archived accounts in this category will appear here."
-                : tab === "patient"
-                  ? "Patients must register themselves. Approved accounts appear here."
-                  : "Provision a dentist or staff profile to get started."
+              tab === "patient"
+                ? "Patients must register themselves. Approved accounts appear here."
+                : "Provision a dentist or staff profile to get started."
             }
           />
         )}
       </section>
 
-      {!isArchiveTab && tab === "patient" ? (
+      {tab === "patient" ? (
         <>
           <section className="admin-panel">
             <div className="admin-panel__heading">
@@ -752,7 +649,7 @@ export function AdminManageUsersPage() {
       ) : null}
 
       {detail ? (
-        <AdminModal title={isArchiveTab ? "Archived record" : "Account details"} onClose={() => setDetail(null)}>
+        <AdminModal title="Account details" onClose={() => setDetail(null)}>
           <div className="admin-detail-grid">
             <p><small>Name</small><strong>{detail.fullName}</strong></p>
             {detail.patientId ? <p><small>Patient ID</small><strong>{detail.patientId}</strong></p> : null}
@@ -763,10 +660,7 @@ export function AdminManageUsersPage() {
             {detail.patientCategory ? (
               <p><small>Category</small><strong>{categoryLabel(detail.patientCategory)}</strong></p>
             ) : null}
-            <p><small>{isArchiveTab ? "Original status" : "Status"}</small><strong className="capitalize">{detail.originalStatus || detail.status}</strong></p>
-            {isArchiveTab ? (
-              <p><small>Archived date</small><strong>{formatAdminDate(detail.archivedAt)}</strong></p>
-            ) : null}
+            <p><small>Status</small><strong className="capitalize">{detail.status}</strong></p>
           </div>
         </AdminModal>
       ) : null}
