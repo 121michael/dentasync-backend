@@ -67,6 +67,17 @@ async function startPortal(seedUsers, { missingPatientColumns = false } = {}) {
       return { rows: [cloneUser(target)] };
     }
 
+    if (sql.includes("SET is_archived = FALSE")) {
+      const target = users.get(String(params[0]));
+      if (!target) return { rows: [] };
+      Object.assign(target, {
+        is_archived: false,
+        archived_at: null,
+        archived_by: null,
+      });
+      return { rows: [cloneUser(target)] };
+    }
+
     if (sql.includes("FROM users AS account") && sql.includes("COALESCE(account.is_archived, FALSE) = TRUE")) {
       if (missingPatientColumns && sql.includes("account.patient_id")) {
         const error = new Error('column "patient_id" does not exist');
@@ -260,33 +271,45 @@ test("archiving a patient keeps Patient ID and related identity fields", async (
   }
 });
 
-test("archived records cannot be restored or permanently deleted", async () => {
+test("archived accounts can be restored by an administrator without duplicating records", async () => {
   const portal = await startPortal(
-    seed.map((user) => (user.id === "dentist-1" ? { ...user, is_archived: true } : user))
+    seed.map((user) =>
+      user.id === "patient-1"
+        ? { ...user, is_archived: true, archived_at: "2026-09-28T00:00:00.000Z", archived_by: "admin-1" }
+        : user
+    )
   );
   try {
-    const restore = await fetch(`${portal.url}/accounts/dentist-1/lifecycle`, {
+    const restore = await fetch(`${portal.url}/accounts/patient-1/lifecycle`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action: "restore" }),
     });
-    assert.equal(restore.status, 403);
+    assert.equal(restore.status, 200);
+    const body = await restore.json();
+    assert.equal(body.account.patientId, "A2026_01");
+    assert.equal(body.account.status, "active");
+    assert.equal(portal.users.get("patient-1").is_archived, false);
+    assert.equal(portal.users.get("patient-1").patient_id, "A2026_01");
+    assert.equal(portal.users.get("patient-1").status, "Active");
 
-    const removed = await fetch(`${portal.url}/archived/dentist-1`, {
+    const archived = await fetch(`${portal.url}/archived?role=patient`);
+    const archivedBody = await archived.json();
+    assert.equal(archivedBody.records.length, 0);
+
+    const active = await fetch(`${portal.url}/patients?limit=50`);
+    const activeBody = await active.json();
+    assert.equal(activeBody.patients.length, 1);
+    assert.equal(activeBody.patients[0].id, "patient-1");
+    assert.equal(activeBody.patients[0].patientId, "A2026_01");
+
+    const removed = await fetch(`${portal.url}/archived/patient-1`, {
       method: "DELETE",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ confirm: "delete" }),
     });
     assert.equal(removed.status, 403);
-    assert.equal(portal.users.get("dentist-1").is_archived, true);
-    assert.ok(portal.users.has("dentist-1"));
-
-    const roleChange = await fetch(`${portal.url}/accounts/staff-1/role`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ role: "admin" }),
-    });
-    assert.equal(roleChange.status, 403);
+    assert.ok(portal.users.has("patient-1"));
   } finally {
     await portal.close();
   }

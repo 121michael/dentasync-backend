@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { Eye, Search } from "lucide-react";
+import { Eye, RotateCcw, Search } from "lucide-react";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { AdminModal, AdminStatusBadge } from "../components/AdminUI";
+import { useAdminUi } from "../components/AdminLayout";
 import { formatAdminDate } from "../adminUtils";
 
 const ARCHIVE_ROLES = [
@@ -21,12 +22,14 @@ function categoryLabel(value) {
 }
 
 export function AdminArchivedPage() {
+  const { pushToast, confirm } = useAdminUi();
   const [archiveRole, setArchiveRole] = useState("staff");
   const [data, setData] = useState(null);
   const [search, setSearch] = useState("");
   const [applied, setApplied] = useState("");
   const [error, setError] = useState("");
   const [detail, setDetail] = useState(null);
+  const [actionBusyId, setActionBusyId] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -54,6 +57,42 @@ export function AdminArchivedPage() {
     setData(null);
   }
 
+  async function restoreUser(user) {
+    const name = user.fullName || user.email;
+    const isPatient = archiveRole === "patient";
+    const isDentist = archiveRole === "dentist";
+    const title = isPatient
+      ? "Restore Patient Account"
+      : isDentist
+        ? "Restore Dentist Account"
+        : "Restore Staff Account";
+    const destination = isPatient
+      ? "active Patient Records section"
+      : isDentist
+        ? "active Dentists category in Manage User"
+        : "active Clinic Staff category in Manage User";
+    const ok = await confirm({
+      title,
+      message: `Are you sure you want to restore this ${
+        isPatient ? "patient" : isDentist ? "dentist" : "clinic staff"
+      } account? The account will be moved back to the ${destination}.`,
+      confirmLabel: "Restore Account",
+      tone: "primary",
+    });
+    if (!ok) return;
+    setActionBusyId(`${user.id}:restore`);
+    try {
+      const response = await api.updateAdminAccountLifecycle(user.id, "restore");
+      pushToast(response.message || `${name} was restored to the active list.`);
+      if (detail?.id === user.id) setDetail(null);
+      await load();
+    } catch (restoreError) {
+      pushToast(restoreError.message || "Unable to restore this account.", "error");
+    } finally {
+      setActionBusyId("");
+    }
+  }
+
   if (error && !data) return <ErrorState message={error} onRetry={load} />;
   if (!data) return <LoadingState label="Loading archived records…" />;
 
@@ -73,7 +112,7 @@ export function AdminArchivedPage() {
             <span className="eyebrow">Archive Records</span>
             <h2>{heading}</h2>
             <p>
-              Archived accounts are read-only. Original details stay unchanged and related clinical records remain attached.
+              Archived accounts stay unchanged until an administrator restores them to their active category.
             </p>
           </div>
         </div>
@@ -124,6 +163,7 @@ export function AdminArchivedPage() {
                   {archiveRole === "patient" ? <th>Category</th> : <th>Email</th>}
                   <th>Original Status</th>
                   <th>Archived Date</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -139,11 +179,18 @@ export function AdminArchivedPage() {
                       <td>{user.email}</td>
                     )}
                     <td><AdminStatusBadge status={user.originalStatus || user.status} /></td>
+                    <td>{formatAdminDate(user.archivedAt)}</td>
                     <td>
                       <div className="admin-row-actions">
-                        <span>{formatAdminDate(user.archivedAt)}</span>
                         <button className="button button--secondary button--compact" onClick={() => setDetail(user)}>
                           <Eye size={14} /> View
+                        </button>
+                        <button
+                          className="button button--primary button--compact"
+                          disabled={actionBusyId === `${user.id}:restore`}
+                          onClick={() => restoreUser(user)}
+                        >
+                          <RotateCcw size={14} /> Restore
                         </button>
                       </div>
                     </td>

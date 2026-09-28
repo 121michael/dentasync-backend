@@ -436,19 +436,15 @@ function attachAdminCommandCenterRoutes(router, { db }) {
       "suspend",
       "activate",
       "archive",
+      "restore",
     ]);
 
     if (!accountId) {
       return res.status(400).json({ message: "A valid account ID is required." });
     }
-    if (action === "restore") {
-      return res.status(403).json({
-        message: "Archived records are read-only and cannot be restored.",
-      });
-    }
     if (!allowed.has(action)) {
       return res.status(400).json({
-        message: "Lifecycle action must be verify, approve, reject, suspend, activate, or archive.",
+        message: "Lifecycle action must be verify, approve, reject, suspend, activate, archive, or restore.",
       });
     }
     if (String(req.admin.id) === String(accountId) && ["suspend", "archive", "reject"].includes(action)) {
@@ -475,6 +471,51 @@ function attachAdminCommandCenterRoutes(router, { db }) {
         await client.query("ROLLBACK");
         transactionOpen = false;
         return res.status(404).json({ message: "Account not found." });
+      }
+
+      if (action === "restore") {
+        if (!target.is_archived) {
+          await client.query("ROLLBACK");
+          transactionOpen = false;
+          return res.status(409).json({ message: "Account is not archived." });
+        }
+        let restored;
+        try {
+          restored = await client.query(
+            `UPDATE users
+             SET is_archived = FALSE,
+                 archived_at = NULL,
+                 archived_by = NULL
+             WHERE id::text = $1
+             RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by, patient_id, patient_category`,
+            [accountId]
+          );
+        } catch (error) {
+          if (error?.code !== "42703") throw error;
+          restored = await client.query(
+            `UPDATE users
+             SET is_archived = FALSE,
+                 archived_at = NULL,
+                 archived_by = NULL
+             WHERE id::text = $1
+             RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by`,
+            [accountId]
+          );
+        }
+        await client.query("COMMIT");
+        transactionOpen = false;
+        await audit(db, req, {
+          action: "restore_account",
+          targetType: "account",
+          targetId: accountId,
+          targetLabel: target.email,
+          result: "success",
+          detail: "Archived account restored to its active category without duplicating records.",
+        });
+        return res.json({
+          message: "Account restored successfully.",
+          account: mapAccount(restored.rows[0]),
+        });
       }
 
       if (target.is_archived) {
