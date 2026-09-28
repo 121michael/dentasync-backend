@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Navigate, useSearchParams } from "react-router-dom";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
@@ -26,9 +26,8 @@ function hoursSummary(hours, defaults) {
   return `${open} – ${close}`;
 }
 
-export function AdminClinicSchedulePage() {
+function AdminClinicCalendarPanel({ onOpenSlots }) {
   const { pushToast, confirm } = useAdminUi();
-  const navigate = useNavigate();
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth() + 1);
@@ -160,7 +159,7 @@ export function AdminClinicSchedulePage() {
   if (!data) return <LoadingState label="Loading clinic calendar…" />;
 
   return (
-    <div className="admin-page">
+    <>
       <section className="admin-panel">
         <div className="admin-panel__heading">
           <div>
@@ -230,7 +229,7 @@ export function AdminClinicSchedulePage() {
               <button
                 className="button button--primary button--compact"
                 type="button"
-                onClick={() => navigate(`/admin/schedule/slots?date=${selectedDate}`)}
+                onClick={() => onOpenSlots(selectedDate)}
               >
                 Set Slot
               </button>
@@ -330,11 +329,11 @@ export function AdminClinicSchedulePage() {
       ) : null}
 
       {busy && !dayDetail ? <LoadingState label="Loading date…" /> : null}
-    </div>
+    </>
   );
 }
 
-export function AdminClinicSlotsPage() {
+function AdminClinicSlotsPanel() {
   const { pushToast, confirm } = useAdminUi();
   const [searchParams, setSearchParams] = useSearchParams();
   const todayIso = new Date().toISOString().slice(0, 10);
@@ -361,7 +360,11 @@ export function AdminClinicSlotsPage() {
 
   function changeDate(nextDate) {
     setDate(nextDate);
-    setSearchParams(nextDate ? { date: nextDate } : {}, { replace: true });
+    const next = new URLSearchParams(searchParams);
+    next.set("tab", "slots");
+    if (nextDate) next.set("date", nextDate);
+    else next.delete("date");
+    setSearchParams(next, { replace: true });
   }
 
   function toggleSlot(slot) {
@@ -442,8 +445,7 @@ export function AdminClinicSlotsPage() {
   );
 
   return (
-    <div className="admin-page">
-      <section className="admin-panel">
+    <section className="admin-panel">
         <div className="admin-panel__heading">
           <div>
             <span className="eyebrow">Clinic Schedule</span>
@@ -506,6 +508,56 @@ export function AdminClinicSlotsPage() {
           </div>
         </form>
       </section>
+    );
+}
+
+const SCHEDULE_TABS = [
+  { id: "calendar", label: "View Calendar" },
+  { id: "slots", label: "Set Slot" },
+];
+
+export function AdminClinicSchedulePage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = searchParams.get("tab") === "slots" ? "slots" : "calendar";
+
+  function selectTab(nextTab, extra = {}) {
+    const next = new URLSearchParams(searchParams);
+    if (nextTab === "slots") next.set("tab", "slots");
+    else next.delete("tab");
+    if (extra.date) next.set("date", extra.date);
+    if (nextTab === "calendar") next.delete("date");
+    setSearchParams(next, { replace: true });
+  }
+
+  return (
+    <div className="admin-page">
+      <div className="admin-tabs" role="tablist" aria-label="Clinic schedule sections">
+        {SCHEDULE_TABS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            role="tab"
+            aria-selected={tab === item.id}
+            className={`admin-tab ${tab === item.id ? "is-active" : ""}`}
+            onClick={() => selectTab(item.id)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+      {tab === "slots" ? (
+        <AdminClinicSlotsPanel />
+      ) : (
+        <AdminClinicCalendarPanel onOpenSlots={(date) => selectTab("slots", { date })} />
+      )}
     </div>
   );
+}
+
+export function AdminClinicSlotsRedirect() {
+  const [params] = useSearchParams();
+  const next = new URLSearchParams({ tab: "slots" });
+  const date = params.get("date");
+  if (date) next.set("date", date);
+  return <Navigate to={`/admin/schedule?${next}`} replace />;
 }

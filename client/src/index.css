@@ -3500,21 +3500,6 @@ strong {
 }
 .admin-nav__link.is-active svg { color: var(--amethyst-700); }
 .admin-nav__button { width: 100%; border: 0; cursor: pointer; }
-.admin-nav__group { display: grid; gap: .12rem; }
-.admin-nav__group-label {
-  display: flex;
-  align-items: center;
-  gap: .7rem;
-  min-height: 36px;
-  padding: .45rem .76rem .2rem;
-  color: rgba(255,255,255,.55);
-  font-size: .68rem;
-  font-weight: 780;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-}
-.admin-nav__sub { display: grid; gap: .12rem; padding: 0 0 .2rem .55rem; }
-.admin-nav__link--sub { min-height: 36px; padding: .45rem .76rem; font-size: .74rem; }
 .admin-sidebar__footer { display: grid; gap: .85rem; margin-top: auto; padding: .85rem .45rem .15rem; border-top: 1px solid rgba(255,255,255,.14); }
 .admin-user-summary { display: flex; align-items: center; gap: .65rem; min-width: 0; }
 .admin-user-summary__avatar {
