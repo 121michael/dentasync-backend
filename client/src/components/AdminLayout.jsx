@@ -39,7 +39,15 @@ const navigation = [
   { to: "/admin/users", label: "Manage User", icon: Users },
   { to: "/admin/patient-records", label: "Patient Record", icon: FolderOpen },
   { to: "/admin/rfid", label: "RFID Tags", icon: CreditCard },
-  { to: "/admin/schedule", label: "Clinic Schedule", icon: CalendarDays },
+  {
+    to: "/admin/schedule",
+    label: "Clinic Schedule",
+    icon: CalendarDays,
+    children: [
+      { to: "/admin/schedule", label: "View Calendar", end: true },
+      { to: "/admin/schedule/slots", label: "Set Slot" },
+    ],
+  },
   { to: "/admin/notifications", label: "Notifications", icon: Bell },
   { to: "/admin/analytics", label: "General Analytics", icon: BarChart3 },
   { to: "/admin/ai-settings", label: "Manage AI Settings", icon: Bot },
@@ -54,7 +62,9 @@ const PAGE_TITLES = {
   "/admin/archived-records": "Archive Records",
   "/admin/patient-records": "Patient Records Vault",
   "/admin/rfid": "RFID Tag Assignments",
-  "/admin/schedule": "Clinic Schedule & Roster",
+  "/admin/schedule/slots": "Set Appointment Slots",
+  "/admin/schedule": "Clinic Schedule",
+  "/admin/roster": "Staff Roster",
   "/admin/notifications": "Notifications",
   "/admin/analytics": "General Operations Analytics",
   "/admin/ai-settings": "Amethyst AI Core Settings",
@@ -189,11 +199,38 @@ export function AdminLayout() {
           </div>
 
           <nav className="admin-nav" aria-label="Admin dashboard navigation">
-            {navigation.map(({ to, label, icon: Icon }) => {
+            {navigation.map(({ to, label, icon: Icon, children }) => {
               const showDot =
                 (to === "/admin/users" && alerts.pendingAccounts > 0) ||
                 (to === "/admin/schedule" && alerts.pendingAppointments > 0) ||
                 (to === "/admin/notifications" && alerts.unreadNotifications > 0);
+              const groupActive = children?.some((child) =>
+                child.end ? location.pathname === child.to : location.pathname.startsWith(child.to)
+              );
+              if (children?.length) {
+                return (
+                  <div key={to} className={`admin-nav__group ${groupActive ? "is-active" : ""}`}>
+                    <div className="admin-nav__group-label">
+                      <Icon size={18} aria-hidden="true" />
+                      <span>{label}</span>
+                      {showDot ? <span className="nav-alert-dot" aria-hidden="true" /> : null}
+                    </div>
+                    <div className="admin-nav__sub">
+                      {children.map((child) => (
+                        <NavLink
+                          key={child.to}
+                          to={child.to}
+                          end={Boolean(child.end)}
+                          onClick={() => setIsOpen(false)}
+                          className={({ isActive }) => `admin-nav__link admin-nav__link--sub ${isActive ? "is-active" : ""}`}
+                        >
+                          <span>{child.label}</span>
+                        </NavLink>
+                      ))}
+                    </div>
+                  </div>
+                );
+              }
               return (
                 <NavLink
                   key={to}

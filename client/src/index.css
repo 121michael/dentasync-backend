@@ -471,6 +471,7 @@ strong {
   margin-top: 0.35rem;
 }
 
+.muted,
 .muted-copy {
   color: var(--text-muted);
   font-size: 0.82rem;
@@ -3499,6 +3500,21 @@ strong {
 }
 .admin-nav__link.is-active svg { color: var(--amethyst-700); }
 .admin-nav__button { width: 100%; border: 0; cursor: pointer; }
+.admin-nav__group { display: grid; gap: .12rem; }
+.admin-nav__group-label {
+  display: flex;
+  align-items: center;
+  gap: .7rem;
+  min-height: 36px;
+  padding: .45rem .76rem .2rem;
+  color: rgba(255,255,255,.55);
+  font-size: .68rem;
+  font-weight: 780;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.admin-nav__sub { display: grid; gap: .12rem; padding: 0 0 .2rem .55rem; }
+.admin-nav__link--sub { min-height: 36px; padding: .45rem .76rem; font-size: .74rem; }
 .admin-sidebar__footer { display: grid; gap: .85rem; margin-top: auto; padding: .85rem .45rem .15rem; border-top: 1px solid rgba(255,255,255,.14); }
 .admin-user-summary { display: flex; align-items: center; gap: .65rem; min-width: 0; }
 .admin-user-summary__avatar {
@@ -5917,4 +5933,118 @@ strong {
   .staff-money-input input {
     width: 100%;
   }
+}
+
+.clinic-calendar__month {
+  margin: .2rem 0 .85rem;
+  font-size: 1.05rem;
+  letter-spacing: -.03em;
+}
+.clinic-calendar {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: .45rem;
+}
+.clinic-calendar__weekday {
+  color: var(--text-muted);
+  font-size: .68rem;
+  font-weight: 780;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  text-align: center;
+}
+.clinic-calendar__cell {
+  display: grid;
+  gap: .12rem;
+  min-height: 84px;
+  padding: .55rem .45rem;
+  border: 1px solid rgba(91, 42, 134, .12);
+  border-radius: 14px;
+  background: #fff;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.clinic-calendar__cell.is-empty {
+  border: 0;
+  background: transparent;
+  cursor: default;
+}
+.clinic-calendar__cell strong { font-size: .92rem; }
+.clinic-calendar__cell span,
+.clinic-calendar__cell small {
+  color: var(--text-muted);
+  font-size: .68rem;
+  font-weight: 650;
+}
+.clinic-calendar__cell.is-weekday { background: #f7f1fd; }
+.clinic-calendar__cell.is-weekend { background: #eef6ff; }
+.clinic-calendar__cell.is-holiday { background: #fff4e6; }
+.clinic-calendar__cell.is-custom { background: #f3e8ff; border-color: rgba(91, 42, 134, .28); }
+.clinic-calendar__cell.is-closed {
+  background: #fdecec;
+  border-color: rgba(176, 42, 55, .22);
+}
+.clinic-calendar__cell.has-unavailable { box-shadow: inset 0 0 0 2px rgba(146, 64, 14, .18); }
+.clinic-calendar__cell.is-selected {
+  border-color: var(--amethyst-700);
+  box-shadow: 0 0 0 2px rgba(91, 42, 134, .18);
+}
+.clinic-calendar__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .55rem;
+  margin-top: .9rem;
+  font-size: .72rem;
+  font-weight: 700;
+}
+.clinic-calendar__legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  padding: .28rem .55rem;
+  border-radius: 999px;
+  background: #f7f1fd;
+}
+.clinic-calendar__legend .is-weekend { background: #eef6ff; }
+.clinic-calendar__legend .is-holiday { background: #fff4e6; }
+.clinic-calendar__legend .is-custom { background: #f3e8ff; }
+.clinic-calendar__legend .is-closed { background: #fdecec; }
+.clinic-calendar__legend .is-unavailable { background: #fff7ed; }
+.clinic-schedule-modes {
+  display: grid;
+  gap: .45rem;
+  margin: .8rem 0;
+  border: 0;
+  padding: 0;
+}
+.clinic-schedule-modes label,
+.clinic-schedule-recurring {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  font-size: .84rem;
+}
+.clinic-slot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: .5rem;
+  margin: .7rem 0 1rem;
+}
+.clinic-slot {
+  display: grid;
+  gap: .18rem;
+  padding: .7rem .5rem;
+  border: 1px solid rgba(91, 42, 134, .14);
+  border-radius: 14px;
+  background: #f7f1fd;
+  cursor: pointer;
+}
+.clinic-slot small { color: var(--text-muted); text-transform: capitalize; }
+.clinic-slot--available { background: #f7f1fd; }
+.clinic-slot--unavailable { background: #fff7ed; }
+.clinic-slot--booked {
+  background: #fdecec;
+  cursor: not-allowed;
+  opacity: .85;
 }

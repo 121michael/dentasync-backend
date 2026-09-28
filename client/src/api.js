@@ -104,6 +104,8 @@ export const api = {
   getCurrentUser: () => request("/auth/me"),
   getDashboard: (options = {}) => request("/patient/dashboard", options),
   getCatalog: () => request("/patient/catalog"),
+  getAppointmentAvailability: (date) =>
+    request(`/patient/availability?date=${encodeURIComponent(date)}`),
   getAppointments: (options = {}) => request("/patient/appointments", options),
   createAppointment: (body) => request("/patient/appointments", { method: "POST", body }),
   cancelAppointment: (appointmentId) =>
@@ -350,6 +352,18 @@ export const api = {
     const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value || value === 0));
     return request(`/admin/schedules${search.size ? `?${search}` : ""}`);
   },
+  getAdminClinicSchedule: (params = {}) => {
+    const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value || value === 0));
+    return request(`/admin/clinic-schedule${search.size ? `?${search}` : ""}`);
+  },
+  getAdminClinicScheduleDay: (date) =>
+    request(`/admin/clinic-schedule/day?date=${encodeURIComponent(date)}`),
+  saveAdminClinicScheduleDay: (body) =>
+    request("/admin/clinic-schedule/day", { method: "PUT", body }),
+  saveAdminClinicScheduleSlots: (body) =>
+    request("/admin/clinic-schedule/slots", { method: "PUT", body }),
+  saveAdminClinicScheduleDefaults: (body) =>
+    request("/admin/clinic-schedule/defaults", { method: "PUT", body }),
   createAdminSchedule: (body) => request("/admin/schedules", { method: "POST", body }),
   updateAdminSchedule: (id, body) => request(`/admin/schedules/${id}`, { method: "PATCH", body }),
   deleteAdminSchedule: (id) => request(`/admin/schedules/${id}`, { method: "DELETE" }),

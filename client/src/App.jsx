@@ -32,6 +32,7 @@ import { AdminArchivedPage } from "./pages/AdminArchivedPage";
 import { AdminPatientRecordsPage } from "./pages/AdminPatientRecordsPage";
 import { AdminRfidPage } from "./pages/AdminRfidPage";
 import { AdminSchedulePage } from "./pages/AdminSchedulePage";
+import { AdminClinicSchedulePage, AdminClinicSlotsPage } from "./pages/AdminClinicSchedulePage";
 import { AdminAnalyticsPage } from "./pages/AdminAnalyticsPage";
 import { AdminAiSettingsPage } from "./pages/AdminAiSettingsPage";
 import { AdminSettingsPage } from "./pages/AdminSettingsPage";
@@ -168,7 +169,9 @@ function PortalRoutes() {
           <Route path="/admin/archived-records" element={<AdminArchivedPage />} />
           <Route path="/admin/patient-records" element={<AdminPatientRecordsPage />} />
           <Route path="/admin/rfid" element={<AdminRfidPage />} />
-          <Route path="/admin/schedule" element={<AdminSchedulePage />} />
+          <Route path="/admin/schedule" element={<AdminClinicSchedulePage />} />
+          <Route path="/admin/schedule/slots" element={<AdminClinicSlotsPage />} />
+          <Route path="/admin/roster" element={<AdminSchedulePage />} />
           <Route path="/admin/analytics" element={<AdminAnalyticsPage />} />
           <Route path="/admin/ai-settings" element={<AdminAiSettingsPage />} />
           <Route path="/admin/settings" element={<AdminSettingsPage />} />

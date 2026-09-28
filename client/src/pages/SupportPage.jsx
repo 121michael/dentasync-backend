@@ -25,8 +25,8 @@ export function SupportPage() {
         <article className="support-card glass-card">
           <span><Clock3 size={23} /></span>
           <h2>Clinic hours</h2>
-          <p>Monday to Saturday</p>
-          <strong>9:00 AM – 6:00 PM</strong>
+          <p>Weekdays 9:00 AM – 4:00 PM. Weekends and holidays 11:00 AM – 4:00 PM, unless the clinic schedule is updated.</p>
+          <strong>Mon–Fri 9–4 · Sat–Sun 11–4</strong>
         </article>
       </section>
       <section className="support-banner">

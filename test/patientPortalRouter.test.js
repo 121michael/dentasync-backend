@@ -50,7 +50,7 @@ test("patient portal exposes the booking catalog only to patient accounts", asyn
     assert.equal(response.status, 200);
     const body = await response.json();
 
-    assert.equal(body.services.length, 8);
+    assert.equal(body.services.length, 10);
     assert.equal(body.services[0].id, "cleaning");
     assert.equal(body.dentists.length, 4);
     assert.equal(body.dentists[0].id, "dr-sarah-cruz");

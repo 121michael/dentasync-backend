@@ -16,11 +16,7 @@ import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../compone
 import { useAuth } from "../useAuth";
 import { matchesNotificationFocus } from "../notificationFocus";
 
-const TIME_SLOTS = {
-  Morning: ["09:00", "09:30", "10:00", "10:30", "11:00"],
-  Afternoon: ["13:00", "13:30", "14:00", "14:30", "15:00"],
-  Evening: ["16:00", "16:30", "17:00", "17:30"],
-};
+const PERIOD_ORDER = ["Morning", "Afternoon", "Evening"];
 
 const LEGACY_SERVICE_NAMES = {
   "Dental Cleaning": "Dental Cleaning / Oral Prophylaxis",
@@ -103,6 +99,7 @@ export function AppointmentsPage() {
   const [isBusy, setIsBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [timePeriod, setTimePeriod] = useState("Morning");
+  const [availability, setAvailability] = useState(null);
   const [form, setForm] = useState({
     serviceId: "",
     appointmentDate: tomorrow(),
@@ -140,6 +137,36 @@ export function AppointmentsPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (!isBooking || !form.appointmentDate) {
+      setAvailability(null);
+      return undefined;
+    }
+    let active = true;
+    api
+      .getAppointmentAvailability(form.appointmentDate)
+      .then((response) => {
+        if (!active) return;
+        setAvailability(response);
+        const bookable = new Set(response.availableTimes || []);
+        setForm((current) =>
+          current.appointmentTime && bookable.has(current.appointmentTime)
+            ? current
+            : { ...current, appointmentTime: "" }
+        );
+        const periods = PERIOD_ORDER.filter((period) =>
+          (response.slots || []).some((slot) => slot.bookable && slot.period === period)
+        );
+        setTimePeriod((current) => (periods.includes(current) ? current : periods[0] || current));
+      })
+      .catch(() => {
+        if (active) setAvailability(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [form.appointmentDate, isBooking]);
 
   useEffect(() => {
     const focus = searchParams.get("focus");
@@ -413,8 +440,20 @@ export function AppointmentsPage() {
                 />
               </label>
             </div>
+            {availability?.closed ? (
+              <p className="inline-alert" role="status">
+                The clinic is closed on {displayDate(form.appointmentDate)}. Choose another date.
+              </p>
+            ) : null}
+            {availability && !availability.closed && availability.hours ? (
+              <p className="muted">
+                Clinic hours: {displayTime(availability.hours.open)} – {displayTime(availability.hours.close)}
+              </p>
+            ) : null}
             <div className="time-filter-row">
-              {Object.keys(TIME_SLOTS).map((period) => (
+              {PERIOD_ORDER.filter((period) =>
+                (availability?.slots || []).some((slot) => slot.bookable && slot.period === period)
+              ).map((period) => (
                 <button
                   type="button"
                   key={period}
@@ -426,17 +465,22 @@ export function AppointmentsPage() {
               ))}
             </div>
             <div className="time-slots">
-              {TIME_SLOTS[timePeriod].map((time) => (
-                <button
-                  type="button"
-                  key={time}
-                  className={`time-slot ${form.appointmentTime === time ? "is-selected" : ""}`}
-                  onClick={() => setForm((current) => ({ ...current, appointmentTime: time }))}
-                >
-                  <Clock3 size={15} /> {displayTime(time)}
-                </button>
-              ))}
+              {(availability?.slots || [])
+                .filter((slot) => slot.bookable && slot.period === timePeriod)
+                .map((slot) => (
+                  <button
+                    type="button"
+                    key={slot.time}
+                    className={`time-slot ${form.appointmentTime === slot.time ? "is-selected" : ""}`}
+                    onClick={() => setForm((current) => ({ ...current, appointmentTime: slot.time }))}
+                  >
+                    <Clock3 size={15} /> {displayTime(slot.time)}
+                  </button>
+                ))}
             </div>
+            {availability && !availability.closed && !(availability.availableTimes || []).length ? (
+              <p className="muted">No appointment slots are available on this date.</p>
+            ) : null}
           </section>
 
           <section className="glass-card booking-section">

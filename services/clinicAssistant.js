@@ -13,7 +13,7 @@ const DEFAULT_CLINIC = {
   address: "Makati, Metro Manila",
   phone: "+63 2 8555 1234",
   email: "care@amethystdental.example",
-  operatingHours: "Monday–Saturday · 9:00 AM – 6:00 PM",
+  operatingHours: "Monday–Friday 9:00 AM–4:00 PM · Saturday–Sunday and holidays 11:00 AM–4:00 PM",
 };
 
 const GENERIC_SERVICE_TOKENS = new Set([

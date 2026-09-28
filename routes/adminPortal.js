@@ -6,6 +6,7 @@ const bcrypt = require("bcrypt");
 const express = require("express");
 const { attachAdminDocumentSyncRoutes } = require("./adminDocumentSync");
 const { attachAdminCommandCenterRoutes } = require("./adminCommandCenter");
+const { attachClinicScheduleRoutes } = require("./clinicSchedule");
 const { writeAdminAudit } = require("../services/adminAudit");
 const clinicalPatients = require("../services/clinicalPatients");
 const { insertPatientNotification } = require("../services/patientPortalNotifications");
@@ -314,6 +315,7 @@ function createAdminPortalRouter({
     uploadDirectory: path.join(process.cwd(), "uploads", "admin-document-sync"),
   });
   attachAdminCommandCenterRoutes(router, { db });
+  attachClinicScheduleRoutes(router, { db });
 
   router.get("/dashboard", async (req, res) => {
     try {

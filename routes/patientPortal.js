@@ -15,6 +15,7 @@ const { analyzeDentalImageBuffer, DISCLAIMER: IMAGE_ANALYSIS_DISCLAIMER } = requ
 const staffCheckIn = require("../services/staffCheckIn");
 const { insertPatientNotification, mapPatientNotification } = require("../services/patientPortalNotifications");
 const staffWalkInQr = require("../services/staffWalkInQr");
+const clinicSchedule = require("../services/clinicSchedule");
 const { resolveAppSecrets } = require("../lib/securityConfig");
 
 const SERVICES = [
@@ -427,6 +428,31 @@ function createPatientPortalRouter({
     res.json({ services: SERVICES.map(mapCatalogService), dentists: DENTISTS });
   });
 
+  router.get("/availability", async (req, res) => {
+    const date = stringValue(req.query.date, 10);
+    if (!clinicSchedule.isIsoDate(date)) {
+      return res.status(400).json({ message: "Provide a valid appointment date." });
+    }
+    try {
+      const defaults = await clinicSchedule.loadDefaults(db);
+      const dayMap = await clinicSchedule.loadDayMap(db, date, date);
+      const hours = clinicSchedule.resolveOperatingHours(date, dayMap.get(date), defaults);
+      const savedSlots = await clinicSchedule.loadSlotMap(db, date);
+      const bookedTimes = await clinicSchedule.loadBookedTimes(db, date);
+      const slots = clinicSchedule.buildSlots(hours, defaults, savedSlots, bookedTimes);
+      return res.json({
+        date,
+        closed: hours.closed,
+        hours,
+        slots,
+        availableTimes: slots.filter((slot) => slot.bookable).map((slot) => slot.time),
+      });
+    } catch (error) {
+      console.error("Patient availability error:", error.message);
+      return res.status(500).json({ message: "Unable to load appointment availability." });
+    }
+  });
+
   router.get("/session", async (req, res) => {
     return res.json({
       user: formatPortalUser(req.user),
@@ -802,6 +828,26 @@ function createPatientPortalRouter({
 
     if (isPastDate(appointmentDate)) {
       return res.status(400).json({ message: "Appointments must be scheduled for a future date." });
+    }
+
+    try {
+      const defaults = await clinicSchedule.loadDefaults(db);
+      const dayMap = await clinicSchedule.loadDayMap(db, appointmentDate, appointmentDate);
+      const hours = clinicSchedule.resolveOperatingHours(appointmentDate, dayMap.get(appointmentDate), defaults);
+      const savedSlots = await clinicSchedule.loadSlotMap(db, appointmentDate);
+      const bookedTimes = await clinicSchedule.loadBookedTimes(db, appointmentDate);
+      if (hours.closed) {
+        return res.status(400).json({ message: "The clinic is closed on that date. Please choose another day." });
+      }
+      if (!clinicSchedule.isSlotBookable(hours, defaults, savedSlots, bookedTimes, normalizedAppointmentTime)) {
+        return res.status(400).json({
+          message: "That time is outside clinic hours or is not available. Please choose another slot.",
+        });
+      }
+    } catch (scheduleError) {
+      if (scheduleError?.code !== "42P01") {
+        console.warn("Clinic schedule booking check skipped:", scheduleError.message);
+      }
     }
 
     const normalizedProvider = stringValue(hmoProvider, 120);
