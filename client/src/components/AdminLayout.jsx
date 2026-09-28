@@ -1,7 +1,6 @@
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
-  Archive,
   BarChart3,
   Bell,
   Bot,
@@ -37,7 +36,6 @@ export function useAdminUi() {
 const navigation = [
   { to: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { to: "/admin/users", label: "Manage User", icon: Users },
-  { to: "/admin/archived-records", label: "Archived Records", icon: Archive },
   { to: "/admin/patient-records", label: "Patient Record", icon: FolderOpen },
   { to: "/admin/rfid", label: "RFID Tags", icon: CreditCard },
   { to: "/admin/schedule", label: "Update Schedule", icon: CalendarDays },
@@ -50,8 +48,7 @@ const navigation = [
 
 const PAGE_TITLES = {
   "/admin/dashboard": "Dashboard Overview",
-  "/admin/users": "Manage Users",
-  "/admin/archived-records": "Archived Registry Vault",
+  "/admin/users": "User Management",
   "/admin/patient-records": "Patient Records Vault",
   "/admin/rfid": "RFID Tag Assignments",
   "/admin/schedule": "Clinic Schedule & Roster",

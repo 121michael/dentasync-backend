@@ -459,3 +459,54 @@ test("reset-password hashes the submitted password before consuming a reset toke
     true
   );
 });
+
+test("login rejects archived clinic accounts without deleting credentials", async (t) => {
+  const passwordHash = await bcrypt.hash("SecurePass123", 4);
+  const app = express();
+  app.use(express.json());
+  app.use(
+    "/api/auth",
+    createAuthRouter({
+      db: {
+        async query(sql) {
+          if (/SELECT \* FROM users/i.test(sql)) {
+            return {
+              rows: [
+                {
+                  id: 7,
+                  first_name: "Juan",
+                  last_name: "Dela Cruz",
+                  email: "juan@email.com",
+                  phone: "639171234567",
+                  role: "staff",
+                  status: "Active",
+                  is_verified: true,
+                  is_archived: true,
+                  password_hash: passwordHash,
+                },
+              ],
+            };
+          }
+          return { rows: [] };
+        },
+      },
+      otpService: {},
+      authenticateToken: (_req, _res, next) => next(),
+      jwtSecret: "test-jwt-secret",
+    })
+  );
+
+  const server = await startServer(app);
+  t.after(server.close);
+
+  const response = await fetch(`${server.baseUrl}/api/auth/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "juan@email.com", password: "SecurePass123" }),
+  });
+  const body = await response.json();
+
+  assert.equal(response.status, 403);
+  assert.match(body.message, /archived/i);
+  assert.equal(body.token, undefined);
+});

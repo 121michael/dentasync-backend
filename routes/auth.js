@@ -553,6 +553,12 @@ function createAuthRouter({
         });
       }
 
+      if (user.is_archived) {
+        return res.status(403).json({
+          message: "This account has been archived. Please contact the administrator.",
+        });
+      }
+
       const token = jwt.sign(
         { id: user.id, role: user.role },
         jwtSecret,

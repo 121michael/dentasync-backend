@@ -163,6 +163,10 @@ function mapAccount(row, extras = {}) {
     status: (row.status || "active").toLowerCase(),
     verified: Boolean(row.is_verified),
     createdAt: row.created_at || null,
+    patientId: extras.patientId ?? row.patient_id ?? null,
+    patientCategory: extras.patientCategory ?? row.patient_category ?? null,
+    archivedAt: extras.archivedAt ?? row.archived_at ?? null,
+    isArchived: Boolean(extras.isArchived ?? row.is_archived),
   };
 
   if (row.last_visit !== undefined || extras.lastVisit !== undefined) {
@@ -263,15 +267,22 @@ function requireAdminAccount(db) {
   };
 }
 
-function searchClause(alias, search, params) {
+function searchClause(alias, search, params, { includePatientId = false } = {}) {
   if (!search) {
     return null;
   }
   params.push(`%${search}%`);
-  return `(${alias}.first_name ILIKE $${params.length}
-    OR ${alias}.last_name ILIKE $${params.length}
-    OR ${alias}.email ILIKE $${params.length}
-    OR ${alias}.phone ILIKE $${params.length})`;
+  const fields = [
+    `${alias}.first_name ILIKE $${params.length}`,
+    `${alias}.last_name ILIKE $${params.length}`,
+    `${alias}.email ILIKE $${params.length}`,
+    `${alias}.phone ILIKE $${params.length}`,
+    `${alias}.id::text ILIKE $${params.length}`,
+  ];
+  if (includePatientId) {
+    fields.push(`COALESCE(${alias}.patient_id, '') ILIKE $${params.length}`);
+  }
+  return `(${fields.join("\n    OR ")})`;
 }
 
 async function countActiveAdmins(client) {
@@ -472,7 +483,7 @@ function createAdminPortalRouter({
       clauses.push(statusClause);
     }
 
-    const searchSql = searchClause("account", search, params);
+    const searchSql = searchClause("account", search, params, { includePatientId: role === "patient" });
     if (searchSql) {
       clauses.push(searchSql);
     }
@@ -501,6 +512,8 @@ function createAdminPortalRouter({
             account.status,
             account.is_verified,
             account.created_at,
+            account.patient_id,
+            account.patient_category,
             CONCAT_WS(' ', account.first_name, account.last_name) AS full_name,
             MAX(appointment.appointment_date) AS last_visit,
             profile.date_of_birth,
@@ -525,6 +538,7 @@ function createAdminPortalRouter({
           GROUP BY
             account.id, account.first_name, account.last_name, account.email, account.phone,
             account.role, account.status, account.is_verified, account.created_at,
+            account.patient_id, account.patient_category,
             profile.date_of_birth, profile.gender
           ORDER BY account.last_name ASC NULLS LAST, account.first_name ASC NULLS LAST
           LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`;
@@ -603,6 +617,8 @@ function createAdminPortalRouter({
             age: row.age ?? null,
             lastTreatment: row.last_treatment || "",
             lastVisit: row.last_visit || null,
+            patientId: row.patient_id || null,
+            patientCategory: row.patient_category || null,
           })
         ),
       });
@@ -1557,7 +1573,6 @@ function createAdminPortalRouter({
       const result = await client.query(
         `UPDATE users
          SET is_archived = TRUE,
-             status = 'Inactive',
              archived_at = CURRENT_TIMESTAMP,
              archived_by = $2
          WHERE id::text = $1

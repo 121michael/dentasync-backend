@@ -28,7 +28,6 @@ import { StaffQueuePage } from "./pages/StaffQueuePage";
 import { SupportPage } from "./pages/SupportPage";
 import { AdminDashboardPage } from "./pages/AdminDashboardPage";
 import { AdminManageUsersPage } from "./pages/AdminManageUsersPage";
-import { AdminArchivedPage } from "./pages/AdminArchivedPage";
 import { AdminPatientRecordsPage } from "./pages/AdminPatientRecordsPage";
 import { AdminRfidPage } from "./pages/AdminRfidPage";
 import { AdminSchedulePage } from "./pages/AdminSchedulePage";
@@ -165,7 +164,7 @@ function PortalRoutes() {
           <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
           <Route path="/admin/dashboard" element={<AdminDashboardPage />} />
           <Route path="/admin/users" element={<AdminManageUsersPage />} />
-          <Route path="/admin/archived-records" element={<AdminArchivedPage />} />
+          <Route path="/admin/archived-records" element={<Navigate to="/admin/users?tab=archive" replace />} />
           <Route path="/admin/patient-records" element={<AdminPatientRecordsPage />} />
           <Route path="/admin/rfid" element={<AdminRfidPage />} />
           <Route path="/admin/schedule" element={<AdminSchedulePage />} />

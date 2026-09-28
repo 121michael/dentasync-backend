@@ -88,11 +88,15 @@ function mapAccount(row, extras = {}) {
     phone: row.phone || "",
     role: (row.role || "").toLowerCase(),
     status: (row.status || "active").toLowerCase(),
+    originalStatus: (row.status || "active").toLowerCase(),
     verified: Boolean(row.is_verified),
     createdAt: row.created_at || null,
     statusChangedAt: row.status_changed_at || null,
     archivedAt: row.archived_at || null,
     archivedBy: row.archived_by || null,
+    isArchived: Boolean(row.is_archived),
+    patientId: extras.patientId ?? row.patient_id ?? null,
+    patientCategory: extras.patientCategory ?? row.patient_category ?? null,
     operationalRole: extras.operationalRole ?? row.operational_role ?? "",
     specialization: extras.specialization ?? row.specialization ?? "",
     scheduleNotes: extras.scheduleNotes ?? row.schedule_notes ?? "",
@@ -432,15 +436,19 @@ function attachAdminCommandCenterRoutes(router, { db }) {
       "suspend",
       "activate",
       "archive",
-      "restore",
     ]);
 
     if (!accountId) {
       return res.status(400).json({ message: "A valid account ID is required." });
     }
+    if (action === "restore") {
+      return res.status(403).json({
+        message: "Archived records are read-only and cannot be restored.",
+      });
+    }
     if (!allowed.has(action)) {
       return res.status(400).json({
-        message: "Lifecycle action must be verify, approve, reject, suspend, activate, archive, or restore.",
+        message: "Lifecycle action must be verify, approve, reject, suspend, activate, or archive.",
       });
     }
     if (String(req.admin.id) === String(accountId) && ["suspend", "archive", "reject"].includes(action)) {
@@ -469,39 +477,24 @@ function attachAdminCommandCenterRoutes(router, { db }) {
         return res.status(404).json({ message: "Account not found." });
       }
 
-      if (action === "restore") {
-        if (!target.is_archived) {
-          await client.query("ROLLBACK");
-          transactionOpen = false;
-          return res.status(409).json({ message: "Account is not archived." });
-        }
-        const result = await client.query(
-          `UPDATE users
-           SET is_archived = FALSE,
-               archived_at = NULL,
-               archived_by = NULL,
-               status = 'Active',
-               is_verified = TRUE
-           WHERE id::text = $1
-           RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by`,
-          [accountId]
-        );
-        await client.query("COMMIT");
-        transactionOpen = false;
-        await audit(db, req, {
-          action: "restore_account",
-          targetType: "account",
-          targetId: accountId,
-          targetLabel: target.email,
-          result: "success",
-        });
-        return res.json({ message: "User restored successfully.", account: mapAccount(result.rows[0]) });
-      }
-
-      if (target.is_archived && action !== "archive") {
+      if (target.is_archived) {
         await client.query("ROLLBACK");
         transactionOpen = false;
-        return res.status(409).json({ message: "Restore the archived account before applying other actions." });
+        return res.status(409).json({
+          message: "Archived records are read-only and cannot be modified.",
+        });
+      }
+
+      const targetRole = String(target.role || "").toLowerCase();
+      if ((targetRole === "staff" || targetRole === "dentist") && action !== "archive") {
+        await client.query("ROLLBACK");
+        transactionOpen = false;
+        return res.status(403).json({
+          message:
+            targetRole === "staff"
+              ? "Clinic staff accounts can only be edited or archived."
+              : "Dentist accounts can only be edited or archived.",
+        });
       }
 
       if (["suspend", "archive"].includes(action) && String(target.role || "").toLowerCase() === "admin") {
@@ -555,12 +548,10 @@ function attachAdminCommandCenterRoutes(router, { db }) {
       } else {
         sql = `UPDATE users
                SET is_archived = TRUE,
-                   status = 'Inactive',
-                   status_changed_at = CURRENT_TIMESTAMP,
                    archived_at = CURRENT_TIMESTAMP,
                    archived_by = $2
                WHERE id::text = $1
-               RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by, status_changed_at`;
+               RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by, patient_id, patient_category`;
         params = [accountId, String(req.admin.id)];
         message = "User archived successfully.";
       }
@@ -587,6 +578,17 @@ function attachAdminCommandCenterRoutes(router, { db }) {
             [accountId]
           );
           message = "Patient account rejected successfully.";
+        } else if (action === "archive") {
+          result = await client.query(
+            `UPDATE users
+             SET is_archived = TRUE,
+                 archived_at = CURRENT_TIMESTAMP,
+                 archived_by = $2
+             WHERE id::text = $1
+             RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by`,
+            params
+          );
+          message = "User archived successfully.";
         } else {
           throw error;
         }
@@ -648,7 +650,14 @@ function attachAdminCommandCenterRoutes(router, { db }) {
         return res.status(404).json({ message: "Account not found." });
       }
 
-      if (String(target.rows[0].role || "").toLowerCase() === "admin" && role !== "admin") {
+      const currentRole = String(target.rows[0].role || "").toLowerCase();
+      if (currentRole === "staff" || currentRole === "dentist") {
+        return res.status(403).json({
+          message: "Clinic staff and dentist roles cannot be changed from User Management.",
+        });
+      }
+
+      if (currentRole === "admin" && role !== "admin") {
         const activeAdmins = await countActiveAdmins(db);
         if (activeAdmins <= 1) {
           return res.status(409).json({
@@ -700,6 +709,13 @@ function attachAdminCommandCenterRoutes(router, { db }) {
         return res.status(404).json({ message: "Account not found." });
       }
 
+      const targetRole = String(target.rows[0].role || "").toLowerCase();
+      if (targetRole === "staff" || targetRole === "dentist") {
+        return res.status(403).json({
+          message: "Password reset is not available for clinic staff or dentist accounts from User Management.",
+        });
+      }
+
       const passwordHash = await bcrypt.hash(temporaryPassword, 10);
       await db.query(
         `UPDATE users
@@ -730,9 +746,18 @@ function attachAdminCommandCenterRoutes(router, { db }) {
 
   router.get("/archived", async (req, res) => {
     const search = stringValue(req.query.search, 100);
+    const roleFilter = stringValue(req.query.role, 40)?.toLowerCase();
     const { page, limit, offset } = parsePagination(req.query);
     const params = [];
     const clauses = ["COALESCE(account.is_archived, FALSE) = TRUE"];
+
+    if (roleFilter && ["staff", "dentist", "patient"].includes(roleFilter)) {
+      clauses.push(`LOWER(account.role) = '${roleFilter}'`);
+    } else if (roleFilter) {
+      return res.status(400).json({
+        message: "Archive Records role must be staff, dentist, or patient.",
+      });
+    }
 
     if (search) {
       params.push(`%${search}%`);
@@ -742,6 +767,7 @@ function attachAdminCommandCenterRoutes(router, { db }) {
         OR account.email ILIKE $${params.length}
         OR account.phone ILIKE $${params.length}
         OR account.id::text ILIKE $${params.length}
+        OR COALESCE(account.patient_id, '') ILIKE $${params.length}
       )`);
     }
 
@@ -765,6 +791,9 @@ function attachAdminCommandCenterRoutes(router, { db }) {
            account.created_at,
            account.archived_at,
            account.archived_by,
+           account.is_archived,
+           account.patient_id,
+           account.patient_category,
            CONCAT_WS(' ', account.first_name, account.last_name) AS full_name,
            CONCAT_WS(' ', archiver.first_name, archiver.last_name) AS archived_by_name
          FROM users AS account
@@ -783,7 +812,8 @@ function attachAdminCommandCenterRoutes(router, { db }) {
           ...mapAccount(row),
           recordType: (row.role || "user").toLowerCase(),
           archivedByName: row.archived_by_name || row.archived_by || "Administrator",
-          status: "archived",
+          originalStatus: (row.status || "active").toLowerCase(),
+          isArchived: true,
         })),
       });
     } catch (error) {
@@ -795,46 +825,10 @@ function attachAdminCommandCenterRoutes(router, { db }) {
     }
   });
 
-  router.delete("/archived/:id", async (req, res) => {
-    const accountId = stringValue(req.params.id, 120);
-    const confirm = stringValue(req.body?.confirm, 40)?.toLowerCase();
-    if (!accountId) {
-      return res.status(400).json({ message: "A valid record ID is required." });
-    }
-    if (confirm !== "delete") {
-      return res.status(400).json({
-        message: 'Permanent delete requires confirm: "delete".',
-      });
-    }
-    if (String(req.admin.id) === String(accountId)) {
-      return res.status(403).json({ message: "You cannot permanently delete your own account." });
-    }
-
-    try {
-      const target = await db.query(
-        `SELECT id, email, role, is_archived
-         FROM users WHERE id::text = $1 LIMIT 1`,
-        [accountId]
-      );
-      if (!target.rows.length || !target.rows[0].is_archived) {
-        return res.status(404).json({ message: "Archived record not found." });
-      }
-
-      await db.query(`DELETE FROM users WHERE id::text = $1`, [accountId]);
-      await audit(db, req, {
-        action: "delete_account_permanent",
-        targetType: "account",
-        targetId: accountId,
-        targetLabel: target.rows[0].email,
-        result: "warning",
-        detail: "Archived record permanently deleted.",
-      });
-
-      return res.json({ message: "Record deleted permanently." });
-    } catch (error) {
-      console.error("Admin permanent delete error:", error.message);
-      return res.status(500).json({ message: "Unable to permanently delete the record." });
-    }
+  router.delete("/archived/:id", async (_req, res) => {
+    return res.status(403).json({
+      message: "Archived records cannot be deleted. They remain in Archive Records.",
+    });
   });
 
   router.get("/ai-settings", async (_req, res) => {
