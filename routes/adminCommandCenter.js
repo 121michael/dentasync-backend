@@ -748,7 +748,6 @@ function attachAdminCommandCenterRoutes(router, { db }) {
     const search = stringValue(req.query.search, 100);
     const roleFilter = stringValue(req.query.role, 40)?.toLowerCase();
     const { page, limit, offset } = parsePagination(req.query);
-    const params = [];
     const clauses = ["COALESCE(account.is_archived, FALSE) = TRUE"];
 
     if (roleFilter && ["staff", "dentist", "patient"].includes(roleFilter)) {
@@ -759,25 +758,34 @@ function attachAdminCommandCenterRoutes(router, { db }) {
       });
     }
 
-    if (search) {
-      params.push(`%${search}%`);
-      clauses.push(`(
-        account.first_name ILIKE $${params.length}
-        OR account.last_name ILIKE $${params.length}
-        OR account.email ILIKE $${params.length}
-        OR account.phone ILIKE $${params.length}
-        OR account.id::text ILIKE $${params.length}
-        OR COALESCE(account.patient_id, '') ILIKE $${params.length}
+    async function loadArchived(includePatientIdentity) {
+      const queryParams = [];
+      const queryClauses = [...clauses];
+      if (search) {
+        queryParams.push(`%${search}%`);
+        const identityMatch = includePatientIdentity
+          ? ` OR account.id::text ILIKE $${queryParams.length}
+        OR COALESCE(account.patient_id, '') ILIKE $${queryParams.length}`
+          : ` OR account.id::text ILIKE $${queryParams.length}`;
+        queryClauses.push(`(
+        account.first_name ILIKE $${queryParams.length}
+        OR account.last_name ILIKE $${queryParams.length}
+        OR account.email ILIKE $${queryParams.length}
+        OR account.phone ILIKE $${queryParams.length}${identityMatch}
       )`);
-    }
+      }
 
-    const whereSql = clauses.join(" AND ");
-    try {
+      const whereSql = queryClauses.join(" AND ");
       const countResult = await db.query(
         `SELECT COUNT(*) AS count FROM users AS account WHERE ${whereSql}`,
-        params
+        queryParams
       );
-      const listParams = [...params, limit, offset];
+      const listParams = [...queryParams, limit, offset];
+      const patientColumns = includePatientIdentity
+        ? `,
+           account.patient_id,
+           account.patient_category`
+        : "";
       const result = await db.query(
         `SELECT
            account.id,
@@ -791,9 +799,7 @@ function attachAdminCommandCenterRoutes(router, { db }) {
            account.created_at,
            account.archived_at,
            account.archived_by,
-           account.is_archived,
-           account.patient_id,
-           account.patient_category,
+           account.is_archived${patientColumns},
            CONCAT_WS(' ', account.first_name, account.last_name) AS full_name,
            CONCAT_WS(' ', archiver.first_name, archiver.last_name) AS archived_by_name
          FROM users AS account
@@ -804,7 +810,7 @@ function attachAdminCommandCenterRoutes(router, { db }) {
         listParams
       );
 
-      return res.json({
+      return {
         page,
         limit,
         total: count(countResult.rows[0]),
@@ -815,7 +821,18 @@ function attachAdminCommandCenterRoutes(router, { db }) {
           originalStatus: (row.status || "active").toLowerCase(),
           isArchived: true,
         })),
-      });
+      };
+    }
+
+    try {
+      try {
+        return res.json(await loadArchived(true));
+      } catch (error) {
+        if (error?.code !== "42703") {
+          throw error;
+        }
+        return res.json(await loadArchived(false));
+      }
     } catch (error) {
       if (error?.code === "42703" || isMissingRelation(error)) {
         return migrationUnavailable(res, "Archived records");

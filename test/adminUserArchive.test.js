@@ -9,7 +9,7 @@ function cloneUser(user) {
   return { ...user };
 }
 
-async function startPortal(seedUsers) {
+async function startPortal(seedUsers, { missingPatientColumns = false } = {}) {
   const users = new Map(seedUsers.map((user) => [String(user.id), cloneUser(user)]));
 
   async function query(sql, params = []) {
@@ -68,6 +68,11 @@ async function startPortal(seedUsers) {
     }
 
     if (sql.includes("FROM users AS account") && sql.includes("COALESCE(account.is_archived, FALSE) = TRUE")) {
+      if (missingPatientColumns && sql.includes("account.patient_id")) {
+        const error = new Error('column "patient_id" does not exist');
+        error.code = "42703";
+        throw error;
+      }
       const roleMatch = sql.match(/LOWER\(account\.role\) = '([^']+)'/);
       const archived = [...users.values()].filter((user) => {
         if (!user.is_archived) return false;
@@ -82,6 +87,24 @@ async function startPortal(seedUsers) {
           ...user,
           full_name: `${user.first_name} ${user.last_name}`.trim(),
           archived_by_name: "Ada Admin",
+        })),
+      };
+    }
+
+    if (sql.includes("FROM users AS account") && sql.includes("LOWER(account.role) = 'patient'")) {
+      if (missingPatientColumns && sql.includes("account.patient_id")) {
+        const error = new Error('column "patient_id" does not exist');
+        error.code = "42703";
+        throw error;
+      }
+      const patients = [...users.values()].filter((user) => user.role === "patient" && !user.is_archived);
+      if (sql.includes("COUNT(*) AS count")) {
+        return { rows: [{ count: String(patients.length) }] };
+      }
+      return {
+        rows: patients.map((user) => ({
+          ...user,
+          full_name: `${user.first_name} ${user.last_name}`.trim(),
         })),
       };
     }
@@ -264,6 +287,28 @@ test("archived records cannot be restored or permanently deleted", async () => {
       body: JSON.stringify({ role: "admin" }),
     });
     assert.equal(roleChange.status, 403);
+  } finally {
+    await portal.close();
+  }
+});
+
+test("archived and patient lists still load when patient identity columns are missing", async () => {
+  const portal = await startPortal(
+    seed.map((user) => (user.id === "staff-1" ? { ...user, is_archived: true } : user)),
+    { missingPatientColumns: true }
+  );
+  try {
+    const archived = await fetch(`${portal.url}/archived?role=staff&limit=50`);
+    assert.equal(archived.status, 200);
+    const archivedBody = await archived.json();
+    assert.equal(archivedBody.records.length, 1);
+    assert.equal(archivedBody.records[0].id, "staff-1");
+
+    const patients = await fetch(`${portal.url}/patients?limit=50`);
+    assert.equal(patients.status, 200);
+    const patientBody = await patients.json();
+    assert.equal(patientBody.patients.length, 1);
+    assert.equal(patientBody.patients[0].id, "patient-1");
   } finally {
     await portal.close();
   }

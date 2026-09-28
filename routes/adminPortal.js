@@ -472,25 +472,27 @@ function createAdminPortalRouter({
   async function listAccountsByRole(req, res, role) {
     const search = stringValue(req.query.search, 100);
     const { page, limit, offset } = parsePagination(req.query);
-    const params = [];
-    const clauses = [
-      `LOWER(account.role) = '${role}'`,
-      "COALESCE(account.is_archived, FALSE) = FALSE",
-    ];
 
-    const statusClause = statusFilterClause("account", req.query.status, params);
-    if (statusClause) {
-      clauses.push(statusClause);
-    }
+    async function load(includePatientIdentity) {
+      const params = [];
+      const clauses = [
+        `LOWER(account.role) = '${role}'`,
+        "COALESCE(account.is_archived, FALSE) = FALSE",
+      ];
 
-    const searchSql = searchClause("account", search, params, { includePatientId: role === "patient" });
-    if (searchSql) {
-      clauses.push(searchSql);
-    }
+      const statusClause = statusFilterClause("account", req.query.status, params);
+      if (statusClause) {
+        clauses.push(statusClause);
+      }
 
-    const whereSql = clauses.join(" AND ");
+      const searchSql = searchClause("account", search, params, {
+        includePatientId: role === "patient" && includePatientIdentity,
+      });
+      if (searchSql) {
+        clauses.push(searchSql);
+      }
 
-    try {
+      const whereSql = clauses.join(" AND ");
       const countResult = await db.query(
         `SELECT COUNT(*) AS count
          FROM users AS account
@@ -501,6 +503,15 @@ function createAdminPortalRouter({
       const listParams = [...params, limit, offset];
       let selectSql;
       if (role === "patient") {
+        const patientColumns = includePatientIdentity
+          ? `,
+            account.patient_id,
+            account.patient_category`
+          : "";
+        const patientGroup = includePatientIdentity
+          ? `,
+            account.patient_id, account.patient_category`
+          : "";
         selectSql = `
           SELECT
             account.id,
@@ -511,20 +522,12 @@ function createAdminPortalRouter({
             account.role,
             account.status,
             account.is_verified,
-            account.created_at,
-            account.patient_id,
-            account.patient_category,
+            account.created_at${patientColumns},
             CONCAT_WS(' ', account.first_name, account.last_name) AS full_name,
             MAX(appointment.appointment_date) AS last_visit,
             profile.date_of_birth,
             profile.gender,
-            (
-              SELECT treatment.treatment
-              FROM patient_portal_treatment_records AS treatment
-              WHERE treatment.user_id = account.id::text
-              ORDER BY treatment.treatment_date DESC, treatment.id DESC
-              LIMIT 1
-            ) AS last_treatment,
+            NULL AS last_treatment,
             CASE
               WHEN profile.date_of_birth IS NULL THEN NULL
               ELSE DATE_PART('year', AGE(profile.date_of_birth::timestamp))::int
@@ -537,8 +540,7 @@ function createAdminPortalRouter({
           WHERE ${whereSql}
           GROUP BY
             account.id, account.first_name, account.last_name, account.email, account.phone,
-            account.role, account.status, account.is_verified, account.created_at,
-            account.patient_id, account.patient_category,
+            account.role, account.status, account.is_verified, account.created_at${patientGroup},
             profile.date_of_birth, profile.gender
           ORDER BY account.last_name ASC NULLS LAST, account.first_name ASC NULLS LAST
           LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`;
@@ -604,7 +606,7 @@ function createAdminPortalRouter({
 
       const result = await db.query(selectSql, listParams);
       const key = role === "patient" ? "patients" : role === "dentist" ? "dentists" : "staff";
-      return res.json({
+      return {
         page,
         limit,
         total: count(countResult.rows[0]),
@@ -621,7 +623,18 @@ function createAdminPortalRouter({
             patientCategory: row.patient_category || null,
           })
         ),
-      });
+      };
+    }
+
+    try {
+      try {
+        return res.json(await load(true));
+      } catch (error) {
+        if (error?.code !== "42703" && !isMissingRelation(error)) {
+          throw error;
+        }
+        return res.json(await load(false));
+      }
     } catch (error) {
       if (isMissingRelation(error)) {
         return migrationUnavailable(res);
