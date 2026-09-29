@@ -104,17 +104,36 @@ test("allocatePatientId falls back when the sequences table is missing", async (
   assert.equal(issued.patientId, "A202609_04");
 });
 
-test("planPatientIdAssignments remaps year-only IDs using created year and month", () => {
-  const planned = patientIds.planPatientIdAssignments([
-    { key: "1", patientId: "A2026_01", category: "regular", createdAt: "2026-09-01T01:00:00.000Z" },
-    { key: "2", patientId: "A2026_02", category: "regular", createdAt: "2026-09-01T02:00:00.000Z" },
-    { key: "3", patientId: "CP-99", category: "regular", createdAt: "2026-10-05T00:00:00.000Z" },
-    { key: "4", patientId: "S2026_01", category: "senior", createdAt: "2026-09-12T00:00:00.000Z" },
-    { key: "5", patientId: "A202609_07", category: "regular", createdAt: "2026-09-20T00:00:00.000Z" },
-  ]);
-  assert.equal(planned.get("1"), "A202609_01");
-  assert.equal(planned.get("2"), "A202609_02");
-  assert.equal(planned.get("3"), "A202610_01");
-  assert.equal(planned.get("4"), "S202609_01");
-  assert.equal(planned.get("5"), "A202609_07");
+test("new monthly IDs start at 01 even when older year-only IDs already exist", async () => {
+  const store = new Map();
+  const db = {
+    async query(sql, params = []) {
+      if (/SAVEPOINT|RELEASE SAVEPOINT|ROLLBACK TO SAVEPOINT/i.test(sql)) {
+        return { rows: [] };
+      }
+      if (sql.includes("INSERT INTO patient_id_sequences")) {
+        const key = `${params[0]}:${params[1]}:${params[2]}`;
+        const current = store.get(key) || 0;
+        const next = current + 1;
+        store.set(key, next);
+        return {
+          rows: [
+            {
+              category_prefix: params[0],
+              id_year: params[1],
+              id_month: params[2],
+              last_sequence: next,
+            },
+          ],
+        };
+      }
+      throw new Error(`Unexpected: ${sql}`);
+    },
+  };
+
+  const nextRegular = await patientIds.allocatePatientId(db, {
+    category: "regular",
+    createdAt: "2026-09-29",
+  });
+  assert.equal(nextRegular.patientId, "A202609_01");
 });

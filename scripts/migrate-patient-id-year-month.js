@@ -11,13 +11,13 @@ async function migrate() {
   console.log("Applied migrations/032_patient_id_year_month.sql");
 
   try {
-    const result = await patientIds.reformatExistingPatientIds(db);
+    const result = await patientIds.seedMonthlySequencesFromExistingIds(db);
     console.log(
-      `Reformatted ${result.updatedUsers} user Patient ID(s) and ${result.updatedRecords} unlinked clinical record ID(s).`
+      `Kept existing Patient IDs unchanged. Seeded monthly sequences from ${result.preserved} current ID(s).`
     );
   } catch (error) {
     if (error?.code === "42P01" || error?.code === "42703") {
-      console.log("Patient ID tables are not fully installed yet; skipped ID rewrite.");
+      console.log("Patient ID tables are not fully installed yet; skipped sequence seed.");
       return;
     }
     throw error;

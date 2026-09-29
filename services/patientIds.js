@@ -270,90 +270,7 @@ async function rebuildSequenceTable(db, ids) {
   }
 }
 
-async function reformatExistingPatientIds(db) {
-  const users = await db.query(
-    `SELECT id::text AS id, patient_id, patient_category, created_at
-     FROM users
-     WHERE LOWER(role) = 'patient'
-       AND patient_id IS NOT NULL`
-  );
-  const planned = planPatientIdAssignments(
-    users.rows.map((row) => ({
-      key: row.id,
-      patientId: row.patient_id,
-      category: row.patient_category,
-      createdAt: row.created_at,
-    }))
-  );
-
-  const changes = [];
-  for (const row of users.rows) {
-    const nextId = planned.get(row.id);
-    if (nextId && nextId !== row.patient_id) {
-      changes.push({ id: row.id, from: row.patient_id, to: nextId });
-    }
-  }
-
-  for (const change of changes) {
-    await db.query(`UPDATE users SET patient_id = $1 WHERE id::text = $2`, [
-      `__MIG_U_${change.id}`,
-      change.id,
-    ]);
-  }
-  for (const change of changes) {
-    await db.query(`UPDATE users SET patient_id = $1 WHERE id::text = $2`, [change.to, change.id]);
-  }
-
-  await db.query(
-    `UPDATE clinic_patient_records AS record
-     SET patient_id = account.patient_id,
-         patient_category = COALESCE(record.patient_category, account.patient_category)
-     FROM users AS account
-     WHERE record.linked_user_id = account.id::text
-       AND account.patient_id IS NOT NULL`
-  ).catch((error) => {
-    if (error?.code !== "42P01" && error?.code !== "42703") throw error;
-  });
-
-  let unlinked = { rows: [] };
-  try {
-    unlinked = await db.query(
-      `SELECT id::text AS id, patient_id, patient_category, created_at
-       FROM clinic_patient_records
-       WHERE patient_id IS NOT NULL
-         AND (linked_user_id IS NULL OR linked_user_id = '')`
-    );
-  } catch (error) {
-    if (error?.code !== "42P01" && error?.code !== "42703") throw error;
-  }
-  const unlinkedPlan = planPatientIdAssignments(
-    unlinked.rows.map((row) => ({
-      key: row.id,
-      patientId: row.patient_id,
-      category: row.patient_category,
-      createdAt: row.created_at,
-    }))
-  );
-  const unlinkedChanges = [];
-  for (const row of unlinked.rows) {
-    const nextId = unlinkedPlan.get(row.id);
-    if (nextId && nextId !== row.patient_id) {
-      unlinkedChanges.push({ id: row.id, to: nextId });
-    }
-  }
-  for (const change of unlinkedChanges) {
-    await db.query(`UPDATE clinic_patient_records SET patient_id = $1 WHERE id::text = $2`, [
-      `__MIG_C_${change.id}`,
-      change.id,
-    ]);
-  }
-  for (const change of unlinkedChanges) {
-    await db.query(`UPDATE clinic_patient_records SET patient_id = $1 WHERE id::text = $2`, [
-      change.to,
-      change.id,
-    ]);
-  }
-
+async function seedMonthlySequencesFromExistingIds(db) {
   let issued = { rows: [] };
   try {
     issued = await db.query(
@@ -365,16 +282,11 @@ async function reformatExistingPatientIds(db) {
     if (error?.code !== "42P01" && error?.code !== "42703") throw error;
     issued = await db.query(`SELECT patient_id FROM users WHERE patient_id IS NOT NULL`);
   }
-  try {
-    await rebuildSequenceTable(
-      db,
-      issued.rows.map((row) => row.patient_id)
-    );
-  } catch (error) {
-    if (error?.code !== "42P01") throw error;
-  }
-
-  return { updatedUsers: changes.length, updatedRecords: unlinkedChanges.length };
+  await rebuildSequenceTable(
+    db,
+    issued.rows.map((row) => row.patient_id)
+  );
+  return { preserved: issued.rows.length };
 }
 
 module.exports = {
@@ -389,5 +301,5 @@ module.exports = {
   clinicYearMonth,
   planPatientIdAssignments,
   allocatePatientId,
-  reformatExistingPatientIds,
+  seedMonthlySequencesFromExistingIds,
 };
