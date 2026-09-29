@@ -23,15 +23,30 @@ function isInactiveStatus(status) {
 }
 
 async function loadActiveUser(userId) {
-  const userQuery = await pool.query(
-    `SELECT id, first_name, last_name, email, phone, role, status
-     FROM users
-     WHERE id = $1
-       AND COALESCE(is_archived, FALSE) = FALSE
-     LIMIT 1`,
-    [userId]
-  );
-  return userQuery.rows[0] || null;
+  const id = String(userId);
+  try {
+    const userQuery = await pool.query(
+      `SELECT id, first_name, last_name, email, phone, role, status
+       FROM users
+       WHERE id::text = $1
+         AND COALESCE(is_archived, FALSE) = FALSE
+       LIMIT 1`,
+      [id]
+    );
+    return userQuery.rows[0] || null;
+  } catch (error) {
+    if (error?.code !== '42703') {
+      throw error;
+    }
+    const userQuery = await pool.query(
+      `SELECT id, first_name, last_name, email, phone, role, status
+       FROM users
+       WHERE id::text = $1
+       LIMIT 1`,
+      [id]
+    );
+    return userQuery.rows[0] || null;
+  }
 }
 
 async function guardianLinkedToDependent(guardianId, dependentId) {
@@ -108,7 +123,11 @@ const authenticateToken = async (req, res, next) => {
 
     next();
   } catch (error) {
-    return res.status(403).json({ message: 'Invalid or expired token.' });
+    if (error?.name === 'JsonWebTokenError' || error?.name === 'TokenExpiredError' || error?.name === 'NotBeforeError') {
+      return res.status(403).json({ message: 'Invalid or expired token.' });
+    }
+    console.error('Auth token validation error:', error.message);
+    return res.status(500).json({ message: 'Unable to validate your session.' });
   }
 };
 

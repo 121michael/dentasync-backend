@@ -11,6 +11,7 @@ function cloneUser(user) {
 
 async function startPortal(seedUsers, { missingPatientColumns = false } = {}) {
   const users = new Map(seedUsers.map((user) => [String(user.id), cloneUser(user)]));
+  let aborted = false;
 
   async function query(sql, params = []) {
     if (sql.includes("FROM users") && sql.includes("LOWER(role) = 'admin'") && sql.includes("is_verified = TRUE")) {
@@ -33,8 +34,23 @@ async function startPortal(seedUsers, { missingPatientColumns = false } = {}) {
       };
     }
 
-    if (/^\s*BEGIN\s*$/i.test(sql.trim()) || /^\s*COMMIT\s*$/i.test(sql.trim()) || /^\s*ROLLBACK\s*$/i.test(sql.trim())) {
+    if (/SAVEPOINT/i.test(sql) || /RELEASE SAVEPOINT/i.test(sql) || /ROLLBACK TO SAVEPOINT/i.test(sql)) {
+      if (/ROLLBACK TO SAVEPOINT/i.test(sql)) {
+        aborted = false;
+      }
       return { rows: [] };
+    }
+
+    if (/^\s*BEGIN\s*$/i.test(sql.trim()) || /^\s*COMMIT\s*$/i.test(sql.trim()) || /^\s*ROLLBACK\s*$/i.test(sql.trim())) {
+      if (/^\s*BEGIN\s*$/i.test(sql.trim())) aborted = false;
+      if (/^\s*ROLLBACK\s*$/i.test(sql.trim())) aborted = false;
+      return { rows: [] };
+    }
+
+    if (aborted) {
+      const abortedError = new Error("current transaction is aborted, commands ignored until end of transaction block");
+      abortedError.code = "25P02";
+      throw abortedError;
     }
 
     if (sql.includes("INTO admin_portal_audit_logs")) {
@@ -57,6 +73,12 @@ async function startPortal(seedUsers, { missingPatientColumns = false } = {}) {
     }
 
     if (sql.includes("SET is_archived = TRUE")) {
+      if (missingPatientColumns && /patient_id/.test(sql)) {
+        aborted = true;
+        const missing = new Error("column \"patient_id\" does not exist");
+        missing.code = "42703";
+        throw missing;
+      }
       const target = users.get(String(params[0]));
       if (!target) return { rows: [] };
       Object.assign(target, {
@@ -68,6 +90,12 @@ async function startPortal(seedUsers, { missingPatientColumns = false } = {}) {
     }
 
     if (sql.includes("SET is_archived = FALSE")) {
+      if (missingPatientColumns && /patient_id/.test(sql)) {
+        aborted = true;
+        const missing = new Error("column \"patient_id\" does not exist");
+        missing.code = "42703";
+        throw missing;
+      }
       const target = users.get(String(params[0]));
       if (!target) return { rows: [] };
       Object.assign(target, {
@@ -332,6 +360,45 @@ test("archived and patient lists still load when patient identity columns are mi
     const patientBody = await patients.json();
     assert.equal(patientBody.patients.length, 1);
     assert.equal(patientBody.patients[0].id, "patient-1");
+  } finally {
+    await portal.close();
+  }
+});
+
+test("archiving still succeeds when patient identity columns are missing", async () => {
+  const portal = await startPortal(seed, { missingPatientColumns: true });
+  try {
+    const archived = await fetch(`${portal.url}/accounts/staff-1/lifecycle`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "archive" }),
+    });
+    assert.equal(archived.status, 200);
+    const body = await archived.json();
+    assert.equal(body.account.id, "staff-1");
+    assert.equal(portal.users.get("staff-1").is_archived, true);
+  } finally {
+    await portal.close();
+  }
+});
+
+test("restore still succeeds when patient identity columns are missing", async () => {
+  const portal = await startPortal(
+    seed.map((user) =>
+      user.id === "patient-1"
+        ? { ...user, is_archived: true, archived_at: "2026-09-28T00:00:00.000Z", archived_by: "admin-1" }
+        : user
+    ),
+    { missingPatientColumns: true }
+  );
+  try {
+    const restore = await fetch(`${portal.url}/accounts/patient-1/lifecycle`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "restore" }),
+    });
+    assert.equal(restore.status, 200);
+    assert.equal(portal.users.get("patient-1").is_archived, false);
   } finally {
     await portal.close();
   }

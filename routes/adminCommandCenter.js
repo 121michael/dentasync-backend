@@ -178,6 +178,27 @@ async function countActiveAdmins(client) {
   return count(result.rows[0]);
 }
 
+async function clientQueryWithColumnFallback(client, attempts) {
+  let lastError = null;
+  for (let index = 0; index < attempts.length; index += 1) {
+    const attempt = attempts[index];
+    const savepoint = `col_fallback_${index}`;
+    await client.query(`SAVEPOINT ${savepoint}`);
+    try {
+      const result = await client.query(attempt.sql, attempt.params);
+      await client.query(`RELEASE SAVEPOINT ${savepoint}`);
+      return result;
+    } catch (error) {
+      await client.query(`ROLLBACK TO SAVEPOINT ${savepoint}`).catch(() => {});
+      lastError = error;
+      if (error?.code !== "42703") {
+        throw error;
+      }
+    }
+  }
+  throw lastError;
+}
+
 function attachAdminCommandCenterRoutes(router, { db }) {
   router.get("/status", async (_req, res) => {
     try {
@@ -479,29 +500,26 @@ function attachAdminCommandCenterRoutes(router, { db }) {
           transactionOpen = false;
           return res.status(409).json({ message: "Account is not archived." });
         }
-        let restored;
-        try {
-          restored = await client.query(
-            `UPDATE users
-             SET is_archived = FALSE,
-                 archived_at = NULL,
-                 archived_by = NULL
-             WHERE id::text = $1
-             RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by, patient_id, patient_category`,
-            [accountId]
-          );
-        } catch (error) {
-          if (error?.code !== "42703") throw error;
-          restored = await client.query(
-            `UPDATE users
-             SET is_archived = FALSE,
-                 archived_at = NULL,
-                 archived_by = NULL
-             WHERE id::text = $1
-             RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by`,
-            [accountId]
-          );
-        }
+        const restored = await clientQueryWithColumnFallback(client, [
+          {
+            sql: `UPDATE users
+                  SET is_archived = FALSE,
+                      archived_at = NULL,
+                      archived_by = NULL
+                  WHERE id::text = $1
+                  RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by, patient_id, patient_category`,
+            params: [accountId],
+          },
+          {
+            sql: `UPDATE users
+                  SET is_archived = FALSE,
+                      archived_at = NULL,
+                      archived_by = NULL
+                  WHERE id::text = $1
+                  RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by`,
+            params: [accountId],
+          },
+        ]);
         await client.query("COMMIT");
         transactionOpen = false;
         await audit(db, req, {
@@ -597,43 +615,52 @@ function attachAdminCommandCenterRoutes(router, { db }) {
         message = "User archived successfully.";
       }
 
-      let result;
-      try {
-        result = await client.query(sql, params);
-      } catch (error) {
-        if (error?.code !== "42703") throw error;
-        // Fallback without status_changed_at for older schemas.
-        if (action === "verify" || action === "approve") {
-          result = await client.query(
-            `UPDATE users SET is_verified = TRUE, status = 'Active'
-             WHERE id::text = $1
-             RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by`,
-            [accountId]
-          );
-          message = action === "verify" ? "Account verified successfully." : "Patient account approved successfully.";
-        } else if (action === "reject") {
-          result = await client.query(
-            `UPDATE users SET is_verified = FALSE, status = 'Rejected'
-             WHERE id::text = $1
-             RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by`,
-            [accountId]
-          );
-          message = "Patient account rejected successfully.";
-        } else if (action === "archive") {
-          result = await client.query(
-            `UPDATE users
-             SET is_archived = TRUE,
-                 archived_at = CURRENT_TIMESTAMP,
-                 archived_by = $2
-             WHERE id::text = $1
-             RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by`,
-            params
-          );
-          message = "User archived successfully.";
-        } else {
-          throw error;
-        }
-      }
+      const result = await clientQueryWithColumnFallback(client, [
+        { sql, params },
+        action === "verify" || action === "approve"
+          ? {
+              sql: `UPDATE users SET is_verified = TRUE, status = 'Active'
+                    WHERE id::text = $1
+                    RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by`,
+              params: [accountId],
+            }
+          : null,
+        action === "reject"
+          ? {
+              sql: `UPDATE users SET is_verified = FALSE, status = 'Rejected'
+                    WHERE id::text = $1
+                    RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by`,
+              params: [accountId],
+            }
+          : null,
+        action === "suspend"
+          ? {
+              sql: `UPDATE users SET status = 'Suspended'
+                    WHERE id::text = $1
+                    RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by`,
+              params: [accountId],
+            }
+          : null,
+        action === "activate"
+          ? {
+              sql: `UPDATE users SET status = 'Active', is_verified = TRUE
+                    WHERE id::text = $1
+                    RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by`,
+              params: [accountId],
+            }
+          : null,
+        action === "archive"
+          ? {
+              sql: `UPDATE users
+                    SET is_archived = TRUE,
+                        archived_at = CURRENT_TIMESTAMP,
+                        archived_by = $2
+                    WHERE id::text = $1
+                    RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at, archived_at, archived_by`,
+              params,
+            }
+          : null,
+      ].filter(Boolean));
       await client.query("COMMIT");
       transactionOpen = false;
 
@@ -656,7 +683,7 @@ function attachAdminCommandCenterRoutes(router, { db }) {
       return res.json({ message, account: mapAccount(result.rows[0]) });
     } catch (error) {
       if (transactionOpen) {
-        await client.query("ROLLBACK");
+        await client.query("ROLLBACK").catch(() => {});
       }
       if (error?.code === "42703") {
         return migrationUnavailable(res, "Archive metadata");

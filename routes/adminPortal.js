@@ -240,17 +240,32 @@ function requireAdminAccount(db) {
     }
 
     try {
-      const result = await db.query(
-        `SELECT id, first_name, last_name, email, phone, role, status, is_verified, password_hash, created_at
-         FROM users
-         WHERE id = $1
-           AND LOWER(role) = 'admin'
-           AND is_verified = TRUE
-           AND COALESCE(is_archived, FALSE) = FALSE
-           AND LOWER(COALESCE(status, 'active')) NOT IN ('inactive', 'disabled', 'suspended')
-         LIMIT 1`,
-        [String(tokenUserId)]
-      );
+      let result;
+      try {
+        result = await db.query(
+          `SELECT id, first_name, last_name, email, phone, role, status, is_verified, password_hash, created_at
+           FROM users
+           WHERE id::text = $1
+             AND LOWER(role) = 'admin'
+             AND is_verified = TRUE
+             AND COALESCE(is_archived, FALSE) = FALSE
+             AND LOWER(COALESCE(status, 'active')) NOT IN ('inactive', 'disabled', 'suspended')
+           LIMIT 1`,
+          [String(tokenUserId)]
+        );
+      } catch (error) {
+        if (error?.code !== "42703") throw error;
+        result = await db.query(
+          `SELECT id, first_name, last_name, email, phone, role, status, is_verified, password_hash, created_at
+           FROM users
+           WHERE id::text = $1
+             AND LOWER(role) = 'admin'
+             AND is_verified = TRUE
+             AND LOWER(COALESCE(status, 'active')) NOT IN ('inactive', 'disabled', 'suspended')
+           LIMIT 1`,
+          [String(tokenUserId)]
+        );
+      }
 
       if (!result.rows.length) {
         return res.status(403).json({
