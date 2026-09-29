@@ -274,7 +274,7 @@ function createAuthRouter({
           `INSERT INTO users
              (first_name, last_name, email, phone, password_hash, role, is_verified, status)
            VALUES ($1, $2, $3, $4, $5, 'patient', FALSE, 'Pending')
-           RETURNING id, first_name, last_name, email, phone, role, status, is_verified`,
+           RETURNING id, first_name, last_name, email, phone, role, status, is_verified, created_at`,
           [
             computedFirstName,
             computedLastName,
@@ -286,23 +286,31 @@ function createAuthRouter({
         userRow = userResult.rows[0];
       }
 
-      // Issue stable clinic Patient ID (A/S/P/W + year + sequence). Keep existing ID on reclaim.
+      // Issue a stable clinic Patient ID (A/S/P/W + YYYYMM + monthly sequence). Keep existing ID on reclaim.
       if (userRow?.id && !userRow.patient_id) {
         try {
-          const issued = await patientIds.allocatePatientId(db, {
-            category: categoryValue,
-            createdAt: new Date(),
-          });
-          const updated = await db.query(
-            `UPDATE users
-             SET patient_id = COALESCE(patient_id, $1),
-                 patient_category = COALESCE(patient_category, $2)
-             WHERE id = $3
-             RETURNING id, first_name, last_name, email, phone, role, status, is_verified,
-                       patient_id, patient_category`,
-            [issued.patientId, issued.category, userRow.id]
-          );
-          if (updated.rows[0]) userRow = updated.rows[0];
+          let assigned = false;
+          for (let attempt = 0; attempt < 8 && !assigned; attempt += 1) {
+            const issued = await patientIds.allocatePatientId(db, {
+              category: categoryValue,
+              createdAt: userRow.created_at || new Date(),
+            });
+            try {
+              const updated = await db.query(
+                `UPDATE users
+                 SET patient_id = COALESCE(patient_id, $1),
+                     patient_category = COALESCE(patient_category, $2)
+                 WHERE id = $3
+                 RETURNING id, first_name, last_name, email, phone, role, status, is_verified,
+                           patient_id, patient_category`,
+                [issued.patientId, issued.category, userRow.id]
+              );
+              if (updated.rows[0]) userRow = updated.rows[0];
+              assigned = true;
+            } catch (uniqueError) {
+              if (uniqueError?.code !== "23505") throw uniqueError;
+            }
+          }
         } catch (idError) {
           if (idError?.code !== "42703") {
             console.warn("Patient ID allocation skipped:", idError.message);

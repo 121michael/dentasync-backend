@@ -234,7 +234,7 @@ const seed = [
     is_verified: true,
     is_archived: false,
     created_at: "2026-01-04T00:00:00.000Z",
-    patient_id: "A2026_01",
+    patient_id: "A202601_01",
     patient_category: "regular",
   },
 ];
@@ -285,14 +285,14 @@ test("archiving a patient keeps Patient ID and related identity fields", async (
     });
     assert.equal(archived.status, 200);
     const body = await archived.json();
-    assert.equal(body.account.patientId, "A2026_01");
+    assert.equal(body.account.patientId, "A202601_01");
     assert.equal(body.account.patientCategory, "regular");
     assert.equal(body.account.status, "active");
 
     const list = await fetch(`${portal.url}/archived?role=patient`);
     const payload = await list.json();
     assert.equal(payload.records.length, 1);
-    assert.equal(payload.records[0].patientId, "A2026_01");
+    assert.equal(payload.records[0].patientId, "A202601_01");
     assert.equal(payload.records[0].email, "patient@email.com");
   } finally {
     await portal.close();
@@ -315,10 +315,10 @@ test("archived accounts can be restored by an administrator without duplicating 
     });
     assert.equal(restore.status, 200);
     const body = await restore.json();
-    assert.equal(body.account.patientId, "A2026_01");
+    assert.equal(body.account.patientId, "A202601_01");
     assert.equal(body.account.status, "active");
     assert.equal(portal.users.get("patient-1").is_archived, false);
-    assert.equal(portal.users.get("patient-1").patient_id, "A2026_01");
+    assert.equal(portal.users.get("patient-1").patient_id, "A202601_01");
     assert.equal(portal.users.get("patient-1").status, "Active");
 
     const archived = await fetch(`${portal.url}/archived?role=patient`);
@@ -329,7 +329,7 @@ test("archived accounts can be restored by an administrator without duplicating 
     const activeBody = await active.json();
     assert.equal(activeBody.patients.length, 1);
     assert.equal(activeBody.patients[0].id, "patient-1");
-    assert.equal(activeBody.patients[0].patientId, "A2026_01");
+    assert.equal(activeBody.patients[0].patientId, "A202601_01");
 
     const removed = await fetch(`${portal.url}/archived/patient-1`, {
       method: "DELETE",

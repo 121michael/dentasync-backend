@@ -70,7 +70,7 @@ test("listCheckInLog queries the existing queue table with the date window", asy
             appointment_date: "2026-09-18",
             appointment_time: "10:00:00",
             patient_id: 3,
-            clinic_patient_id: "A2026_03",
+            clinic_patient_id: "A202609_03",
             patient_name: "Pedro Cruz",
           },
         ],
@@ -126,7 +126,7 @@ test("staff check-ins API filters on the backend and keeps completed visits in t
             appointment_date: "2026-09-19",
             appointment_time: "09:00:00",
             patient_id: 11,
-            clinic_patient_id: "A2026_01",
+            clinic_patient_id: "A202609_01",
             patient_name: "Juan Dela Cruz",
           },
         ],
@@ -155,7 +155,7 @@ test("staff check-ins API filters on the backend and keeps completed visits in t
     assert.equal(response.status, 200);
     const body = await response.json();
     assert.equal(body.range, "date");
-    assert.equal(body.checkIns[0].clinicPatientId, "A2026_01");
+    assert.equal(body.checkIns[0].clinicPatientId, "A202609_01");
     assert.equal(body.checkIns[0].checkInId, "CI-000001");
     assert.equal(body.checkIns[0].status, "completed");
     assert.equal(captured[0].params[1], "2026-09-18");

@@ -42,7 +42,7 @@ test("expired scans delete the temp file and unsaved job, not a linked patient",
         return {
           rows: [
             { id: 9, stored_name: stored, status: "extracted", linked_patient_id: null },
-            { id: 10, stored_name: null, status: "synced", linked_patient_id: "A2026_01" },
+            { id: 10, stored_name: null, status: "synced", linked_patient_id: "A202609_01" },
           ],
         };
       }

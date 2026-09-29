@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * End-to-end synchronization flow for ONE patient (A2026_01):
+ * End-to-end synchronization flow for ONE patient (A202609_01):
  *   profile → dentist adds Root Canal #36 → chart derives #36 → staff reads the same record
  *   → staff updates Amount Paid + Next Appointment → dentist reads the same values.
  *
@@ -23,7 +23,7 @@ function createDatabase() {
       last_name: "Dela Cruz",
       email: "juan@example.com",
       phone: "639123456789",
-      patient_id: "A2026_01",
+      patient_id: "A202609_01",
       user_patient_category: "regular",
       date_of_birth: "2005-01-10",
       gender: "Male",
@@ -41,7 +41,7 @@ function createDatabase() {
       date_of_birth: "2005-01-10",
       gender: "Male",
       linked_user_id: "user-1",
-      patient_id: "A2026_01",
+      patient_id: "A202609_01",
       patient_category: "regular",
       next_appointment_date: null,
       next_appointment_time: null,
@@ -174,7 +174,7 @@ test("one patient record stays synchronized across Admin profile, Dentist, and S
 
   // Dentist opens the record: demographics come from the verified account profile.
   const dentistView = await openPatientRecord(db, 3);
-  assert.equal(dentistView.record.patientId, "A2026_01");
+  assert.equal(dentistView.record.patientId, "A202609_01");
   assert.equal(dentistView.record.fullName, "Juan Dela Cruz");
   assert.equal(dentistView.record.gender, "Male");
   assert.equal(dentistView.record.phone, "639123456789");

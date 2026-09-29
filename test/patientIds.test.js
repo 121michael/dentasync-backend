@@ -15,12 +15,16 @@ test("normalizeCategory maps aliases", () => {
   assert.equal(patientIds.prefixForCategory("pwd"), "W");
 });
 
-test("formatPatientId pads sequence", () => {
-  assert.equal(patientIds.formatPatientId("A", 2026, 1), "A2026_01");
-  assert.equal(patientIds.formatPatientId("S", 2026, 12), "S2026_12");
+test("formatPatientId uses prefix, year, month, and padded sequence", () => {
+  assert.equal(patientIds.formatPatientId("A", 2026, 9, 1), "A202609_01");
+  assert.equal(patientIds.formatPatientId("S", 2026, 9, 12), "S202609_12");
+  assert.equal(patientIds.formatPatientId("P", 2026, 10, 1), "P202610_01");
+  assert.equal(patientIds.isCanonicalPatientId("A202609_01"), true);
+  assert.equal(patientIds.isCanonicalPatientId("A2026_01"), false);
+  assert.equal(patientIds.isCanonicalPatientId("CP-123"), false);
 });
 
-test("allocatePatientId increments sequence per prefix/year", async () => {
+test("allocatePatientId increments sequence per prefix, year, and month", async () => {
   const store = new Map();
   const db = {
     async query(sql, params = []) {
@@ -28,12 +32,19 @@ test("allocatePatientId increments sequence per prefix/year", async () => {
         return { rows: [] };
       }
       if (sql.includes("INSERT INTO patient_id_sequences")) {
-        const key = `${params[0]}:${params[1]}`;
+        const key = `${params[0]}:${params[1]}:${params[2]}`;
         const current = store.get(key) || 0;
         const next = current + 1;
         store.set(key, next);
         return {
-          rows: [{ category_prefix: params[0], id_year: params[1], last_sequence: next }],
+          rows: [
+            {
+              category_prefix: params[0],
+              id_year: params[1],
+              id_month: params[2],
+              last_sequence: next,
+            },
+          ],
         };
       }
       throw new Error(`Unexpected: ${sql}`);
@@ -46,16 +57,21 @@ test("allocatePatientId increments sequence per prefix/year", async () => {
   });
   const second = await patientIds.allocatePatientId(db, {
     category: "regular",
-    createdAt: "2026-09-18",
+    createdAt: "2026-09-29",
+  });
+  const october = await patientIds.allocatePatientId(db, {
+    category: "regular",
+    createdAt: "2026-10-02",
   });
   const senior = await patientIds.allocatePatientId(db, {
     category: "senior",
     createdAt: "2026-09-18",
   });
 
-  assert.equal(first.patientId, "A2026_01");
-  assert.equal(second.patientId, "A2026_02");
-  assert.equal(senior.patientId, "S2026_01");
+  assert.equal(first.patientId, "A202609_01");
+  assert.equal(second.patientId, "A202609_02");
+  assert.equal(october.patientId, "A202610_01");
+  assert.equal(senior.patientId, "S202609_01");
 });
 
 test("allocatePatientId falls back when the sequences table is missing", async () => {
@@ -70,7 +86,7 @@ test("allocatePatientId falls back when the sequences table is missing", async (
         throw error;
       }
       if (sql.includes("SELECT patient_id FROM users")) {
-        return { rows: [{ patient_id: "A2026_03" }] };
+        return { rows: [{ patient_id: "A202609_03" }] };
       }
       if (sql.includes("SELECT patient_id FROM clinic_patient_records")) {
         const error = new Error('column "patient_id" does not exist');
@@ -85,5 +101,20 @@ test("allocatePatientId falls back when the sequences table is missing", async (
     category: "regular",
     createdAt: "2026-09-18",
   });
-  assert.equal(issued.patientId, "A2026_04");
+  assert.equal(issued.patientId, "A202609_04");
+});
+
+test("planPatientIdAssignments remaps year-only IDs using created year and month", () => {
+  const planned = patientIds.planPatientIdAssignments([
+    { key: "1", patientId: "A2026_01", category: "regular", createdAt: "2026-09-01T01:00:00.000Z" },
+    { key: "2", patientId: "A2026_02", category: "regular", createdAt: "2026-09-01T02:00:00.000Z" },
+    { key: "3", patientId: "CP-99", category: "regular", createdAt: "2026-10-05T00:00:00.000Z" },
+    { key: "4", patientId: "S2026_01", category: "senior", createdAt: "2026-09-12T00:00:00.000Z" },
+    { key: "5", patientId: "A202609_07", category: "regular", createdAt: "2026-09-20T00:00:00.000Z" },
+  ]);
+  assert.equal(planned.get("1"), "A202609_01");
+  assert.equal(planned.get("2"), "A202609_02");
+  assert.equal(planned.get("3"), "A202610_01");
+  assert.equal(planned.get("4"), "S202609_01");
+  assert.equal(planned.get("5"), "A202609_07");
 });
