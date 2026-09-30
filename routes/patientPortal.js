@@ -173,6 +173,39 @@ function rejectIfActingAs(req, res, actionLabel = "do that") {
   return true;
 }
 
+async function findApprovedOwnedDependent(db, guardianUserId, dependentUserId) {
+  try {
+    return await db.query(
+      `SELECT id
+       FROM patient_portal_dependents
+       WHERE guardian_user_id::text = $1
+         AND dependent_user_id::text = $2
+         AND LOWER(COALESCE(approval_status, 'approved')) = 'approved'
+         AND removed_at IS NULL
+       LIMIT 1`,
+      [guardianUserId, dependentUserId]
+    );
+  } catch (error) {
+    if (error?.code === "42703") {
+      return db.query(
+        `SELECT id
+         FROM patient_portal_dependents
+         WHERE guardian_user_id::text = $1
+           AND dependent_user_id::text = $2
+           AND LOWER(COALESCE(approval_status, 'approved')) = 'approved'
+         LIMIT 1`,
+        [guardianUserId, dependentUserId]
+      );
+    }
+    if (error?.code === "42P01") {
+      const missing = new Error("Dependents are not available. Run npm run migrate:paper-gaps.");
+      missing.status = 503;
+      throw missing;
+    }
+    throw error;
+  }
+}
+
 function formatPortalUser(user) {
   const firstName = user.first_name || user.firstName || "";
   const lastName = user.last_name || user.lastName || "";
@@ -457,25 +490,7 @@ function createPatientPortalRouter({
     }
 
     try {
-      const link = await db.query(
-        `SELECT id
-         FROM patient_portal_dependents
-         WHERE guardian_user_id::text = $1
-           AND dependent_user_id::text = $2
-           AND LOWER(COALESCE(approval_status, 'approved')) = 'approved'
-         LIMIT 1`,
-        [principalId, dependentUserId]
-      ).catch(async (error) => {
-        if (error?.code !== "42703") throw error;
-        return db.query(
-          `SELECT id
-           FROM patient_portal_dependents
-           WHERE guardian_user_id::text = $1
-             AND dependent_user_id::text = $2
-           LIMIT 1`,
-          [principalId, dependentUserId]
-        );
-      });
+      const link = await findApprovedOwnedDependent(db, principalId, dependentUserId);
       if (!link.rows.length) {
         return res.status(403).json({
           message: "You can only switch into dependents linked on Family.",
@@ -751,6 +766,7 @@ function createPatientPortalRouter({
              WHERE guardian_user_id = $1
                AND dependent_user_id IS NOT NULL
                AND LOWER(COALESCE(approval_status, 'approved')) = 'approved'
+               AND removed_at IS NULL
            )
          )${statusClause}
          ORDER BY appointments.appointment_date DESC, appointments.appointment_time DESC`,
@@ -759,6 +775,30 @@ function createPatientPortalRouter({
 
       return res.json({ appointments: result.rows.map(mapAppointment) });
     } catch (error) {
+      if (error?.code === "42703") {
+        try {
+          const fallback = await db.query(
+            `SELECT appointments.*
+             FROM patient_portal_appointments AS appointments
+             WHERE (
+               appointments.user_id = $1
+               OR appointments.user_id IN (
+                 SELECT dependent_user_id
+                 FROM patient_portal_dependents
+                 WHERE guardian_user_id = $1
+                   AND dependent_user_id IS NOT NULL
+                   AND LOWER(COALESCE(approval_status, 'approved')) = 'approved'
+               )
+             )${statusClause}
+             ORDER BY appointments.appointment_date DESC, appointments.appointment_time DESC`,
+            params
+          );
+          return res.json({ appointments: fallback.rows.map(mapAppointment) });
+        } catch (fallbackError) {
+          console.error("Patient appointments error:", fallbackError.message);
+          return res.status(500).json({ message: "Unable to load appointments." });
+        }
+      }
       if (error?.code === "42P01") {
         // Dependents table missing — fall back to self-only appointments.
         try {
@@ -860,32 +900,7 @@ function createPatientPortalRouter({
         // While switched into a dependent, bookings always belong to that account.
         userId = actorUserId;
       } else if (bookingFor !== actorUserId) {
-        const link = await db.query(
-          `SELECT id
-           FROM patient_portal_dependents
-           WHERE guardian_user_id::text = $1
-             AND dependent_user_id::text = $2
-             AND LOWER(COALESCE(approval_status, 'approved')) = 'approved'
-           LIMIT 1`,
-          [guardianUserId, bookingFor]
-        ).catch(async (error) => {
-          if (error?.code === "42703") {
-            return db.query(
-              `SELECT id
-               FROM patient_portal_dependents
-               WHERE guardian_user_id::text = $1
-                 AND dependent_user_id::text = $2
-               LIMIT 1`,
-              [guardianUserId, bookingFor]
-            );
-          }
-          if (error?.code === "42P01") {
-            const missing = new Error("Dependents are not available. Run npm run migrate:paper-gaps.");
-            missing.status = 503;
-            throw missing;
-          }
-          throw error;
-        });
+        const link = await findApprovedOwnedDependent(db, guardianUserId, bookingFor);
         if (!link.rows.length) {
           return res.status(403).json({
             message: "You can only book for approved dependents linked to your account.",
@@ -1077,6 +1092,7 @@ function createPatientPortalRouter({
                WHERE guardian_user_id = $2
                  AND dependent_user_id IS NOT NULL
                  AND LOWER(COALESCE(approval_status, 'approved')) = 'approved'
+                 AND removed_at IS NULL
              )
            )
          RETURNING *`,
@@ -1902,37 +1918,35 @@ function createPatientPortalRouter({
   });
 
   router.delete("/dependents/:id", async (req, res) => {
-    if (rejectIfActingAs(req, res, "unlink family dependents")) {
+    if (rejectIfActingAs(req, res, "delete family dependents")) {
       return;
     }
     const linkId = Number.parseInt(req.params.id, 10);
     if (!Number.isSafeInteger(linkId) || linkId <= 0) {
-      return res.status(400).json({ message: "A valid dependent link ID is required." });
+      return res.status(400).json({ message: "A valid dependent ID is required." });
     }
+    const confirmed = req.body?.confirmed === true || req.body?.confirm === true;
 
     try {
-      const result = await db.query(
-        `DELETE FROM patient_portal_dependents
-         WHERE id = $1
-           AND guardian_user_id::text = $2
-           AND LOWER(COALESCE(approval_status, 'pending')) IN ('pending', 'rejected')
-         RETURNING id`,
-        [linkId, principalUserIdFor(req)]
-      );
-      if (!result.rows.length) {
-        return res.status(404).json({
-          message: "Pending or rejected dependent request was not found.",
-        });
-      }
-      return res.json({ message: "Dependent request removed.", id: result.rows[0].id });
+      const result = await accountDependents.removeDependent(db, principalUserIdFor(req), linkId, {
+        confirmed,
+      });
+      return res.json({
+        message: `${result.dependent.fullName} was removed from your family dependents.`,
+        dependent: result.dependent,
+        cancelledAppointments: result.cancelledAppointments,
+      });
     } catch (error) {
-      if (error?.code === "42P01") {
+      if (error?.status) {
+        return res.status(error.status).json({ message: error.message });
+      }
+      if (error?.code === "42P01" || error?.code === "42703") {
         return res.status(503).json({
-          message: "Dependents are not available. Run npm run migrate:paper-gaps.",
+          message: "Dependent registration is not available. Run npm run migrate:account-dependents.",
         });
       }
       console.error("Patient dependent delete error:", error.message);
-      return res.status(500).json({ message: "Unable to unlink the dependent." });
+      return res.status(500).json({ message: "Unable to delete the dependent." });
     }
   });
 

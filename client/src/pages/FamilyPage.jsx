@@ -64,6 +64,7 @@ export function FamilyPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [viewing, setViewing] = useState(null);
+  const [deleting, setDeleting] = useState(null);
 
   const calculatedAge = useMemo(() => ageFromBirthdate(form.birthdate), [form.birthdate]);
 
@@ -135,6 +136,37 @@ export function FamilyPage() {
       setError(switchError.message);
     } finally {
       setSwitchingId("");
+    }
+  }
+
+  async function openDeleteDialog(dependent) {
+    setError("");
+    setSuccess("");
+    let detail = dependent;
+    try {
+      const response = await api.getDependent(dependent.id);
+      detail = { ...dependent, ...(response.dependent || {}) };
+    } catch {
+      detail = dependent;
+    }
+    setDeleting(detail);
+  }
+
+  async function confirmDeleteDependent() {
+    if (!deleting) return;
+    setBusy(true);
+    setError("");
+    setSuccess("");
+    try {
+      const response = await api.removeDependent(deleting.id, { confirmed: true });
+      setSuccess(response.message || `${deleting.fullName} was removed from your family dependents.`);
+      setDeleting(null);
+      if (viewing?.id === deleting.id) setViewing(null);
+      await load();
+    } catch (deleteError) {
+      setError(deleteError.message);
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -299,8 +331,8 @@ export function FamilyPage() {
             <table className="admin-table family-dependents-table">
               <thead>
                 <tr>
-                  <th>Name</th>
-                  <th>Relationship</th>
+                  <th>Dependent</th>
+                  <th>Patient ID</th>
                   <th>Status</th>
                   <th>Actions</th>
                 </tr>
@@ -313,9 +345,9 @@ export function FamilyPage() {
                     <tr key={dependent.id || dependent.dependentUserId}>
                       <td>
                         <strong>{dependent.fullName || dependent.name || "Dependent"}</strong>
-                        {dependent.patientId ? <div><small>{dependent.patientId}</small></div> : null}
+                        <div><small>{relationshipLabel(dependent.relationship)}</small></div>
                       </td>
-                      <td>{relationshipLabel(dependent.relationship)}</td>
+                      <td>{dependent.patientId || "—"}</td>
                       <td>
                         <span className={`status-pill status-pill--${status === "approved" ? "confirmed" : status === "rejected" ? "cancelled" : "pending"}`}>
                           {statusLabel(status)}
@@ -343,6 +375,16 @@ export function FamilyPage() {
                               disabled={busy || switchingId === String(dependent.dependentUserId)}
                             >
                               {switchingId === String(dependent.dependentUserId) ? "Switching…" : "Open records"}
+                            </button>
+                          ) : null}
+                          {!actingAs ? (
+                            <button
+                              type="button"
+                              className="button button--danger button--compact"
+                              onClick={() => openDeleteDialog(dependent)}
+                              disabled={busy}
+                            >
+                              Delete Account
                             </button>
                           ) : null}
                         </div>
@@ -386,6 +428,54 @@ export function FamilyPage() {
             <p className="muted-copy">Your dependent registration is awaiting Admin approval. Appointment booking for this dependent stays unavailable until then.</p>
           ) : null}
         </section>
+      ) : null}
+
+      {deleting && !actingAs ? (
+        <div className="admin-modal-backdrop" role="presentation" onMouseDown={() => !busy && setDeleting(null)}>
+          <section
+            className="admin-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-dependent-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <header className="admin-modal__header">
+              <h2 id="delete-dependent-title">Delete Dependent Account</h2>
+              <button
+                type="button"
+                className="icon-button"
+                onClick={() => setDeleting(null)}
+                disabled={busy}
+                aria-label="Close confirmation"
+              >
+                ×
+              </button>
+            </header>
+            <p className="admin-confirm-copy">
+              Are you sure you want to delete {deleting.fullName || "this dependent"} from your family dependents?
+            </p>
+            <p className="muted-copy">
+              This will remove the dependent from your account and prevent further appointment bookings under this
+              dependent. Completed appointments and dental records are kept.
+            </p>
+            {Array.isArray(deleting.upcomingAppointments) && deleting.upcomingAppointments.length ? (
+              <p className="inline-alert inline-alert--error">
+                {deleting.fullName} has {deleting.upcomingAppointments.length} upcoming appointment
+                {deleting.upcomingAppointments.length === 1 ? "" : "s"}. Deleting this dependent will cancel
+                {deleting.upcomingAppointments.length === 1 ? " that booking" : " those bookings"} using the clinic
+                cancellation workflow.
+              </p>
+            ) : null}
+            <div className="admin-modal__actions">
+              <button type="button" className="button button--secondary" onClick={() => setDeleting(null)} disabled={busy}>
+                Cancel
+              </button>
+              <button type="button" className="button button--danger" onClick={confirmDeleteDependent} disabled={busy}>
+                {busy ? "Deleting…" : "Delete Account"}
+              </button>
+            </div>
+          </section>
+        </div>
       ) : null}
     </div>
   );

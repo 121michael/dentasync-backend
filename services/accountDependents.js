@@ -8,7 +8,7 @@ const { notifyActiveAdmins } = require("./adminNotifications");
 
 const RELATIONSHIPS = new Set(["child", "spouse", "parent", "guardian", "other"]);
 const CATEGORIES = new Set(["regular", "senior", "pediatric", "pwd"]);
-const STATUSES = new Set(["pending", "approved", "rejected"]);
+const STATUSES = new Set(["pending", "approved", "rejected", "removed"]);
 
 function httpError(status, message) {
   const error = new Error(message);
@@ -99,6 +99,7 @@ function mapDependent(row) {
     createdAt: row.created_at,
     reviewedAt: row.reviewed_at || null,
     rejectionReason: row.rejection_reason || null,
+    removedAt: row.removed_at || row.removedAt || null,
     patientId: row.patient_id || null,
     email: row.user_email || "",
     accountHolderName: row.guardian_full_name || null,
@@ -165,6 +166,8 @@ const SELECT_DEPENDENT = `
     link.reviewed_at,
     link.reviewed_by,
     link.rejection_reason,
+    link.removed_at,
+    link.removed_by,
     dependent.first_name AS user_first_name,
     dependent.last_name AS user_last_name,
     dependent.email AS user_email,
@@ -198,6 +201,8 @@ const SELECT_DEPENDENT_NO_PATIENT_ID = `
     link.reviewed_at,
     link.reviewed_by,
     link.rejection_reason,
+    link.removed_at,
+    link.removed_by,
     dependent.first_name AS user_first_name,
     dependent.last_name AS user_last_name,
     dependent.email AS user_email,
@@ -243,7 +248,9 @@ async function ensureAccountDependentSchema(db) {
        ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMPTZ,
        ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ,
        ADD COLUMN IF NOT EXISTS reviewed_by TEXT,
-       ADD COLUMN IF NOT EXISTS rejection_reason TEXT`,
+       ADD COLUMN IF NOT EXISTS rejection_reason TEXT,
+       ADD COLUMN IF NOT EXISTS removed_at TIMESTAMPTZ,
+       ADD COLUMN IF NOT EXISTS removed_by TEXT`,
     `UPDATE patient_portal_dependents
        SET approval_status = 'approved'
      WHERE dependent_user_id IS NOT NULL
@@ -257,6 +264,11 @@ async function ensureAccountDependentSchema(db) {
      WHERE submitted_at IS NULL`,
     `ALTER TABLE patient_portal_dependents ALTER COLUMN approval_status SET DEFAULT 'pending'`,
     `ALTER TABLE patient_portal_dependents ALTER COLUMN submitted_at SET DEFAULT CURRENT_TIMESTAMP`,
+    `ALTER TABLE patient_portal_dependents
+       DROP CONSTRAINT IF EXISTS patient_portal_dependents_approval_status_check`,
+    `ALTER TABLE patient_portal_dependents
+       ADD CONSTRAINT patient_portal_dependents_approval_status_check
+       CHECK (LOWER(approval_status) IN ('pending', 'approved', 'rejected', 'removed'))`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS managed_by_user_id TEXT`,
   ];
   for (const sql of statements) {
@@ -270,7 +282,7 @@ async function ensureAccountDependentSchema(db) {
     }
   }
   try {
-    await db.query("SELECT approval_status, first_name, submitted_at FROM patient_portal_dependents LIMIT 0");
+    await db.query("SELECT approval_status, first_name, submitted_at, removed_at FROM patient_portal_dependents LIMIT 0");
     schemaReady = true;
   } catch (error) {
     if (error?.code === "42P01") {
@@ -280,12 +292,12 @@ async function ensureAccountDependentSchema(db) {
   }
 }
 
-async function queryDependentRows(db, { whereSql, params = [], orderSql = "" }) {
+async function queryDependentRows(db, { whereSql, legacyWhereSql, params = [], orderSql = "" }) {
   await ensureAccountDependentSchema(db);
   const attempts = [
     `${SELECT_DEPENDENT} ${whereSql} ${orderSql}`,
     `${SELECT_DEPENDENT_NO_PATIENT_ID} ${whereSql} ${orderSql}`,
-    `${SELECT_DEPENDENT_LEGACY} ${whereSql} ORDER BY link.created_at DESC`,
+    `${SELECT_DEPENDENT_LEGACY} ${legacyWhereSql || whereSql} ORDER BY link.created_at DESC`,
   ];
   let lastError = null;
   for (const sql of attempts) {
@@ -319,6 +331,7 @@ async function findDuplicate(db, guardianUserId, payload, excludeId = null) {
      LEFT JOIN users AS dependent ON dependent.id::text = link.dependent_user_id::text
      WHERE link.guardian_user_id::text = $1
        AND LOWER(link.approval_status) IN ('pending', 'approved')
+       AND link.removed_at IS NULL
        AND LOWER(TRIM(COALESCE(link.first_name, dependent.first_name, ''))) = $2
        AND LOWER(TRIM(COALESCE(link.last_name, dependent.last_name, ''))) = $3
        AND COALESCE(link.date_of_birth, NULL) = $4::date
@@ -331,7 +344,9 @@ async function findDuplicate(db, guardianUserId, payload, excludeId = null) {
 
 async function listForGuardian(db, guardianUserId) {
   const result = await queryDependentRows(db, {
-    whereSql: "WHERE link.guardian_user_id::text = $1",
+    whereSql:
+      "WHERE link.guardian_user_id::text = $1 AND link.removed_at IS NULL AND LOWER(COALESCE(link.approval_status, 'pending')) <> 'removed'",
+    legacyWhereSql: "WHERE link.guardian_user_id::text = $1",
     params: [String(guardianUserId)],
     orderSql: "ORDER BY COALESCE(link.submitted_at, link.created_at) DESC, link.id DESC",
   });
@@ -340,11 +355,21 @@ async function listForGuardian(db, guardianUserId) {
 
 async function getForGuardian(db, guardianUserId, dependentId) {
   const result = await queryDependentRows(db, {
-    whereSql: "WHERE link.id = $1 AND link.guardian_user_id::text = $2",
+    whereSql:
+      "WHERE link.id = $1 AND link.guardian_user_id::text = $2 AND link.removed_at IS NULL AND LOWER(COALESCE(link.approval_status, 'pending')) <> 'removed'",
+    legacyWhereSql: "WHERE link.id = $1 AND link.guardian_user_id::text = $2",
     params: [dependentId, String(guardianUserId)],
     orderSql: "",
   });
-  return mapDependent(result.rows[0]);
+  const dependent = mapDependent(result.rows[0]);
+  if (!dependent) return null;
+  dependent.upcomingAppointments = await listUpcomingAppointments(db, dependent.dependentUserId);
+  return dependent;
+}
+
+function isRemovedDependent(row) {
+  if (!row) return false;
+  return Boolean(row.removedAt || row.removed_at) || String(row.approvalStatus || row.approval_status || "").toLowerCase() === "removed";
 }
 
 async function submitDependent(db, guardianUserId, body, { notifyAdmin } = {}) {
@@ -393,7 +418,9 @@ async function submitDependent(db, guardianUserId, body, { notifyAdmin } = {}) {
 
 async function listPendingForAdmin(db) {
   const result = await queryDependentRows(db, {
-    whereSql: "WHERE LOWER(COALESCE(link.approval_status, 'pending')) = 'pending'",
+    whereSql:
+      "WHERE LOWER(COALESCE(link.approval_status, 'pending')) = 'pending' AND link.removed_at IS NULL",
+    legacyWhereSql: "WHERE LOWER(COALESCE(link.approval_status, 'pending')) = 'pending'",
     params: [],
     orderSql: "ORDER BY COALESCE(link.submitted_at, link.created_at) DESC, link.id DESC",
   });
@@ -402,7 +429,9 @@ async function listPendingForAdmin(db) {
 
 async function listReviewedForAdmin(db) {
   const result = await queryDependentRows(db, {
-    whereSql: "WHERE LOWER(COALESCE(link.approval_status, '')) IN ('approved', 'rejected')",
+    whereSql:
+      "WHERE LOWER(COALESCE(link.approval_status, '')) IN ('approved', 'rejected') AND link.removed_at IS NULL",
+    legacyWhereSql: "WHERE LOWER(COALESCE(link.approval_status, '')) IN ('approved', 'rejected')",
     params: [],
     orderSql: "ORDER BY COALESCE(link.reviewed_at, link.submitted_at, link.created_at) DESC",
   });
@@ -453,6 +482,9 @@ async function approveDependent(db, dependentId, adminUser, { notifyPatient } = 
   const existing = await getForAdmin(db, dependentId);
   if (!existing) {
     throw httpError(404, "Dependent request was not found.");
+  }
+  if (isRemovedDependent(existing)) {
+    throw httpError(409, "This dependent was removed by the account holder and cannot be approved.");
   }
   if (existing.approvalStatus === "approved") {
     return existing;
@@ -609,8 +641,122 @@ async function rejectDependent(db, dependentId, adminUser, { confirmed, reason, 
   return getForAdmin(db, existing.id);
 }
 
+async function listUpcomingAppointments(db, userId) {
+  if (!userId) return [];
+  try {
+    const result = await db.query(
+      `SELECT id, service_name, appointment_date, appointment_time, status
+       FROM patient_portal_appointments
+       WHERE user_id::text = $1
+         AND status IN ('pending', 'confirmed')
+         AND appointment_date >= CURRENT_DATE
+       ORDER BY appointment_date ASC, appointment_time ASC`,
+      [String(userId)]
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      serviceName: row.service_name,
+      appointmentDate: row.appointment_date,
+      appointmentTime: row.appointment_time,
+      status: row.status,
+    }));
+  } catch (error) {
+    if (error?.code === "42P01") return [];
+    throw error;
+  }
+}
+
+async function cancelUpcomingAppointments(db, userId) {
+  if (!userId) return [];
+  try {
+    const result = await db.query(
+      `UPDATE patient_portal_appointments
+       SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
+       WHERE user_id::text = $1
+         AND status IN ('pending', 'confirmed')
+         AND appointment_date >= CURRENT_DATE
+       RETURNING id, service_name, appointment_date, appointment_time`,
+      [String(userId)]
+    );
+    return result.rows;
+  } catch (error) {
+    if (error?.code === "42P01") return [];
+    throw error;
+  }
+}
+
+async function removeDependent(db, guardianUserId, dependentId, { confirmed } = {}) {
+  if (!confirmed) {
+    throw httpError(400, "Confirm deletion before removing this dependent.");
+  }
+  const guardianId = String(guardianUserId);
+  const owned = await queryDependentRows(db, {
+    whereSql: "WHERE link.id = $1 AND link.guardian_user_id::text = $2",
+    legacyWhereSql: "WHERE link.id = $1 AND link.guardian_user_id::text = $2",
+    params: [dependentId, guardianId],
+    orderSql: "",
+  });
+  const existing = mapDependent(owned.rows[0]);
+  if (!existing) {
+    throw httpError(404, "Dependent was not found on this account.");
+  }
+  if (existing.dependentUserId && existing.dependentUserId === guardianId) {
+    throw httpError(400, "You cannot delete the primary account holder.");
+  }
+  if (isRemovedDependent(existing)) {
+    throw httpError(409, "This dependent has already been removed.");
+  }
+
+  const upcomingAppointments = await listUpcomingAppointments(db, existing.dependentUserId);
+  const cancelledAppointments = await cancelUpcomingAppointments(db, existing.dependentUserId);
+
+  let updated;
+  try {
+    updated = await db.query(
+      `UPDATE patient_portal_dependents
+       SET approval_status = 'removed',
+           removed_at = CURRENT_TIMESTAMP,
+           removed_by = $3
+       WHERE id = $1
+         AND guardian_user_id::text = $2
+         AND removed_at IS NULL
+         AND LOWER(COALESCE(approval_status, '')) <> 'removed'
+       RETURNING id`,
+      [existing.id, guardianId, guardianId]
+    );
+  } catch (error) {
+    if (error?.code !== "42703" && error?.code !== "23514") throw error;
+    updated = await db.query(
+      `UPDATE patient_portal_dependents
+       SET approval_status = CASE
+             WHEN LOWER(COALESCE(approval_status, 'pending')) = 'pending' THEN 'rejected'
+             ELSE approval_status
+           END,
+           rejection_reason = COALESCE(rejection_reason, 'Removed by account holder')
+       WHERE id = $1
+         AND guardian_user_id::text = $2
+       RETURNING id`,
+      [existing.id, guardianId]
+    );
+  }
+  if (!updated.rows.length) {
+    throw httpError(409, "This dependent could not be removed.");
+  }
+
+  return {
+    dependent: {
+      ...existing,
+      approvalStatus: "removed",
+      removedAt: new Date().toISOString(),
+    },
+    cancelledAppointments: cancelledAppointments.length,
+    upcomingAppointments,
+  };
+}
+
 function isApprovedBookingTarget(row) {
   if (!row) return false;
+  if (isRemovedDependent(row)) return false;
   const status = String(row.approval_status || row.approvalStatus || "").toLowerCase();
   return status === "approved" && Boolean(row.dependent_user_id || row.dependentUserId);
 }
@@ -627,6 +773,8 @@ module.exports = {
   getForAdmin,
   approveDependent,
   rejectDependent,
+  removeDependent,
+  listUpcomingAppointments,
   isApprovedBookingTarget,
   httpError,
 };

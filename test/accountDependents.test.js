@@ -322,3 +322,170 @@ test("dependents list stays available when new columns are missing", async () =>
     await server.close();
   }
 });
+
+function dependentDb(handlers) {
+  return {
+    async query(sql, params = []) {
+      if (sql.includes("ALTER TABLE") || sql.includes("ADD CONSTRAINT") || sql.includes("DROP CONSTRAINT")) {
+        return { rows: [] };
+      }
+      if (typeof handlers === "function") {
+        return handlers(sql, params);
+      }
+      return { rows: [] };
+    },
+  };
+}
+
+test("account holder can delete an owned dependent after confirmation", async () => {
+  let removed = false;
+  const app = express();
+  app.use(express.json());
+  app.use(
+    "/api/patient",
+    createPatientPortalRouter({
+      db: dependentDb(async (sql, params) => {
+        if (sql.includes("SET approval_status = 'removed'")) {
+          removed = true;
+          assert.equal(String(params[1]), "12");
+          return { rows: [{ id: 21 }] };
+        }
+        if (sql.includes("FROM patient_portal_appointments") || sql.includes("UPDATE patient_portal_appointments")) {
+          return { rows: [] };
+        }
+        if (sql.includes("FROM patient_portal_dependents")) {
+          return {
+            rows: [
+              {
+                id: 21,
+                guardian_user_id: "12",
+                dependent_user_id: "46",
+                first_name: "Maria",
+                last_name: "Santos",
+                relationship: "child",
+                approval_status: "approved",
+              },
+            ],
+          };
+        }
+        return { rows: [] };
+      }),
+      authenticateToken(req, _res, next) {
+        req.user = { id: "12", role: "patient" };
+        req.authUser = { id: "12", role: "patient" };
+        next();
+      },
+      uploadDirectory: "/tmp/dentasync-dependent-test",
+    })
+  );
+  const server = await listen(app);
+  try {
+    const denied = await fetch(`${server.url}/api/patient/dependents/21`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    assert.equal(denied.status, 400);
+
+    const response = await fetch(`${server.url}/api/patient/dependents/21`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ confirmed: true }),
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.match(body.message, /removed from your family dependents/i);
+    assert.equal(removed, true);
+  } finally {
+    await server.close();
+  }
+});
+
+test("backend rejects deleting another account's dependent", async () => {
+  const app = express();
+  app.use(express.json());
+  app.use(
+    "/api/patient",
+    createPatientPortalRouter({
+      db: dependentDb(async (sql, params) => {
+        if (sql.includes("FROM patient_portal_dependents") && String(params[1]) === "12") {
+          return { rows: [] };
+        }
+        return { rows: [] };
+      }),
+      authenticateToken(req, _res, next) {
+        req.user = { id: "12", role: "patient" };
+        req.authUser = { id: "12", role: "patient" };
+        next();
+      },
+      uploadDirectory: "/tmp/dentasync-dependent-test",
+    })
+  );
+  const server = await listen(app);
+  try {
+    const response = await fetch(`${server.url}/api/patient/dependents/21`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ confirmed: true }),
+    });
+    assert.equal(response.status, 404);
+  } finally {
+    await server.close();
+  }
+});
+
+test("staff cannot delete dependents through the patient API", async () => {
+  const app = express();
+  app.use(express.json());
+  app.use(
+    "/api/patient",
+    createPatientPortalRouter({
+      db: dependentDb(async () => ({ rows: [] })),
+      authenticateToken(req, _res, next) {
+        req.user = { id: "staff-1", role: "staff" };
+        next();
+      },
+      uploadDirectory: "/tmp/dentasync-dependent-test",
+    })
+  );
+  const server = await listen(app);
+  try {
+    const response = await fetch(`${server.url}/api/patient/dependents/21`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ confirmed: true }),
+    });
+    assert.equal(response.status, 403);
+  } finally {
+    await server.close();
+  }
+});
+
+test("admin cannot approve a dependent after the account holder deletes it", async () => {
+  await assert.rejects(
+    () =>
+      accountDependents.approveDependent(
+        dependentDb(async (sql) => {
+          if (sql.includes("FROM patient_portal_dependents")) {
+            return {
+              rows: [
+                {
+                  id: 21,
+                  guardian_user_id: "12",
+                  first_name: "Maria",
+                  last_name: "Santos",
+                  approval_status: "removed",
+                  removed_at: "2026-09-30T00:00:00.000Z",
+                  relationship: "child",
+                },
+              ],
+            };
+          }
+          return { rows: [] };
+        }),
+        21,
+        { id: "admin-1" }
+      ),
+    (error) => error.status === 409
+  );
+});

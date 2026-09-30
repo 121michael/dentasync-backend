@@ -137,8 +137,8 @@ export const api = {
   getDependents: () => request("/patient/dependents"),
   getDependent: (dependentId) => request(`/patient/dependents/${dependentId}`),
   addDependent: (body) => request("/patient/dependents", { method: "POST", body }),
-  removeDependent: (dependentId) =>
-    request(`/patient/dependents/${dependentId}`, { method: "DELETE" }),
+  removeDependent: (dependentId, body = { confirmed: true }) =>
+    request(`/patient/dependents/${dependentId}`, { method: "DELETE", body }),
   switchToDependent: (dependentUserId) =>
     request("/patient/session/act-as", {
       method: "POST",
