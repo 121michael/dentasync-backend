@@ -267,3 +267,58 @@ test("staff cannot approve dependents through the admin API", async () => {
     await server.close();
   }
 });
+
+test("dependents list stays available when new columns are missing", async () => {
+  const app = express();
+  app.use(
+    "/api/patient",
+    createPatientPortalRouter({
+      db: {
+        async query(sql) {
+          if (sql.includes("ALTER TABLE") || sql.startsWith("UPDATE patient_portal_dependents")) {
+            return { rows: [] };
+          }
+          if (sql.includes("link.first_name") || sql.includes("dependent.patient_id")) {
+            const error = new Error('column "first_name" does not exist');
+            error.code = "42703";
+            throw error;
+          }
+          if (sql.includes("FROM patient_portal_dependents")) {
+            return {
+              rows: [
+                {
+                  id: 1,
+                  guardian_user_id: "12",
+                  dependent_user_id: "46",
+                  relationship: "child",
+                  created_at: "2026-09-01T00:00:00.000Z",
+                  user_first_name: "Ana",
+                  user_last_name: "Child",
+                  user_email: "ana@example.test",
+                },
+              ],
+            };
+          }
+          return { rows: [] };
+        },
+      },
+      authenticateToken(req, _res, next) {
+        req.user = { id: "12", role: "patient" };
+        req.authUser = { id: "12", role: "patient" };
+        next();
+      },
+      uploadDirectory: "/tmp/dentasync-dependent-test",
+    })
+  );
+  const server = await listen(app);
+  try {
+    const response = await fetch(`${server.url}/api/patient/dependents`);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.dependents.length, 1);
+    assert.equal(body.dependents[0].fullName, "Ana Child");
+    assert.equal(body.dependents[0].approvalStatus, "approved");
+  } finally {
+    await server.close();
+  }
+});

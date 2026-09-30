@@ -72,7 +72,9 @@ function fullName(row) {
 
 function mapDependent(row) {
   if (!row) return null;
-  const status = String(row.approval_status || row.approvalStatus || "pending").toLowerCase();
+  const rawStatus = row.approval_status || row.approvalStatus;
+  const inferredStatus = row.dependent_user_id ? "approved" : "pending";
+  const status = String(rawStatus || inferredStatus).toLowerCase();
   const firstName = row.first_name || row.user_first_name || "";
   const middleName = row.middle_name || "";
   const lastName = row.last_name || row.user_last_name || "";
@@ -176,6 +178,129 @@ const SELECT_DEPENDENT = `
   LEFT JOIN users AS guardian ON guardian.id::text = link.guardian_user_id::text
 `;
 
+const SELECT_DEPENDENT_NO_PATIENT_ID = `
+  SELECT
+    link.id,
+    link.guardian_user_id,
+    link.dependent_user_id,
+    link.relationship,
+    link.eligibility_category,
+    link.first_name,
+    link.middle_name,
+    link.last_name,
+    link.date_of_birth,
+    link.gender,
+    link.phone,
+    link.patient_category,
+    link.approval_status,
+    link.submitted_at,
+    link.created_at,
+    link.reviewed_at,
+    link.reviewed_by,
+    link.rejection_reason,
+    dependent.first_name AS user_first_name,
+    dependent.last_name AS user_last_name,
+    dependent.email AS user_email,
+    dependent.phone AS user_phone,
+    CONCAT_WS(' ', guardian.first_name, guardian.last_name) AS guardian_full_name,
+    guardian.email AS guardian_email
+  FROM patient_portal_dependents AS link
+  LEFT JOIN users AS dependent ON dependent.id::text = link.dependent_user_id::text
+  LEFT JOIN users AS guardian ON guardian.id::text = link.guardian_user_id::text
+`;
+
+const SELECT_DEPENDENT_LEGACY = `
+  SELECT
+    link.id,
+    link.guardian_user_id,
+    link.dependent_user_id,
+    link.relationship,
+    link.created_at,
+    dependent.first_name AS user_first_name,
+    dependent.last_name AS user_last_name,
+    dependent.email AS user_email,
+    dependent.phone AS user_phone
+  FROM patient_portal_dependents AS link
+  LEFT JOIN users AS dependent ON dependent.id::text = link.dependent_user_id::text
+`;
+
+let schemaReady = false;
+
+async function ensureAccountDependentSchema(db) {
+  if (schemaReady) return;
+  const statements = [
+    `ALTER TABLE patient_portal_dependents ALTER COLUMN dependent_user_id DROP NOT NULL`,
+    `ALTER TABLE patient_portal_dependents
+       ADD COLUMN IF NOT EXISTS eligibility_category TEXT,
+       ADD COLUMN IF NOT EXISTS first_name TEXT,
+       ADD COLUMN IF NOT EXISTS middle_name TEXT,
+       ADD COLUMN IF NOT EXISTS last_name TEXT,
+       ADD COLUMN IF NOT EXISTS date_of_birth DATE,
+       ADD COLUMN IF NOT EXISTS gender TEXT,
+       ADD COLUMN IF NOT EXISTS phone TEXT,
+       ADD COLUMN IF NOT EXISTS patient_category TEXT,
+       ADD COLUMN IF NOT EXISTS approval_status TEXT,
+       ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMPTZ,
+       ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ,
+       ADD COLUMN IF NOT EXISTS reviewed_by TEXT,
+       ADD COLUMN IF NOT EXISTS rejection_reason TEXT`,
+    `UPDATE patient_portal_dependents
+       SET approval_status = 'approved'
+     WHERE dependent_user_id IS NOT NULL
+       AND (approval_status IS NULL OR BTRIM(approval_status) = '')`,
+    `UPDATE patient_portal_dependents
+       SET approval_status = 'pending'
+     WHERE dependent_user_id IS NULL
+       AND (approval_status IS NULL OR BTRIM(approval_status) = '')`,
+    `UPDATE patient_portal_dependents
+       SET submitted_at = COALESCE(submitted_at, created_at, CURRENT_TIMESTAMP)
+     WHERE submitted_at IS NULL`,
+    `ALTER TABLE patient_portal_dependents ALTER COLUMN approval_status SET DEFAULT 'pending'`,
+    `ALTER TABLE patient_portal_dependents ALTER COLUMN submitted_at SET DEFAULT CURRENT_TIMESTAMP`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS managed_by_user_id TEXT`,
+  ];
+  for (const sql of statements) {
+    try {
+      await db.query(sql);
+    } catch (error) {
+      if (error?.code === "42P01") {
+        throw error;
+      }
+      console.warn("Account dependents schema ensure skipped:", error.message);
+    }
+  }
+  try {
+    await db.query("SELECT approval_status, first_name, submitted_at FROM patient_portal_dependents LIMIT 0");
+    schemaReady = true;
+  } catch (error) {
+    if (error?.code === "42P01") {
+      throw error;
+    }
+    schemaReady = false;
+  }
+}
+
+async function queryDependentRows(db, { whereSql, params = [], orderSql = "" }) {
+  await ensureAccountDependentSchema(db);
+  const attempts = [
+    `${SELECT_DEPENDENT} ${whereSql} ${orderSql}`,
+    `${SELECT_DEPENDENT_NO_PATIENT_ID} ${whereSql} ${orderSql}`,
+    `${SELECT_DEPENDENT_LEGACY} ${whereSql} ORDER BY link.created_at DESC`,
+  ];
+  let lastError = null;
+  for (const sql of attempts) {
+    try {
+      return await db.query(sql, params);
+    } catch (error) {
+      if (error?.code !== "42703") {
+        throw error;
+      }
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
+
 async function findDuplicate(db, guardianUserId, payload, excludeId = null) {
   const params = [
     String(guardianUserId),
@@ -205,27 +330,25 @@ async function findDuplicate(db, guardianUserId, payload, excludeId = null) {
 }
 
 async function listForGuardian(db, guardianUserId) {
-  const result = await db.query(
-    `${SELECT_DEPENDENT}
-     WHERE link.guardian_user_id::text = $1
-     ORDER BY link.submitted_at DESC, link.created_at DESC`,
-    [String(guardianUserId)]
-  );
+  const result = await queryDependentRows(db, {
+    whereSql: "WHERE link.guardian_user_id::text = $1",
+    params: [String(guardianUserId)],
+    orderSql: "ORDER BY COALESCE(link.submitted_at, link.created_at) DESC, link.id DESC",
+  });
   return result.rows.map(mapDependent);
 }
 
 async function getForGuardian(db, guardianUserId, dependentId) {
-  const result = await db.query(
-    `${SELECT_DEPENDENT}
-     WHERE link.id = $1
-       AND link.guardian_user_id::text = $2
-     LIMIT 1`,
-    [dependentId, String(guardianUserId)]
-  );
+  const result = await queryDependentRows(db, {
+    whereSql: "WHERE link.id = $1 AND link.guardian_user_id::text = $2",
+    params: [dependentId, String(guardianUserId)],
+    orderSql: "",
+  });
   return mapDependent(result.rows[0]);
 }
 
 async function submitDependent(db, guardianUserId, body, { notifyAdmin } = {}) {
+  await ensureAccountDependentSchema(db);
   const payload = parseSubmission(body);
   const duplicate = await findDuplicate(db, guardianUserId, payload);
   if (duplicate) {
@@ -269,26 +392,29 @@ async function submitDependent(db, guardianUserId, body, { notifyAdmin } = {}) {
 }
 
 async function listPendingForAdmin(db) {
-  const result = await db.query(
-    `${SELECT_DEPENDENT}
-     WHERE LOWER(link.approval_status) = 'pending'
-     ORDER BY link.submitted_at DESC, link.id DESC`
-  );
+  const result = await queryDependentRows(db, {
+    whereSql: "WHERE LOWER(COALESCE(link.approval_status, 'pending')) = 'pending'",
+    params: [],
+    orderSql: "ORDER BY COALESCE(link.submitted_at, link.created_at) DESC, link.id DESC",
+  });
   return result.rows.map(mapDependent);
 }
 
 async function listReviewedForAdmin(db) {
-  const result = await db.query(
-    `${SELECT_DEPENDENT}
-     WHERE LOWER(link.approval_status) IN ('approved', 'rejected')
-     ORDER BY COALESCE(link.reviewed_at, link.submitted_at) DESC
-     LIMIT 100`
-  );
+  const result = await queryDependentRows(db, {
+    whereSql: "WHERE LOWER(COALESCE(link.approval_status, '')) IN ('approved', 'rejected')",
+    params: [],
+    orderSql: "ORDER BY COALESCE(link.reviewed_at, link.submitted_at, link.created_at) DESC",
+  });
   return result.rows.map(mapDependent);
 }
 
 async function getForAdmin(db, dependentId) {
-  const result = await db.query(`${SELECT_DEPENDENT} WHERE link.id = $1 LIMIT 1`, [dependentId]);
+  const result = await queryDependentRows(db, {
+    whereSql: "WHERE link.id = $1",
+    params: [dependentId],
+    orderSql: "",
+  });
   return mapDependent(result.rows[0]);
 }
 

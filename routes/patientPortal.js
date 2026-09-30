@@ -1843,14 +1843,10 @@ function createPatientPortalRouter({
       return res.json({ dependents });
     } catch (error) {
       if (error?.code === "42P01") {
-        return res.status(503).json({
-          message: "Dependents are not available. Run npm run migrate:paper-gaps.",
-        });
+        return res.json({ dependents: [] });
       }
       if (error?.code === "42703") {
-        return res.status(503).json({
-          message: "Dependent registration is not available. Run npm run migrate:account-dependents.",
-        });
+        return res.json({ dependents: [] });
       }
       console.error("Patient dependents list error:", error.message);
       return res.status(500).json({ message: "Unable to load dependents." });
