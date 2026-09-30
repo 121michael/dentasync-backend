@@ -84,7 +84,7 @@ export function FamilyPage() {
   }
 
   async function switchIntoDependent(dependent) {
-    const dependentUserId = dependent.dependentUserId || dependent.userId;
+    const dependentUserId = String(dependent.dependentUserId || dependent.userId || "").trim();
     if (!dependentUserId) {
       setError("That dependent account cannot be switched into.");
       return;

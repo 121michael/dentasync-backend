@@ -212,6 +212,9 @@ function formatPortalUser(user) {
 }
 
 function stringValue(value, maxLength = 500) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    value = String(value);
+  }
   if (typeof value !== "string") {
     return null;
   }
@@ -1875,7 +1878,7 @@ function createPatientPortalRouter({
           relationship: row.relationship,
           eligibilityCategory: row.eligibility_category || row.relationship || null,
           createdAt: row.created_at,
-          dependentUserId: row.dependent_user_id,
+          dependentUserId: row.dependent_user_id != null ? String(row.dependent_user_id) : "",
           firstName: row.first_name || "",
           lastName: row.last_name || "",
           fullName: `${row.first_name || ""} ${row.last_name || ""}`.trim(),
