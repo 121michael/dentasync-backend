@@ -11,6 +11,20 @@ export function getAdminNotificationTarget(notification) {
   const title = String(notification.title || "");
   const focus = entityId != null && String(entityId).trim() !== "" ? String(entityId) : null;
 
+  if (
+    type === "dependent" ||
+    entityType === "dependent" ||
+    entityType === "family"
+  ) {
+    const params = new URLSearchParams({ tab: "patient" });
+    if (focus) params.set("focus", `dependent:${focus}`);
+    return {
+      targetPage: "users",
+      path: `/admin/users?${params}`,
+      label: "Review dependent request",
+    };
+  }
+
   if (type === "staff" || entityType === "staff") {
     const params = new URLSearchParams({ tab: "staff" });
     if (focus) params.set("focus", focus);

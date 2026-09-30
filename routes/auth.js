@@ -533,6 +533,15 @@ function createAuthRouter({
       }
 
       const user = userResult.rows[0];
+      if (
+        user.managed_by_user_id ||
+        user.password_hash == null ||
+        user.password_hash === "" ||
+        user.password_hash === "!"
+      ) {
+        return res.status(401).json({ message: "Invalid credentials." });
+      }
+
       const isPasswordMatch = await bcrypt.compare(password, user.password_hash);
       if (!isPasswordMatch) {
         return res.status(401).json({ message: "Invalid credentials." });

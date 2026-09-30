@@ -135,6 +135,7 @@ export const api = {
     return request("/patient/uploads/xray", { method: "POST", body });
   },
   getDependents: () => request("/patient/dependents"),
+  getDependent: (dependentId) => request(`/patient/dependents/${dependentId}`),
   addDependent: (body) => request("/patient/dependents", { method: "POST", body }),
   removeDependent: (dependentId) =>
     request(`/patient/dependents/${dependentId}`, { method: "DELETE" }),
@@ -342,6 +343,11 @@ export const api = {
   },
   approveAdminRegistration: (id) => request(`/admin/registrations/${id}/approve`, { method: "POST" }),
   rejectAdminRegistration: (id) => request(`/admin/registrations/${id}/reject`, { method: "POST" }),
+  getAdminPendingDependents: () => request("/admin/dependents/pending"),
+  getAdminDependent: (id) => request(`/admin/dependents/${id}`),
+  approveAdminDependent: (id) => request(`/admin/dependents/${id}/approve`, { method: "POST" }),
+  rejectAdminDependent: (id, body = { confirmed: true }) =>
+    request(`/admin/dependents/${id}/reject`, { method: "POST", body }),
   getAdminArchivedRecords: (params = {}) => {
     const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value || value === 0));
     return request(`/admin/archived${search.size ? `?${search}` : ""}`);

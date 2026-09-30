@@ -450,8 +450,16 @@ strong {
   line-height: 1.35;
 }
 
-.family-dependent-row {
-  align-items: center;
+.family-dependents-table {
+  width: 100%;
+}
+
+.family-pending-note {
+  margin: 0.35rem 0 0;
+}
+
+.dependent-form {
+  margin-top: 0.75rem;
 }
 
 .family-dependent-actions {

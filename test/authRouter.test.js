@@ -510,3 +510,52 @@ test("login rejects archived clinic accounts without deleting credentials", asyn
   assert.match(body.message, /archived/i);
   assert.equal(body.token, undefined);
 });
+
+test("login rejects managed dependents that share a guardian account", async (t) => {
+  const app = express();
+  app.use(express.json());
+  app.use(
+    "/api/auth",
+    createAuthRouter({
+      db: {
+        async query(sql) {
+          if (/SELECT \* FROM users/i.test(sql)) {
+            return {
+              rows: [
+                {
+                  id: 88,
+                  first_name: "Maria",
+                  last_name: "Santos",
+                  email: "dependent.21.12@managed.invalid",
+                  phone: "managed.21",
+                  password_hash: "!",
+                  role: "patient",
+                  status: "Active",
+                  is_verified: true,
+                  managed_by_user_id: "12",
+                },
+              ],
+            };
+          }
+          return { rows: [] };
+        },
+      },
+      otpService: {},
+      authenticateToken: (_req, _res, next) => next(),
+      jwtSecret: "test-jwt-secret",
+    })
+  );
+
+  const server = await startServer(app);
+  t.after(server.close);
+
+  const response = await fetch(`${server.baseUrl}/api/auth/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "dependent.21.12@managed.invalid", password: "anything" }),
+  });
+  const body = await response.json();
+  assert.equal(response.status, 401);
+  assert.match(body.message, /invalid credentials/i);
+  assert.equal(body.token, undefined);
+});

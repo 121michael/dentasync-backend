@@ -16,6 +16,7 @@ const staffCheckIn = require("../services/staffCheckIn");
 const { insertPatientNotification, mapPatientNotification } = require("../services/patientPortalNotifications");
 const staffWalkInQr = require("../services/staffWalkInQr");
 const clinicSchedule = require("../services/clinicSchedule");
+const accountDependents = require("../services/accountDependents");
 const { resolveAppSecrets } = require("../lib/securityConfig");
 
 const SERVICES = [
@@ -137,29 +138,6 @@ const ALLOWED_UPLOAD_TYPES = new Set([
   "image/png",
   "image/webp",
 ]);
-
-const DEPENDENT_ELIGIBILITY = new Set([
-  "toddler",
-  "child_under_12",
-  "pwd",
-  "senior",
-  "other_authorized",
-]);
-
-function ageFromIsoDate(value) {
-  if (!isIsoDate(value) && !(value instanceof Date)) {
-    return null;
-  }
-  const dob = value instanceof Date ? value : new Date(`${value}T00:00:00`);
-  if (Number.isNaN(dob.getTime())) return null;
-  const today = new Date();
-  let age = today.getFullYear() - dob.getFullYear();
-  const monthDiff = today.getMonth() - dob.getMonth();
-  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) {
-    age -= 1;
-  }
-  return age >= 0 ? age : null;
-}
 
 function requirePatient(req, res, next) {
   // Auth subject (guardian) must be a patient; effective user is also a patient when acting-as.
@@ -484,9 +462,20 @@ function createPatientPortalRouter({
          FROM patient_portal_dependents
          WHERE guardian_user_id::text = $1
            AND dependent_user_id::text = $2
+           AND LOWER(COALESCE(approval_status, 'approved')) = 'approved'
          LIMIT 1`,
         [principalId, dependentUserId]
-      );
+      ).catch(async (error) => {
+        if (error?.code !== "42703") throw error;
+        return db.query(
+          `SELECT id
+           FROM patient_portal_dependents
+           WHERE guardian_user_id::text = $1
+             AND dependent_user_id::text = $2
+           LIMIT 1`,
+          [principalId, dependentUserId]
+        );
+      });
       if (!link.rows.length) {
         return res.status(403).json({
           message: "You can only switch into dependents linked on Family.",
@@ -760,6 +749,8 @@ function createPatientPortalRouter({
              SELECT dependent_user_id
              FROM patient_portal_dependents
              WHERE guardian_user_id = $1
+               AND dependent_user_id IS NOT NULL
+               AND LOWER(COALESCE(approval_status, 'approved')) = 'approved'
            )
          )${statusClause}
          ORDER BY appointments.appointment_date DESC, appointments.appointment_time DESC`,
@@ -874,9 +865,20 @@ function createPatientPortalRouter({
            FROM patient_portal_dependents
            WHERE guardian_user_id::text = $1
              AND dependent_user_id::text = $2
+             AND LOWER(COALESCE(approval_status, 'approved')) = 'approved'
            LIMIT 1`,
           [guardianUserId, bookingFor]
-        ).catch((error) => {
+        ).catch(async (error) => {
+          if (error?.code === "42703") {
+            return db.query(
+              `SELECT id
+               FROM patient_portal_dependents
+               WHERE guardian_user_id::text = $1
+                 AND dependent_user_id::text = $2
+               LIMIT 1`,
+              [guardianUserId, bookingFor]
+            );
+          }
           if (error?.code === "42P01") {
             const missing = new Error("Dependents are not available. Run npm run migrate:paper-gaps.");
             missing.status = 503;
@@ -886,7 +888,7 @@ function createPatientPortalRouter({
         });
         if (!link.rows.length) {
           return res.status(403).json({
-            message: "You can only book for dependents linked to your account.",
+            message: "You can only book for approved dependents linked to your account.",
           });
         }
         userId = bookingFor;
@@ -1073,6 +1075,8 @@ function createPatientPortalRouter({
                SELECT dependent_user_id
                FROM patient_portal_dependents
                WHERE guardian_user_id = $2
+                 AND dependent_user_id IS NOT NULL
+                 AND LOWER(COALESCE(approval_status, 'approved')) = 'approved'
              )
            )
          RETURNING *`,
@@ -1835,61 +1839,17 @@ function createPatientPortalRouter({
   router.get("/dependents", async (req, res) => {
     const guardianUserId = principalUserIdFor(req);
     try {
-      const result = await db.query(
-        `SELECT
-           link.id,
-           link.relationship,
-           link.created_at,
-           link.eligibility_category,
-           dependent.id AS dependent_user_id,
-           dependent.first_name,
-           dependent.last_name,
-           dependent.email,
-           dependent.phone
-         FROM patient_portal_dependents AS link
-         JOIN users AS dependent ON dependent.id::text = link.dependent_user_id
-         WHERE link.guardian_user_id = $1
-         ORDER BY link.created_at DESC`,
-        [guardianUserId]
-      ).catch(async (error) => {
-        if (error?.code === "42703") {
-          return db.query(
-            `SELECT
-               link.id,
-               link.relationship,
-               link.created_at,
-               dependent.id AS dependent_user_id,
-               dependent.first_name,
-               dependent.last_name,
-               dependent.email,
-               dependent.phone
-             FROM patient_portal_dependents AS link
-             JOIN users AS dependent ON dependent.id::text = link.dependent_user_id
-             WHERE link.guardian_user_id = $1
-             ORDER BY link.created_at DESC`,
-            [guardianUserId]
-          );
-        }
-        throw error;
-      });
-      return res.json({
-        dependents: result.rows.map((row) => ({
-          id: row.id,
-          relationship: row.relationship,
-          eligibilityCategory: row.eligibility_category || row.relationship || null,
-          createdAt: row.created_at,
-          dependentUserId: row.dependent_user_id != null ? String(row.dependent_user_id) : "",
-          firstName: row.first_name || "",
-          lastName: row.last_name || "",
-          fullName: `${row.first_name || ""} ${row.last_name || ""}`.trim(),
-          email: row.email || "",
-          phone: row.phone || "",
-        })),
-      });
+      const dependents = await accountDependents.listForGuardian(db, guardianUserId);
+      return res.json({ dependents });
     } catch (error) {
       if (error?.code === "42P01") {
         return res.status(503).json({
           message: "Dependents are not available. Run npm run migrate:paper-gaps.",
+        });
+      }
+      if (error?.code === "42703") {
+        return res.status(503).json({
+          message: "Dependent registration is not available. Run npm run migrate:account-dependents.",
         });
       }
       console.error("Patient dependents list error:", error.message);
@@ -1897,170 +1857,51 @@ function createPatientPortalRouter({
     }
   });
 
+  router.get("/dependents/:id", async (req, res) => {
+    const linkId = Number.parseInt(req.params.id, 10);
+    if (!Number.isSafeInteger(linkId) || linkId <= 0) {
+      return res.status(400).json({ message: "A valid dependent ID is required." });
+    }
+    try {
+      const dependent = await accountDependents.getForGuardian(db, principalUserIdFor(req), linkId);
+      if (!dependent) {
+        return res.status(404).json({ message: "Dependent was not found." });
+      }
+      return res.json({ dependent });
+    } catch (error) {
+      if (error?.code === "42P01" || error?.code === "42703") {
+        return res.status(503).json({
+          message: "Dependent registration is not available. Run npm run migrate:account-dependents.",
+        });
+      }
+      console.error("Patient dependent detail error:", error.message);
+      return res.status(500).json({ message: "Unable to load the dependent." });
+    }
+  });
+
   router.post("/dependents", async (req, res) => {
-    if (rejectIfActingAs(req, res, "link family dependents")) {
+    if (rejectIfActingAs(req, res, "add family dependents")) {
       return;
     }
-    const guardianUserId = principalUserIdFor(req);
-    let dependentUserId = stringValue(
-      req.body?.dependentUserId || req.body?.userId || req.body?.dependentId,
-      120
-    );
-    const eligibilityCategory =
-      stringValue(req.body?.eligibilityCategory || req.body?.relationship, 80)?.toLowerCase() ||
-      null;
-    const relationship = eligibilityCategory || "dependent";
-    const email = normalizeEmail(req.body?.email);
-    const phone = normalizePhone(req.body?.phone);
-
-    if (!eligibilityCategory || !DEPENDENT_ELIGIBILITY.has(eligibilityCategory)) {
-      return res.status(400).json({
-        message:
-          "Select an eligibility reason: toddler, child under 12, PWD, senior, or other authorized patient who cannot manage their own account.",
-      });
-    }
-
     try {
-      if (!dependentUserId) {
-        if (!email || !phone) {
-          return res.status(400).json({
-            message: "Provide the dependent's registered email and phone, or their patient user ID.",
-          });
-        }
-
-        const lookup = await db.query(
-          `SELECT id, first_name, last_name, email, phone
-           FROM users
-           WHERE LOWER(role) = 'patient'
-             AND COALESCE(is_archived, FALSE) = FALSE
-             AND LOWER(email) = $1
-             AND (
-               phone = $2
-               OR REPLACE(COALESCE(phone, ''), '+', '') = $2
-               OR RIGHT(REGEXP_REPLACE(COALESCE(phone, ''), '\\D', '', 'g'), 10) =
-                  RIGHT(REGEXP_REPLACE($2, '\\D', '', 'g'), 10)
-             )
-           LIMIT 1`,
-          [email, phone]
-        );
-        if (!lookup.rows.length) {
-          return res.status(404).json({
-            message: "No matching patient account found for that email and phone.",
-          });
-        }
-        dependentUserId = String(lookup.rows[0].id);
-      }
-
-      if (dependentUserId === guardianUserId) {
-        return res.status(400).json({ message: "You cannot link yourself as a dependent." });
-      }
-
-      const dependentResult = await db.query(
-        `SELECT id, first_name, last_name, email, phone
-         FROM users
-         WHERE id::text = $1
-           AND LOWER(role) = 'patient'
-           AND COALESCE(is_archived, FALSE) = FALSE
-         LIMIT 1`,
-        [dependentUserId]
-      );
-      if (!dependentResult.rows.length) {
-        return res.status(404).json({ message: "Dependent must be an existing patient account." });
-      }
-
-      // Age-gated categories require a recorded birth date under 12 (or under 3 for toddler).
-      // Profiles store DOB in date_of_birth; older paper-gap code also used birth_date.
-      if (eligibilityCategory === "toddler" || eligibilityCategory === "child_under_12") {
-        const dobResult = await db.query(
-          `SELECT COALESCE(birth_date, date_of_birth) AS birth_date
-           FROM patient_portal_profiles
-           WHERE user_id::text = $1
-           LIMIT 1`,
-          [dependentUserId]
-        ).catch(async (error) => {
-          // birth_date may be missing before migrate:paper-gaps; fall back to date_of_birth only.
-          if (error?.code === "42703") {
-            return db.query(
-              `SELECT date_of_birth AS birth_date
-               FROM patient_portal_profiles
-               WHERE user_id::text = $1
-               LIMIT 1`,
-              [dependentUserId]
-            );
-          }
-          if (error?.code === "42P01") {
-            return { rows: [] };
-          }
-          throw error;
-        });
-        const birthDate = normalizeIsoDate(dobResult.rows[0]?.birth_date);
-        const age = ageFromIsoDate(birthDate);
-        if (age == null) {
-          return res.status(400).json({
-            message:
-              "Child/toddler dependents need a date of birth on their patient profile before they can be linked. Sign in as the dependent (or open their Profile) and save Date of birth, then try again.",
-          });
-        }
-        if (eligibilityCategory === "toddler" && age >= 3) {
-          return res.status(400).json({
-            message: "Toddler eligibility applies to dependents under 3 years old.",
-          });
-        }
-        if (eligibilityCategory === "child_under_12" && age >= 12) {
-          return res.status(400).json({
-            message: "Child under 12 eligibility requires the dependent to be under 12 years old.",
-          });
-        }
-      }
-
-      let result;
-      try {
-        result = await db.query(
-          `INSERT INTO patient_portal_dependents (
-             guardian_user_id, dependent_user_id, relationship, eligibility_category
-           ) VALUES ($1, $2, $3, $4)
-           RETURNING id, guardian_user_id, dependent_user_id, relationship, eligibility_category, created_at`,
-          [guardianUserId, dependentUserId, relationship, eligibilityCategory]
-        );
-      } catch (columnError) {
-        if (columnError?.code !== "42703") throw columnError;
-        result = await db.query(
-          `INSERT INTO patient_portal_dependents (
-             guardian_user_id, dependent_user_id, relationship
-           ) VALUES ($1, $2, $3)
-           RETURNING id, guardian_user_id, dependent_user_id, relationship, created_at`,
-          [guardianUserId, dependentUserId, relationship]
-        );
-      }
-
-      const dependent = dependentResult.rows[0];
+      const dependent = await accountDependents.submitDependent(db, principalUserIdFor(req), req.body, {
+        notifyAdmin,
+      });
       return res.status(201).json({
-        message: "Authorized dependent linked successfully.",
-        dependent: {
-          id: result.rows[0].id,
-          relationship: result.rows[0].relationship,
-          eligibilityCategory:
-            result.rows[0].eligibility_category || eligibilityCategory || result.rows[0].relationship,
-          createdAt: result.rows[0].created_at,
-          dependentUserId: dependent.id,
-          firstName: dependent.first_name || "",
-          lastName: dependent.last_name || "",
-          fullName: `${dependent.first_name || ""} ${dependent.last_name || ""}`.trim(),
-          email: dependent.email || "",
-          phone: dependent.phone || "",
-        },
+        message: "Your dependent registration is awaiting Admin approval.",
+        dependent,
       });
     } catch (error) {
-      if (error?.code === "42P01") {
+      if (error?.status) {
+        return res.status(error.status).json({ message: error.message });
+      }
+      if (error?.code === "42P01" || error?.code === "42703") {
         return res.status(503).json({
-          message: "Dependents are not available. Run npm run migrate:paper-gaps.",
+          message: "Dependent registration is not available. Run npm run migrate:account-dependents.",
         });
       }
-      if (error?.code === "23505") {
-        return res.status(409).json({ message: "That dependent is already linked." });
-      }
       console.error("Patient dependent create error:", error.message);
-      return res.status(500).json({ message: "Unable to link the dependent." });
+      return res.status(500).json({ message: "Unable to submit the dependent for approval." });
     }
   });
 
@@ -2078,13 +1919,16 @@ function createPatientPortalRouter({
         `DELETE FROM patient_portal_dependents
          WHERE id = $1
            AND guardian_user_id::text = $2
+           AND LOWER(COALESCE(approval_status, 'pending')) IN ('pending', 'rejected')
          RETURNING id`,
         [linkId, principalUserIdFor(req)]
       );
       if (!result.rows.length) {
-        return res.status(404).json({ message: "Dependent link not found." });
+        return res.status(404).json({
+          message: "Pending or rejected dependent request was not found.",
+        });
       }
-      return res.json({ message: "Dependent unlinked.", id: result.rows[0].id });
+      return res.json({ message: "Dependent request removed.", id: result.rows[0].id });
     } catch (error) {
       if (error?.code === "42P01") {
         return res.status(503).json({

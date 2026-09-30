@@ -88,7 +88,7 @@ export function AppointmentsPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { actingAs } = useAuth();
+  const { actingAs, user } = useAuth();
   const isBooking = location.pathname.endsWith("/book");
 
   const [catalog, setCatalog] = useState(null);
@@ -126,7 +126,13 @@ export function AppointmentsPage() {
       ]);
       setCatalog(catalogResponse);
       setAppointments(appointmentResponse.appointments || []);
-      setDependents(dependentsResponse.dependents || dependentsResponse.items || []);
+      setDependents(
+        (dependentsResponse.dependents || dependentsResponse.items || []).filter(
+          (dependent) =>
+            String(dependent.approvalStatus || "").toLowerCase() === "approved" &&
+            String(dependent.dependentUserId || "").trim()
+        )
+      );
       setLoaded(true);
     } catch (loadError) {
       setError(loadError.message);
@@ -413,15 +419,17 @@ export function AppointmentsPage() {
             </div>
             {dependents.length && !actingAs ? (
               <label className="field" style={{ marginBottom: "1rem" }}>
-                <span>Book for</span>
+                <span>Patient</span>
                 <select name="forPatientUserId" value={form.forPatientUserId} onChange={updateForm}>
-                  <option value="">Myself</option>
+                  <option value="">
+                    {user?.fullName || "Account holder"} (Account Holder)
+                  </option>
                   {dependents.map((dependent) => (
                     <option
                       key={dependent.id || dependent.dependentUserId}
                       value={dependent.dependentUserId}
                     >
-                      {dependent.fullName || dependent.name || "Dependent"}
+                      {dependent.fullName || dependent.name || "Dependent"} (Approved Dependent)
                     </option>
                   ))}
                 </select>

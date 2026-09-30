@@ -63,6 +63,7 @@ export function AdminManageUsersPage() {
   });
   const [data, setData] = useState(null);
   const [pending, setPending] = useState([]);
+  const [pendingDependents, setPendingDependents] = useState([]);
   const [rejected, setRejected] = useState([]);
   const [search, setSearch] = useState("");
   const [applied, setApplied] = useState("");
@@ -71,6 +72,7 @@ export function AdminManageUsersPage() {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [detail, setDetail] = useState(null);
+  const [dependentDetail, setDependentDetail] = useState(null);
   const [busy, setBusy] = useState(false);
   const [actionBusyId, setActionBusyId] = useState("");
   const [focusKey, setFocusKey] = useState(() => searchParams.get("focus") || "");
@@ -80,13 +82,15 @@ export function AdminManageUsersPage() {
     try {
       const loader =
         tab === "patient" ? api.getAdminPatients : tab === "staff" ? api.getAdminStaff : api.getAdminDentists;
-      const [list, pendingResponse, rejectedResponse] = await Promise.all([
+      const [list, pendingResponse, rejectedResponse, dependentsResponse] = await Promise.all([
         loader({ search: applied, limit: 50 }),
         api.getAdminPendingRegistrations({ limit: 50 }),
         api.getAdminRejectedRegistrations({ limit: 100 }),
+        tab === "patient" ? api.getAdminPendingDependents().catch(() => ({ dependents: [] })) : Promise.resolve({ dependents: [] }),
       ]);
       setData(list);
       setPending((pendingResponse.requests || []).filter((request) => request.role === "patient"));
+      setPendingDependents(dependentsResponse.dependents || dependentsResponse.requests || []);
       setRejected((rejectedResponse.requests || []).filter((request) => request.role === "patient"));
       setError("");
     } catch (loadError) {
@@ -113,7 +117,14 @@ export function AdminManageUsersPage() {
   }, [searchParams, tab]);
 
   useEffect(() => {
-    if (!focusKey || !users.length) return;
+    if (!focusKey) return;
+    if (String(focusKey).startsWith("dependent:")) {
+      const id = String(focusKey).slice("dependent:".length);
+      const match = pendingDependents.find((item) => String(item.id) === id);
+      if (match) setDependentDetail(match);
+      return undefined;
+    }
+    if (!users.length) return;
     const match = users.find((user) =>
       matchesNotificationFocus(user, focusKey, ["id", "email", "phone", "patientId"])
     );
@@ -133,7 +144,7 @@ export function AdminManageUsersPage() {
       window.clearTimeout(timer);
       window.clearTimeout(clearTimer);
     };
-  }, [focusKey, users, searchParams, setSearchParams]);
+  }, [focusKey, users, pendingDependents, searchParams, setSearchParams]);
 
   function selectTab(nextTab) {
     setTab(nextTab);
@@ -295,6 +306,41 @@ export function AdminManageUsersPage() {
       await load();
     } catch (rejectError) {
       pushToast(rejectError.message || "Unable to reject patient account.", "error");
+    } finally {
+      setActionBusyId("");
+    }
+  }
+
+  async function approveDependent(request) {
+    setActionBusyId(`dep-${request.id}:approve`);
+    try {
+      const response = await api.approveAdminDependent(request.id);
+      pushToast(response.message || "Dependent approved.");
+      setDependentDetail(null);
+      await load();
+    } catch (approveError) {
+      pushToast(approveError.message || "Unable to approve the dependent.", "error");
+    } finally {
+      setActionBusyId("");
+    }
+  }
+
+  async function rejectDependent(request) {
+    const ok = await confirm({
+      title: "Reject dependent",
+      message: `Reject ${request.fullName}? This request will stay rejected and the dependent will not become an active patient.`,
+      confirmLabel: "Reject",
+      tone: "danger",
+    });
+    if (!ok) return;
+    setActionBusyId(`dep-${request.id}:reject`);
+    try {
+      const response = await api.rejectAdminDependent(request.id, { confirmed: true });
+      pushToast(response.message || "Dependent request rejected.");
+      setDependentDetail(null);
+      await load();
+    } catch (rejectError) {
+      pushToast(rejectError.message || "Unable to reject the dependent.", "error");
     } finally {
       setActionBusyId("");
     }
@@ -572,6 +618,69 @@ export function AdminManageUsersPage() {
           <section className="admin-panel">
             <div className="admin-panel__heading">
               <div>
+                <span className="eyebrow">Dependent approval</span>
+                <h2>Pending Dependent Requests</h2>
+                <p>
+                  Account holders submit dependents under their existing login. Approve to create a separate patient
+                  record and Patient ID. Staff and dentists cannot approve these requests.
+                </p>
+              </div>
+            </div>
+            {pendingDependents.length ? (
+              <div className="admin-table-wrap">
+                <table className="admin-table">
+                  <thead>
+                    <tr>
+                      <th>Dependent Name</th>
+                      <th>Relationship</th>
+                      <th>Account Holder</th>
+                      <th>Submitted Date</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pendingDependents.map((request) => (
+                      <tr key={`dep-${request.id}`}>
+                        <td><strong>{request.fullName}</strong></td>
+                        <td className="capitalize">{request.relationship}</td>
+                        <td>{request.accountHolderName || "—"}</td>
+                        <td>{formatAdminDate(request.submittedAt || request.createdAt)}</td>
+                        <td><AdminStatusBadge status="pending" /></td>
+                        <td>
+                          <div className="admin-row-actions">
+                            <button className="button button--secondary button--compact" onClick={() => setDependentDetail(request)}>
+                              View
+                            </button>
+                            <button
+                              className="button button--primary button--compact"
+                              disabled={actionBusyId === `dep-${request.id}:approve`}
+                              onClick={() => approveDependent(request)}
+                            >
+                              Approve
+                            </button>
+                            <button
+                              className="button button--danger button--compact"
+                              disabled={actionBusyId === `dep-${request.id}:reject`}
+                              onClick={() => rejectDependent(request)}
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <EmptyState title="No pending dependents" detail="Newly submitted dependents will appear here for Admin review." />
+            )}
+          </section>
+
+          <section className="admin-panel">
+            <div className="admin-panel__heading">
+              <div>
                 <span className="eyebrow">Rejected accounts</span>
                 <h2>Rejected Patient Registrations</h2>
                 <p>
@@ -648,6 +757,45 @@ export function AdminManageUsersPage() {
         </AdminModal>
       ) : null}
 
+      {dependentDetail ? (
+        <AdminModal title="Dependent request" onClose={() => setDependentDetail(null)} wide>
+          <div className="admin-detail-grid">
+            <p><small>Dependent</small><strong>{dependentDetail.fullName}</strong></p>
+            <p><small>Relationship</small><strong className="capitalize">{dependentDetail.relationship}</strong></p>
+            <p><small>Account holder</small><strong>{dependentDetail.accountHolderName || "—"}</strong></p>
+            <p><small>Holder email</small><strong>{dependentDetail.accountHolderEmail || "—"}</strong></p>
+            <p><small>Holder Patient ID</small><strong>{dependentDetail.accountHolderPatientId || "—"}</strong></p>
+            <p><small>Birthdate</small><strong>{dependentDetail.dateOfBirth || "—"}</strong></p>
+            <p><small>Age</small><strong>{dependentDetail.age ?? "—"}</strong></p>
+            <p><small>Sex</small><strong>{dependentDetail.gender || "—"}</strong></p>
+            <p><small>Phone</small><strong>{dependentDetail.phone || "—"}</strong></p>
+            <p><small>Category</small><strong>{categoryLabel(dependentDetail.patientCategory)}</strong></p>
+            <p><small>Submitted</small><strong>{formatAdminDate(dependentDetail.submittedAt || dependentDetail.createdAt)}</strong></p>
+            <p><small>Status</small><strong className="capitalize">{dependentDetail.approvalStatus}</strong></p>
+          </div>
+          {String(dependentDetail.approvalStatus).toLowerCase() === "pending" ? (
+            <div className="admin-modal__actions">
+              <button type="button" className="button button--secondary" onClick={() => setDependentDetail(null)}>Close</button>
+              <button
+                type="button"
+                className="button button--danger"
+                disabled={actionBusyId === `dep-${dependentDetail.id}:reject`}
+                onClick={() => rejectDependent(dependentDetail)}
+              >
+                Reject
+              </button>
+              <button
+                type="button"
+                className="button button--primary"
+                disabled={actionBusyId === `dep-${dependentDetail.id}:approve`}
+                onClick={() => approveDependent(dependentDetail)}
+              >
+                Approve
+              </button>
+            </div>
+          ) : null}
+        </AdminModal>
+      ) : null}
       {detail ? (
         <AdminModal title="Account details" onClose={() => setDetail(null)}>
           <div className="admin-detail-grid">
