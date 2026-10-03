@@ -158,3 +158,14 @@ test("staff appointment update rejects every field except appointment date and t
     await portal.close();
   }
 });
+
+test("staff cannot archive a patient record", async () => {
+  const portal = await startStaffPortal({ tokenRole: "staff", databaseRole: "staff" });
+  try {
+    const response = await fetch(`${portal.url}/patients/3`, { method: "DELETE" });
+    assert.equal(response.status, 403);
+    assert.match((await response.json()).message, /cannot archive patient records/i);
+  } finally {
+    await portal.close();
+  }
+});

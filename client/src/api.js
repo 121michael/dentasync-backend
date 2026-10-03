@@ -225,8 +225,6 @@ export const api = {
     request(`/staff/patients/${patientId}`, { method: "PATCH", body }),
   updateStaffPatientTreatmentPayment: (patientId, treatmentId, body) =>
     request(`/staff/patients/${patientId}/treatments/${treatmentId}`, { method: "PATCH", body }),
-  deleteStaffPatient: (patientId) =>
-    request(`/staff/patients/${patientId}`, { method: "DELETE" }),
   getStaffBilling: (search = "") =>
     request(`/staff/billing${search ? `?search=${encodeURIComponent(search)}` : ""}`),
   createStaffInvoice: (body) => request("/staff/billing", { method: "POST", body }),

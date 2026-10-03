@@ -1389,25 +1389,10 @@ function createStaffPortalRouter({
     }
   });
 
-  router.delete("/patients/:id", async (req, res) => {
-    const recordId = Number.parseInt(req.params.id, 10);
-    if (!Number.isSafeInteger(recordId) || recordId <= 0) {
-      return res.status(400).json({ message: "A valid patient record ID is required." });
-    }
-    try {
-      const record = await clinicalPatients.archiveClinicalRecord(db, recordId, {
-        id: req.staff.id,
-        role: "staff",
-      });
-      return res.json({
-        message: "Patient record archived.",
-        patient: { ...record, isClinicalRecord: true },
-      });
-    } catch (error) {
-      return res.status(error.status || 500).json({
-        message: error.status ? error.message : "Unable to archive the patient record.",
-      });
-    }
+  router.delete("/patients/:id", async (_req, res) => {
+    return res.status(403).json({
+      message: "Staff cannot archive patient records. Clinical records stay available for appointment and payment updates.",
+    });
   });
 
   router.get("/patients/:id", async (req, res) => {

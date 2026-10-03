@@ -86,7 +86,7 @@ function paymentStatus(amountCharged, amountPaid) {
 }
 
 export function StaffPatientsPage() {
-  const { pushToast, confirm } = useStaffUi();
+  const { pushToast } = useStaffUi();
   const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState("");
   const [applied, setApplied] = useState("");
@@ -228,26 +228,6 @@ export function StaffPatientsPage() {
       await refreshDetail();
     } catch (saveError) {
       pushToast(saveError.message, "error");
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function archivePatient(patient) {
-    const ok = await confirm({
-      title: "Archive patient record",
-      message: `Archive clinical record for ${patient.fullName || patient.patientName}? This does not permanently delete protected system data.`,
-      confirmLabel: "Archive",
-    });
-    if (!ok) return;
-    setBusy(`archive-${patient.id}`);
-    try {
-      await api.deleteStaffPatient(patient.id);
-      pushToast("Patient record archived.");
-      setDetail(null);
-      await load();
-    } catch (archiveError) {
-      pushToast(archiveError.message, "error");
     } finally {
       setBusy("");
     }
@@ -738,13 +718,6 @@ export function StaffPatientsPage() {
             <p className="muted-copy">
               Clinical data is read-only. Staff controls are limited to appointment and payment.
             </p>
-            <button
-              className="button button--danger"
-              onClick={() => archivePatient(detail)}
-              disabled={Boolean(busy)}
-            >
-              Archive record
-            </button>
           </div>
         </StaffModal>
       ) : null}
