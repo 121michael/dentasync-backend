@@ -495,11 +495,11 @@ export function StaffPatientsPage() {
                 <strong>Next Appointment:</strong> {nextAppointmentLabel(detail)}
               </p>
             </div>
-            <p className="muted-copy">
-              {isProfileLocked(detail)
-                ? "Patient ID, Name, Age, Sex, Birthdate, and Phone Number are synced from the patient account profile and are read-only here."
-                : "Walk-in clinical record. Basic patient information remains read-only for Staff."}
-            </p>
+            {!isProfileLocked(detail) ? (
+              <p className="muted-copy">
+                Walk-in clinical record. Basic patient information remains read-only for Staff.
+              </p>
+            ) : null}
           </section>
 
           <DentalChart
