@@ -27,7 +27,7 @@ async function seedStaff() {
     console.log("Staff account ready.");
     console.log(`Email: ${email}`);
     console.log(`Password: ${password}`);
-    console.log("Use C:\\DentaSync-backend\\client and open http://localhost:5173/login");
+    console.log("Use C:\\DentaSync-git\\frontend and open http://localhost:5173/login");
   } finally {
     await db.end();
   }

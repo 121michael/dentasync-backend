@@ -101,7 +101,7 @@ async function createAdmin() {
   console.log(`  Role:     ${admin.role}`);
   console.log(`  Verified: ${admin.is_verified}`);
   console.log(`  Password hash check: ${matches ? "OK" : "FAILED"}`);
-  console.log("  Open: C:\\DentaSync-backend\\client → http://localhost:5173/login");
+  console.log("  Open: C:\\DentaSync-git\\frontend → http://localhost:5173/login");
 }
 
 createAdmin()

@@ -2,7 +2,10 @@ node_modules/
 .env
 .env.local
 uploads/
-client/dist/
+frontend/dist/
+backend/uploads/
 eng.traineddata
 dentasync-start.log
+backend/dentasync-start.log
+backend/scripts/__pycache__/
 scripts/__pycache__/

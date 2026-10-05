@@ -25,7 +25,7 @@ try {
   // ignore log write failures
 }
 
-require("dotenv").config();
+require("dotenv").config({ path: require("node:path").join(__dirname, ".env") });
 
 // Belt-and-suspenders: also downgrade production+weak-secret npm boots.
 const {

@@ -109,7 +109,7 @@ export function AdminPatientRecordsPage() {
       <ErrorState
         message={
           needsMigration
-            ? "Patient records need a database update. In C:\\DentaSync-backend run: npm run migrate:clinical-records, then restart npm start."
+            ? "Patient records need a database update. In C:\\DentaSync-git\\backend run: npm run migrate:clinical-records, then restart npm start."
             : error
         }
         onRetry={load}
@@ -159,7 +159,7 @@ export function AdminPatientRecordsPage() {
         {data.setupRequired || data.message ? (
           <p className="inline-alert inline-alert--error" role="status">
             {data.message ||
-              "Clinical tables are missing. In C:\\DentaSync-backend run: npm run migrate:clinical-records, then restart npm start."}
+              "Clinical tables are missing. In C:\\DentaSync-git\\backend run: npm run migrate:clinical-records, then restart npm start."}
           </p>
         ) : null}
 

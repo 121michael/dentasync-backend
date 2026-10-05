@@ -550,7 +550,7 @@ export function DentistRecordsPage() {
       <ErrorState
         message={
           needsMigration
-            ? "Patient records need a database update. In C:\\DentaSync-git run: npm run migrate:clinical-records, then restart npm start."
+            ? "Patient records need a database update. In C:\\DentaSync-git\\backend run: npm run migrate:clinical-records, then restart npm start."
             : error
         }
         onRetry={load}

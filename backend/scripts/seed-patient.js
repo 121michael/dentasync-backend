@@ -82,7 +82,7 @@ async function seedPatient() {
   console.log(`Email: ${PATIENT_EMAIL}`);
   console.log(`Password: ${PATIENT_PASSWORD}`);
   console.log("Dashboard: http://localhost:5173/dashboard");
-  console.log("Use C:\\DentaSync-backend\\client (not an older DentaSync\\frontend folder).");
+  console.log("Use C:\\DentaSync-git\\frontend (npm run dev).");
 }
 
 seedPatient()
