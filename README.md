@@ -20,7 +20,7 @@ npm run migrate
 npm start
 ```
 
-The API listens on `http://localhost:5000`. Put your `.env` file inside `backend/`.
+The API listens on `http://localhost:5000`. Put your `.env` file inside `backend/` (copy `backend/.env.example`). It must include `DB_USER` (usually `postgres`), not your Windows account name.
 
 **Terminal 2 — frontend**
 

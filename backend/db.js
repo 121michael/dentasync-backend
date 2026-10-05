@@ -1,6 +1,17 @@
-const path = require('node:path');
 const { Pool } = require('pg');
-require('dotenv').config({ path: path.join(__dirname, '.env') });
+const { loadEnv } = require('./loadEnv');
+
+loadEnv();
+
+const dbUser = String(process.env.DB_USER || "").trim();
+if (!dbUser) {
+  console.error(
+    '❌ DB_USER is missing. PostgreSQL is trying to log in as your Windows user instead.'
+  );
+  console.error(
+    '   Create C:\\DentaSync-git\\backend\\.env (see backend/.env.example) with DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, and DB_NAME.'
+  );
+}
 
 const pool = new Pool({
   user: process.env.DB_USER,
