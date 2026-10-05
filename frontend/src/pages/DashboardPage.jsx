@@ -166,8 +166,7 @@ export function DashboardPage() {
             <span className="eyebrow">Clinic arrival</span>
             <h2>Check-In</h2>
             <p>
-              At the clinic, tap your RFID card or scan the staff-generated QR. Both create the same queue
-              number for Patient, Staff, and Dentist portals.
+              At the clinic, tap your RFID card or scan the staff-generated QR.
             </p>
           </div>
         </div>
