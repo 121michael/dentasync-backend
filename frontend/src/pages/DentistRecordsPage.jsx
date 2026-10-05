@@ -164,7 +164,6 @@ export function DentistRecordsPage() {
   const [form, setForm] = useState(emptyForm);
   const [busy, setBusy] = useState(false);
   const [detail, setDetail] = useState(null);
-  const [xrays, setXrays] = useState([]);
   const [treatmentForm, setTreatmentForm] = useState(emptyTreatment);
   const [treatmentDrafts, setTreatmentDrafts] = useState(() => [newProcedureDraft()]);
   const [activeDraftIndex, setActiveDraftIndex] = useState(0);
@@ -245,12 +244,6 @@ export function DentistRecordsPage() {
   async function refreshPatientDetail(patientId, { silent = false } = {}) {
     const response = await api.getDentistPatient(patientId, { silent });
     setDetail(response);
-    try {
-      const xrayResponse = await api.getDentistPatientXrays(patientId, { silent });
-      setXrays(xrayResponse.xrays || []);
-    } catch {
-      setXrays([]);
-    }
     return response;
   }
 
@@ -1233,51 +1226,6 @@ export function DentistRecordsPage() {
                 <p className="muted-copy">No treatments on file yet.</p>
               )}
             </div>
-          </section>
-
-          <section className="dentist-xray-panel">
-            <div className="dentist-panel__heading">
-              <div>
-                <span className="eyebrow">Imaging</span>
-                <h2>X-rays & AI analysis</h2>
-              </div>
-            </div>
-            <p className="muted-copy">
-              AI findings are preliminary / supplementary only and are separate from the dental chart.
-            </p>
-            {xrays.length ? (
-              <div className="xray-list">
-                {xrays.map((xray) => (
-                  <article className="xray-row" key={xray.id}>
-                    <div>
-                      <strong>{xray.name || "X-ray image"}</strong>
-                      <small>
-                        {formatDentistDate(xray.uploadedAt)}
-                        {xray.analysis?.confidence != null
-                          ? ` · Confidence ${xray.analysis.confidence}%`
-                          : ""}
-                      </small>
-                      <span
-                        className={`status-pill status-pill--${String(
-                          xray.analysis?.status || "unavailable"
-                        ).replaceAll("_", "-")}`}
-                      >
-                        {String(xray.analysis?.status || "unavailable").replaceAll("_", " ")}
-                      </span>
-                      {xray.analysis?.summary ? (
-                        <p className="muted-copy">{xray.analysis.summary}</p>
-                      ) : null}
-                      <p className="xray-disclaimer">
-                        {xray.analysis?.disclaimer ||
-                          "Preliminary / supplementary information only. Not a clinical diagnosis."}
-                      </p>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            ) : (
-              <p className="muted-copy">No uploaded X-rays for this linked patient account.</p>
-            )}
           </section>
         </DentistModal>
       ) : null}
