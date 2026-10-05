@@ -852,12 +852,6 @@ export function DentistRecordsPage() {
                 {nextAppointmentLabel(null, detail.nextAppointment, detail.patient)}
               </p>
             </div>
-            {isProfileLocked(detail.patient) ? (
-              <p className="muted-copy">
-                Patient ID, Name, Age, Sex, Birthdate, and Phone Number are synced from the patient
-                account profile and are read-only here.
-              </p>
-            ) : null}
           </section>
 
           {ageSexOpen && !isProfileLocked(detail.patient) ? (
