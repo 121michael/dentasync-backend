@@ -1,89 +1,79 @@
 import { useEffect, useId, useState } from "react";
 
-/**
- * Premium SVG tooth for Amethyst Dental Clinic loading states.
- * Nested motion layers keep float / breathe / glow / shine independent.
- */
-function ToothMark({ size = 72 }) {
-  const uid = useId().replace(/:/g, "");
-  const enamelId = `tooth-enamel-${uid}`;
-  const shadeId = `tooth-shade-${uid}`;
-  const shineId = `tooth-shine-${uid}`;
-  const shadowId = `tooth-shadow-${uid}`;
-  const clipId = `tooth-clip-${uid}`;
+const TEETH = [
+  { kind: "molar", x: 18, y: 46 },
+  { kind: "premolar", x: 44, y: 32 },
+  { kind: "canine", x: 68, y: 20 },
+  { kind: "incisor", x: 90, y: 14 },
+  { kind: "incisor", x: 112, y: 14 },
+  { kind: "canine", x: 134, y: 20 },
+  { kind: "premolar", x: 158, y: 32 },
+  { kind: "molar", x: 184, y: 46 },
+];
 
-  const outline =
-    "M32 6c8.6 0 15.2 5.2 17.4 12.6 1.4 4.6 1.1 9.4-.4 13.8-.7 2.1-1.1 4.1-.8 6.3.5 3.6 2.4 6.8 4.6 9.8 2.3 3.1 2.8 7.1.8 10.2-1.7 2.6-4.8 3.8-7.9 3.2-2.4-.5-4.4-2-5.8-3.9-1.5 2.4-3.5 4.4-6.1 5.1-3 .8-6.1-.4-7.9-2.9-1.9-2.6-1.7-6.1.1-9.1 1.9-3.1 3.8-6.4 4.2-10 .3-2.3-.1-4.4-.9-6.5C27.2 22.4 26.4 17.6 27.6 13 29.4 8.2 32.9 6 32 6z";
+function toothPath(kind) {
+  if (kind === "molar") {
+    return "M2 8c0-3 2-8 9-10 7 2 9 7 9 10v16.5c0 2.4-1.8 4.5-4.2 4.5H15c-1.4 0-2.2-1.2-2.8-2.4-.6 1.2-1.4 2.4-2.8 2.4H6.2C3.8 29 2 26.9 2 24.5V8z";
+  }
+  if (kind === "premolar") {
+    return "M3 7c0-3 2.2-8 8-9.5C16.8-1 19 4 19 7v16c0 2.2-1.7 4-3.8 4h-2.6c-1.2 0-1.9-1-2.4-2.1-.5 1.1-1.2 2.1-2.4 2.1H6.8C4.7 27 3 25.2 3 23V7z";
+  }
+  if (kind === "canine") {
+    return "M4 8c0-4 2.4-12 7.5-16C16.6-4 19 4 19 8v15c0 2.1-1.7 3.8-3.8 3.8H7.8C5.7 26.8 4 25.1 4 23V8z";
+  }
+  return "M5 6c0-3 2-12 6.5-15C16-6 18 3 18 6v16.5c0 2-1.6 3.6-3.6 3.6H8.6C6.6 26.1 5 24.5 5 22.5V6z";
+}
+
+function TeethMark({ compact = false }) {
+  const uid = useId().replace(/:/g, "");
+  const enamelId = `teeth-enamel-${uid}`;
+  const width = compact ? 132 : 210;
+  const height = compact ? 58 : 90;
 
   return (
     <svg
       className="tooth-loader__svg"
-      viewBox="0 0 64 72"
-      width={size}
-      height={size}
+      viewBox="0 0 210 90"
+      width={width}
+      height={height}
       aria-hidden="true"
       focusable="false"
     >
       <defs>
-        <linearGradient id={enamelId} x1="18" y1="4" x2="48" y2="68" gradientUnits="userSpaceOnUse">
+        <linearGradient id={enamelId} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="#ffffff" />
-          <stop offset="48%" stopColor="#f8f3fc" />
-          <stop offset="100%" stopColor="#eadff6" />
+          <stop offset="55%" stopColor="#f7f4fb" />
+          <stop offset="100%" stopColor="#e8dcf6" />
         </linearGradient>
-        <linearGradient id={shadeId} x1="32" y1="10" x2="32" y2="62" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#ffffff" stopOpacity="0.92" />
-          <stop offset="100%" stopColor="#d5c1eb" stopOpacity="0.5" />
-        </linearGradient>
-        <linearGradient id={shineId} x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="#ffffff" stopOpacity="0" />
-          <stop offset="42%" stopColor="#ffffff" stopOpacity="0.9" />
-          <stop offset="58%" stopColor="#f3e9ff" stopOpacity="0.55" />
-          <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
-        </linearGradient>
-        <filter id={shadowId} x="-35%" y="-35%" width="170%" height="170%">
-          <feDropShadow dx="0" dy="3" stdDeviation="3.2" floodColor="#733baa" floodOpacity="0.24" />
-        </filter>
-        <clipPath id={clipId}>
-          <path d={outline} />
-        </clipPath>
       </defs>
-
-      <ellipse className="tooth-loader__aura" cx="32" cy="36" rx="26" ry="30" />
-
-      <g filter={`url(#${shadowId})`}>
-        <path className="tooth-loader__outline" fill={`url(#${enamelId})`} d={outline} />
-        <path
-          className="tooth-loader__shade"
-          fill={`url(#${shadeId})`}
-          d="M32 12c6.2 0 10.8 3.6 12.4 8.8 1.1 3.5.8 7.2-.4 10.6-.7 2-.9 3.8-.6 5.8.4 3 1.8 5.7 3.5 8.3 1.4 2.1 1.6 4.7.3 6.7-1 1.5-2.8 2.2-4.6 1.8-1.7-.4-3.1-1.6-4-3.1-.9 1.9-2.4 3.5-4.4 4-2.1.5-4.2-.3-5.4-2-1.3-1.8-1.2-4.3.1-6.4 1.5-2.5 3-5.2 3.3-8.1.2-2-.2-3.8-.9-5.6C30.5 24.8 29.9 21.2 30.8 18 31.6 14.6 33.2 12.4 32 12z"
-        />
-        <path
-          className="tooth-loader__grooves"
-          d="M32 16v28M24.5 30.5h15"
-          fill="none"
-          stroke="rgba(115,59,170,0.18)"
-          strokeWidth="1.35"
-          strokeLinecap="round"
-        />
-        {/* Soft traveling highlight clipped to the tooth (seamless opacity fade at ends) */}
-        <g clipPath={`url(#${clipId})`}>
-          <rect
-            className="tooth-loader__shine-band"
-            x="-18"
-            y="0"
-            width="18"
-            height="72"
-            fill={`url(#${shineId})`}
-          />
+      <path
+        className="tooth-loader__gumline"
+        d="M8 58c28-28 56-42 97-42s69 14 97 42"
+        fill="none"
+        stroke="rgba(115,59,170,0.16)"
+        strokeWidth="3"
+        strokeLinecap="round"
+      />
+      {TEETH.map((tooth, index) => (
+        <g key={`${tooth.kind}-${index}`} transform={`translate(${tooth.x} ${tooth.y})`}>
+          <g className="tooth-loader__unit" style={{ "--tooth-index": index }}>
+            <path
+              className="tooth-loader__crown"
+              d={toothPath(tooth.kind)}
+              fill={`url(#${enamelId})`}
+              stroke="#c9b3e4"
+              strokeWidth="1.15"
+              strokeLinejoin="round"
+            />
+          </g>
         </g>
-      </g>
+      ))}
     </svg>
   );
 }
 
 /**
- * Reusable tooth-shaped loader for Amethyst Dental Clinic.
- * Use as a full-screen overlay (`overlay`) or an inline status (`inline`).
+ * Full-screen and inline loading UI: a smile of teeth on a white login-panel background.
  */
 export function ToothLoader({
   label = "Loading",
@@ -134,14 +124,8 @@ export function ToothLoader({
       aria-busy="true"
       aria-label={labelText === "Loading" ? "Loading" : labelText}
     >
-      {/* Nested layers: each owns one transform so animations never fight */}
-      <div className="tooth-loader__float" aria-hidden="true">
-        <div className="tooth-loader__breathe">
-          <div className="tooth-loader__glow-wrap">
-            <span className="tooth-loader__glow" />
-            <ToothMark size={compact ? 44 : 76} />
-          </div>
-        </div>
+      <div className="tooth-loader__smile" aria-hidden="true">
+        <TeethMark compact={compact} />
       </div>
 
       {label ? (

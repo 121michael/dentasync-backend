@@ -1081,7 +1081,7 @@ strong {
   to { transform: rotate(360deg); }
 }
 
-/* Global tooth-shaped loader (Amethyst Dental) — fluid premium motion */
+/* Loading screen: smile of teeth on the white login-panel background */
 .tooth-loader {
   display: grid;
   place-items: center;
@@ -1114,13 +1114,11 @@ strong {
 .tooth-loader__backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(35, 17, 56, 0.3);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  background: #ffffff;
 }
 
 :root[data-theme="dark"] .tooth-loader__backdrop {
-  background: rgba(8, 4, 16, 0.48);
+  background: #ffffff;
 }
 
 .tooth-loader__content {
@@ -1128,14 +1126,11 @@ strong {
   z-index: 1;
   display: grid;
   justify-items: center;
-  gap: 0.9rem;
-  padding: 1.6rem 1.8rem 1.4rem;
-  border-radius: 24px;
-  background: color-mix(in srgb, var(--surface-solid) 95%, white);
-  box-shadow:
-    0 24px 60px rgba(35, 17, 56, 0.16),
-    0 0 0 1px color-mix(in srgb, var(--amethyst-200) 60%, transparent);
-  min-width: min(240px, 86vw);
+  gap: 1rem;
+  padding: 0.4rem;
+  background: transparent;
+  box-shadow: none;
+  min-width: 0;
   transform: translate3d(0, 10px, 0) scale(0.96);
   opacity: 0;
   transition:
@@ -1154,81 +1149,30 @@ strong {
 }
 
 .tooth-loader--inline .tooth-loader__content {
-  background: transparent;
-  box-shadow: none;
-  border: 0;
-  padding: 0.4rem;
-  min-width: 0;
   transform: none;
   opacity: 1;
   transition: none;
 }
 
-/* Nested motion layers — one transform property per element */
-.tooth-loader__float {
+.tooth-loader__smile {
   display: grid;
   place-items: center;
-  animation: tooth-float 4s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
-}
-
-.tooth-loader__breathe {
-  display: grid;
-  place-items: center;
-  transform-origin: center center;
-  animation: tooth-breathe 3.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-}
-
-.tooth-loader__glow-wrap {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: 92px;
-  height: 92px;
-}
-
-.tooth-loader--compact .tooth-loader__glow-wrap {
-  width: 54px;
-  height: 54px;
-}
-
-.tooth-loader__glow {
-  position: absolute;
-  inset: 0;
-  margin: auto;
-  width: 108px;
-  height: 108px;
-  border-radius: 50%;
-  background: radial-gradient(
-    circle,
-    color-mix(in srgb, var(--amethyst-500) 32%, transparent) 0%,
-    color-mix(in srgb, var(--amethyst-400) 14%, transparent) 42%,
-    transparent 70%
-  );
-  pointer-events: none;
-  animation: tooth-glow 3.6s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
-}
-
-.tooth-loader--compact .tooth-loader__glow {
-  width: 64px;
-  height: 64px;
 }
 
 .tooth-loader__svg {
-  position: relative;
-  z-index: 1;
   display: block;
   overflow: visible;
 }
 
-.tooth-loader__aura {
-  fill: color-mix(in srgb, var(--amethyst-400) 16%, transparent);
-  animation: tooth-aura 3.6s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
-  animation-delay: 0.2s;
+.tooth-loader__unit {
+  transform-box: fill-box;
+  transform-origin: center bottom;
+  animation: tooth-wave 1.15s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  animation-delay: calc(var(--tooth-index) * 70ms);
 }
 
-.tooth-loader__shine-band {
-  animation: tooth-shine 3.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-  animation-delay: 0.35s;
+.tooth-loader__crown {
+  filter: drop-shadow(0 4px 8px rgba(115, 59, 170, 0.12));
 }
 
 .tooth-loader__label {
@@ -1236,11 +1180,10 @@ strong {
   display: inline-flex;
   align-items: baseline;
   justify-content: center;
-  color: var(--text-strong);
+  color: #332d41;
   font-size: 0.94rem;
   font-weight: 600;
   letter-spacing: 0.02em;
-  /* Reserve space for "Loading..." so text never jumps */
   min-width: 6.2em;
 }
 
@@ -1269,44 +1212,9 @@ strong {
 .tooth-loader__ellipsis span:nth-child(2) { animation-delay: 0.28s; }
 .tooth-loader__ellipsis span:nth-child(3) { animation-delay: 0.56s; }
 
-/* Seamless loops: start and end keyframes match visually */
-@keyframes tooth-float {
+@keyframes tooth-wave {
   0%, 100% { transform: translate3d(0, 0, 0); }
-  50% { transform: translate3d(0, -3.5px, 0); }
-}
-
-@keyframes tooth-breathe {
-  0%, 100% { transform: scale3d(1, 1, 1); }
-  40% { transform: scale3d(1.035, 1.035, 1); }
-  70% { transform: scale3d(0.985, 0.985, 1); }
-}
-
-@keyframes tooth-glow {
-  0%, 100% { opacity: 0.42; transform: scale3d(0.94, 0.94, 1); }
-  50% { opacity: 0.92; transform: scale3d(1.06, 1.06, 1); }
-}
-
-@keyframes tooth-aura {
-  0%, 100% { opacity: 0.3; }
-  50% { opacity: 0.7; }
-}
-
-/* Shine band: invisible at both ends → seamless restart */
-@keyframes tooth-shine {
-  0% {
-    transform: translate3d(-8px, 0, 0);
-    opacity: 0;
-  }
-  12% { opacity: 0.85; }
-  50% {
-    transform: translate3d(36px, 0, 0);
-    opacity: 0.55;
-  }
-  88% { opacity: 0.85; }
-  100% {
-    transform: translate3d(78px, 0, 0);
-    opacity: 0;
-  }
+  40% { transform: translate3d(0, -7px, 0); }
 }
 
 @keyframes tooth-ellipsis {
@@ -1321,18 +1229,9 @@ strong {
     transition: opacity 180ms ease;
   }
 
-  .tooth-loader__float,
-  .tooth-loader__breathe,
-  .tooth-loader__glow,
-  .tooth-loader__aura,
-  .tooth-loader__shine-band,
+  .tooth-loader__unit,
   .tooth-loader__ellipsis span {
     animation: none !important;
-  }
-
-  .tooth-loader__glow {
-    opacity: 0.65;
-    animation: tooth-reduced-pulse 2.4s ease-in-out infinite !important;
   }
 
   .tooth-loader__ellipsis span {
@@ -1340,30 +1239,10 @@ strong {
   }
 }
 
-@keyframes tooth-reduced-pulse {
-  0%, 100% { opacity: 0.45; }
-  50% { opacity: 0.8; }
-}
-
 @media (max-width: 640px) {
-  .tooth-loader__content {
-    padding: 1.25rem 1.35rem 1.1rem;
-    border-radius: 20px;
-  }
-
-  .tooth-loader__glow-wrap {
-    width: 76px;
-    height: 76px;
-  }
-
-  .tooth-loader__glow {
-    width: 90px;
-    height: 90px;
-  }
-
   .tooth-loader__svg {
-    width: 64px;
-    height: 64px;
+    width: min(210px, 78vw);
+    height: auto;
   }
 }
 
