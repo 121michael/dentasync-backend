@@ -700,8 +700,9 @@ export function AdminSyncPage() {
           <span className="eyebrow">Text to database</span>
           <h2>Document Data Extraction</h2>
           <p>
-            Uploaded scans stay in Recent Scans for 24 hours, then the
-            temporary file is deleted. Permanent patient records are never removed with the scan.
+            Scan a hard-copy paper or upload a PDF / PNG / JPEG. The system reads what it can from the document
+            (name, date of birth, age, cellphone, procedure, treatment date, amount), lets you correct mistakes,
+            then saves only that structured text to the database. Face photos and non-documents are rejected.
           </p>
           <div className="admin-heading-actions" style={{ marginTop: "0.85rem" }}>
             <button type="button" className="button button--secondary" onClick={load}>
