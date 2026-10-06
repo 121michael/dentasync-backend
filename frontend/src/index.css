@@ -1007,6 +1007,19 @@ strong {
   margin: 0 0 2.8rem 0.55rem;
 }
 
+.portal-sidebar__brand {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.45rem;
+}
+
+.portal-sidebar__close,
+.portal-menu-button,
+.portal-sidebar__scrim {
+  display: none;
+}
+
 .portal-nav {
   display: grid;
   gap: 0.28rem;
@@ -2450,12 +2463,51 @@ strong {
 
 @media (max-width: 760px) {
   body { padding-bottom: 70px; }
-  .portal-sidebar { display: none; }
+  .portal-sidebar {
+    display: flex;
+    z-index: 30;
+    width: min(var(--sidebar-width), 86vw);
+    transform: translateX(-105%);
+    transition: transform 180ms ease;
+  }
+  .portal-sidebar.is-open { transform: translateX(0); }
+  .portal-sidebar__close {
+    display: grid;
+    width: 32px;
+    height: 32px;
+    flex: 0 0 auto;
+    margin: 0.15rem 0 0 auto;
+    place-items: center;
+    border: 0;
+    border-radius: 8px;
+    color: #fff;
+    background: rgba(255,255,255,.12);
+  }
+  .portal-sidebar__scrim {
+    display: block;
+    position: fixed;
+    z-index: 25;
+    inset: 0;
+    border: 0;
+    background: rgba(20, 10, 31, .42);
+  }
   .portal-main { margin-left: 0; }
-  .portal-header { min-height: 66px; padding: .75rem 1rem; }
+  .portal-menu-button {
+    display: grid;
+    width: 39px;
+    height: 39px;
+    flex: 0 0 auto;
+    place-items: center;
+    border: 1px solid var(--border);
+    border-radius: 11px;
+    color: var(--amethyst-700);
+    background: var(--surface);
+  }
+  .portal-header { min-height: 66px; padding: .75rem 1rem; gap: .65rem; }
   .portal-header__date > .eyebrow { display: none; }
   .portal-content { padding: 1.1rem 1rem 1.5rem; }
   .mobile-nav { position: fixed; z-index: 5; right: .65rem; bottom: .65rem; left: .65rem; display: grid; grid-template-columns: repeat(5,1fr); padding: .38rem; border: 1px solid var(--border); border-radius: 18px; background: color-mix(in srgb, var(--surface-solid) 90%, transparent); box-shadow: var(--shadow-md); backdrop-filter: blur(18px); }
+  .mobile-nav.is-menu-open { visibility: hidden; pointer-events: none; }
   .mobile-nav__link { display: grid; place-items: center; gap: .22rem; min-height: 47px; border-radius: 11px; color: var(--text-muted); font-size: .52rem; font-weight: 750; }
   .mobile-nav__link.is-active { color: var(--amethyst-700); background: var(--amethyst-100); }
   .dashboard-welcome { align-items: flex-start; flex-direction: column; }
@@ -2492,6 +2544,31 @@ strong {
   .notification-row .button { grid-column: 2 / 3; width: max-content; }
   .checkin-card { align-items: flex-start; flex-direction: column; }
   .care-summary { grid-template-columns: 1fr; }
+  .appointments-page .admin-heading-actions {
+    width: auto;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 0.55rem;
+  }
+  .appointments-page .admin-heading-actions .button,
+  .appointments-page .empty-state .button,
+  .booking-layout .button.button--primary,
+  .booking-layout .button.button--secondary {
+    flex: 0 1 auto;
+    width: auto;
+    max-width: 100%;
+    min-height: 40px;
+    padding: 0.55rem 1rem;
+    font-size: 0.8rem;
+  }
+  .booking-summary .button--wide {
+    width: auto;
+    align-self: stretch;
+    min-height: 40px;
+    padding: 0.55rem 1rem;
+    font-size: 0.8rem;
+  }
 }
 
 @media (max-width: 460px) {
@@ -2506,6 +2583,14 @@ strong {
   .wellness-card__score { align-items: flex-start; flex-direction: column; }
   .booking-progress { gap: .4rem; }
   .booking-progress span { font-size: .58rem; }
+  .appointments-page .admin-heading-actions {
+    display: flex;
+    grid-template-columns: none;
+  }
+  .appointments-page .admin-heading-actions .button,
+  .appointments-page .empty-state .button {
+    width: auto;
+  }
 }
 
 /* Staff dashboard */

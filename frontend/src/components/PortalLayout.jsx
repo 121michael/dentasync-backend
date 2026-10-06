@@ -7,11 +7,13 @@ import {
   CircleHelp,
   LayoutDashboard,
   LogOut,
+  Menu,
   Moon,
   Sun,
   UserRound,
   Users,
   UsersRound,
+  X,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { BrandMark } from "./BrandMark";
@@ -39,6 +41,7 @@ export function PortalLayout({ theme, onToggleTheme }) {
   const location = useLocation();
   const [unreadCount, setUnreadCount] = useState(0);
   const [switchingBack, setSwitchingBack] = useState(false);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
   const date = new Intl.DateTimeFormat("en-US", {
     weekday: "long",
     month: "long",
@@ -90,6 +93,10 @@ export function PortalLayout({ theme, onToggleTheme }) {
     navigate("/login", { replace: true });
   }
 
+  function closeMenu() {
+    setIsMenuOpen(false);
+  }
+
   async function handleSwitchBack() {
     setSwitchingBack(true);
     try {
@@ -107,8 +114,13 @@ export function PortalLayout({ theme, onToggleTheme }) {
 
   return (
     <div className="portal-shell">
-      <aside className="portal-sidebar">
-        <BrandMark />
+      <aside className={`portal-sidebar ${isMenuOpen ? "is-open" : ""}`}>
+        <div className="portal-sidebar__brand">
+          <BrandMark />
+          <button type="button" className="portal-sidebar__close" onClick={closeMenu} aria-label="Close navigation">
+            <X size={20} />
+          </button>
+        </div>
         <nav className="portal-nav" aria-label="Patient portal navigation">
           {navigation.map(({ to, label, icon: Icon, alertKey }) => (
             <NavLink
@@ -116,6 +128,7 @@ export function PortalLayout({ theme, onToggleTheme }) {
               to={to}
               onClick={() => {
                 if (to === "/notifications") setUnreadCount(0);
+                closeMenu();
               }}
               className={({ isActive }) => `portal-nav__link ${isActive ? "is-active" : ""}`}
             >
@@ -128,7 +141,7 @@ export function PortalLayout({ theme, onToggleTheme }) {
           ))}
         </nav>
         <div className="portal-sidebar__footer">
-          <NavLink to="/support" className="portal-nav__link">
+          <NavLink to="/support" className="portal-nav__link" onClick={closeMenu}>
             <CircleHelp size={19} aria-hidden="true" />
             <span>Help &amp; Support</span>
           </NavLink>
@@ -139,8 +152,20 @@ export function PortalLayout({ theme, onToggleTheme }) {
         </div>
       </aside>
 
+      {isMenuOpen ? (
+        <button type="button" className="portal-sidebar__scrim" onClick={closeMenu} aria-label="Close navigation" />
+      ) : null}
+
       <div className="portal-main">
         <header className="portal-header">
+          <button
+            type="button"
+            className="portal-menu-button"
+            onClick={() => setIsMenuOpen((open) => !open)}
+            aria-label="Open navigation"
+          >
+            <Menu size={21} />
+          </button>
           <div className="portal-header__date">
             <span className="eyebrow">Premium care, thoughtfully connected</span>
             <span>{date}</span>
@@ -196,7 +221,10 @@ export function PortalLayout({ theme, onToggleTheme }) {
         </main>
       </div>
 
-      <nav className="mobile-nav" aria-label="Mobile patient portal navigation">
+      <nav
+        className={`mobile-nav ${isMenuOpen ? "is-menu-open" : ""}`}
+        aria-label="Mobile patient portal navigation"
+      >
         {navigation.slice(0, 5).map(({ to, label, icon: Icon }) => (
           <NavLink
             key={to}
