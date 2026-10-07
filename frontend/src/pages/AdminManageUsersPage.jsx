@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Archive, Eye, Pencil, Plus, Search } from "lucide-react";
+import { Archive, Eye, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { Navigate, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
@@ -286,6 +286,26 @@ export function AdminManageUsersPage() {
       await load();
     } catch (approveError) {
       pushToast(approveError.message || "Unable to approve patient account.", "error");
+    } finally {
+      setActionBusyId("");
+    }
+  }
+
+  async function deletePendingRequest(request) {
+    const ok = await confirm({
+      title: "Permanently delete registration",
+      message: `Delete ${request.fullName || request.email} completely? This cannot be undone. They can register again with the same email.`,
+      confirmLabel: "Delete permanently",
+      tone: "danger",
+    });
+    if (!ok) return;
+    setActionBusyId(`${request.id}:purge`);
+    try {
+      const response = await api.permanentlyDeleteAdminArchived(request.id);
+      pushToast(response.message || "Registration permanently deleted.");
+      await load();
+    } catch (deleteError) {
+      pushToast(deleteError.message || "Unable to permanently delete this registration.", "error");
     } finally {
       setActionBusyId("");
     }
@@ -601,6 +621,13 @@ export function AdminManageUsersPage() {
                               onClick={() => rejectRequest(request)}
                             >
                               Reject
+                            </button>
+                            <button
+                              className="button button--danger button--compact"
+                              disabled={actionBusyId === `${request.id}:purge`}
+                              onClick={() => deletePendingRequest(request)}
+                            >
+                              <Trash2 size={14} /> Delete
                             </button>
                             <button className="button button--secondary button--compact" onClick={() => setDetail(request)}>View Details</button>
                           </div>

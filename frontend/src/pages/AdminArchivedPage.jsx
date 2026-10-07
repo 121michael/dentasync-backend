@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Eye, RotateCcw, Search } from "lucide-react";
+import { Eye, RotateCcw, Search, Trash2 } from "lucide-react";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { AdminModal, AdminStatusBadge } from "../components/AdminUI";
@@ -93,6 +93,28 @@ export function AdminArchivedPage() {
     }
   }
 
+  async function deleteUserPermanently(user) {
+    const name = user.fullName || user.email;
+    const ok = await confirm({
+      title: "Permanently delete account",
+      message: `Delete ${name} completely? This cannot be undone. The email can be used to register again.`,
+      confirmLabel: "Delete permanently",
+      tone: "danger",
+    });
+    if (!ok) return;
+    setActionBusyId(`${user.id}:purge`);
+    try {
+      const response = await api.permanentlyDeleteAdminArchived(user.id);
+      pushToast(response.message || `${name} was permanently deleted.`);
+      if (detail?.id === user.id) setDetail(null);
+      await load();
+    } catch (deleteError) {
+      pushToast(deleteError.message || "Unable to permanently delete this account.", "error");
+    } finally {
+      setActionBusyId("");
+    }
+  }
+
   if (error && !data) return <ErrorState message={error} onRetry={load} />;
   if (!data) return <LoadingState label="Loading archived records…" />;
 
@@ -112,7 +134,8 @@ export function AdminArchivedPage() {
             <span className="eyebrow">Archive Records</span>
             <h2>{heading}</h2>
             <p>
-              Archived accounts stay unchanged until an administrator restores them to their active category.
+              Restore an archived account to make it active again, or permanently delete it. Permanent delete
+              cannot be undone.
             </p>
           </div>
         </div>
@@ -191,6 +214,13 @@ export function AdminArchivedPage() {
                           onClick={() => restoreUser(user)}
                         >
                           <RotateCcw size={14} /> Restore
+                        </button>
+                        <button
+                          className="button button--danger button--compact"
+                          disabled={actionBusyId === `${user.id}:purge`}
+                          onClick={() => deleteUserPermanently(user)}
+                        >
+                          <Trash2 size={14} /> Delete
                         </button>
                       </div>
                     </td>

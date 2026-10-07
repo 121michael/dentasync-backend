@@ -4,6 +4,10 @@ const crypto = require("crypto");
 const bcrypt = require("bcrypt");
 const { writeAdminAudit } = require("../services/adminAudit");
 const { linkClinicalRecordsToUser } = require("../services/clinicalPatients");
+const {
+  canPermanentlyDeleteAccount,
+  purgeUserAccount,
+} = require("../services/purgeUserAccount");
 
 const ACCOUNT_ROLES = new Set(["admin", "dentist", "staff", "patient"]);
 const SCHEDULE_TYPES = new Set([
@@ -910,10 +914,78 @@ function attachAdminCommandCenterRoutes(router, { db }) {
     }
   });
 
-  router.delete("/archived/:id", async (_req, res) => {
-    return res.status(403).json({
-      message: "Archived records cannot be deleted. They remain in Archive Records.",
-    });
+  router.delete("/archived/:id", async (req, res) => {
+    const accountId = stringValue(req.params.id, 120);
+    const confirmed = String(req.body?.confirm || "").trim().toLowerCase() === "delete";
+    if (!accountId) {
+      return res.status(400).json({ message: "A valid account ID is required." });
+    }
+    if (!confirmed) {
+      return res.status(400).json({
+        message: 'Send { "confirm": "delete" } to permanently remove this account.',
+      });
+    }
+    if (String(req.admin.id) === String(accountId)) {
+      return res.status(403).json({
+        message: "You cannot delete the currently logged-in administrator account.",
+      });
+    }
+
+    const client = await db.connect();
+    let transactionOpen = false;
+    try {
+      await client.query("BEGIN");
+      transactionOpen = true;
+      const targetResult = await client.query(
+        `SELECT id, email, role, status, is_verified, is_archived
+         FROM users
+         WHERE id::text = $1
+         FOR UPDATE`,
+        [accountId]
+      );
+      const target = targetResult.rows[0];
+      if (!target) {
+        await client.query("ROLLBACK");
+        transactionOpen = false;
+        return res.status(404).json({ message: "Account not found." });
+      }
+      if (!canPermanentlyDeleteAccount(target)) {
+        await client.query("ROLLBACK");
+        transactionOpen = false;
+        return res.status(403).json({
+          message:
+            "Active staff, dentist, and approved patient accounts must be archived before they can be permanently deleted.",
+        });
+      }
+
+      const removed = await purgeUserAccount(client, accountId);
+      await client.query("COMMIT");
+      transactionOpen = false;
+
+      await writeAdminAudit(db, {
+        actorId: req.admin.id,
+        actorName: `${req.admin.first_name || ""} ${req.admin.last_name || ""}`.trim(),
+        actorRole: "admin",
+        action: "purge_account",
+        targetType: "account",
+        targetId: accountId,
+        targetLabel: removed?.email || target.email,
+        result: "warning",
+        detail: "Account permanently deleted.",
+      });
+
+      return res.json({
+        message: "Account permanently deleted. That email can be used to register again.",
+      });
+    } catch (error) {
+      if (transactionOpen) {
+        await client.query("ROLLBACK");
+      }
+      console.error("Admin account purge error:", error.message);
+      return res.status(500).json({ message: "Unable to permanently delete the account." });
+    } finally {
+      client.release();
+    }
   });
 
   router.get("/ai-settings", async (_req, res) => {

@@ -152,6 +152,22 @@ async function startPortal(seedUsers, { missingPatientColumns = false } = {}) {
       return { rows: [{ count: "0" }] };
     }
 
+    if (/^\s*DELETE FROM users/i.test(sql)) {
+      const key = String(params[0]);
+      const target = users.get(key);
+      users.delete(key);
+      return { rows: target ? [cloneUser(target)] : [] };
+    }
+
+    if (
+      /^\s*DELETE FROM /i.test(sql) ||
+      /UPDATE clinic_patient_records SET linked_user_id/i.test(sql) ||
+      /UPDATE staff_portal_invoices SET patient_user_id/i.test(sql) ||
+      /UPDATE users SET managed_by_user_id/i.test(sql)
+    ) {
+      return { rows: [] };
+    }
+
     throw new Error(`Unexpected test query: ${sql} :: ${JSON.stringify(params)}`);
   }
 
@@ -338,6 +354,39 @@ test("archived accounts can be restored by an administrator without duplicating 
     });
     assert.equal(removed.status, 403);
     assert.ok(portal.users.has("patient-1"));
+  } finally {
+    await portal.close();
+  }
+});
+
+test("pending unverified patients can be permanently deleted", async () => {
+  const portal = await startPortal([
+    ...seed,
+    {
+      id: "patient-pending",
+      first_name: "New",
+      last_name: "Patient",
+      email: "new.patient@email.com",
+      phone: "09120000000",
+      role: "patient",
+      status: "Pending",
+      is_verified: false,
+      is_archived: false,
+      created_at: "2026-01-05T00:00:00.000Z",
+      patient_id: null,
+      patient_category: "regular",
+    },
+  ]);
+  try {
+    const removed = await fetch(`${portal.url}/archived/patient-pending`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ confirm: "delete" }),
+    });
+    assert.equal(removed.status, 200);
+    const body = await removed.json();
+    assert.match(body.message, /permanently deleted/i);
+    assert.equal(portal.users.has("patient-pending"), false);
   } finally {
     await portal.close();
   }
