@@ -8,16 +8,24 @@ function getMailConfig(env = process.env) {
   const from = String(env.EMAIL_FROM || user || "").trim();
   const host = String(env.EMAIL_HOST || "").trim();
   const port = Number(env.EMAIL_PORT || 587);
+  const appsScriptUrl = String(env.GMAIL_APPS_SCRIPT_URL || "").trim();
+  const appsScriptSecret = String(env.GMAIL_APPS_SCRIPT_SECRET || "").trim();
+  const smtpConfigured = Boolean(user && pass && from);
+  const httpsRelayConfigured = Boolean(appsScriptUrl && appsScriptSecret);
   return {
     user,
     pass,
     from,
     host,
     port,
+    appsScriptUrl,
+    appsScriptSecret,
     secure:
       env.EMAIL_SECURE === "true" ||
       (!env.EMAIL_SECURE && Number(env.EMAIL_PORT) === 465),
-    configured: Boolean(user && pass && from),
+    smtpConfigured,
+    httpsRelayConfigured,
+    configured: smtpConfigured || httpsRelayConfigured,
   };
 }
 
@@ -36,7 +44,6 @@ function createMailTransporter(env = process.env) {
     });
   }
 
-  // Match local VS Code Gmail OTP: app password over smtp.gmail.com.
   return nodemailer.createTransport({
     host: "smtp.gmail.com",
     port: 587,
@@ -56,41 +63,97 @@ function escapeHtml(value) {
   })[character]);
 }
 
-async function sendEmailOtp({ to, otp, expiresAt }, env = process.env) {
+function describeSmtpFailure(error) {
+  const code = String(error?.code || "");
+  const message = String(error?.message || "unknown");
+  if (
+    ["ETIMEDOUT", "ESOCKET", "ECONNECTION", "ENETUNREACH", "ECONNREFUSED"].includes(code) ||
+    /timeout|network is unreachable|connect e/i.test(message)
+  ) {
+    return (
+      "Gmail SMTP is blocked on Render Free (ports 587/465). " +
+      "Set GMAIL_APPS_SCRIPT_URL and GMAIL_APPS_SCRIPT_SECRET to send OTP over HTTPS, " +
+      "or upgrade the dentasync web service off Free."
+    );
+  }
+  return message;
+}
+
+async function sendViaGmailHttpsRelay(config, { to, subject, html }, fetchImpl = fetch) {
+  const response = await fetchImpl(config.appsScriptUrl, {
+    method: "POST",
+    redirect: "follow",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      secret: config.appsScriptSecret,
+      to,
+      subject,
+      html,
+    }),
+  });
+  const body = String(await response.text());
+  if (!response.ok || !/\bok\b/i.test(body)) {
+    throw new Error(
+      `Gmail HTTPS relay failed (${response.status}): ${body.replace(/\s+/g, " ").slice(0, 180)}`
+    );
+  }
+}
+
+async function sendMailMessage({ to, subject, html }, env = process.env, fetchImpl = fetch) {
   const config = getMailConfig(env);
   if (!config.configured) {
     throw new Error("Email delivery is not configured.");
   }
 
-  const expiration = new Date(expiresAt);
-  const minutesRemaining = Number.isNaN(expiration.getTime())
-    ? 5
-    : Math.max(1, Math.ceil((expiration.getTime() - Date.now()) / 60000));
+  if (config.httpsRelayConfigured) {
+    return sendViaGmailHttpsRelay(config, { to, subject, html }, fetchImpl);
+  }
 
-  return createMailTransporter(env).sendMail({
-    from: `"Amethyst Dental Clinic" <${config.from}>`,
-    to,
-    subject: "Your DentaSync Verification Code",
-    html: `
+  try {
+    return await createMailTransporter(env).sendMail({
+      from: `"Amethyst Dental Clinic" <${config.from}>`,
+      to,
+      subject,
+      html,
+    });
+  } catch (error) {
+    throw new Error(describeSmtpFailure(error));
+  }
+}
+
+function otpHtml(otp, minutesRemaining) {
+  return `
       <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
         <h2>Welcome to DentaSync!</h2>
         <p>Your 6-digit verification code is:</p>
         <h1 style="color: #4F46E5; letter-spacing: 5px;">${otp}</h1>
         <p>This code will expire in approximately ${minutesRemaining} minute${minutesRemaining === 1 ? "" : "s"}.</p>
       </div>
-    `,
-  });
+    `;
+}
+
+async function sendEmailOtp({ to, otp, expiresAt }, env = process.env, fetchImpl = fetch) {
+  const expiration = new Date(expiresAt);
+  const minutesRemaining = Number.isNaN(expiration.getTime())
+    ? 5
+    : Math.max(1, Math.ceil((expiration.getTime() - Date.now()) / 60000));
+
+  return sendMailMessage(
+    {
+      to,
+      subject: "Your DentaSync Verification Code",
+      html: otpHtml(otp, minutesRemaining),
+    },
+    env,
+    fetchImpl
+  );
 }
 
 async function sendPasswordResetEmail(
   { to, token, expiresAt, recipientName },
-  env = process.env
+  env = process.env,
+  fetchImpl = fetch
 ) {
-  const config = getMailConfig(env);
-  if (!config.configured) {
-    throw new Error("Email delivery is not configured.");
-  }
-
   const expiration = new Date(expiresAt);
   const minutesRemaining = Number.isNaN(expiration.getTime())
     ? 30
@@ -106,11 +169,11 @@ async function sendPasswordResetEmail(
   resetUrl.search = "";
   const safeRecipientName = escapeHtml(recipientName || "there");
 
-  return createMailTransporter(env).sendMail({
-    from: `"Amethyst Dental Clinic" <${config.from}>`,
-    to,
-    subject: "Password Reset Request - Amethyst Dental Clinic",
-    html: `
+  return sendMailMessage(
+    {
+      to,
+      subject: "Password Reset Request - Amethyst Dental Clinic",
+      html: `
       <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
         <h2>Reset your password</h2>
         <p>Hello ${safeRecipientName},</p>
@@ -124,7 +187,10 @@ async function sendPasswordResetEmail(
         <p>If you did not request this change, you can safely ignore this email.</p>
       </div>
     `,
-  });
+    },
+    env,
+    fetchImpl
+  );
 }
 
 module.exports = {

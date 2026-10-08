@@ -329,10 +329,15 @@ if (require.main === module) {
       console.log("Clinic SMS: SEMAPHORE_API_KEY is missing — staff/patient SMS will fail.");
     }
     if (emailDeliveryIsConfigured()) {
-      console.log(`Clinic email OTP: Gmail SMTP ready (${getMailConfig().from}).`);
+      const mail = getMailConfig();
+      if (mail.httpsRelayConfigured) {
+        console.log("Clinic email OTP: Gmail HTTPS relay ready (Render Free compatible).");
+      } else {
+        console.log(`Clinic email OTP: Gmail SMTP ready (${mail.from}).`);
+      }
     } else {
       console.log(
-        "Clinic email OTP: EMAIL_USER / EMAIL_PASS are missing — Create account codes will not send."
+        "Clinic email OTP: set GMAIL_APPS_SCRIPT_URL on Render Free, or EMAIL_USER / EMAIL_PASS for local SMTP."
       );
     }
     cleaningReminderJob.start();
