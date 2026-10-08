@@ -8,7 +8,7 @@ function getMailConfig(env = process.env) {
   const from = String(env.EMAIL_FROM || user || "").trim();
   const host = String(env.EMAIL_HOST || "").trim();
   const port = Number(env.EMAIL_PORT || 587);
-  const appsScriptUrl = String(env.GMAIL_APPS_SCRIPT_URL || "").trim();
+  const appsScriptUrl = String(env.GMAIL_APPS_SCRIPT_URL || "").replace(/\s+/g, "").trim();
   const appsScriptSecret = String(env.GMAIL_APPS_SCRIPT_SECRET || "").trim();
   const smtpConfigured = Boolean(user && pass && from);
   const httpsRelayConfigured = Boolean(appsScriptUrl && appsScriptSecret);
@@ -31,6 +31,30 @@ function getMailConfig(env = process.env) {
 
 function emailDeliveryIsConfigured(env = process.env) {
   return getMailConfig(env).configured;
+}
+
+async function probeGmailHttpsRelay(env = process.env, fetchImpl = fetch) {
+  const config = getMailConfig(env);
+  if (!config.httpsRelayConfigured) {
+    return null;
+  }
+  const response = await fetchImpl(config.appsScriptUrl, {
+    method: "POST",
+    redirect: "follow",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify({
+      secret: "__dentasync_boot_probe__",
+      to: "otp-probe@example.invalid",
+      subject: "probe",
+      html: "<p>probe</p>",
+    }),
+  });
+  const body = String(await response.text()).replace(/\s+/g, " ").slice(0, 180);
+  return {
+    status: response.status,
+    body,
+    scriptReached: /forbidden|\bok\b|error:/i.test(body),
+  };
 }
 
 function createMailTransporter(env = process.env) {
@@ -197,6 +221,7 @@ async function sendPasswordResetEmail(
 module.exports = {
   getMailConfig,
   emailDeliveryIsConfigured,
+  probeGmailHttpsRelay,
   createMailTransporter,
   sendEmailOtp,
   sendPasswordResetEmail,

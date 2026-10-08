@@ -59,6 +59,7 @@ const { notifyDentists } = require("./services/dentistNotifications");
 const {
   emailDeliveryIsConfigured,
   getMailConfig,
+  probeGmailHttpsRelay,
   sendEmailOtp,
   sendPasswordResetEmail,
 } = require("./services/emailDelivery");
@@ -332,6 +333,22 @@ if (require.main === module) {
       const mail = getMailConfig();
       if (mail.httpsRelayConfigured) {
         console.log("Clinic email OTP: Gmail HTTPS relay ready (Render Free compatible).");
+        probeGmailHttpsRelay()
+          .then((probe) => {
+            if (!probe) return;
+            if (probe.scriptReached) {
+              console.log(
+                `Clinic email OTP probe: Apps Script responded HTTP ${probe.status} (${probe.body})`
+              );
+            } else {
+              console.log(
+                `Clinic email OTP probe: URL did not run doPost HTTP ${probe.status} (${probe.body}). Copy the Web App URL that ends with /exec.`
+              );
+            }
+          })
+          .catch((error) => {
+            console.log(`Clinic email OTP probe failed: ${error.message}`);
+          });
       } else {
         console.log(`Clinic email OTP: Gmail SMTP ready (${mail.from}).`);
       }

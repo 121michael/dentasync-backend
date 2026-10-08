@@ -36,6 +36,14 @@ test("Render Free Gmail OTP can use the HTTPS Apps Script relay", () => {
   assert.equal(emailDeliveryIsConfigured(env), true);
 });
 
+test("Gmail Apps Script URL spaces are stripped", () => {
+  const config = getMailConfig({
+    GMAIL_APPS_SCRIPT_URL: "https://script.google.com/macros/s/abc/exec ",
+    GMAIL_APPS_SCRIPT_SECRET: "relay-secret",
+  });
+  assert.equal(config.appsScriptUrl, "https://script.google.com/macros/s/abc/exec");
+});
+
 test("HTTPS relay POSTs the OTP email without using SMTP", async () => {
   const { sendEmailOtp } = require("../services/emailDelivery");
   const calls = [];
