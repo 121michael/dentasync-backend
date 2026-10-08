@@ -144,9 +144,11 @@ function createOtpService({
             requestId,
             expiresAt: request.expiresAt,
           });
-        } catch {
+        } catch (error) {
           await invalidateRequest(requestId);
-          writeAuditLog(logger, "otp.delivery_failed", auditContext);
+          const reason = String(error?.message || "unknown");
+          writeAuditLog(logger, "otp.delivery_failed", { ...auditContext, reason });
+          logger.error?.(`[otp] delivery failed: ${reason}`);
           throw new OtpDeliveryError();
         }
 

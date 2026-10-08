@@ -43,7 +43,6 @@ if (normalizeLocalNpmStartEnv(process.env).changed) {
 const express = require("express");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
-const nodemailer = require("nodemailer");
 const db = require("./db");
 const { createAuthRouter } = require("./routes/auth");
 const { createPatientPortalRouter } = require("./routes/patientPortal");
@@ -57,6 +56,12 @@ const { createPasswordResetService } = require("./services/passwordResetService"
 const { notifyActiveStaff } = require("./services/staffNotifications");
 const { notifyActiveAdmins } = require("./services/adminNotifications");
 const { notifyDentists } = require("./services/dentistNotifications");
+const {
+  emailDeliveryIsConfigured,
+  getMailConfig,
+  sendEmailOtp,
+  sendPasswordResetEmail,
+} = require("./services/emailDelivery");
 const { authenticateToken } = require("./middleware/authMiddleware");
 
 const app = express();
@@ -84,114 +89,6 @@ app.use((req, res, next) => {
   console.log(`📩 [${new Date().toLocaleTimeString()}] ${req.method} request to ${req.url}`);
   next();
 });
-
-// ==========================================
-// REAL OTP DELIVERY SERVICES SETUP
-// ==========================================
-const EMAIL_PASSWORD = process.env.EMAIL_PASSWORD || process.env.EMAIL_PASS;
-const EMAIL_SENDER = process.env.EMAIL_FROM || process.env.EMAIL_USER;
-const transporter = process.env.EMAIL_HOST
-  ? nodemailer.createTransport({
-      host: process.env.EMAIL_HOST,
-      port: Number(process.env.EMAIL_PORT || 587),
-      secure:
-        process.env.EMAIL_SECURE === "true" ||
-        (!process.env.EMAIL_SECURE && Number(process.env.EMAIL_PORT) === 465),
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: EMAIL_PASSWORD,
-      },
-    })
-  : nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: EMAIL_PASSWORD,
-      },
-    });
-
-function emailDeliveryIsConfigured() {
-  return Boolean(process.env.EMAIL_USER && EMAIL_PASSWORD && EMAIL_SENDER);
-}
-
-function escapeHtml(value) {
-  return String(value || "").replace(/[&<>"']/g, (character) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;",
-  })[character]);
-}
-
-async function sendEmailOtp({ to, otp, expiresAt }) {
-  if (!emailDeliveryIsConfigured()) {
-    throw new Error("Email delivery is not configured.");
-  }
-
-  const expiration = new Date(expiresAt);
-  const minutesRemaining = Number.isNaN(expiration.getTime())
-    ? 5
-    : Math.max(1, Math.ceil((expiration.getTime() - Date.now()) / 60000));
-
-  const mailOptions = {
-    from: `"Amethyst Dental Clinic" <${EMAIL_SENDER}>`,
-    to,
-    subject: "Your DentaSync Verification Code",
-    html: `
-      <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
-        <h2>Welcome to DentaSync!</h2>
-        <p>Your 6-digit verification code is:</p>
-        <h1 style="color: #4F46E5; letter-spacing: 5px;">${otp}</h1>
-        <p>This code will expire in approximately ${minutesRemaining} minute${minutesRemaining === 1 ? "" : "s"}.</p>
-      </div>
-    `,
-  };
-  return transporter.sendMail(mailOptions);
-}
-
-async function sendPasswordResetEmail({ to, token, expiresAt, recipientName }) {
-  if (!emailDeliveryIsConfigured()) {
-    throw new Error("Email delivery is not configured.");
-  }
-
-  const expiration = new Date(expiresAt);
-  const minutesRemaining = Number.isNaN(expiration.getTime())
-    ? 30
-    : Math.max(1, Math.ceil((expiration.getTime() - Date.now()) / 60000));
-  const resetUrl = new URL(
-    process.env.FRONTEND_URL ||
-      process.env.PASSWORD_RESET_URL ||
-      "http://localhost:5173"
-  );
-  const basePath = resetUrl.pathname.replace(/\/$/, "");
-  const resetPath = basePath.endsWith("/reset-password")
-    ? basePath
-    : `${basePath}/reset-password`;
-  resetUrl.pathname = `${resetPath}/${encodeURIComponent(token)}`;
-  resetUrl.search = "";
-  const safeRecipientName = escapeHtml(recipientName || "there");
-
-  return transporter.sendMail({
-    from: `"Amethyst Dental Clinic" <${EMAIL_SENDER}>`,
-    to,
-    subject: "Password Reset Request - Amethyst Dental Clinic",
-    html: `
-      <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
-        <h2>Reset your password</h2>
-        <p>Hello ${safeRecipientName},</p>
-        <p>We received a request to reset your password for your Amethyst Dental Clinic account.</p>
-        <p>
-          <a href="${resetUrl.toString()}" style="display:inline-block;padding:12px 18px;border-radius:8px;color:#fff;background:#5B2A86;text-decoration:none;">
-            Reset Password
-          </a>
-        </p>
-        <p>This link expires in approximately ${minutesRemaining} minute${minutesRemaining === 1 ? "" : "s"} and can be used once.</p>
-        <p>If you did not request this change, you can safely ignore this email.</p>
-      </div>
-    `,
-  });
-}
 
 const { createClinicSmsService } = require("./services/clinicSms");
 const { createCleaningReminderJob } = require("./services/cleaningReminders");
@@ -430,6 +327,13 @@ if (require.main === module) {
       console.log("Clinic SMS: Semaphore API key loaded.");
     } else {
       console.log("Clinic SMS: SEMAPHORE_API_KEY is missing — staff/patient SMS will fail.");
+    }
+    if (emailDeliveryIsConfigured()) {
+      console.log(`Clinic email OTP: Gmail SMTP ready (${getMailConfig().from}).`);
+    } else {
+      console.log(
+        "Clinic email OTP: EMAIL_USER / EMAIL_PASS are missing — Create account codes will not send."
+      );
     }
     cleaningReminderJob.start();
     documentSyncCleanupJob.start();
