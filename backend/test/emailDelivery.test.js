@@ -61,6 +61,7 @@ test("HTTPS relay POSTs the OTP email without using SMTP", async () => {
 
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, "https://script.google.com/macros/s/abc/exec");
+  assert.match(String(calls[0].options.headers["Content-Type"]), /text\/plain/);
   const payload = JSON.parse(calls[0].options.body);
   assert.equal(payload.to, "patient@example.test");
   assert.equal(payload.secret, "relay-secret");

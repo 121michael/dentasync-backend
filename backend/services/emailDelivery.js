@@ -83,7 +83,7 @@ async function sendViaGmailHttpsRelay(config, { to, subject, html }, fetchImpl =
   const response = await fetchImpl(config.appsScriptUrl, {
     method: "POST",
     redirect: "follow",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
     body: JSON.stringify({
       secret: config.appsScriptSecret,
       to,
@@ -92,9 +92,10 @@ async function sendViaGmailHttpsRelay(config, { to, subject, html }, fetchImpl =
     }),
   });
   const body = String(await response.text());
-  if (!response.ok || !/\bok\b/i.test(body)) {
+  const accepted = /\bok\b/i.test(body) || /"status"\s*:\s*"ok"/i.test(body);
+  if (!response.ok || !accepted) {
     throw new Error(
-      `Gmail HTTPS relay failed (${response.status}): ${body.replace(/\s+/g, " ").slice(0, 180)}`
+      `Gmail HTTPS relay failed (${response.status}): ${body.replace(/\s+/g, " ").slice(0, 220)}`
     );
   }
 }
