@@ -41,13 +41,13 @@ async function probeGmailHttpsRelay(env = process.env, fetchImpl = fetch) {
   const response = await fetchImpl(config.appsScriptUrl, {
     method: "POST",
     redirect: "follow",
-    headers: { "Content-Type": "text/plain;charset=utf-8" },
-    body: JSON.stringify({
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
       secret: "__dentasync_boot_probe__",
       to: "otp-probe@example.invalid",
       subject: "probe",
       html: "<p>probe</p>",
-    }),
+    }).toString(),
   });
   const body = String(await response.text()).replace(/\s+/g, " ").slice(0, 180);
   return {
@@ -107,13 +107,13 @@ async function sendViaGmailHttpsRelay(config, { to, subject, html }, fetchImpl =
   const response = await fetchImpl(config.appsScriptUrl, {
     method: "POST",
     redirect: "follow",
-    headers: { "Content-Type": "text/plain;charset=utf-8" },
-    body: JSON.stringify({
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
       secret: config.appsScriptSecret,
       to,
       subject,
       html,
-    }),
+    }).toString(),
   });
   const body = String(await response.text());
   const accepted = /\bok\b/i.test(body) || /"status"\s*:\s*"ok"/i.test(body);

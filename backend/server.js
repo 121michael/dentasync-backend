@@ -142,6 +142,29 @@ const passwordResetService = createPasswordResetService({
 // ==========================================
 // 1. HEALTH CHECK
 // ==========================================
+app.get("/api/auth/otp-mail-status", async (_req, res) => {
+  const mail = getMailConfig();
+  try {
+    const probe = await probeGmailHttpsRelay();
+    return res.json({
+      httpsRelayConfigured: Boolean(mail.httpsRelayConfigured),
+      smtpConfigured: Boolean(mail.smtpConfigured),
+      probe: probe
+        ? {
+            status: probe.status,
+            scriptReached: probe.scriptReached,
+            body: probe.body,
+          }
+        : null,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      httpsRelayConfigured: Boolean(mail.httpsRelayConfigured),
+      error: error.message,
+    });
+  }
+});
+
 app.get("/", async (req, res) => {
   try {
     const result = await db.query("SELECT NOW()");
