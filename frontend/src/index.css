@@ -1242,11 +1242,11 @@ strong {
 }
 
 .tooth-loader__crown {
-  filter: drop-shadow(0 3px 6px rgba(115, 59, 170, 0.1));
+  filter: drop-shadow(0 2px 4px rgba(115, 59, 170, 0.08));
 }
 
 .tooth-loader__gums {
-  filter: drop-shadow(0 6px 10px rgba(115, 59, 170, 0.08));
+  filter: none;
 }
 
 .tooth-loader__label {
@@ -1287,15 +1287,15 @@ strong {
 .tooth-loader__ellipsis span:nth-child(3) { animation-delay: 0.56s; }
 
 @keyframes tooth-erupt {
-  0% { transform: translate3d(0, 44px, 0); }
+  0% { transform: translate3d(0, 78%, 0); }
   42% { transform: translate3d(0, 0, 0); }
   58% { transform: translate3d(0, 0, 0); }
-  100% { transform: translate3d(0, 44px, 0); }
+  100% { transform: translate3d(0, 78%, 0); }
 }
 
 @keyframes tooth-erupt-reduced {
-  0%, 100% { transform: translate3d(0, 10px, 0); }
-  50% { transform: translate3d(0, 4px, 0); }
+  0%, 100% { transform: translate3d(0, 18%, 0); }
+  50% { transform: translate3d(0, 8%, 0); }
 }
 
 @keyframes tooth-ellipsis {
