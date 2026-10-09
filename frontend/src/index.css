@@ -2228,7 +2228,21 @@ strong {
 .queue-visit-details { display: grid; gap: .85rem; }
 .queue-visit-details .visit-procedure-list li { grid-template-columns: 1fr auto; align-items: start; }
 .queue-treatment-timer { font-variant-numeric: tabular-nums; letter-spacing: .04em; }
-.queue-disclaimer strong { color: var(--text); font-size: .72rem; }
+.queue-disclaimer {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  line-height: 1.55;
+}
+.queue-estimate {
+  display: inline;
+}
+.queue-estimate + .queue-estimate::before,
+.queue-estimate-note::before {
+  content: " ";
+}
+.queue-disclaimer strong,
+.queue-estimate strong { color: var(--text); font-size: .72rem; }
+.queue-estimate-note { display: inline; margin: 0; }
 
 .queue-empty-wrap { display: grid; gap: .9rem; }
 .checkin-card { display: flex; align-items: center; justify-content: space-between; gap: 1.2rem; padding: 1.25rem; border: 1px solid var(--border); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow-sm); flex-wrap: wrap; }
@@ -2511,12 +2525,26 @@ strong {
     color: var(--amethyst-700);
     background: var(--surface);
   }
-  .portal-header { min-height: 66px; padding: .75rem 1rem; gap: .65rem; }
+  .portal-header { min-height: 66px; padding: .75rem .85rem; gap: .5rem; }
+  .portal-header__date {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
   .portal-header__date > .eyebrow { display: none; }
-  .portal-content { padding: 1.1rem 1rem 1.5rem; }
-  .mobile-nav { position: fixed; z-index: 5; right: .65rem; bottom: .65rem; left: .65rem; display: grid; grid-template-columns: repeat(5,1fr); padding: .38rem; border: 1px solid var(--border); border-radius: 18px; background: color-mix(in srgb, var(--surface-solid) 90%, transparent); box-shadow: var(--shadow-md); backdrop-filter: blur(18px); }
+  .portal-header__date > span:last-child {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .portal-header__actions { flex: 0 0 auto; gap: .4rem; }
+  .portal-content { padding: 1.1rem 1rem 6.5rem; }
+  .portal-shell { overflow-x: hidden; max-width: 100%; }
+  .mobile-nav { position: fixed; z-index: 5; right: .65rem; bottom: .65rem; left: .65rem; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); padding: .38rem; border: 1px solid var(--border); border-radius: 18px; background: color-mix(in srgb, var(--surface-solid) 90%, transparent); box-shadow: var(--shadow-md); backdrop-filter: blur(18px); }
   .mobile-nav.is-menu-open { visibility: hidden; pointer-events: none; }
-  .mobile-nav__link { display: grid; place-items: center; gap: .22rem; min-height: 47px; border-radius: 11px; color: var(--text-muted); font-size: .52rem; font-weight: 750; }
+  .mobile-nav__link { display: grid; place-items: center; gap: .22rem; min-width: 0; min-height: 47px; padding: .15rem .1rem; border-radius: 11px; color: var(--text-muted); font-size: .52rem; font-weight: 750; }
+  .mobile-nav__link span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .mobile-nav__link.is-active { color: var(--amethyst-700); background: var(--amethyst-100); }
   .dashboard-welcome { align-items: flex-start; flex-direction: column; }
   .next-visit-card { align-items: flex-start; flex-wrap: wrap; }
@@ -2524,7 +2552,44 @@ strong {
   .next-visit-card__details { display: grid; grid-template-columns: 1fr 1fr; }
   .metrics-grid { gap: .65rem; }
   .metric-card { padding: .85rem; }
-  .metric-card > strong { font-size: 1rem; }
+  .metric-card > strong {
+    font-size: 1rem;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.25;
+  }
+  .metric-card > small {
+    white-space: normal;
+  }
+  .patient-checkin-card__actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: .7rem;
+  }
+  .patient-qr-checkin { width: 100%; }
+  .patient-checkin-card__actions > .button {
+    width: 100%;
+    justify-content: center;
+  }
+  .dashboard-page .staff-heading-actions {
+    display: grid;
+    gap: .55rem;
+  }
+  .dashboard-page .staff-heading-actions .button {
+    width: 100%;
+    justify-content: center;
+  }
+  .appointment-row strong,
+  .appointment-row small {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
+    overflow-wrap: anywhere;
+  }
+  .dashboard-footnote {
+    flex-wrap: wrap;
+    gap: .65rem;
+  }
   .wellness-card, .quick-actions-card { padding: 1.05rem; }
   .time-slots { grid-template-columns: repeat(3, 1fr); }
   .treatment-grid { grid-template-columns: 1fr; }
@@ -2532,8 +2597,58 @@ strong {
   .field--full { grid-column: auto; }
   .appointment-row { grid-template-columns: max-content minmax(0,1fr) auto; gap: .6rem; }
   .appointment-row > div:nth-of-type(2) { display: none; }
-  .queue-hero { align-items: flex-start; flex-direction: column; }
-  .queue-glow-ring { align-self: flex-end; margin-top: -3.8rem; width: 72px; height: 72px; }
+  .queue-page .section-heading {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .queue-hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    flex-direction: unset;
+    gap: .85rem;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .queue-hero > div:first-child { min-width: 0; }
+  .queue-hero__numbers {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: .75rem;
+  }
+  .queue-hero__numbers > div { min-width: 0; }
+  .queue-hero__numbers strong {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    font-size: 1rem;
+    line-height: 1.3;
+  }
+  .queue-glow-ring {
+    align-self: start;
+    margin-top: 0;
+    width: 56px;
+    height: 56px;
+    box-shadow: 0 0 0 6px rgba(219, 176, 255, 0.08), 0 0 24px rgba(193, 119, 255, 0.45);
+  }
+  .queue-disclaimer {
+    display: grid;
+    gap: 1rem;
+    min-width: 0;
+  }
+  .queue-estimate,
+  .queue-estimate-note {
+    display: grid;
+    gap: .28rem;
+    min-width: 0;
+  }
+  .queue-estimate + .queue-estimate::before,
+  .queue-estimate-note::before {
+    content: none;
+  }
+  .queue-estimate span,
+  .queue-estimate-note {
+    overflow-wrap: anywhere;
+  }
   .queue-stepper { overflow-x: auto; grid-template-columns: repeat(5, minmax(85px, 1fr)); padding-bottom: .25rem; }
   .care-timeline { grid-template-columns: 1fr 1fr; }
   .queue-table__header, .queue-table__row { grid-template-columns: .8fr 1fr .8fr; padding-right: 0; padding-left: 0; }
@@ -2548,8 +2663,34 @@ strong {
   .profile-security-stack { grid-template-columns: 1fr; }
   .profile-save-button { width: 100%; justify-self: stretch; }
   .support-grid { grid-template-columns: 1fr; }
-  .notification-row { grid-template-columns: 39px minmax(0,1fr); }
-  .notification-row .button { grid-column: 2 / 3; width: max-content; }
+  .notifications-page,
+  .notification-list {
+    min-width: 0;
+    overflow: visible;
+  }
+  .notification-row {
+    grid-template-columns: 39px minmax(0, 1fr);
+    align-items: start;
+    gap: .7rem .75rem;
+    padding: 1rem;
+    min-width: 0;
+  }
+  .notification-row p {
+    overflow-wrap: anywhere;
+  }
+  .notification-row__aside {
+    grid-column: 2 / 3;
+    justify-content: flex-start;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+  .notification-row .button {
+    grid-column: auto;
+    width: auto;
+    max-width: 100%;
+    justify-self: start;
+  }
   .checkin-card { align-items: flex-start; flex-direction: column; }
   .care-summary { grid-template-columns: 1fr; }
   .appointments-page .admin-heading-actions {

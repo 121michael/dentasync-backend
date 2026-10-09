@@ -123,34 +123,38 @@ export function QueuePage() {
                 </div>
               ))}
             </div>
-            <p className="queue-disclaimer">
+            <div className="queue-disclaimer">
               {current.currentProcedure ? (
-                <>
+                <div className="queue-estimate">
                   <strong>Current procedure</strong>
                   <span>{current.currentProcedure.name}</span>
-                </>
+                </div>
               ) : null}
               {current.additionalProcedureCount > 0 ? (
-                <>
+                <div className="queue-estimate">
                   <strong>Additional procedure(s)</strong>
                   <span>
                     {current.additionalProcedureCount} more procedure
                     {current.additionalProcedureCount === 1 ? "" : "s"}
                   </span>
-                </>
+                </div>
               ) : null}
-              <strong>Estimated waiting time</strong>
-              <span>
-                {current.status === "dentist"
-                  ? "Now — you are being seen"
-                  : waitRangeFromEntry(current)}
-              </span>
-              <strong>Estimated call time</strong>
-              <span>
-                {current.status === "dentist" ? "Now" : callRangeFromEntry(current)}
-              </span>
-              {QUEUE_WAIT_DISCLAIMER}
-            </p>
+              <div className="queue-estimate">
+                <strong>Estimated waiting time</strong>
+                <span>
+                  {current.status === "dentist"
+                    ? "Now — you are being seen"
+                    : waitRangeFromEntry(current)}
+                </span>
+              </div>
+              <div className="queue-estimate">
+                <strong>Estimated call time</strong>
+                <span>
+                  {current.status === "dentist" ? "Now" : callRangeFromEntry(current)}
+                </span>
+              </div>
+              <p className="queue-estimate-note">{QUEUE_WAIT_DISCLAIMER}</p>
+            </div>
             <label className="queue-toggle">
               <span>
                 <BellRing size={18} />
