@@ -10,6 +10,7 @@ function recordRfidEvent( partial ) {
   const event = {
     id: sequence,
     rfidTag: String(partial.rfidTag || "").trim().toUpperCase() || null,
+    method: String(partial.method || "rfid").toLowerCase(),
     status: partial.status || "received",
     message: partial.message || null,
     patient: partial.patient || null,

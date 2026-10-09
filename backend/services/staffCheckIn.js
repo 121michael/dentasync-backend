@@ -11,6 +11,16 @@ function stringValue(value, maxLength = 500) {
   return normalized ? normalized.slice(0, maxLength) : null;
 }
 
+function normalizeRfidTag(value) {
+  const text = stringValue(value, 120);
+  if (!text) return null;
+  const compact = text.replace(/[:\-\s]/g, "");
+  if (/^[A-Fa-f0-9]{6,32}$/.test(compact)) {
+    return compact.toUpperCase();
+  }
+  return text;
+}
+
 function numericId(value) {
   const id = Number.parseInt(value, 10);
   return Number.isSafeInteger(id) && id > 0 ? id : null;
@@ -145,10 +155,11 @@ function resolveCheckInLogFilter(query = {}, now = new Date()) {
   };
 }
 
-function checkInLogSelectSql(includeClinicPatientId = true) {
+function checkInLogSelectSql({ includeClinicPatientId = true, includeMethod = true } = {}) {
   const clinicColumn = includeClinicPatientId
     ? "patient.patient_id AS clinic_patient_id,"
     : "NULL::text AS clinic_patient_id,";
+  const methodColumn = includeMethod ? "queue.check_in_method," : "NULL::text AS check_in_method,";
   return `SELECT
            queue.id,
            queue.token,
@@ -157,6 +168,7 @@ function checkInLogSelectSql(includeClinicPatientId = true) {
            queue.estimated_wait_minutes,
            queue.checked_in_at,
            queue.updated_at,
+           ${methodColumn}
            queue.appointment_id,
            appointment.service_name,
            appointment.dentist_name,
@@ -173,20 +185,25 @@ function checkInLogSelectSql(includeClinicPatientId = true) {
 async function listCheckInLog(db, query = {}) {
   const filter = resolveCheckInLogFilter(query);
   const order = filter.sort === "asc" ? "ASC" : "DESC";
-  const sql = `${checkInLogSelectSql(true)}
+  const variants = [
+    { includeClinicPatientId: true, includeMethod: true },
+    { includeClinicPatientId: true, includeMethod: false },
+    { includeClinicPatientId: false, includeMethod: false },
+  ];
+  let lastError = null;
+  for (const variant of variants) {
+    const sql = `${checkInLogSelectSql(variant)}
          WHERE ${filter.sql}
          ORDER BY queue.checked_in_at ${order}, queue.position ASC`;
-  try {
-    const result = await db.query(sql, filter.params);
-    return { filter, rows: result.rows };
-  } catch (error) {
-    if (error.code !== "42703") throw error;
-    const fallback = `${checkInLogSelectSql(false)}
-         WHERE ${filter.sql}
-         ORDER BY queue.checked_in_at ${order}, queue.position ASC`;
-    const result = await db.query(fallback, filter.params);
-    return { filter, rows: result.rows };
+    try {
+      const result = await db.query(sql, filter.params);
+      return { filter, rows: result.rows };
+    } catch (error) {
+      if (error.code !== "42703") throw error;
+      lastError = error;
+    }
   }
+  throw lastError;
 }
 
 async function restoreCheckInFromHistory(client, { sourceQueueId, staff, notifyClinicStaff, notifyClinicDentists }) {
@@ -903,6 +920,7 @@ async function performStaffCheckIn(client, { appointment, staff, notifyClinicSta
 
 module.exports = {
   parseQrPayload,
+  normalizeRfidTag,
   findPatient,
   findAppointmentForCheckIn,
   diagnoseMissingCheckInAppointment,

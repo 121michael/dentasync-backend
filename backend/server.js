@@ -191,6 +191,38 @@ app.get("/", async (req, res) => {
   }
 });
 
+app.post("/api/public/rfid-check-in", async (req, res) => {
+  const rfidDeskCheckIn = require("./services/rfidDeskCheckIn");
+  if (!rfidDeskCheckIn.deviceSecretConfigured()) {
+    return res.status(503).json({
+      message: "RFID device check-in is not configured. Set RFID_DEVICE_SECRET on the API service.",
+    });
+  }
+  const provided =
+    req.get("x-rfid-device-key") || req.get("x-device-key") || req.body?.deviceKey || req.body?.secret;
+  if (!rfidDeskCheckIn.deviceKeyMatches(provided)) {
+    return res.status(403).json({ message: "RFID reader is not authorized." });
+  }
+  try {
+    const result = await rfidDeskCheckIn.checkInByRfidTag(db, {
+      rfidTag: req.body?.rfidTag || req.body?.uid || req.body?.tag,
+      notifyClinicStaff: (notification) => notifyActiveStaff(db, notification),
+      notifyClinicDentists: (notification) => notifyDentists(db, notification),
+    });
+    if (!result.ok) {
+      return res.status(result.status).json({
+        message: result.message,
+        patient: result.patient || undefined,
+        diagnosis: result.diagnosis || undefined,
+      });
+    }
+    return res.status(result.status).json(result.payload);
+  } catch (error) {
+    console.error("Public RFID check-in error:", error.message);
+    return res.status(500).json({ message: "Unable to complete RFID check-in." });
+  }
+});
+
 // Public waiting-room board (no private medical details).
 app.get("/api/public/walk-in-check-in/:token", async (req, res) => {
   try {

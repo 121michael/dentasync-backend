@@ -123,6 +123,7 @@ function mapCheckIn(row) {
       time: row.appointment_time || null,
     },
     status: displayQueueStatus(row.status),
+    checkInMethod: row.check_in_method || null,
     waitMinutes: Number(row.estimated_wait_minutes || 0),
     estimatedDurationMinutes:
       row.wait_estimate_duration_minutes != null ? Number(row.wait_estimate_duration_minutes) : null,
@@ -1855,8 +1856,10 @@ function createStaffPortalRouter({
     const patientId =
       staffCheckIn.stringValue(req.body?.patientId, 120) || payload?.patientId || null;
     const rfidTag =
-      staffCheckIn.stringValue(req.body?.rfidTag, 120) ||
-      (method === "rfid" ? payload?.rfidTag || payload?.code || null : payload?.rfidTag || null);
+      staffCheckIn.normalizeRfidTag(req.body?.rfidTag) ||
+      (method === "rfid"
+        ? staffCheckIn.normalizeRfidTag(payload?.rfidTag || payload?.code)
+        : staffCheckIn.normalizeRfidTag(payload?.rfidTag));
     const phone = method === "rfid" ? null : staffCheckIn.stringValue(req.body?.phone, 40);
     const email = method === "rfid" ? null : staffCheckIn.stringValue(req.body?.email, 254);
 

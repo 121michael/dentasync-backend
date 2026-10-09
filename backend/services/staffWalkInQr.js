@@ -99,10 +99,10 @@ async function createWalkInQrSession(db, { staffId, ttlSeconds = DEFAULT_TTL_SEC
   const session = result.rows[0];
   const checkInUrl = buildCheckInUrl(session.token, frontendOrigin);
   const qrDataUrl = await QRCode.toDataURL(checkInUrl, {
-    errorCorrectionLevel: "M",
-    margin: 2,
-    width: 360,
-    color: { dark: "#32134f", light: "#ffffff" },
+    errorCorrectionLevel: "H",
+    margin: 4,
+    width: 512,
+    color: { dark: "#000000", light: "#ffffff" },
   });
 
   return {
@@ -132,10 +132,10 @@ async function getActiveWalkInQrSession(db, { staffId, frontendOrigin } = {}) {
 
   const checkInUrl = buildCheckInUrl(session.token, frontendOrigin);
   const qrDataUrl = await QRCode.toDataURL(checkInUrl, {
-    errorCorrectionLevel: "M",
-    margin: 2,
-    width: 360,
-    color: { dark: "#32134f", light: "#ffffff" },
+    errorCorrectionLevel: "H",
+    margin: 4,
+    width: 512,
+    color: { dark: "#000000", light: "#ffffff" },
   });
 
   return {

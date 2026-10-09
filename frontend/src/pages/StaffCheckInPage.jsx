@@ -56,7 +56,7 @@ function checkInToVerified(entry) {
   if (!entry) return null;
   return {
     verified: true,
-    method: "rfid",
+    method: entry.checkInMethod || "rfid",
     message: "Patient checked in successfully.",
     patient: {
       id: entry.patientId,
@@ -84,7 +84,7 @@ function eventToVerified(event) {
   if (!event || event.status !== "success") return null;
   return {
     verified: true,
-    method: "rfid",
+    method: event.method || "rfid",
     message: event.message || "Patient checked in successfully.",
     patient: event.patient,
     appointment: event.appointment,
@@ -216,9 +216,7 @@ export function StaffCheckInPage() {
   }, [loadLog, loadQrSession, pollRfidEvents]);
 
   useEffect(() => {
-    if (mode === "rfid") {
-      window.setTimeout(() => rfidInputRef.current?.focus(), 50);
-    }
+    window.setTimeout(() => rfidInputRef.current?.focus(), 50);
   }, [mode, scannerState]);
 
   useEffect(() => {
@@ -240,9 +238,9 @@ export function StaffCheckInPage() {
 
   // Hidden capture for USB keyboard-wedge readers only (not for typing by staff).
   useEffect(() => {
-    const tag = String(rfidCode || "").trim();
-    if (busy || mode !== "rfid") return undefined;
-    if (!/^[A-Fa-f0-9]{6,20}$/.test(tag)) return undefined;
+    const tag = String(rfidCode || "").trim().replace(/[:\-\s]/g, "");
+    if (busy) return undefined;
+    if (!/^[A-Fa-f0-9]{6,32}$/.test(tag)) return undefined;
     const timer = window.setTimeout(() => {
       runRfidCheckIn(tag);
     }, 250);
@@ -354,9 +352,9 @@ export function StaffCheckInPage() {
           <div>
             <span className="eyebrow">Walk-in arrival</span>
             <h2>Patient Check-In</h2>
-            <p>
-              No typing. Patient holds their RFID card on the clinic reader (ESP32). Appointment and
-              queue number appear here automatically.
+              <p>
+              RFID card taps and patient QR scans both check in here. The desk reader sends the card
+              UID; the patient camera reads the staff QR.
             </p>
           </div>
           <button className="button button--secondary" onClick={loadLog}>
@@ -386,6 +384,22 @@ export function StaffCheckInPage() {
           </button>
         </div>
 
+        <input
+          ref={rfidInputRef}
+          className="sr-only"
+          value={rfidCode}
+          onChange={(event) => setRfidCode(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter") return;
+            event.preventDefault();
+            const tag = String(rfidCode || "").trim().replace(/[:\-\s]/g, "");
+            if (/^[A-Fa-f0-9]{6,32}$/.test(tag)) runRfidCheckIn(tag);
+          }}
+          autoComplete="off"
+          autoFocus
+          aria-label="Hidden RFID capture"
+        />
+
         {mode === "rfid" ? (
           <div className="staff-checkin-grid">
             <article className={`staff-scanner-card staff-scanner-card--${scannerState}`}>
@@ -413,16 +427,6 @@ export function StaffCheckInPage() {
                         : "Ready — tap the ESP32 reader"}
                 </span>
               </div>
-              {/* Hidden capture only for USB keyboard-wedge readers. Staff should not type here. */}
-              <input
-                ref={rfidInputRef}
-                className="sr-only"
-                value={rfidCode}
-                onChange={(event) => setRfidCode(event.target.value)}
-                autoComplete="off"
-                autoFocus
-                aria-label="Hidden RFID capture"
-              />
               <p className="muted-copy">
                 Tap the physical ESP32 + MFRC522 reader. Do not type in this screen.
               </p>
@@ -434,11 +438,14 @@ export function StaffCheckInPage() {
             <article className="staff-scanner-card staff-scanner-card--qr">
               <QrCode size={34} />
               <h3>Staff-generated QR check-in</h3>
-              <p>Generate a temporary clinic QR. The patient scans it with their phone and signs in to finish check-in.</p>
+              <p>
+                Generate a temporary clinic QR. The patient uses Scan staff QR with camera in the
+                patient app, or the phone camera app, then signs in if asked.
+              </p>
               {qrSession?.qrDataUrl && countdown > 0 ? (
                 <div className="staff-walkin-qr">
                   <img src={qrSession.qrDataUrl} alt="Temporary walk-in check-in QR code" />
-                  <strong>Please scan this QR code using your phone.</strong>
+                  <strong>Ask the patient to scan this QR with their phone camera.</strong>
                   <small>Expires in {formatCountdown(countdown)}</small>
                   <div className="staff-heading-actions">
                     <button type="button" className="button button--secondary" onClick={generateQr} disabled={busy}>
@@ -460,7 +467,7 @@ export function StaffCheckInPage() {
             </article>
             <VerifiedPanel
               verified={verified}
-              emptyHint="Successful QR check-ins appear in the log and notifications as patients redeem the code."
+              emptyHint="When a patient scans this QR, their name and queue number appear here the same way as an RFID tap."
             />
           </div>
         )}

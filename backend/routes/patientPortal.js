@@ -15,6 +15,7 @@ const { analyzeDentalImageBuffer, DISCLAIMER: IMAGE_ANALYSIS_DISCLAIMER } = requ
 const staffCheckIn = require("../services/staffCheckIn");
 const { insertPatientNotification, mapPatientNotification } = require("../services/patientPortalNotifications");
 const staffWalkInQr = require("../services/staffWalkInQr");
+const staffRfidEvents = require("../services/staffRfidEvents");
 const clinicSchedule = require("../services/clinicSchedule");
 const accountDependents = require("../services/accountDependents");
 const { resolveAppSecrets } = require("../lib/securityConfig");
@@ -2441,6 +2442,25 @@ function createPatientPortalRouter({
           })
           .catch((smsError) => console.warn("Walk-in QR check-in SMS failed:", smsError.message));
       }
+
+      staffRfidEvents.recordRfidEvent({
+        method: "qr",
+        status: "success",
+        message: checkIn.alreadyCheckedIn ? "Patient already checked in." : "Patient checked in from QR scan.",
+        patient: {
+          id: appointment.user_id,
+          fullName: appointment.patient_name || "Patient",
+        },
+        appointment: mapAppointment(appointment),
+        queue: {
+          id: checkIn.queueEntry.id,
+          token: checkIn.queueEntry.token,
+          queueNumber: checkIn.queueEntry.token,
+          status: checkIn.queueEntry.status,
+          waitMinutes: Number(checkIn.queueEntry.estimated_wait_minutes || 0),
+          checkedInAt: checkIn.queueEntry.checked_in_at || new Date().toISOString(),
+        },
+      });
 
       return res.status(checkIn.alreadyCheckedIn ? 200 : 201).json({
         message: checkIn.alreadyCheckedIn
