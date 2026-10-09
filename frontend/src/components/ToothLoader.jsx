@@ -4,16 +4,19 @@ import { FRONT_TOOTH_SHAPES, TOOTH_VIEW } from "./DentalChart/toothShapes";
 function ToothMark({ compact = false }) {
   const uid = useId().replace(/:/g, "");
   const enamelId = `tooth-enamel-${uid}`;
-  const width = compact ? 78 : 118;
-  const height = compact ? 104 : 158;
+  const gumId = `tooth-gum-${uid}`;
+  const width = compact ? 148 : 200;
+  const height = compact ? 128 : 172;
   const shape = FRONT_TOOTH_SHAPES.central_incisor;
   const { width: vbW, height: vbH } = TOOTH_VIEW;
+  const toothX = (160 - vbW) / 2;
+  const toothY = 18;
 
   return (
-    <div className="tooth-loader__grow" aria-hidden="true">
+    <div className="tooth-loader__scene" aria-hidden="true">
       <svg
         className="tooth-loader__svg"
-        viewBox={`-4 -4 ${vbW + 8} ${vbH + 8}`}
+        viewBox="0 0 160 140"
         width={width}
         height={height}
         aria-hidden="true"
@@ -25,46 +28,71 @@ function ToothMark({ compact = false }) {
             <stop offset="55%" stopColor="#f7f4fb" />
             <stop offset="100%" stopColor="#e8dcf6" />
           </linearGradient>
+          <linearGradient id={gumId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#f3e6f8" />
+            <stop offset="55%" stopColor="#e4d0ef" />
+            <stop offset="100%" stopColor="#d4b8e4" />
+          </linearGradient>
         </defs>
-        {/* Chart geometry is root-up; flip so the crown is on top like a tooth icon. */}
-        <g transform={`translate(0 ${vbH}) scale(1 -1)`}>
-          {shape.roots.map((d) => (
-            <path
-              key={d}
-              className="tooth-loader__crown"
-              d={d}
-              fill={`url(#${enamelId})`}
-              stroke="#c9b3e4"
-              strokeWidth="1.15"
-              strokeLinejoin="round"
-            />
-          ))}
-          <path
-            className="tooth-loader__crown"
-            d={shape.crown}
-            fill={`url(#${enamelId})`}
-            stroke="#c9b3e4"
-            strokeWidth="1.15"
-            strokeLinejoin="round"
-          />
-          {shape.details.map((d) => (
-            <path
-              key={d}
-              d={d}
-              fill="none"
-              stroke="#c9b3e4"
-              strokeWidth="0.85"
-              strokeLinecap="round"
-            />
-          ))}
+
+        <g transform={`translate(${toothX} ${toothY})`}>
+          <g className="tooth-loader__erupt">
+            <g transform={`translate(0 ${vbH}) scale(1 -1)`}>
+              {shape.roots.map((d) => (
+                <path
+                  key={d}
+                  className="tooth-loader__crown"
+                  d={d}
+                  fill={`url(#${enamelId})`}
+                  stroke="#c9b3e4"
+                  strokeWidth="1.15"
+                  strokeLinejoin="round"
+                />
+              ))}
+              <path
+                className="tooth-loader__crown"
+                d={shape.crown}
+                fill={`url(#${enamelId})`}
+                stroke="#c9b3e4"
+                strokeWidth="1.15"
+                strokeLinejoin="round"
+              />
+              {shape.details.map((d) => (
+                <path
+                  key={d}
+                  d={d}
+                  fill="none"
+                  stroke="#c9b3e4"
+                  strokeWidth="0.85"
+                  strokeLinecap="round"
+                />
+              ))}
+            </g>
+          </g>
         </g>
+
+        <path
+          className="tooth-loader__gums"
+          d="M14 72c18-9 34-6 50-11 8-2.4 14-2.4 18 0 16 5 32 2 50 11v46c-22 12-80 12-118 0V72z"
+          fill={`url(#${gumId})`}
+          stroke="#c9b3e4"
+          strokeWidth="1.35"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M28 78c20-6 36-3 52-7 8-2 12-2 16 0 16 4 32 1 44 7"
+          fill="none"
+          stroke="rgba(255,255,255,0.45)"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+        />
       </svg>
     </div>
   );
 }
 
 /**
- * Full-screen and inline loading UI: a single growing tooth on a white panel background.
+ * Full-screen and inline loading UI: a tooth erupting through the gum line.
  */
 export function ToothLoader({
   label = "Loading",
@@ -115,9 +143,7 @@ export function ToothLoader({
       aria-busy="true"
       aria-label={labelText === "Loading" ? "Loading" : labelText}
     >
-      <div className="tooth-loader__smile">
-        <ToothMark compact={compact} />
-      </div>
+      <ToothMark compact={compact} />
 
       {label ? (
         <p className="tooth-loader__label">

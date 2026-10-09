@@ -1151,7 +1151,7 @@ strong {
   to { transform: rotate(360deg); }
 }
 
-/* Loading screen: growing tooth on the white login-panel background */
+/* Loading screen: tooth erupting through the gum line */
 .tooth-loader {
   display: grid;
   place-items: center;
@@ -1196,7 +1196,7 @@ strong {
   z-index: 1;
   display: grid;
   justify-items: center;
-  gap: 1rem;
+  gap: 1.35rem;
   padding: 0.4rem;
   background: transparent;
   box-shadow: none;
@@ -1224,26 +1224,29 @@ strong {
   transition: none;
 }
 
-.tooth-loader__smile {
+.tooth-loader__scene {
   display: grid;
   place-items: center;
-}
-
-.tooth-loader__grow {
-  display: grid;
-  place-items: center;
-  transform-origin: center center;
-  will-change: transform;
-  animation: tooth-grow 1.8s ease-in-out infinite;
 }
 
 .tooth-loader__svg {
   display: block;
-  overflow: visible;
+  overflow: hidden;
+}
+
+.tooth-loader__erupt {
+  transform-origin: center bottom;
+  transform-box: fill-box;
+  will-change: transform;
+  animation: tooth-erupt 3.1s ease-in-out infinite;
 }
 
 .tooth-loader__crown {
-  filter: drop-shadow(0 4px 8px rgba(115, 59, 170, 0.12));
+  filter: drop-shadow(0 3px 6px rgba(115, 59, 170, 0.1));
+}
+
+.tooth-loader__gums {
+  filter: drop-shadow(0 6px 10px rgba(115, 59, 170, 0.08));
 }
 
 .tooth-loader__label {
@@ -1283,14 +1286,16 @@ strong {
 .tooth-loader__ellipsis span:nth-child(2) { animation-delay: 0.28s; }
 .tooth-loader__ellipsis span:nth-child(3) { animation-delay: 0.56s; }
 
-@keyframes tooth-grow {
-  0%, 100% { transform: scale(0.7); }
-  50% { transform: scale(1.15); }
+@keyframes tooth-erupt {
+  0% { transform: translate3d(0, 44px, 0); }
+  42% { transform: translate3d(0, 0, 0); }
+  58% { transform: translate3d(0, 0, 0); }
+  100% { transform: translate3d(0, 44px, 0); }
 }
 
-@keyframes tooth-grow-reduced {
-  0%, 100% { transform: scale(0.94); opacity: 0.82; }
-  50% { transform: scale(1); opacity: 1; }
+@keyframes tooth-erupt-reduced {
+  0%, 100% { transform: translate3d(0, 10px, 0); }
+  50% { transform: translate3d(0, 4px, 0); }
 }
 
 @keyframes tooth-ellipsis {
@@ -1305,8 +1310,8 @@ strong {
     transition: opacity 180ms ease;
   }
 
-  .tooth-loader__grow {
-    animation: tooth-grow-reduced 2.4s ease-in-out infinite;
+  .tooth-loader__erupt {
+    animation: tooth-erupt-reduced 2.8s ease-in-out infinite;
   }
 
   .tooth-loader__ellipsis span {
@@ -1317,7 +1322,7 @@ strong {
 
 @media (max-width: 640px) {
   .tooth-loader__svg {
-    width: min(120px, 42vw);
+    width: min(200px, 72vw);
     height: auto;
   }
 }
