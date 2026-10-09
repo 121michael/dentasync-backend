@@ -1,36 +1,63 @@
 import { useEffect, useId, useState } from "react";
+import { FRONT_TOOTH_SHAPES, TOOTH_VIEW } from "./DentalChart/toothShapes";
 
 function ToothMark({ compact = false }) {
   const uid = useId().replace(/:/g, "");
   const enamelId = `tooth-enamel-${uid}`;
-  const width = compact ? 72 : 120;
-  const height = compact ? 96 : 160;
+  const width = compact ? 78 : 118;
+  const height = compact ? 104 : 158;
+  const shape = FRONT_TOOTH_SHAPES.central_incisor;
+  const { width: vbW, height: vbH } = TOOTH_VIEW;
 
   return (
     <div className="tooth-loader__grow" aria-hidden="true">
       <svg
         className="tooth-loader__svg"
-        viewBox="0 0 80 112"
+        viewBox={`-4 -4 ${vbW + 8} ${vbH + 8}`}
         width={width}
         height={height}
         aria-hidden="true"
         focusable="false"
       >
         <defs>
-          <linearGradient id={enamelId} x1="0" y1="0" x2="0" y2="1">
+          <linearGradient id={enamelId} x1="0" y1="1" x2="0" y2="0">
             <stop offset="0%" stopColor="#ffffff" />
             <stop offset="55%" stopColor="#f7f4fb" />
             <stop offset="100%" stopColor="#e8dcf6" />
           </linearGradient>
         </defs>
-        <path
-          className="tooth-loader__crown"
-          d="M40 6c-12.5 0-22 10.2-22 24.5 0 7.4 2.2 13.8 5.6 19.2 2.6 4.2 4.8 8.8 5.6 14.2.6 4.2 1.4 10.6 2.6 18.4.4 2.4 1.6 4.2 3.4 4.2h9.6c1.8 0 3-1.8 3.4-4.2 1.2-7.8 2-14.2 2.6-18.4.8-5.4 3-10 5.6-14.2 3.4-5.4 5.6-11.8 5.6-19.2C62 16.2 52.5 6 40 6z"
-          fill={`url(#${enamelId})`}
-          stroke="#c9b3e4"
-          strokeWidth="1.6"
-          strokeLinejoin="round"
-        />
+        {/* Chart geometry is root-up; flip so the crown is on top like a tooth icon. */}
+        <g transform={`translate(0 ${vbH}) scale(1 -1)`}>
+          {shape.roots.map((d) => (
+            <path
+              key={d}
+              className="tooth-loader__crown"
+              d={d}
+              fill={`url(#${enamelId})`}
+              stroke="#c9b3e4"
+              strokeWidth="1.15"
+              strokeLinejoin="round"
+            />
+          ))}
+          <path
+            className="tooth-loader__crown"
+            d={shape.crown}
+            fill={`url(#${enamelId})`}
+            stroke="#c9b3e4"
+            strokeWidth="1.15"
+            strokeLinejoin="round"
+          />
+          {shape.details.map((d) => (
+            <path
+              key={d}
+              d={d}
+              fill="none"
+              stroke="#c9b3e4"
+              strokeWidth="0.85"
+              strokeLinecap="round"
+            />
+          ))}
+        </g>
       </svg>
     </div>
   );
