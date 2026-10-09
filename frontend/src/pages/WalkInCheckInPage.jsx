@@ -11,7 +11,10 @@ export function WalkInCheckInPage() {
   const { user, isLoading } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const token = useMemo(() => String(searchParams.get("token") || "").trim(), [searchParams]);
+  const token = useMemo(
+    () => String(searchParams.get("walkin") || searchParams.get("token") || "").trim(),
+    [searchParams]
+  );
   const [sessionStatus, setSessionStatus] = useState(null);
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
@@ -110,7 +113,7 @@ export function WalkInCheckInPage() {
               type="button"
               className="button button--primary"
               onClick={() =>
-                navigate(`/login?next=${encodeURIComponent(`/walk-in-check-in?token=${token}`)}`)
+                navigate(`/login?next=${encodeURIComponent(`/?walkin=${token}`)}`)
               }
             >
               Sign in to check in

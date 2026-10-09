@@ -1866,6 +1866,14 @@ function createStaffPortalRouter({
       });
     }
 
+    const scannedRaw = String(req.body?.rfidTag || req.body?.code || req.body?.qrPayload || rfidTag || "");
+    if (method === "rfid" && /walkin=|walk-in-check-in|https?:\/\//i.test(scannedRaw)) {
+      return res.status(400).json({
+        message:
+          "This is the patient QR code, not an RFID card. Ask the patient to scan it with their phone (or use Scan QR in the patient app). RFID check-in uses the physical card assigned in Admin → RFID.",
+      });
+    }
+
     const client = await db.connect();
     let transactionOpen = false;
     try {
@@ -2086,9 +2094,16 @@ function createStaffPortalRouter({
     });
   });
 
+  function requestFrontendOrigin(req) {
+    return req.get("origin") || req.get("referer") || "";
+  }
+
   router.get("/check-in/qr-session", async (req, res) => {
     try {
-      const session = await staffWalkInQr.getActiveWalkInQrSession(db, { staffId: req.staff.id });
+      const session = await staffWalkInQr.getActiveWalkInQrSession(db, {
+        staffId: req.staff.id,
+        frontendOrigin: requestFrontendOrigin(req),
+      });
       return res.json({ session });
     } catch (error) {
       if (staffWalkInQr.isMissingRelation(error)) {
@@ -2112,7 +2127,10 @@ function createStaffPortalRouter({
            AND expires_at > CURRENT_TIMESTAMP`,
         [String(req.staff.id)]
       );
-      const session = await staffWalkInQr.createWalkInQrSession(db, { staffId: req.staff.id });
+      const session = await staffWalkInQr.createWalkInQrSession(db, {
+        staffId: req.staff.id,
+        frontendOrigin: requestFrontendOrigin(req),
+      });
       return res.status(201).json({
         message: "Walk-in QR code generated. Ask the patient to scan it with their phone.",
         session,

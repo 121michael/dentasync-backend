@@ -6,10 +6,23 @@ export function extractWalkInQrToken(rawValue) {
   const text = String(rawValue || "").trim();
   if (!text) return null;
 
+  const fromSearch = (url) => {
+    const value = url.searchParams.get("walkin") || url.searchParams.get("token");
+    return value ? value.trim() : null;
+  };
+
   try {
     const url = new URL(text);
-    const fromQuery = url.searchParams.get("token");
-    if (fromQuery) return fromQuery.trim();
+    const fromQuery = fromSearch(url);
+    if (fromQuery) return fromQuery;
+
+    if (url.hash) {
+      const hash = url.hash.replace(/^#/, "");
+      const hashPath = hash.startsWith("/") ? hash : `/${hash}`;
+      const fromHash = fromSearch(new URL(hashPath, url.origin));
+      if (fromHash) return fromHash;
+    }
+
     const parts = url.pathname.split("/").filter(Boolean);
     const walkInIndex = parts.findIndex((part) => part === "walk-in-check-in");
     if (walkInIndex >= 0 && parts[walkInIndex + 1]) {
@@ -23,7 +36,7 @@ export function extractWalkInQrToken(rawValue) {
     return text;
   }
 
-  const tokenMatch = text.match(/[?&]token=([a-f0-9]+)/i);
+  const tokenMatch = text.match(/[?&#](?:walkin|token)=([a-f0-9]+)/i);
   if (tokenMatch?.[1]) return tokenMatch[1];
 
   return null;

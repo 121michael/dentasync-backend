@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BrowserRouter, Navigate, Outlet, Route, Routes, useNavigate } from "react-router-dom";
+import { BrowserRouter, Navigate, Outlet, Route, Routes, useNavigate, useSearchParams } from "react-router-dom";
 import { AuthProvider } from "./auth";
 import { LoadingState } from "./components/UI";
 import { GlobalLoadingOverlay } from "./components/GlobalLoadingOverlay";
@@ -51,6 +51,13 @@ import { useAuth } from "./useAuth";
 
 function roleFor(user) {
   return String(user?.role || "").toLowerCase();
+}
+
+function WalkInOrLogin() {
+  const [searchParams] = useSearchParams();
+  const walkin = String(searchParams.get("walkin") || searchParams.get("token") || "").trim();
+  if (walkin) return <WalkInCheckInPage />;
+  return <Navigate to="/login" replace />;
 }
 
 function landingRoute(user) {
@@ -124,6 +131,7 @@ function PortalRoutes() {
 
   return (
     <Routes>
+      <Route path="/" element={<WalkInOrLogin />} />
       <Route path="/queue-display" element={<QueueDisplayPage />} />
       <Route path="/walk-in-check-in" element={<WalkInCheckInPage />} />
       <Route path="/terms" element={<LegalPage />} />
