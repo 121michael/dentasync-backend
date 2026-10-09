@@ -142,11 +142,11 @@ const passwordResetService = createPasswordResetService({
 // ==========================================
 // 1. HEALTH CHECK
 // ==========================================
-app.get("/api/auth/otp-mail-status", async (_req, res) => {
+app.get("/api/auth/otp-mail-status", async (req, res) => {
   const mail = getMailConfig();
   try {
     const probe = await probeGmailHttpsRelay();
-    return res.json({
+    const payload = {
       httpsRelayConfigured: Boolean(mail.httpsRelayConfigured),
       smtpConfigured: Boolean(mail.smtpConfigured),
       probe: probe
@@ -156,7 +156,24 @@ app.get("/api/auth/otp-mail-status", async (_req, res) => {
             body: probe.body,
           }
         : null,
-    });
+    };
+    if (String(req.query.sendTest || "") === "1" && mail.httpsRelayConfigured && mail.user) {
+      try {
+        await sendEmailOtp({
+          to: mail.user,
+          otp: "000000",
+          expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+        });
+        payload.testSend = {
+          ok: true,
+          to: mail.user,
+          message: "A test OTP email was sent to EMAIL_USER. Check that Gmail inbox and Spam.",
+        };
+      } catch (error) {
+        payload.testSend = { ok: false, error: error.message };
+      }
+    }
+    return res.json(payload);
   } catch (error) {
     return res.status(500).json({
       httpsRelayConfigured: Boolean(mail.httpsRelayConfigured),
