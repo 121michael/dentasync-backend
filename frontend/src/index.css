@@ -1151,7 +1151,7 @@ strong {
   to { transform: rotate(360deg); }
 }
 
-/* Loading screen: smile of teeth on the white login-panel background */
+/* Loading screen: growing tooth on the white login-panel background */
 .tooth-loader {
   display: grid;
   place-items: center;
@@ -1229,16 +1229,17 @@ strong {
   place-items: center;
 }
 
+.tooth-loader__grow {
+  display: grid;
+  place-items: center;
+  transform-origin: center center;
+  will-change: transform;
+  animation: tooth-grow 1.8s ease-in-out infinite;
+}
+
 .tooth-loader__svg {
   display: block;
   overflow: visible;
-}
-
-.tooth-loader__unit {
-  transform-box: fill-box;
-  transform-origin: center bottom;
-  animation: tooth-wave 1.15s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-  animation-delay: calc(var(--tooth-index) * 70ms);
 }
 
 .tooth-loader__crown {
@@ -1282,9 +1283,14 @@ strong {
 .tooth-loader__ellipsis span:nth-child(2) { animation-delay: 0.28s; }
 .tooth-loader__ellipsis span:nth-child(3) { animation-delay: 0.56s; }
 
-@keyframes tooth-wave {
-  0%, 100% { transform: translate3d(0, 0, 0); }
-  40% { transform: translate3d(0, -7px, 0); }
+@keyframes tooth-grow {
+  0%, 100% { transform: scale(0.7); }
+  50% { transform: scale(1.15); }
+}
+
+@keyframes tooth-grow-reduced {
+  0%, 100% { transform: scale(0.94); opacity: 0.82; }
+  50% { transform: scale(1); opacity: 1; }
 }
 
 @keyframes tooth-ellipsis {
@@ -1299,19 +1305,19 @@ strong {
     transition: opacity 180ms ease;
   }
 
-  .tooth-loader__unit,
-  .tooth-loader__ellipsis span {
-    animation: none !important;
+  .tooth-loader__grow {
+    animation: tooth-grow-reduced 2.4s ease-in-out infinite;
   }
 
   .tooth-loader__ellipsis span {
+    animation: none !important;
     opacity: 1;
   }
 }
 
 @media (max-width: 640px) {
   .tooth-loader__svg {
-    width: min(210px, 78vw);
+    width: min(120px, 42vw);
     height: auto;
   }
 }
