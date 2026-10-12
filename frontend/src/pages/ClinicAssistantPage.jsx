@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, History, ImagePlus, Plus, SendHorizontal, Sparkles, X } from "lucide-react";
+import { Bot, ImagePlus, Menu, Plus, SendHorizontal, Sparkles, X } from "lucide-react";
 import { api } from "../api";
 import { SectionHeading } from "../components/UI";
 
@@ -61,6 +61,10 @@ function groupConversations(conversations) {
   return groups;
 }
 
+function isCompactNav() {
+  return typeof window !== "undefined" && window.matchMedia("(max-width: 900px)").matches;
+}
+
 export function ClinicAssistantPage() {
   const [messages, setMessages] = useState([WELCOME_MESSAGE]);
   const [conversationId, setConversationId] = useState(null);
@@ -71,15 +75,18 @@ export function ClinicAssistantPage() {
   const [error, setError] = useState("");
   const [available, setAvailable] = useState(true);
   const [unavailableMessage, setUnavailableMessage] = useState("");
-  const [historyOpen, setHistoryOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState("");
   const [conversations, setConversations] = useState([]);
   const [openingId, setOpeningId] = useState("");
   const listRef = useRef(null);
   const fileInputRef = useRef(null);
+  const hamburgerRef = useRef(null);
 
   const groupedHistory = useMemo(() => groupConversations(conversations), [conversations]);
+  const currentTitle =
+    conversations.find((item) => item.id === conversationId)?.title || "New chat";
 
   useEffect(() => {
     let cancelled = false;
@@ -117,6 +124,18 @@ export function ClinicAssistantPage() {
     };
   }, [previewUrl]);
 
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    function onKey(event) {
+      if (event.key === "Escape") {
+        setMenuOpen(false);
+        hamburgerRef.current?.focus();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menuOpen]);
+
   async function loadHistory() {
     setHistoryLoading(true);
     setHistoryError("");
@@ -130,20 +149,29 @@ export function ClinicAssistantPage() {
     }
   }
 
-  async function openHistory() {
-    setHistoryOpen(true);
-    await loadHistory();
+  async function toggleMenu() {
+    const next = !menuOpen;
+    setMenuOpen(next);
+    if (next) await loadHistory();
+  }
+
+  function closeMenuIfCompact() {
+    if (isCompactNav()) setMenuOpen(false);
   }
 
   function startNewChat() {
     setConversationId(null);
     setMessages([WELCOME_MESSAGE]);
     setError("");
-    setHistoryOpen(false);
+    closeMenuIfCompact();
   }
 
   async function openConversation(id) {
     if (!id || openingId) return;
+    if (id === conversationId) {
+      closeMenuIfCompact();
+      return;
+    }
     const previousMessages = messages;
     const previousId = conversationId;
     setOpeningId(id);
@@ -162,7 +190,7 @@ export function ClinicAssistantPage() {
       setConversationId(response.conversation?.id || id);
       setMessages(loaded.length ? loaded : [WELCOME_MESSAGE]);
       setError("");
-      setHistoryOpen(false);
+      closeMenuIfCompact();
     } catch (openError) {
       setHistoryError(openError.message || "Unable to open that conversation.");
       setMessages(previousMessages);
@@ -232,6 +260,7 @@ export function ClinicAssistantPage() {
           analysis: response.analysis || null,
         },
       ]);
+      if (menuOpen) loadHistory();
     } catch (sendError) {
       const disabled =
         /unavailable/i.test(String(sendError.message || "")) ||
@@ -263,39 +292,119 @@ export function ClinicAssistantPage() {
         detail="Ask in English or Tagalog about teeth, oral care, clinic hours, services, and appointments. Magtanong sa English o Tagalog. Attach a dental photo or X-ray with +. Preliminary notes are not a diagnosis."
       />
 
-      <section className="glass-card assistant-panel">
-        <div className="assistant-disclaimer" role="note">
-          <Sparkles size={16} aria-hidden="true" />
-          <p>
-            <strong>Disclaimer:</strong> AI-generated information is preliminary and does not replace
-            examination or diagnosis by a licensed dentist.
-          </p>
-        </div>
+      <section className={`glass-card assistant-panel${menuOpen ? " is-nav-open" : ""}`}>
+        <div
+          className="assistant-nav-backdrop"
+          hidden={!menuOpen}
+          onClick={() => setMenuOpen(false)}
+        />
+        <aside id="assistant-nav" className="assistant-nav" aria-label="Chat navigation">
+          <div className="assistant-nav__head">
+            <div>
+              <p className="assistant-nav__eyebrow">Menu</p>
+              <h2>Chats</h2>
+            </div>
+            <button
+              type="button"
+              className="icon-button assistant-nav__close"
+              onClick={() => setMenuOpen(false)}
+              aria-label="Close chat menu"
+            >
+              <X size={16} />
+            </button>
+          </div>
 
-        <div className="assistant-toolbar">
-          <button type="button" className="button button--secondary" onClick={startNewChat}>
+          <button type="button" className="assistant-nav__new" onClick={startNewChat}>
             <Plus size={16} aria-hidden="true" /> New Chat
           </button>
-          <button
-            type="button"
-            className="button button--secondary"
-            onClick={() => (historyOpen ? setHistoryOpen(false) : openHistory())}
-            aria-expanded={historyOpen}
-            aria-controls="assistant-history-panel"
-          >
-            <History size={16} aria-hidden="true" /> Chat History
-          </button>
-        </div>
 
-        {!available ? (
-          <p className="inline-alert inline-alert--error" role="status">
-            {unavailableMessage ||
-              "The AI Clinic Assistant is temporarily unavailable. Please contact the front desk."}
-          </p>
-        ) : null}
-        {error && available ? <p className="inline-alert inline-alert--error">{error}</p> : null}
+          <div className="assistant-nav__history">
+            <p className="assistant-nav__eyebrow">Chat History</p>
+            {historyLoading ? (
+              <p className="assistant-history__status" role="status">
+                Loading conversations…
+              </p>
+            ) : null}
+            {historyError ? (
+              <div className="assistant-history__error">
+                <p>{historyError}</p>
+                <button type="button" className="button button--secondary" onClick={loadHistory}>
+                  Retry
+                </button>
+              </div>
+            ) : null}
+            {!historyLoading && !historyError && !conversations.length ? (
+              <p className="assistant-history__empty">
+                No saved conversations yet. Send a message and it will appear here automatically.
+              </p>
+            ) : null}
+            {!historyLoading
+              ? groupedHistory.map((group) => (
+                  <section key={group.label} className="assistant-history__group">
+                    <h3>{group.label}</h3>
+                    <ul>
+                      {group.items.map((item) => (
+                        <li key={item.id}>
+                          <button
+                            type="button"
+                            className={`assistant-history__item${
+                              item.id === conversationId ? " is-active" : ""
+                            }`}
+                            onClick={() => openConversation(item.id)}
+                            disabled={Boolean(openingId)}
+                          >
+                            <span>{item.title || "New Conversation"}</span>
+                            <small>{formatHistoryTime(item.updatedAt || item.createdAt, group.label)}</small>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                ))
+              : null}
+            {openingId ? (
+              <p className="assistant-history__status" role="status">
+                Opening conversation…
+              </p>
+            ) : null}
+          </div>
+        </aside>
 
-        <div className={`assistant-workspace${historyOpen ? " is-history-open" : ""}`}>
+        <div className="assistant-main">
+          <header className="assistant-chatbar">
+            <button
+              ref={hamburgerRef}
+              type="button"
+              className="icon-button assistant-hamburger"
+              onClick={toggleMenu}
+              aria-expanded={menuOpen}
+              aria-controls="assistant-nav"
+              aria-label={menuOpen ? "Close chat menu" : "Open chat menu"}
+            >
+              {menuOpen ? <X size={18} /> : <Menu size={18} />}
+            </button>
+            <div className="assistant-chatbar__title">
+              <p>AI Clinic Assistant</p>
+              <small>{currentTitle}</small>
+            </div>
+          </header>
+
+          <div className="assistant-disclaimer" role="note">
+            <Sparkles size={16} aria-hidden="true" />
+            <p>
+              <strong>Disclaimer:</strong> AI-generated information is preliminary and does not replace
+              examination or diagnosis by a licensed dentist.
+            </p>
+          </div>
+
+          {!available ? (
+            <p className="inline-alert inline-alert--error" role="status">
+              {unavailableMessage ||
+                "The AI Clinic Assistant is temporarily unavailable. Please contact the front desk."}
+            </p>
+          ) : null}
+          {error && available ? <p className="inline-alert inline-alert--error">{error}</p> : null}
+
           <div className="assistant-thread" ref={listRef} aria-live="polite">
             {messages.map((item, index) => (
               <article
@@ -335,124 +444,53 @@ export function ClinicAssistantPage() {
             ) : null}
           </div>
 
-          {historyOpen ? (
-            <aside
-              id="assistant-history-panel"
-              className="assistant-history"
-              aria-label="Chat history"
-            >
-              <div className="assistant-history__head">
-                <div>
-                  <p className="assistant-history__eyebrow">Chat History</p>
-                  <h2>Previous conversations</h2>
-                </div>
-                <button
-                  type="button"
-                  className="icon-button"
-                  onClick={() => setHistoryOpen(false)}
-                  aria-label="Close chat history"
-                >
-                  <X size={16} />
-                </button>
-              </div>
-
-              {historyLoading ? (
-                <p className="assistant-history__status" role="status">
-                  Loading conversations…
-                </p>
-              ) : null}
-              {historyError ? (
-                <div className="assistant-history__error">
-                  <p>{historyError}</p>
-                  <button type="button" className="button button--secondary" onClick={loadHistory}>
-                    Retry
-                  </button>
-                </div>
-              ) : null}
-              {!historyLoading && !historyError && !conversations.length ? (
-                <p className="assistant-history__empty">
-                  No saved conversations yet. Send a message and it will appear here automatically.
-                </p>
-              ) : null}
-              {!historyLoading
-                ? groupedHistory.map((group) => (
-                    <section key={group.label} className="assistant-history__group">
-                      <h3>{group.label}</h3>
-                      <ul>
-                        {group.items.map((item) => (
-                          <li key={item.id}>
-                            <button
-                              type="button"
-                              className={`assistant-history__item${
-                                item.id === conversationId ? " is-active" : ""
-                              }`}
-                              onClick={() => openConversation(item.id)}
-                              disabled={Boolean(openingId)}
-                            >
-                              <span>{item.title || "New Conversation"}</span>
-                              <small>{formatHistoryTime(item.updatedAt || item.createdAt, group.label)}</small>
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    </section>
-                  ))
-                : null}
-              {openingId ? (
-                <p className="assistant-history__status" role="status">
-                  Opening conversation…
-                </p>
-              ) : null}
-            </aside>
+          {attachment ? (
+            <div className="assistant-attachment-chip">
+              <ImagePlus size={15} />
+              <span>{attachment.name}</span>
+              <button type="button" className="icon-button" onClick={clearAttachment} aria-label="Remove attachment">
+                <X size={14} />
+              </button>
+            </div>
           ) : null}
-        </div>
 
-        {attachment ? (
-          <div className="assistant-attachment-chip">
-            <ImagePlus size={15} />
-            <span>{attachment.name}</span>
-            <button type="button" className="icon-button" onClick={clearAttachment} aria-label="Remove attachment">
-              <X size={14} />
-            </button>
-          </div>
-        ) : null}
-
-        <form className="assistant-composer" onSubmit={sendMessage}>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/jpeg,image/png,image/webp,application/pdf"
-            className="sr-only"
-            onChange={onPickFile}
-          />
-          <button
-            type="button"
-            className="button button--secondary assistant-attach-button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={busy || !available}
-            aria-label="Attach dental photo or X-ray"
-            title="Attach dental photo or X-ray"
-          >
-            <ImagePlus size={18} />
-            <span aria-hidden="true">+</span>
-          </button>
-          <label className="field assistant-composer__field">
-            <span className="sr-only">Your question</span>
+          <form className="assistant-composer" onSubmit={sendMessage}>
             <input
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              placeholder="Ask about teeth or the clinic · Magtanong tungkol sa ngipin o klinika…"
-              disabled={busy || !available}
-              maxLength={800}
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,application/pdf"
+              className="sr-only"
+              onChange={onPickFile}
             />
-          </label>
-          <button
-            className="button button--primary"
-            disabled={busy || !available || (!input.trim() && !attachment)}
-          >
-            <SendHorizontal size={16} /> Send
-          </button>
-        </form>
+            <button
+              type="button"
+              className="button button--secondary assistant-attach-button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={busy || !available}
+              aria-label="Attach dental photo or X-ray"
+              title="Attach dental photo or X-ray"
+            >
+              <ImagePlus size={18} />
+              <span aria-hidden="true">+</span>
+            </button>
+            <label className="field assistant-composer__field">
+              <span className="sr-only">Your question</span>
+              <input
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                placeholder="Ask about teeth or the clinic · Magtanong tungkol sa ngipin o klinika…"
+                disabled={busy || !available}
+                maxLength={800}
+              />
+            </label>
+            <button
+              className="button button--primary"
+              disabled={busy || !available || (!input.trim() && !attachment)}
+            >
+              <SendHorizontal size={16} /> Send
+            </button>
+          </form>
+        </div>
       </section>
     </div>
   );
