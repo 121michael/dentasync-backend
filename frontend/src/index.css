@@ -3464,8 +3464,7 @@ strong {
   color: var(--text-muted);
   font-size: .6rem;
 }
-.staff-readonly-badge,
-.staff-editable-badge {
+.staff-readonly-badge {
   display: inline-flex;
   align-items: center;
   flex-shrink: 0;
@@ -3477,11 +3476,6 @@ strong {
   background: var(--surface-muted);
   font-size: .62rem;
   font-weight: 750;
-}
-.staff-editable-badge {
-  border-color: rgba(124, 58, 237, .25);
-  color: var(--amethyst-700);
-  background: var(--amethyst-100);
 }
 .staff-record-empty {
   padding: 1rem;

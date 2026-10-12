@@ -604,7 +604,6 @@ export function StaffPatientsPage() {
                 <span className="eyebrow">Staff-managed</span>
                 <h2>Appointment</h2>
               </div>
-              <span className="staff-editable-badge">Editable</span>
             </div>
             <div className="dentist-detail-grid">
               <p>
@@ -650,7 +649,6 @@ export function StaffPatientsPage() {
                 <span className="eyebrow">Staff-managed</span>
                 <h2>Payment</h2>
               </div>
-              <span className="staff-editable-badge">Amount paid editable</span>
             </div>
             <div className="dentist-detail-grid">
               <p>
