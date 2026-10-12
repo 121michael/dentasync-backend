@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Nfc, QrCode, RefreshCw, ShieldCheck } from "lucide-react";
+import {
+  CalendarClock,
+  Check,
+  Clock3,
+  Nfc,
+  QrCode,
+  RefreshCw,
+  ShieldCheck,
+  Ticket,
+  UserRound,
+} from "lucide-react";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { StaffModal, StaffStatusBadge } from "../components/StaffUI";
@@ -708,6 +718,20 @@ export function StaffCheckInPage() {
   );
 }
 
+function VerifiedFact({ icon, label, value, wide = false }) {
+  return (
+    <div className={`staff-verified-card__fact${wide ? " staff-verified-card__fact--wide" : ""}`}>
+      <span className="staff-verified-card__fact-icon" aria-hidden="true">
+        {icon}
+      </span>
+      <div>
+        <small>{label}</small>
+        <strong>{value}</strong>
+      </div>
+    </div>
+  );
+}
+
 function VerifiedPanel({ verified, emptyHint }) {
   if (!verified?.verified) {
     return (
@@ -721,38 +745,76 @@ function VerifiedPanel({ verified, emptyHint }) {
     );
   }
 
+  const method = String(verified.method || "rfid").toUpperCase();
+  const queueNumber = verified.queue?.queueNumber || verified.queue?.token || "—";
+  const appointmentTime = formatStaffTime(String(verified.appointment?.time || "").slice(0, 5));
+  const appointmentService = verified.appointment?.service;
+
   return (
-    <article className="staff-verified-card">
-      <span className="eyebrow">Check-In Successful</span>
-      <h3>{verified.patient?.fullName}</h3>
-      <div className="staff-detail-grid">
-        <p>
-          <small>Method</small>
-          <strong>{String(verified.method || "rfid").toUpperCase()}</strong>
-        </p>
-        <p>
-          <small>Queue Number</small>
-          <strong>{verified.queue?.queueNumber || verified.queue?.token}</strong>
-        </p>
-        <p>
-          <small>Appointment</small>
-          <strong>
-            {formatStaffTime(String(verified.appointment?.time || "").slice(0, 5))} ·{" "}
-            {verified.appointment?.service}
-          </strong>
-        </p>
-        <p>
-          <small>Dentist</small>
-          <strong>{verified.appointment?.dentist || "—"}</strong>
-        </p>
-        <p>
-          <small>Check-In Time</small>
-          <strong>{formatStaffDateTime(verified.queue?.checkedInAt)}</strong>
-        </p>
-        <p>
-          <small>Status</small>
-          <strong>{verified.message}</strong>
-        </p>
+    <article className="staff-verified-card staff-verified-card--success">
+      <header className="staff-verified-card__header">
+        <span className="staff-verified-card__icon" aria-hidden="true">
+          <Check size={22} strokeWidth={2.4} />
+        </span>
+        <p className="staff-verified-card__eyebrow">Check-In Successful</p>
+        <h3>{verified.patient?.fullName}</h3>
+        <p className="staff-verified-card__confirm">Your check-in is confirmed.</p>
+      </header>
+
+      <div className="staff-verified-card__queue">
+        <span className="staff-verified-card__queue-icon" aria-hidden="true">
+          <Ticket size={18} />
+        </span>
+        <div>
+          <small>Your Queue Number</small>
+          <strong>{queueNumber}</strong>
+        </div>
+      </div>
+
+      <div className="staff-verified-card__facts">
+        <VerifiedFact
+          icon={method.includes("QR") ? <QrCode size={16} /> : <Nfc size={16} />}
+          label="Method"
+          value={method}
+        />
+        <VerifiedFact
+          icon={<CalendarClock size={16} />}
+          label="Appointment"
+          value={
+            <>
+              {appointmentTime}
+              {appointmentService ? (
+                <>
+                  <span className="staff-verified-card__sep"> · </span>
+                  {appointmentService}
+                </>
+              ) : null}
+            </>
+          }
+        />
+        <VerifiedFact
+          icon={<UserRound size={16} />}
+          label="Dentist"
+          value={verified.appointment?.dentist || "—"}
+        />
+        <VerifiedFact
+          icon={<Clock3 size={16} />}
+          label="Check-In Time"
+          value={formatStaffDateTime(verified.queue?.checkedInAt)}
+        />
+        <VerifiedFact
+          wide
+          icon={<ShieldCheck size={16} />}
+          label="Status"
+          value={
+            <span className="staff-verified-card__status">
+              <span className="staff-verified-card__status-badge" aria-hidden="true">
+                <Check size={12} strokeWidth={2.6} />
+              </span>
+              {verified.message}
+            </span>
+          }
+        />
       </div>
     </article>
   );
