@@ -77,57 +77,60 @@ export function StaffQueueDisplay({ queue, onExit }) {
 
   return (
     <div className="staff-queue-board" role="dialog" aria-modal="true" aria-label="Live queue status">
-      <header className="staff-queue-board__header">
-        <div>
-          <p className="staff-queue-board__eyebrow">Amethyst Dental Clinic</p>
-          <h2>Live Queue Status</h2>
-        </div>
-        <button type="button" className="button button--secondary" onClick={onExit}>
-          <X size={16} aria-hidden="true" /> Exit Display
-        </button>
-      </header>
-
-      <div className="staff-queue-board__grid">
-        <section className="staff-queue-board__serving" aria-label="Now serving">
-          <p className="staff-queue-board__eyebrow staff-queue-board__eyebrow--serving">Now Serving</p>
-          {model.serving.length ? (
-            <ul className="staff-queue-board__serving-list">
-              {model.serving.map((row) => (
-                <li key={row.id} className="staff-queue-board__serving-item">
-                  <p className="staff-queue-board__ticket">{row.queueNumber}</p>
-                  <p className="staff-queue-board__status">{row.statusLabel}</p>
-                  <p className="staff-queue-board__remaining">
-                    {row.remainingLabel === "Estimate unavailable"
-                      ? "Estimate unavailable"
-                      : `${row.remainingLabel} remaining`}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="staff-queue-board__empty">No patient currently being served.</p>
-          )}
-        </section>
-
-        <section className="staff-queue-board__waiting" aria-label="Waiting patients and estimates">
-          <div className="staff-queue-board__waiting-head">
-            <h3>Next Patient</h3>
-            <h3>Estimated Waiting Time</h3>
+      <div className="staff-queue-board__card">
+        <header className="staff-queue-board__header">
+          <div>
+            <p className="staff-queue-board__eyebrow">Amethyst Dental Clinic</p>
+            <h2>Live Queue Status</h2>
           </div>
-          {model.waiting.length ? (
-            <ol className="staff-queue-board__waiting-list">
-              {model.waiting.map((row) => (
-                <li key={row.id} className="staff-queue-board__waiting-row">
-                  <strong>{row.queueNumber}</strong>
-                  <span>{row.waitLabel}</span>
-                </li>
-              ))}
-            </ol>
-          ) : (
-            <p className="staff-queue-board__empty">No patients waiting in queue.</p>
-          )}
-          <p className="staff-queue-board__note">Waiting times are estimates and may change.</p>
-        </section>
+          <button type="button" className="button button--secondary" onClick={onExit}>
+            <X size={16} aria-hidden="true" /> Exit Display
+          </button>
+        </header>
+
+        <div className="staff-queue-board__body">
+          <section className="staff-queue-board__serving" aria-label="Now serving">
+            <p className="staff-queue-board__eyebrow staff-queue-board__eyebrow--serving">Now Serving</p>
+            {model.serving.length ? (
+              <ul className="staff-queue-board__serving-list">
+                {model.serving.map((row) => (
+                  <li key={row.id} className="staff-queue-board__serving-item">
+                    <p className="staff-queue-board__ticket">{row.queueNumber}</p>
+                    <p className="staff-queue-board__status">{row.statusLabel}</p>
+                    <p className="staff-queue-board__remaining">
+                      {row.remainingLabel === "Estimate unavailable"
+                        ? "Estimate unavailable"
+                        : `${row.remainingLabel} remaining`}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="staff-queue-board__empty">No patient currently being served.</p>
+            )}
+          </section>
+
+          <section className="staff-queue-board__waiting" aria-label="Waiting patients and estimates">
+            <div className="staff-queue-board__waiting-head">
+              <h3>Next Patient</h3>
+              <h3>Estimated Waiting Time</h3>
+            </div>
+            {model.waiting.length ? (
+              <ol className="staff-queue-board__waiting-list">
+                {model.waiting.map((row) => (
+                  <li key={row.id} className="staff-queue-board__waiting-row">
+                    <strong>{row.queueNumber}</strong>
+                    <span>{row.waitLabel}</span>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="staff-queue-board__empty">No patients waiting in queue.</p>
+            )}
+          </section>
+        </div>
+
+        <p className="staff-queue-board__note">Waiting times are estimates and may change.</p>
       </div>
     </div>
   );
