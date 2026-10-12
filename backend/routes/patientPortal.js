@@ -29,6 +29,7 @@ const staffWalkInQr = require("../services/staffWalkInQr");
 const staffRfidEvents = require("../services/staffRfidEvents");
 const clinicSchedule = require("../services/clinicSchedule");
 const accountDependents = require("../services/accountDependents");
+const patientAiConversations = require("../services/patientAiConversations");
 const { resolveAppSecrets } = require("../lib/securityConfig");
 
 const SERVICES = [
@@ -1645,6 +1646,55 @@ function createPatientPortalRouter({
     }
   });
 
+  router.get("/assistant/conversations", async (req, res) => {
+    try {
+      const conversations = await patientAiConversations.listConversations(db, userIdFor(req));
+      return res.json({ conversations });
+    } catch (error) {
+      console.error("Patient assistant conversations error:", error.message);
+      return res.status(500).json({ message: "Unable to load chat history." });
+    }
+  });
+
+  router.get("/assistant/conversations/:id", async (req, res) => {
+    try {
+      const conversation = await patientAiConversations.getOwnedConversation(
+        db,
+        userIdFor(req),
+        req.params.id
+      );
+      if (!conversation) {
+        return res.status(404).json({ message: "Conversation not found." });
+      }
+      const messages = await patientAiConversations.listMessages(db, conversation.id);
+      return res.json({
+        conversation: patientAiConversations.mapConversation(conversation),
+        messages,
+      });
+    } catch (error) {
+      console.error("Patient assistant conversation error:", error.message);
+      return res.status(500).json({ message: "Unable to open that conversation." });
+    }
+  });
+
+  router.get("/assistant/conversations/:id/messages", async (req, res) => {
+    try {
+      const conversation = await patientAiConversations.getOwnedConversation(
+        db,
+        userIdFor(req),
+        req.params.id
+      );
+      if (!conversation) {
+        return res.status(404).json({ message: "Conversation not found." });
+      }
+      const messages = await patientAiConversations.listMessages(db, conversation.id);
+      return res.json({ messages });
+    } catch (error) {
+      console.error("Patient assistant messages error:", error.message);
+      return res.status(500).json({ message: "Unable to load messages." });
+    }
+  });
+
   router.get("/assistant/status", async (req, res) => {
     try {
       const settings = await loadAiSettings(db);
@@ -1665,6 +1715,7 @@ function createPatientPortalRouter({
     const question =
       stringValue(req.body?.question || req.body?.message, 2000) ||
       (req.file ? "Please review this dental image." : null);
+    const requestedConversationId = stringValue(req.body?.conversationId, 80);
 
     if (!question && !req.file) {
       return res.status(400).json({
@@ -1682,6 +1733,22 @@ function createPatientPortalRouter({
         });
       }
 
+      let ownedConversation = null;
+      if (requestedConversationId && (await patientAiConversations.historyEnabled(db))) {
+        ownedConversation = await patientAiConversations.getOwnedConversation(
+          db,
+          userId,
+          requestedConversationId
+        );
+        if (!ownedConversation) {
+          return res.status(404).json({ message: "Conversation not found." });
+        }
+      }
+
+      const priorMessages = ownedConversation
+        ? await patientAiConversations.listMessages(db, ownedConversation.id)
+        : [];
+
       const clinic = await loadClinicKnowledge(db);
       const patientContext = await loadAuthorizedPatientContext(db, userId, {
         includeWait: isAiFeatureEnabled(settings, "waitingTimePrediction"),
@@ -1693,11 +1760,29 @@ function createPatientPortalRouter({
         knowledgeMode: settings.chatbotKnowledgeMode,
         diagnosticsSensitivity: settings.diagnosticsSensitivity,
         patientContext,
+        conversationHistoryBlock: patientAiConversations.formatConversationHistoryBlock(priorMessages),
       };
+
+      async function persistAndRespond(payload) {
+        const saved = await patientAiConversations.persistSuccessfulTurn(db, {
+          userId,
+          conversationId: ownedConversation?.id || requestedConversationId || null,
+          userContent: question,
+          assistantContent: payload.answer,
+          source: payload.source || payload.model || null,
+          analysis: payload.analysis || null,
+          attachmentName: req.file?.originalname || null,
+          attachmentDocumentId: payload.analysis?.documentId || null,
+        });
+        return res.json({
+          ...payload,
+          conversationId: saved.conversation?.id || ownedConversation?.id || null,
+        });
+      }
 
       if (!req.file) {
         const response = await answerWithOptionalGemini(question, assistantOptions);
-        return res.json({
+        return persistAndRespond({
           answer: response.answer,
           source: response.source,
           model: response.model,
@@ -1788,7 +1873,7 @@ function createPatientPortalRouter({
         answerParts.push(IMAGE_ANALYSIS_DISCLAIMER);
       }
 
-      return res.json({
+      return persistAndRespond({
         answer: answerParts.filter(Boolean).join("\n\n"),
         source: analysis.model || "image-analysis",
         model: analysis.model || "none",

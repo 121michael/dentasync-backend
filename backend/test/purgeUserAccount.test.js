@@ -61,6 +61,7 @@ test("purgeUserAccount deletes the users row after related cleanup", async () =>
   const removed = await purgeUserAccount(client, 9);
   assert.equal(removed.email, "gone@example.test");
   assert.ok(statements.some((entry) => /otp_verification_requests/i.test(entry.sql)));
+  assert.ok(statements.some((entry) => /DELETE FROM ai_conversations/i.test(entry.sql)));
   assert.ok(statements.some((entry) => /DELETE FROM users/i.test(entry.sql)));
   assert.deepEqual(statements.at(-1).params, ["9"]);
 });

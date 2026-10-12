@@ -33,6 +33,8 @@ async function purgeUserAccount(client, userId) {
     "DELETE FROM admin_portal_dentist_profiles WHERE user_id = $1",
     "DELETE FROM clinic_sms_logs WHERE patient_user_id = $1",
     "DELETE FROM clinic_sms_reminder_runs WHERE patient_user_id = $1",
+    "DELETE FROM ai_messages WHERE conversation_id IN (SELECT id FROM ai_conversations WHERE user_id = $1)",
+    "DELETE FROM ai_conversations WHERE user_id = $1",
   ];
 
   for (const sql of relatedDeletes) {

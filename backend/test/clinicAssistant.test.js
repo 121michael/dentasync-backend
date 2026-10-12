@@ -5,6 +5,7 @@ const test = require("node:test");
 const {
   DEFAULT_CLINIC,
   answerFromCatalog,
+  answerWithOptionalGemini,
   detectLanguage,
   loadClinicProfile,
   loadClinicKnowledge,
@@ -208,4 +209,21 @@ test("loadClinicKnowledge overlays clinic schedule hours", async () => {
   const clinic = await loadClinicKnowledge(db);
   assert.match(clinic.operatingHours, /10:00 AM–3:00 PM/);
   assert.match(clinic.todayHoursLabel, /AM|Closed/);
+});
+
+test("prior conversation context does not replace clinic catalog answers", async () => {
+  const previous = process.env.GEMINI_API_KEY;
+  delete process.env.GEMINI_API_KEY;
+  try {
+    const result = await answerWithOptionalGemini("What time does the clinic open?", {
+      ...options,
+      conversationHistoryBlock:
+        "Prior conversation:\nPatient: How do I prevent tooth decay?\nAssistant: Brush twice a day.",
+    });
+    assert.match(result.answer, /Monday/i);
+    assert.equal(result.source, "faq");
+  } finally {
+    if (previous === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = previous;
+  }
 });

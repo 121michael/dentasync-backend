@@ -1042,6 +1042,7 @@ async function answerWithOptionalGemini(question, servicesOrOptions) {
     const ownVisit = options.patientContext
       ? `Authenticated patient's own visit info (never discuss anyone else): ${JSON.stringify(options.patientContext)}`
       : "No personal visit record was attached. Do not invent a patient's appointments.";
+    const historyBlock = String(options.conversationHistoryBlock || "").trim();
     const prompt = `You are the patient assistant for ${options.clinic.name} in the DentaSync portal.
 Answer clearly about teeth, oral health, and this clinic.
 You must NOT diagnose diseases, identify a patient's specific condition from symptoms, or prescribe treatment.
@@ -1055,7 +1056,7 @@ ${languageInstruction(question)}
 ${clinicContextBlock(options.clinic, options.services, options.dentists)}
 
 ${ownVisit}
-
+${historyBlock ? `\n${historyBlock}\n` : ""}
 Patient question: ${question}`;
 
     const response = await fetch(

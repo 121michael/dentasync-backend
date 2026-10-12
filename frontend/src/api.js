@@ -116,17 +116,23 @@ export const api = {
   checkIn: (appointmentId) =>
     request("/patient/queue/check-in", { method: "POST", body: { appointmentId } }),
   getClinicAssistantStatus: () => request("/patient/assistant/status", { silent: true }),
-  askClinicAssistant: ({ message, question, image } = {}) => {
+  getClinicAssistantConversations: () =>
+    request("/patient/assistant/conversations", { silent: true }),
+  getClinicAssistantConversation: (conversationId) =>
+    request(`/patient/assistant/conversations/${encodeURIComponent(conversationId)}`, {
+      silent: true,
+    }),
+  askClinicAssistant: ({ message, question, image, conversationId } = {}) => {
     if (image) {
       const body = new FormData();
       body.append("message", message || question || "");
       body.append("question", question || message || "");
-      body.append("image", image);
+      if (conversationId) body.append("conversationId", conversationId);
       return request("/patient/assistant/chat", { method: "POST", body });
     }
     return request("/patient/assistant/chat", {
       method: "POST",
-      body: { message, question },
+      body: { message, question, conversationId },
     });
   },
   getXrays: () => request("/patient/xrays"),
