@@ -1334,7 +1334,9 @@ function createPatientPortalRouter({
         await client.query("ROLLBACK");
       }
       console.error("Queue check-in error:", error.message);
-      return res.status(500).json({ message: "Unable to check in to the queue." });
+      return res.status(error.status || 500).json({
+        message: error.status ? error.message : "Unable to check in to the queue.",
+      });
     } finally {
       client.release();
     }

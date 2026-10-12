@@ -2,6 +2,7 @@
 
 const { insertPatientNotification } = require("./patientPortalNotifications");
 const { safeRecalculateQueueWaitEstimates } = require("./queueWaitPrediction");
+const queueNumbers = require("./queueNumbers");
 
 function stringValue(value, maxLength = 500) {
   if (typeof value !== "string" && typeof value !== "number") {
@@ -739,33 +740,29 @@ async function findActiveQueueForPatient(client, patientId) {
   return result.rows[0] || null;
 }
 
-async function allocateQueueToken(client, position) {
-  const clinicTz = process.env.CLINIC_TIMEZONE || "Asia/Manila";
-  const dayResult = await client.query(
-    `SELECT TO_CHAR((CURRENT_TIMESTAMP AT TIME ZONE $1), 'YYMMDD') AS day_code`,
-    [clinicTz]
-  );
-  const dayCode = dayResult.rows[0]?.day_code || "000000";
-  const seq = String(Math.max(1, Number(position) || 1)).padStart(3, "0");
-  const crypto = require("crypto");
-
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    const suffix = crypto.randomBytes(3).toString("hex").toUpperCase();
-    // Always include a random suffix — never reuse A-101 / A-YYMMDD-001 style tokens.
-    const candidate = `A-${dayCode}-${seq}-${suffix}`;
-    const clash = await client.query(
-      `SELECT 1 FROM patient_portal_queue_entries WHERE token = $1 LIMIT 1`,
-      [candidate]
+async function loadPatientQueueIdentity(client, userId) {
+  try {
+    const result = await client.query(
+      `SELECT patient_category, patient_id
+       FROM users
+       WHERE id::text = $1
+       LIMIT 1`,
+      [String(userId)]
     );
-    if (!clash.rows.length) {
-      return candidate;
+    return result.rows[0] || {};
+  } catch (error) {
+    if (error.code !== "42703" && error.code !== "42P01") {
+      throw error;
     }
+    return {};
   }
-
-  return `A-${dayCode}-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
 }
 
-async function insertQueueEntry(client, { userId, appointmentId, token, position, estimatedWaitMinutes, method }) {
+async function allocateQueueToken(client, identity) {
+  return queueNumbers.allocateDailyQueueNumber(client, identity);
+}
+
+async function insertQueueEntry(client, { userId, appointmentId, token, position, estimatedWaitMinutes, method, queueIdentity }) {
   try {
     return await withSavepoint(client, "queue_insert_with_method", async () =>
       client.query(
@@ -788,7 +785,7 @@ async function insertQueueEntry(client, { userId, appointmentId, token, position
       );
     }
     if (insertError.code === "23505") {
-      const retryToken = await allocateQueueToken(client, position + Math.floor(Math.random() * 90) + 10);
+      const retryToken = await allocateQueueToken(client, queueIdentity || {});
       try {
         return await withSavepoint(client, "queue_insert_retry_method", async () =>
           client.query(
@@ -830,7 +827,12 @@ async function performStaffCheckIn(client, { appointment, staff, notifyClinicSta
      WHERE DATE(checked_in_at) = CURRENT_DATE`
   );
   const position = Number(positionResult.rows[0].next_position);
-  const token = await allocateQueueToken(client, position);
+  const identityRow = await loadPatientQueueIdentity(client, appointment.user_id);
+  const queueIdentity = {
+    patientCategory: appointment.patient_category || identityRow.patient_category,
+    clinicPatientId: appointment.clinic_patient_id || identityRow.patient_id,
+  };
+  const token = await allocateQueueToken(client, queueIdentity);
 
   const aheadCount = Math.max(0, position - 1);
   // Keep wait estimates off optional tables while inside the check-in transaction.
@@ -845,6 +847,7 @@ async function performStaffCheckIn(client, { appointment, staff, notifyClinicSta
     position,
     estimatedWaitMinutes,
     method,
+    queueIdentity,
   });
 
   await client.query(

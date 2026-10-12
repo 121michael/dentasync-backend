@@ -2077,7 +2077,7 @@ function createStaffPortalRouter({
           message: error.message || "Unable to complete patient check-in.",
         });
       }
-      return res.status(500).json({
+      return res.status(error.status || 500).json({
         message: error.message?.includes("estimated_cost")
           ? "Unable to create walk-in appointment for check-in."
           : error.message || "Unable to complete patient check-in.",
