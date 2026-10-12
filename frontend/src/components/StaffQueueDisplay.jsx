@@ -35,10 +35,21 @@ export function buildQueueDisplayModel(queue = []) {
   const active = (Array.isArray(queue) ? queue : []).filter(
     (entry) => !INELIGIBLE_STATUSES.has(statusOf(entry))
   );
-  const serving = active.find((entry) => SERVING_STATUSES.has(statusOf(entry))) || null;
+  const serving = active
+    .filter((entry) => SERVING_STATUSES.has(statusOf(entry)))
+    .sort((a, b) => Number(a.position || 0) - Number(b.position || 0))
+    .slice(0, 2)
+    .map((entry) => ({
+      id: entry.id,
+      queueNumber: publicQueueNumber(entry),
+      statusLabel: publicStatusLabel(entry.status),
+      remainingLabel: remainingRangeFromEntry(entry),
+    }))
+    .filter((row) => row.queueNumber);
+  const servingIds = new Set(serving.map((row) => row.id));
   const waiting = active
     .filter((entry) => {
-      if (serving && entry.id === serving.id) return false;
+      if (servingIds.has(entry.id)) return false;
       if (SERVING_STATUSES.has(statusOf(entry))) return false;
       return WAITING_STATUSES.has(statusOf(entry));
     })
@@ -46,16 +57,7 @@ export function buildQueueDisplayModel(queue = []) {
     .map(toWaitingRow)
     .filter((row) => row.queueNumber);
 
-  return {
-    serving: serving
-      ? {
-          queueNumber: publicQueueNumber(serving),
-          statusLabel: publicStatusLabel(serving.status),
-          remainingLabel: remainingRangeFromEntry(serving),
-        }
-      : null,
-    waiting,
-  };
+  return { serving, waiting };
 }
 
 export function StaffQueueDisplay({ queue, onExit }) {
@@ -87,14 +89,21 @@ export function StaffQueueDisplay({ queue, onExit }) {
 
       <div className="staff-queue-board__grid">
         <section className="staff-queue-board__serving" aria-label="Now serving">
-          <p className="staff-queue-board__eyebrow">Now Serving</p>
-          {model.serving?.queueNumber ? (
-            <>
-              <p className="staff-queue-board__ticket">{model.serving.queueNumber}</p>
-              <p className="staff-queue-board__status">{model.serving.statusLabel}</p>
-              <p className="staff-queue-board__remaining-label">Estimated remaining time</p>
-              <p className="staff-queue-board__remaining">{model.serving.remainingLabel}</p>
-            </>
+          <p className="staff-queue-board__eyebrow staff-queue-board__eyebrow--serving">Now Serving</p>
+          {model.serving.length ? (
+            <ul className="staff-queue-board__serving-list">
+              {model.serving.map((row) => (
+                <li key={row.id} className="staff-queue-board__serving-item">
+                  <p className="staff-queue-board__ticket">{row.queueNumber}</p>
+                  <p className="staff-queue-board__status">{row.statusLabel}</p>
+                  <p className="staff-queue-board__remaining">
+                    {row.remainingLabel === "Estimate unavailable"
+                      ? "Estimate unavailable"
+                      : `${row.remainingLabel} remaining`}
+                  </p>
+                </li>
+              ))}
+            </ul>
           ) : (
             <p className="staff-queue-board__empty">No patient currently being served.</p>
           )}
