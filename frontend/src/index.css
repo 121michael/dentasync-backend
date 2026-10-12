@@ -2929,7 +2929,7 @@ body.is-queue-display .staff-mobile-nav {
 .staff-queue-board__eyebrow {
   margin: 0;
   color: var(--amethyst-700);
-  font-size: 0.72rem;
+  font-size: 2.16rem;
   font-weight: 800;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -2939,7 +2939,7 @@ body.is-queue-display .staff-mobile-nav {
 }
 .staff-queue-board__header h2 {
   margin: 0.1rem 0 0;
-  font-size: clamp(1.2rem, 2.2vw, 1.65rem);
+  font-size: clamp(3.6rem, 6.6vw, 4.95rem);
 }
 .staff-queue-board__body {
   display: grid;
@@ -2983,7 +2983,7 @@ body.is-queue-display .staff-mobile-nav {
 .staff-queue-board__ticket {
   margin: 0;
   color: #168567;
-  font-size: clamp(1.85rem, 4vw, 2.8rem);
+  font-size: clamp(5.55rem, 12vw, 8.4rem);
   font-weight: 800;
   letter-spacing: -0.05em;
   line-height: 1;
@@ -2991,7 +2991,7 @@ body.is-queue-display .staff-mobile-nav {
 .staff-queue-board__status {
   margin: 0.22rem 0 0;
   color: #168567;
-  font-size: 0.78rem;
+  font-size: 2.34rem;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -2999,7 +2999,7 @@ body.is-queue-display .staff-mobile-nav {
 .staff-queue-board__remaining {
   margin: 0.12rem 0 0;
   color: var(--text);
-  font-size: clamp(0.9rem, 1.5vw, 1.05rem);
+  font-size: clamp(2.7rem, 4.5vw, 3.15rem);
   font-weight: 700;
 }
 .staff-queue-board__waiting-head,
@@ -3012,7 +3012,7 @@ body.is-queue-display .staff-mobile-nav {
 .staff-queue-board__waiting-head h3 {
   margin: 0 0 0.55rem;
   color: var(--amethyst-800);
-  font-size: 0.72rem;
+  font-size: 2.16rem;
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -3027,22 +3027,22 @@ body.is-queue-display .staff-mobile-nav {
   list-style: none;
 }
 .staff-queue-board__waiting-row {
-  min-height: 2.45rem;
-  padding: 0.28rem 0;
+  min-height: 7.35rem;
+  padding: 0.4rem 0;
 }
 .staff-queue-board__waiting-row strong {
-  font-size: clamp(1.2rem, 2.4vw, 1.7rem);
+  font-size: clamp(3.6rem, 7.2vw, 5.1rem);
   letter-spacing: -0.04em;
 }
 .staff-queue-board__waiting-row span {
   color: var(--text);
-  font-size: clamp(0.95rem, 1.7vw, 1.2rem);
+  font-size: clamp(2.85rem, 5.1vw, 3.6rem);
   font-weight: 700;
 }
 .staff-queue-board__empty {
   margin: 0.45rem 0 0;
   color: var(--text-muted);
-  font-size: 0.95rem;
+  font-size: 2.85rem;
   line-height: 1.45;
 }
 .staff-queue-board__note {
@@ -3050,7 +3050,7 @@ body.is-queue-display .staff-mobile-nav {
   padding-top: 0.65rem;
   border-top: 1px solid var(--border);
   color: var(--text-muted);
-  font-size: 0.75rem;
+  font-size: 2.25rem;
 }
 @media (max-width: 900px) {
   .staff-queue-board__body {
@@ -3068,7 +3068,7 @@ body.is-queue-display .staff-mobile-nav {
     border-top: 1px solid var(--border);
   }
   .staff-queue-board__ticket {
-    font-size: 2.1rem;
+    font-size: 6.3rem;
   }
 }
 .button--compact { min-height: 35px; padding: .48rem .67rem; border-radius: 10px; font-size: .72rem; }
