@@ -46,6 +46,27 @@ function fromMinutes(total) {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
 }
 
+function formatClock(time) {
+  const normalized = normalizeTime(time);
+  if (!normalized) return "";
+  const hours = Number(normalized.slice(0, 2));
+  const minutes = normalized.slice(3);
+  const suffix = hours >= 12 ? "PM" : "AM";
+  const hour12 = hours % 12 || 12;
+  return minutes === "00" ? `${hour12}:00 ${suffix}` : `${hour12}:${minutes} ${suffix}`;
+}
+
+function formatHourRange(open, close) {
+  const start = formatClock(open);
+  const end = formatClock(close);
+  if (!start || !end) return "Closed";
+  return `${start}–${end}`;
+}
+
+function clinicTodayYmd(now = new Date()) {
+  return now.toLocaleDateString("en-CA", { timeZone: process.env.CLINIC_TIMEZONE || "Asia/Manila" });
+}
+
 function compactHours(open, close) {
   if (!open || !close) return "Closed";
   const openHour = Number(open.slice(0, 2));
@@ -309,6 +330,32 @@ function isSlotBookable(hours, defaults, savedSlots, bookedTimes, appointmentTim
   return Boolean(slot?.bookable);
 }
 
+async function summarizeOperatingHours(db, now = new Date()) {
+  const defaults = await loadDefaults(db);
+  const today = clinicTodayYmd(now);
+  const dayMap = await loadDayMap(db, today, today);
+  const todayHours = resolveOperatingHours(today, dayMap.get(today), defaults);
+  const weekday = formatHourRange(defaults.weekdayOpen, defaults.weekdayClose);
+  const weekend = formatHourRange(defaults.weekendOpen, defaults.weekendClose);
+  const holiday = formatHourRange(defaults.holidayOpen, defaults.holidayClose);
+  const weekLabel = `Monday–Friday ${weekday} · Saturday–Sunday ${weekend} · holidays ${holiday}`;
+  const weekdayName = new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    timeZone: process.env.CLINIC_TIMEZONE || "Asia/Manila",
+  }).format(now);
+  const todayLabel = todayHours.closed
+    ? `Closed today (${weekdayName})`
+    : `${weekdayName} ${formatHourRange(todayHours.open, todayHours.close)}`;
+  return {
+    defaults,
+    today,
+    todayHours,
+    todayClosed: Boolean(todayHours.closed),
+    todayLabel,
+    weekLabel,
+  };
+}
+
 module.exports = {
   DEFAULTS,
   isIsoDate,
@@ -328,4 +375,8 @@ module.exports = {
   buildSlots,
   isSlotBookable,
   toMinutes,
+  formatClock,
+  formatHourRange,
+  clinicTodayYmd,
+  summarizeOperatingHours,
 };

@@ -7,6 +7,8 @@ const {
   answerFromCatalog,
   detectLanguage,
   loadClinicProfile,
+  loadClinicKnowledge,
+  looksLikeOtherPatientRequest,
 } = require("../services/clinicAssistant");
 const { SERVICES, DENTISTS } = require("../routes/patientPortal");
 
@@ -130,4 +132,80 @@ test("loadClinicProfile falls back when the settings table is missing", async ()
   };
   const clinic = await loadClinicProfile(db);
   assert.equal(clinic.phone, DEFAULT_CLINIC.phone);
+});
+
+test("restricted knowledge mode refuses oral-health tutorials", () => {
+  const result = answerFromCatalog("How should I brush my teeth?", {
+    ...options,
+    knowledgeMode: "restricted",
+  });
+  assert.equal(result.source, "restricted");
+  assert.doesNotMatch(result.answer, /twice a day/i);
+});
+
+test("general knowledge mode still answers brushing guidance", () => {
+  const result = answerFromCatalog("How should I brush my teeth?", {
+    ...options,
+    knowledgeMode: "general",
+  });
+  assert.equal(result.source, "oral-health");
+  assert.match(result.answer, /twice a day/i);
+});
+
+test("clinic hours answers include today's saved schedule label", () => {
+  const result = answerFromCatalog("What time does the clinic close today?", {
+    ...options,
+    knowledgeMode: "clinic",
+    clinic: {
+      ...DEFAULT_CLINIC,
+      todayHoursLabel: "Monday 10:00 AM–3:00 PM",
+      operatingHours: "Monday–Friday 10:00 AM–3:00 PM · Saturday–Sunday 11:00 AM–4:00 PM · holidays 11:00 AM–4:00 PM",
+    },
+  });
+  assert.equal(result.source, "faq");
+  assert.match(result.answer, /10:00 AM–3:00 PM/);
+});
+
+test("another patient's private records are refused", () => {
+  assert.equal(looksLikeOtherPatientRequest("What is another patient's diagnosis?"), true);
+  const result = answerFromCatalog("What is another patient's diagnosis?", options);
+  assert.equal(result.source, "privacy");
+  assert.doesNotMatch(result.answer, /Sarah Cruz/);
+});
+
+test("own appointment questions are not treated as other-patient requests", () => {
+  assert.equal(looksLikeOtherPatientRequest("Where is my appointment?"), false);
+});
+
+test("loadClinicKnowledge overlays clinic schedule hours", async () => {
+  const db = {
+    async query(sql) {
+      if (sql.includes("setting_key = 'clinic'")) {
+        return { rows: [{ setting_value: { ...DEFAULT_CLINIC } }] };
+      }
+      if (sql.includes("setting_key = 'clinic_schedule'")) {
+        return {
+          rows: [
+            {
+              setting_value: {
+                weekdayOpen: "10:00",
+                weekdayClose: "15:00",
+                weekendOpen: "11:00",
+                weekendClose: "16:00",
+                holidayOpen: "11:00",
+                holidayClose: "16:00",
+              },
+            },
+          ],
+        };
+      }
+      if (sql.includes("FROM clinic_schedule_days")) {
+        return { rows: [] };
+      }
+      throw new Error(sql);
+    },
+  };
+  const clinic = await loadClinicKnowledge(db);
+  assert.match(clinic.operatingHours, /10:00 AM–3:00 PM/);
+  assert.match(clinic.todayHoursLabel, /AM|Closed/);
 });

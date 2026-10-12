@@ -115,6 +115,7 @@ export const api = {
     request("/public/queue-display", { authenticated: false, ...options }),
   checkIn: (appointmentId) =>
     request("/patient/queue/check-in", { method: "POST", body: { appointmentId } }),
+  getClinicAssistantStatus: () => request("/patient/assistant/status", { silent: true }),
   askClinicAssistant: ({ message, question, image } = {}) => {
     if (image) {
       const body = new FormData();

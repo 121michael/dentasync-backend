@@ -664,6 +664,11 @@ async function persistEstimate(db, entryId, estimate, waitPoint, { serving = fal
 
 async function recalculateQueueWaitEstimates(db, { fromPosition = 0 } = {}) {
   try {
+    const { loadAiSettings, isAiFeatureEnabled } = require("./aiSettings");
+    const aiSettings = await loadAiSettings(db);
+    if (!isAiFeatureEnabled(aiSettings, "waitingTimePrediction")) {
+      return { ok: true, updated: 0, skipped: "waitingTimePrediction-disabled" };
+    }
     const now = new Date();
     const rows = await loadTodayQueue(db);
     const active = rows.filter((row) => ACTIVE_STATUSES.has(String(row.status || "").toLowerCase()));

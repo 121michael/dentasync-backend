@@ -15,8 +15,35 @@ export function ClinicAssistantPage() {
   const [previewUrl, setPreviewUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [available, setAvailable] = useState(true);
+  const [unavailableMessage, setUnavailableMessage] = useState("");
   const listRef = useRef(null);
   const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await api.getClinicAssistantStatus();
+        if (cancelled) return;
+        const isAvailable = response.available !== false;
+        setAvailable(isAvailable);
+        setUnavailableMessage(
+          isAvailable
+            ? ""
+            : response.message ||
+              "The AI Clinic Assistant is temporarily unavailable. Please contact the front desk."
+        );
+      } catch {
+        if (!cancelled) {
+          setAvailable(true);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!listRef.current) return;
@@ -48,7 +75,7 @@ export function ClinicAssistantPage() {
   async function sendMessage(event) {
     event.preventDefault();
     const message = input.trim();
-    if ((!message && !attachment) || busy) return;
+    if ((!message && !attachment) || busy || !available) return;
 
     setError("");
     setInput("");
@@ -85,12 +112,21 @@ export function ClinicAssistantPage() {
         },
       ]);
     } catch (sendError) {
+      const disabled =
+        /unavailable/i.test(String(sendError.message || "")) ||
+        sendError.status === 503;
+      if (disabled) {
+        setAvailable(false);
+        setUnavailableMessage(sendError.message);
+      }
       setError(sendError.message);
       setMessages((current) => [
         ...current,
         {
           role: "assistant",
-          text: "Sorry — I could not reach the clinic assistant just now. Please try again or contact the front desk.",
+          text: disabled
+            ? sendError.message
+            : "Sorry — I could not reach the clinic assistant just now. Please try again or contact the front desk.",
         },
       ]);
     } finally {
@@ -115,7 +151,13 @@ export function ClinicAssistantPage() {
           </p>
         </div>
 
-        {error ? <p className="inline-alert inline-alert--error">{error}</p> : null}
+        {!available ? (
+          <p className="inline-alert inline-alert--error" role="status">
+            {unavailableMessage ||
+              "The AI Clinic Assistant is temporarily unavailable. Please contact the front desk."}
+          </p>
+        ) : null}
+        {error && available ? <p className="inline-alert inline-alert--error">{error}</p> : null}
 
         <div className="assistant-thread" ref={listRef} aria-live="polite">
           {messages.map((item, index) => (
@@ -178,7 +220,7 @@ export function ClinicAssistantPage() {
             type="button"
             className="button button--secondary assistant-attach-button"
             onClick={() => fileInputRef.current?.click()}
-            disabled={busy}
+            disabled={busy || !available}
             aria-label="Attach dental photo or X-ray"
             title="Attach dental photo or X-ray"
           >
@@ -191,13 +233,13 @@ export function ClinicAssistantPage() {
               value={input}
               onChange={(event) => setInput(event.target.value)}
               placeholder="Ask about teeth or the clinic · Magtanong tungkol sa ngipin o klinika…"
-              disabled={busy}
+              disabled={busy || !available}
               maxLength={800}
             />
           </label>
           <button
             className="button button--primary"
-            disabled={busy || (!input.trim() && !attachment)}
+            disabled={busy || !available || (!input.trim() && !attachment)}
           >
             <SendHorizontal size={16} /> Send
           </button>

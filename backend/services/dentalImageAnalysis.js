@@ -22,7 +22,24 @@ function unavailableResult(reason) {
   };
 }
 
-async function analyzeDentalImageBuffer({ buffer, mimeType, fileName, question }) {
+function sensitivityPrompt(sensitivity) {
+  const value = String(sensitivity || "balanced").toLowerCase();
+  if (value === "conservative") {
+    return "Sensitivity: conservative. Prefer uncertainty. Do not speculate about lesions. Send the patient to a dentist for almost any concerning visual finding. Keep urgent-care advice for severe symptoms.";
+  }
+  if (value === "aggressive") {
+    return "Sensitivity: aggressive. You may point out possible areas a dentist should examine, but you still MUST NOT diagnose or prescribe treatment. Keep urgent-care advice when warning signs are present.";
+  }
+  return "Sensitivity: balanced. Stay cautious and preliminary. Never diagnose or replace a dentist.";
+}
+
+async function analyzeDentalImageBuffer({
+  buffer,
+  mimeType,
+  fileName,
+  question,
+  diagnosticsSensitivity = "balanced",
+} = {}) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return unavailableResult(
@@ -56,6 +73,8 @@ Respond in plain text with short sections:
 3) Possible visible tooth surface if applicable (occlusal, incisal, buccal, facial, lingual, palatal, mesial, distal) or "uncertain"
 4) Possible visible abnormality area requiring professional attention (preliminary only)
 5) Recommendation to see a licensed dentist
+
+${sensitivityPrompt(diagnosticsSensitivity)}
 
 Always end with: ${DISCLAIMER}`;
 

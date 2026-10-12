@@ -170,12 +170,16 @@ const CLINIC_TOPICS = [
       "sarado",
       "anong oras kayo nag oopen",
     ],
-    build: (clinic, _dentists, _services, lang) =>
-      pick(
+    build: (clinic, _dentists, _services, lang) => {
+      const today = clinic.todayHoursLabel
+        ? pick(lang, `Today: ${clinic.todayHoursLabel}. `, `Ngayon: ${clinic.todayHoursLabel}. `)
+        : "";
+      return pick(
         lang,
-        `${clinic.name} is open ${clinic.operatingHours}. Appointments are booked from the Appointments page. Portal messages are reviewed during clinic hours.`,
-        `Bukas ang ${clinic.name} tuwing ${clinic.operatingHours}. Mag-book ng appointment sa page na Appointments. Sinusuri ang mga mensahe sa portal sa oras ng klinika.`
-      ),
+        `${today}${clinic.name} is open ${clinic.operatingHours}. Appointments are booked from the Appointments page. Portal messages are reviewed during clinic hours.`,
+        `${today}Bukas ang ${clinic.name} ayon sa iskedyul: ${clinic.operatingHours}. Mag-book ng appointment sa page na Appointments. Sinusuri ang mga mensahe sa portal sa oras ng klinika.`
+      );
+    },
   },
   {
     id: "location",
@@ -588,19 +592,100 @@ function clinicFrom(value) {
     operatingHours:
       String(incoming.operatingHours || incoming.operating_hours || "").trim() ||
       DEFAULT_CLINIC.operatingHours,
+    todayHoursLabel: String(incoming.todayHoursLabel || "").trim() || null,
+    todayClosed: Boolean(incoming.todayClosed),
   };
 }
 
 function normalizeOptions(servicesOrOptions) {
   if (Array.isArray(servicesOrOptions)) {
-    return { services: servicesOrOptions, dentists: [], clinic: DEFAULT_CLINIC };
+    return {
+      services: servicesOrOptions,
+      dentists: [],
+      clinic: DEFAULT_CLINIC,
+      knowledgeMode: "general",
+      diagnosticsSensitivity: "balanced",
+      patientContext: null,
+    };
   }
   const options = servicesOrOptions && typeof servicesOrOptions === "object" ? servicesOrOptions : {};
+  const mode = String(options.knowledgeMode || "").trim().toLowerCase();
+  const sensitivity = String(options.diagnosticsSensitivity || "").trim().toLowerCase();
   return {
     services: Array.isArray(options.services) ? options.services : [],
     dentists: Array.isArray(options.dentists) ? options.dentists : [],
     clinic: clinicFrom(options.clinic),
+    knowledgeMode: ["clinic", "general", "restricted"].includes(mode) ? mode : "general",
+    diagnosticsSensitivity: ["conservative", "balanced", "aggressive"].includes(sensitivity)
+      ? sensitivity
+      : "balanced",
+    patientContext: options.patientContext && typeof options.patientContext === "object"
+      ? options.patientContext
+      : null,
   };
+}
+
+function looksLikeOtherPatientRequest(question) {
+  const normalized = normalizeQuestion(question);
+  if (!normalized) return false;
+  if (
+    /\b(my|mine|ako|ko|akin|sarili)\b/.test(normalized) &&
+    !/\b(another|other|ibang|someone else)\b/.test(normalized)
+  ) {
+    return false;
+  }
+  return /(another patient|other patient|someone else|ibang pasyente|their diagnosis|his diagnosis|her diagnosis|patient named|list all patients|all patients|admin password|internal admin|phone number of|treatment history of)/.test(
+    normalized
+  );
+}
+
+function privacyRefusal(lang) {
+  return pick(
+    lang,
+    "I can only discuss your own appointment or queue information while you are signed in, plus public clinic facts. I cannot share another patient's name, diagnosis, treatment, appointments, phone number, or payment details.",
+    "Ang maaari kong pag-usapan ay ang sarili mong appointment o pila habang naka-sign in ka, at pampublikong impormasyon ng klinika. Hindi ako puwedeng magbahagi ng pangalan, diagnosis, treatment, appointment, numero, o bayad ng ibang pasyente."
+  );
+}
+
+function restrictedRefusal(lang) {
+  return pick(
+    lang,
+    "This assistant is currently limited to clinic operations information. For oral-care advice or a preliminary image review, please contact clinic staff or a licensed dentist.",
+    "Limitado ngayon ang assistant na ito sa impormasyon ng operasyon ng klinika. Para sa payo sa ngipin o review ng litrato, makipag-ugnayan sa staff o lisensyadong dentista."
+  );
+}
+
+function knowledgeModeInstructions(mode) {
+  if (mode === "restricted") {
+    return `Knowledge mode: restricted / staff only.
+Answer only public clinic operations: hours, location, contact, booking, cancellation, queue/RFID/QR check-in, and listed services.
+Do not give oral-hygiene tutorials, interpret symptoms, or review images.
+If asked for clinical advice, tell the patient to contact staff or book an exam.`;
+  }
+  if (mode === "clinic") {
+    return `Knowledge mode: clinic knowledge base.
+Prefer DentaSync clinic facts: hours, location, services, booking, cancellation, RFID/QR check-in, and queue status meanings.
+You may briefly explain general procedures the clinic offers.
+Do not invent hours, fees, or policies that are not in the clinic facts.`;
+  }
+  return `Knowledge mode: general dental guidance.
+You may explain general oral hygiene, brushing, flossing, common dental concerns, preventive care, procedure overviews, and when to seek professional care.
+Also answer Amethyst Dental Clinic questions using the clinic facts.
+Do not invent clinic hours, services, or policies.`;
+}
+
+function diagnosticsSensitivityInstructions(sensitivity) {
+  if (sensitivity === "conservative") {
+    return `Diagnostics sensitivity: conservative.
+Be extra cautious. Flag symptoms for in-person evaluation quickly. Avoid speculative findings. Never claim a diagnosis. Always keep urgent-care advice for severe pain, swelling, fever, or uncontrolled bleeding.`;
+  }
+  if (sensitivity === "aggressive") {
+    return `Diagnostics sensitivity: aggressive.
+You may mention possible areas that a dentist should examine when the question or image suggests a concern, but you MUST NOT claim a definitive diagnosis or recommend treatment from an unverified AI finding.
+Never suppress urgent-care recommendations when warning signs are present.`;
+  }
+  return `Diagnostics sensitivity: balanced.
+Share cautious, preliminary guidance only. Never claim a diagnosis or replace a dentist. Keep urgent-care recommendations when warning signs are present.`;
 }
 
 function keywordHits(normalized, keywords) {
@@ -677,6 +762,56 @@ function describeService(service, lang) {
   return parts.join(" ");
 }
 
+function wantsOwnVisitInfo(normalized) {
+  return /(my appointment|my queue|my wait|my check in|my check-in|aking appointment|aking pila|saan ako sa pila|ano ang queue ko)/.test(
+    normalized
+  );
+}
+
+function describeOwnVisit(patientContext, clinic, lang) {
+  const appointments = Array.isArray(patientContext.appointments) ? patientContext.appointments : [];
+  const queue = patientContext.queue && typeof patientContext.queue === "object" ? patientContext.queue : null;
+  const parts = [];
+  if (queue) {
+    const wait =
+      queue.waitMinutes == null
+        ? ""
+        : pick(lang, ` Estimated wait is about ${queue.waitMinutes} minutes.`, ` Mga ${queue.waitMinutes} minuto ang estimated wait.`);
+    parts.push(
+      pick(
+        lang,
+        `Your queue number is ${queue.token || queue.queueNumber || "assigned"} (status: ${queue.status || "waiting"}).${wait}`,
+        `Ang iyong queue number ay ${queue.token || queue.queueNumber || "nakatalaga"} (status: ${queue.status || "waiting"}).${wait}`
+      )
+    );
+  }
+  if (appointments.length) {
+    const next = appointments[0];
+    parts.push(
+      pick(
+        lang,
+        `Your next listed visit is ${next.service || "a dental visit"} on ${next.date || "the scheduled date"} at ${next.time || "the scheduled time"} (${next.status || "scheduled"}).`,
+        `Ang iyong susunod na bisita ay ${next.service || "dental visit"} sa ${next.date || "takdang petsa"} nang ${next.time || "takdang oras"} (${next.status || "scheduled"}).`
+      )
+    );
+  }
+  if (!parts.length) {
+    return pick(
+      lang,
+      `I do not see an active appointment or queue ticket on your signed-in account. Book from Appointments or check in with staff at ${clinic.name}.`,
+      `Walang aktibong appointment o queue ticket sa naka-sign in mong account. Mag-book sa Appointments o mag-check in sa staff ng ${clinic.name}.`
+    );
+  }
+  parts.push(
+    pick(
+      lang,
+      "This is only your own visit information. I cannot share other patients' records.",
+      "Sarili mong impormasyon ng bisita lang ito. Hindi ako puwedeng magbahagi ng rekord ng ibang pasyente."
+    )
+  );
+  return parts.join(" ");
+}
+
 function languageInstruction(question) {
   const lang = detectLanguage(question);
   if (lang === "tl") {
@@ -686,9 +821,14 @@ function languageInstruction(question) {
 }
 
 function answerFromCatalog(question, servicesOrOptions) {
-  const { services, dentists, clinic } = normalizeOptions(servicesOrOptions);
+  const { services, dentists, clinic, knowledgeMode, patientContext } = normalizeOptions(
+    servicesOrOptions
+  );
   const normalized = normalizeQuestion(question);
   const lang = detectLanguage(question);
+  if (looksLikeOtherPatientRequest(question)) {
+    return { answer: privacyRefusal(lang), source: "privacy", language: lang };
+  }
   if (!normalized) {
     return {
       answer: pick(
@@ -697,6 +837,14 @@ function answerFromCatalog(question, servicesOrOptions) {
         `Magtanong tungkol sa oras, lokasyon, serbisyo, booking, pila, o ngipin at oral care sa ${clinic.name}. Hindi ako makakapagbigay ng diagnosis.`
       ),
       source: "faq",
+      language: lang,
+    };
+  }
+
+  if (patientContext && wantsOwnVisitInfo(normalized)) {
+    return {
+      answer: describeOwnVisit(patientContext, clinic, lang),
+      source: "patient-own",
       language: lang,
     };
   }
@@ -728,10 +876,16 @@ function answerFromCatalog(question, servicesOrOptions) {
   }
 
   if (oralTopic) {
+    if (knowledgeMode === "restricted") {
+      return { answer: restrictedRefusal(lang), source: "restricted", language: lang };
+    }
     return { answer: pick(lang, oralTopic.en, oralTopic.tl), source: "oral-health", language: lang };
   }
 
   if (ORAL_FALLBACK_RE.test(normalized)) {
+    if (knowledgeMode === "restricted") {
+      return { answer: restrictedRefusal(lang), source: "restricted", language: lang };
+    }
     return {
       answer: pick(
         lang,
@@ -797,6 +951,75 @@ async function loadClinicProfile(db) {
   }
 }
 
+async function loadClinicKnowledge(db) {
+  const clinic = await loadClinicProfile(db);
+  try {
+    const clinicSchedule = require("./clinicSchedule");
+    const hours = await clinicSchedule.summarizeOperatingHours(db);
+    return {
+      ...clinic,
+      operatingHours: hours.weekLabel || clinic.operatingHours,
+      todayHoursLabel: hours.todayLabel,
+      todayClosed: hours.todayClosed,
+    };
+  } catch {
+    return clinic;
+  }
+}
+
+async function loadAuthorizedPatientContext(db, userId, { includeWait = true } = {}) {
+  if (!db || !userId) return null;
+  const context = { appointments: [], queue: null };
+  try {
+    const appointments = await db.query(
+      `SELECT service_name, appointment_date::text AS appointment_date,
+              appointment_time::text AS appointment_time, status
+       FROM patient_portal_appointments
+       WHERE user_id = $1
+         AND LOWER(COALESCE(status, 'pending')) <> 'cancelled'
+       ORDER BY appointment_date DESC, appointment_time DESC
+       LIMIT 3`,
+      [String(userId)]
+    );
+    context.appointments = appointments.rows.map((row) => ({
+      service: row.service_name,
+      date: String(row.appointment_date || "").slice(0, 10),
+      time: String(row.appointment_time || "").slice(0, 5),
+      status: row.status,
+    }));
+  } catch (error) {
+    if (error?.code !== "42P01" && error?.code !== "42703") {
+      console.warn("Patient assistant appointment context skipped:", error.message);
+    }
+  }
+  try {
+    const queue = await db.query(
+      `SELECT token, position, status, estimated_wait_minutes
+       FROM patient_portal_queue_entries
+       WHERE user_id = $1
+         AND DATE(checked_in_at) = CURRENT_DATE
+         AND status NOT IN ('completed', 'no_show')
+       ORDER BY checked_in_at DESC
+       LIMIT 1`,
+      [String(userId)]
+    );
+    if (queue.rows[0]) {
+      context.queue = {
+        token: queue.rows[0].token,
+        queueNumber: queue.rows[0].token,
+        position: queue.rows[0].position,
+        status: queue.rows[0].status,
+        waitMinutes: includeWait ? queue.rows[0].estimated_wait_minutes : null,
+      };
+    }
+  } catch (error) {
+    if (error?.code !== "42P01" && error?.code !== "42703") {
+      console.warn("Patient assistant queue context skipped:", error.message);
+    }
+  }
+  return context;
+}
+
 async function answerWithOptionalGemini(question, servicesOrOptions) {
   const options = normalizeOptions(servicesOrOptions);
   const local = answerFromCatalog(question, options);
@@ -806,20 +1029,32 @@ async function answerWithOptionalGemini(question, servicesOrOptions) {
   const oralIntent =
     Boolean(matchTopic(normalized, ORAL_HEALTH_TOPICS)) || ORAL_FALLBACK_RE.test(normalized);
 
+  if (local.source === "privacy" || local.source === "restricted" || local.source === "patient-own") {
+    return { ...local, model: "clinic-faq" };
+  }
+
   // Clinic facts stay on the local catalog so hours, phone, and fees are not invented.
-  if (!apiKey || (clinicIntent && !oralIntent)) {
+  if (!apiKey || (clinicIntent && !oralIntent) || options.knowledgeMode === "restricted") {
     return { ...local, model: "clinic-faq" };
   }
 
   try {
+    const ownVisit = options.patientContext
+      ? `Authenticated patient's own visit info (never discuss anyone else): ${JSON.stringify(options.patientContext)}`
+      : "No personal visit record was attached. Do not invent a patient's appointments.";
     const prompt = `You are the patient assistant for ${options.clinic.name} in the DentaSync portal.
 Answer clearly about teeth, oral health, and this clinic.
 You must NOT diagnose diseases, identify a patient's specific condition from symptoms, or prescribe treatment.
 If asked for a diagnosis, refuse and suggest booking an oral examination or calling the clinic.
 Keep answers brief (about 80-140 words). Use the clinic facts below when the question is about location, hours, contact, services, or dentists.
+Never reveal another patient's private information, admin settings, or internal credentials.
+${knowledgeModeInstructions(options.knowledgeMode)}
+${diagnosticsSensitivityInstructions(options.diagnosticsSensitivity)}
 ${languageInstruction(question)}
 
 ${clinicContextBlock(options.clinic, options.services, options.dentists)}
+
+${ownVisit}
 
 Patient question: ${question}`;
 
@@ -865,5 +1100,8 @@ module.exports = {
   answerFromCatalog,
   answerWithOptionalGemini,
   loadClinicProfile,
+  loadClinicKnowledge,
+  loadAuthorizedPatientContext,
+  looksLikeOtherPatientRequest,
   detectLanguage,
 };

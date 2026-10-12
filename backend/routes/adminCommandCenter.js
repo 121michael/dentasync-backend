@@ -9,6 +9,12 @@ const {
   purgeUserAccount,
 } = require("../services/purgeUserAccount");
 
+const {
+  DEFAULT_AI_SETTINGS,
+  normalizeAiSettings,
+  invalidateAiSettingsCache,
+} = require("../services/aiSettings");
+
 const ACCOUNT_ROLES = new Set(["admin", "dentist", "staff", "patient"]);
 const SCHEDULE_TYPES = new Set([
   "dentist",
@@ -17,17 +23,6 @@ const SCHEDULE_TYPES = new Set([
   "blocked",
   "availability",
 ]);
-const DEFAULT_AI_SETTINGS = {
-  amethystAiEnabled: true,
-  predictiveDiagnostics: true,
-  automatedReminders: true,
-  waitingTimePrediction: true,
-  aiChatbot: false,
-  scheduledSystemUpdates: true,
-  chatbotKnowledgeMode: "clinic",
-  diagnosticsSensitivity: "balanced",
-};
-
 function stringValue(value, maxLength = 500) {
   if (typeof value !== "string") {
     return null;
@@ -996,10 +991,10 @@ function attachAdminCommandCenterRoutes(router, { db }) {
          WHERE setting_key = 'ai'
          LIMIT 1`
       );
-      const settings = {
+      const settings = normalizeAiSettings({
         ...DEFAULT_AI_SETTINGS,
         ...(result.rows[0]?.setting_value || {}),
-      };
+      });
       return res.json({
         settings,
         updatedAt: result.rows[0]?.updated_at || null,
@@ -1022,8 +1017,9 @@ function attachAdminCommandCenterRoutes(router, { db }) {
       return res.status(400).json({ message: "Provide AI settings values to update." });
     }
 
-    const next = {
+    const next = normalizeAiSettings({
       ...DEFAULT_AI_SETTINGS,
+      ...payload,
       amethystAiEnabled: Boolean(payload.amethystAiEnabled),
       predictiveDiagnostics: Boolean(payload.predictiveDiagnostics),
       automatedReminders: Boolean(payload.automatedReminders),
@@ -1032,7 +1028,7 @@ function attachAdminCommandCenterRoutes(router, { db }) {
       scheduledSystemUpdates: Boolean(payload.scheduledSystemUpdates),
       chatbotKnowledgeMode: stringValue(payload.chatbotKnowledgeMode, 40) || "clinic",
       diagnosticsSensitivity: stringValue(payload.diagnosticsSensitivity, 40) || "balanced",
-    };
+    });
 
     try {
       const result = await db.query(
@@ -1045,6 +1041,8 @@ function attachAdminCommandCenterRoutes(router, { db }) {
          RETURNING setting_value, updated_at, updated_by`,
         [JSON.stringify(next), String(req.admin.id)]
       );
+
+      invalidateAiSettingsCache();
 
       await audit(db, req, {
         action: "update_ai_settings",

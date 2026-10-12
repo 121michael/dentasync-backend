@@ -10,7 +10,18 @@ const jwt = require("jsonwebtoken");
 const multer = require("multer");
 const { linkClinicalRecordsToUser, listTreatmentsForVisit } = require("../services/clinicalPatients");
 const { publicWaitEstimate, waitEstimateFromRow } = require("../services/queueWaitPrediction");
-const { answerWithOptionalGemini, loadClinicProfile } = require("../services/clinicAssistant");
+const {
+  answerWithOptionalGemini,
+  loadClinicKnowledge,
+  loadAuthorizedPatientContext,
+  detectLanguage,
+} = require("../services/clinicAssistant");
+const {
+  loadAiSettings,
+  isChatbotEnabled,
+  isAiFeatureEnabled,
+  chatbotUnavailableMessage,
+} = require("../services/aiSettings");
 const { analyzeDentalImageBuffer, DISCLAIMER: IMAGE_ANALYSIS_DISCLAIMER } = require("../services/dentalImageAnalysis");
 const staffCheckIn = require("../services/staffCheckIn");
 const { insertPatientNotification, mapPatientNotification } = require("../services/patientPortalNotifications");
@@ -1194,7 +1205,11 @@ function createPatientPortalRouter({
 
       const current = currentResult.rows[0] || null;
       const nowServing = nowServingResult.rows[0] || null;
-      const waitEstimate = publicWaitEstimate(waitEstimateFromRow(current));
+      const aiSettings = await loadAiSettings(db).catch(() => null);
+      const waitEnabled = aiSettings
+        ? isAiFeatureEnabled(aiSettings, "waitingTimePrediction")
+        : true;
+      const waitEstimate = waitEnabled ? publicWaitEstimate(waitEstimateFromRow(current)) : null;
       const visitProcedures = current
         ? await listTreatmentsForVisit(db, {
             queueEntryId: current.id,
@@ -1220,11 +1235,11 @@ function createPatientPortalRouter({
               position: current.position,
               status: current.status,
               checkInMethod: current.check_in_method || null,
-              estimatedWaitMinutes: current.estimated_wait_minutes,
-              estimatedWaitMinMinutes: waitEstimate.estimatedWaitMinutes?.min ?? null,
-              estimatedWaitMaxMinutes: waitEstimate.estimatedWaitMinutes?.max ?? null,
-              estimatedCallStart: waitEstimate.estimatedCallTime?.start || null,
-              estimatedCallEnd: waitEstimate.estimatedCallTime?.end || null,
+              estimatedWaitMinutes: waitEnabled ? current.estimated_wait_minutes : null,
+              estimatedWaitMinMinutes: waitEstimate?.estimatedWaitMinutes?.min ?? null,
+              estimatedWaitMaxMinutes: waitEstimate?.estimatedWaitMinutes?.max ?? null,
+              estimatedCallStart: waitEstimate?.estimatedCallTime?.start || null,
+              estimatedCallEnd: waitEstimate?.estimatedCallTime?.end || null,
               waitEstimate,
               currentProcedure: currentProcedure
                 ? { name: currentProcedure.treatment, status: currentProcedure.status }
@@ -1241,7 +1256,7 @@ function createPatientPortalRouter({
                 token: current.token,
                 queueNumber: current.token,
                 status: current.status,
-                estimatedWaitMinutes: current.estimated_wait_minutes,
+                estimatedWaitMinutes: waitEnabled ? current.estimated_wait_minutes : null,
                 waitEstimate,
                 isCurrentPatient: true,
               },
@@ -1630,6 +1645,21 @@ function createPatientPortalRouter({
     }
   });
 
+  router.get("/assistant/status", async (req, res) => {
+    try {
+      const settings = await loadAiSettings(db);
+      const available = isChatbotEnabled(settings);
+      const lang = detectLanguage(req.query?.lang || "");
+      return res.json({
+        available,
+        message: available ? null : chatbotUnavailableMessage(lang),
+      });
+    } catch (error) {
+      console.error("Patient assistant status error:", error.message);
+      return res.status(500).json({ message: "Unable to load assistant status." });
+    }
+  });
+
   router.post("/assistant/chat", upload.single("image"), async (req, res) => {
     const userId = userIdFor(req);
     const question =
@@ -1643,13 +1673,30 @@ function createPatientPortalRouter({
     }
 
     try {
-      if (!req.file) {
-        const clinic = await loadClinicProfile(db);
-        const response = await answerWithOptionalGemini(question, {
-          services: SERVICES,
-          dentists: DENTISTS,
-          clinic,
+      const settings = await loadAiSettings(db);
+      const lang = detectLanguage(question || "");
+      if (!isChatbotEnabled(settings)) {
+        return res.status(503).json({
+          message: chatbotUnavailableMessage(lang),
+          available: false,
         });
+      }
+
+      const clinic = await loadClinicKnowledge(db);
+      const patientContext = await loadAuthorizedPatientContext(db, userId, {
+        includeWait: isAiFeatureEnabled(settings, "waitingTimePrediction"),
+      });
+      const assistantOptions = {
+        services: SERVICES,
+        dentists: DENTISTS,
+        clinic,
+        knowledgeMode: settings.chatbotKnowledgeMode,
+        diagnosticsSensitivity: settings.diagnosticsSensitivity,
+        patientContext,
+      };
+
+      if (!req.file) {
+        const response = await answerWithOptionalGemini(question, assistantOptions);
         return res.json({
           answer: response.answer,
           source: response.source,
@@ -1674,12 +1721,28 @@ function createPatientPortalRouter({
       );
 
       const fileBuffer = fs.readFileSync(req.file.path);
-      const analysis = await analyzeDentalImageBuffer({
-        buffer: fileBuffer,
-        mimeType: req.file.mimetype,
-        fileName: req.file.originalname,
-        question,
-      });
+      const diagnosticsEnabled =
+        isAiFeatureEnabled(settings, "predictiveDiagnostics") &&
+        settings.chatbotKnowledgeMode !== "restricted";
+      const analysis = diagnosticsEnabled
+        ? await analyzeDentalImageBuffer({
+            buffer: fileBuffer,
+            mimeType: req.file.mimetype,
+            fileName: req.file.originalname,
+            question,
+            diagnosticsSensitivity: settings.diagnosticsSensitivity,
+          })
+        : {
+            status: "unavailable",
+            summary:
+              "Your dental image was saved for your care team. Preliminary image analysis is turned off in clinic AI settings.",
+            findings: null,
+            confidence: null,
+            possibleToothNumber: null,
+            possibleSurface: null,
+            disclaimer: IMAGE_ANALYSIS_DISCLAIMER,
+            model: "disabled",
+          };
 
       try {
         await db.query(

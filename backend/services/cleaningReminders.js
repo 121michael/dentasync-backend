@@ -101,6 +101,12 @@ function createCleaningReminderJob({ db, clinicSms, intervalMs = 6 * 60 * 60 * 1
         return { skipped: true, reason: "disabled" };
       }
 
+      const { loadAiSettings, isAiFeatureEnabled } = require("./aiSettings");
+      const aiSettings = await loadAiSettings(db);
+      if (!isAiFeatureEnabled(aiSettings, "automatedReminders")) {
+        return { skipped: true, reason: "ai-automated-reminders-disabled" };
+      }
+
       const months = Math.max(4, Math.min(6, Number(settings.cleaningReminderMonths) || 5));
       const duePatients = await findDuePatients(months);
       let sent = 0;
