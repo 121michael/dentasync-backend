@@ -2889,6 +2889,157 @@ strong {
 .staff-page .section-heading h1 { margin-top: .2rem; font-size: clamp(1.65rem, 2.5vw, 2.15rem); letter-spacing: -.055em; }
 .staff-page .section-heading p { margin-top: .3rem; color: var(--text-muted); font-size: .82rem; }
 .staff-heading-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .5rem; }
+body.is-queue-display {
+  overflow: hidden;
+}
+body.is-queue-display .staff-mobile-nav {
+  display: none !important;
+}
+.staff-queue-board {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 1rem;
+  padding: clamp(1rem, 2.4vw, 1.8rem);
+  color: #2d2438;
+  background:
+    radial-gradient(circle at 12% -10%, rgba(186, 230, 205, 0.45), transparent 28rem),
+    radial-gradient(circle at 88% 0%, rgba(216, 188, 245, 0.38), transparent 32rem),
+    #f4eef9;
+}
+.staff-queue-board__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.staff-queue-board__eyebrow {
+  margin: 0;
+  color: var(--amethyst-700);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.staff-queue-board__header h2 {
+  margin: 0.15rem 0 0;
+  font-size: clamp(1.4rem, 3vw, 2rem);
+}
+.staff-queue-board__grid {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.9fr) minmax(0, 1.6fr);
+  gap: 1rem;
+  min-height: 0;
+}
+.staff-queue-board__serving {
+  display: grid;
+  align-content: start;
+  gap: 0.45rem;
+  min-height: 0;
+  padding: clamp(1.1rem, 2vw, 1.6rem);
+  border: 1px solid rgba(22, 133, 103, 0.22);
+  border-radius: 24px;
+  background: linear-gradient(180deg, #e8f8f1, #d8f3e7);
+}
+.staff-queue-board__ticket {
+  margin: 0.35rem 0 0;
+  color: #0f6a4f;
+  font-size: clamp(3.2rem, 8vw, 6.2rem);
+  font-weight: 800;
+  letter-spacing: -0.06em;
+  line-height: 0.95;
+}
+.staff-queue-board__status {
+  margin: 0.35rem 0 0;
+  color: #14785a;
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.staff-queue-board__remaining-label {
+  margin: 1.1rem 0 0;
+  color: #3d6b5c;
+  font-size: 0.78rem;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.staff-queue-board__remaining {
+  margin: 0.2rem 0 0;
+  color: #10563f;
+  font-size: clamp(1.35rem, 3vw, 2rem);
+  font-weight: 800;
+}
+.staff-queue-board__waiting {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-height: 0;
+  padding: clamp(1rem, 2vw, 1.4rem);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.78);
+}
+.staff-queue-board__waiting-head,
+.staff-queue-board__waiting-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: center;
+}
+.staff-queue-board__waiting-head h3 {
+  margin: 0 0 0.75rem;
+  color: var(--amethyst-800);
+  font-size: 0.82rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.staff-queue-board__waiting-list {
+  display: grid;
+  align-content: start;
+  gap: 0.35rem;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+.staff-queue-board__waiting-row {
+  min-height: 3.4rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 14px;
+  background: var(--violet-wash);
+}
+.staff-queue-board__waiting-row strong {
+  font-size: clamp(1.35rem, 3vw, 2rem);
+  letter-spacing: -0.04em;
+}
+.staff-queue-board__waiting-row span {
+  color: var(--text);
+  font-size: clamp(1rem, 2vw, 1.35rem);
+  font-weight: 700;
+}
+.staff-queue-board__empty {
+  margin: 0.4rem 0 0;
+  color: var(--text-muted);
+  font-size: 1.05rem;
+  line-height: 1.45;
+}
+.staff-queue-board__note {
+  margin: 0.85rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+@media (max-width: 900px) {
+  .staff-queue-board__grid {
+    grid-template-columns: 1fr;
+  }
+  .staff-queue-board__ticket {
+    font-size: 3.4rem;
+  }
+}
 .button--compact { min-height: 35px; padding: .48rem .67rem; border-radius: 10px; font-size: .72rem; }
 .button--danger { color: #fff; background: linear-gradient(135deg, #bc4e65, #9c3655); box-shadow: 0 9px 20px rgba(165, 54, 81, .18); }
 .staff-panel {

@@ -421,16 +421,29 @@ function serializeEstimate({
   };
 }
 
+function remainingTreatmentRange(row, durationMinutes, now = new Date()) {
+  const status = String(row?.status || "").toLowerCase();
+  if (!SERVING_STATUSES.has(status)) return null;
+  const remaining = remainingServingMinutes(row, durationMinutes, now);
+  const settings = getPredictionSettings();
+  const min = roundMinutes(remaining * settings.lowerFactor);
+  const max = Math.max(min, roundMinutes(remaining * settings.upperFactor));
+  return { min, max };
+}
+
 function waitEstimateFromRow(row) {
   if (!row) return null;
   const min = row.wait_estimate_min_minutes;
   const max = row.wait_estimate_max_minutes;
-  if (min == null && max == null && !row.wait_estimate_at) return null;
+  const durationMinutes =
+    row.wait_estimate_duration_minutes != null ? Number(row.wait_estimate_duration_minutes) : null;
+  if (min == null && max == null && !row.wait_estimate_at && durationMinutes == null) return null;
+  const remaining = remainingTreatmentRange(row, durationMinutes);
   return {
     queueNumber: row.token || null,
     queuePosition: Number(row.position) || null,
-    estimatedDurationMinutes:
-      row.wait_estimate_duration_minutes != null ? Number(row.wait_estimate_duration_minutes) : null,
+    estimatedDurationMinutes: durationMinutes,
+    remainingTreatmentMinutes: remaining,
     estimatedWaitMinutes:
       min == null && max == null
         ? null
@@ -460,6 +473,7 @@ function publicWaitEstimate(estimate) {
     estimatedWaitMinutes: estimate.estimatedWaitMinutes,
     estimatedCallTime: estimate.estimatedCallTime,
     estimatedDurationMinutes: estimate.estimatedDurationMinutes ?? null,
+    remainingTreatmentMinutes: estimate.remainingTreatmentMinutes || null,
     calculatedAt: estimate.calculatedAt || null,
     unavailable: Boolean(estimate.unavailable),
   };

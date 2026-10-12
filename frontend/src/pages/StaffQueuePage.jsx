@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { RefreshCw, RotateCcw } from "lucide-react";
+import { Maximize2, RefreshCw, RotateCcw } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { StaffStatusBadge, StaffSummaryCard } from "../components/StaffUI";
 import { useStaffUi } from "../components/StaffLayout";
+import { StaffQueueDisplay } from "../components/StaffQueueDisplay";
 import { formatStaffDateTime, formatStaffTime } from "../staffUtils";
 import {
   callRangeFromEntry,
@@ -54,6 +55,7 @@ export function StaffQueuePage() {
   const [summary, setSummary] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
+  const [displayOpen, setDisplayOpen] = useState(false);
   const [focusKey, setFocusKey] = useState(() => searchParams.get("focus") || "");
   const focusedRowRef = useRef(null);
 
@@ -73,9 +75,9 @@ export function StaffQueuePage() {
 
   useEffect(() => {
     load();
-    const timer = window.setInterval(() => load({ silent: true }), 12000);
+    const timer = window.setInterval(() => load({ silent: true }), displayOpen ? 8000 : 12000);
     return () => window.clearInterval(timer);
-  }, [load]);
+  }, [load, displayOpen]);
 
   useEffect(() => {
     const focus = searchParams.get("focus");
@@ -203,6 +205,13 @@ export function StaffQueuePage() {
             <p>Monitor queue activity and make minor adjustments. Clinical treatment controls stay with dentists. {QUEUE_WAIT_DISCLAIMER}</p>
           </div>
           <div className="staff-heading-actions">
+            <button
+              type="button"
+              className="button button--primary"
+              onClick={() => setDisplayOpen(true)}
+            >
+              <Maximize2 size={16} aria-hidden="true" /> Display Queue
+            </button>
             <button className="button button--secondary" onClick={load} disabled={Boolean(busy)}>
               <RefreshCw size={16} /> Refresh
             </button>
@@ -330,6 +339,10 @@ export function StaffQueuePage() {
           <EmptyState title="Queue is empty" detail="Checked-in patients will appear here in real time." />
         )}
       </section>
+
+      {displayOpen ? (
+        <StaffQueueDisplay queue={queue} onExit={() => setDisplayOpen(false)} />
+      ) : null}
     </div>
   );
 }

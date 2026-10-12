@@ -68,5 +68,17 @@ export function durationFromEntry(entry) {
   return formatSpan(minutes);
 }
 
+export function remainingRangeFromEntry(entry) {
+  const remaining = entry?.waitEstimate?.remainingTreatmentMinutes;
+  if (remaining && (remaining.min != null || remaining.max != null)) {
+    return formatWaitRange(remaining.min, remaining.max, { unavailableLabel: "Estimate unavailable" });
+  }
+  return "Estimate unavailable";
+}
+
+export function publicQueueNumber(entry) {
+  return String(entry?.token || entry?.queueNumber || "").trim() || null;
+}
+
 export const QUEUE_WAIT_DISCLAIMER =
   "Estimates are approximate and may change depending on actual treatment duration and queue conditions.";

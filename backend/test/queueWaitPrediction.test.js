@@ -6,11 +6,27 @@ const {
   createPredictionService,
   estimateWaitForQueueContext,
   remainingServingMinutes,
+  waitEstimateFromRow,
   getHistoricalDurationStats,
   invalidateDurationStatsCache,
   publicWaitEstimate,
 } = require("../services/queueWaitPrediction");
 const { estimateWaitMinutesForPosition } = require("../services/waitTime");
+
+test("waitEstimateFromRow exposes remaining treatment time for a serving patient", () => {
+  const estimate = waitEstimateFromRow({
+    token: "A-001",
+    position: 1,
+    status: "dentist",
+    wait_estimate_duration_minutes: 40,
+    wait_estimate_min_minutes: 0,
+    wait_estimate_max_minutes: 0,
+    wait_estimate_at: "2026-09-22T14:25:00.000Z",
+    serving_started_at: "2026-09-22T14:00:00.000Z",
+  });
+  assert.ok(estimate.remainingTreatmentMinutes);
+  assert.equal(estimate.remainingTreatmentMinutes.min <= estimate.remainingTreatmentMinutes.max, true);
+});
 
 test("remaining serving time subtracts elapsed time and never goes negative", () => {
   const now = new Date("2026-09-22T14:25:00.000Z");
