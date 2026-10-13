@@ -4606,6 +4606,29 @@ body.is-queue-display .staff-mobile-nav {
 .admin-confirm-copy { color: var(--text); font-size: .84rem; line-height: 1.55; }
 .admin-detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .65rem; margin-bottom: 1rem; }
 .admin-detail-grid p { padding: .7rem; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-muted); font-size: .74rem; }
+.admin-patient-record-details p {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.28rem 0.4rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.admin-patient-record-details small {
+  flex: 0 0 auto;
+}
+.admin-patient-record-details small::after {
+  content: ":";
+}
+.admin-patient-record-details strong {
+  flex: 1 1 7rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.treatment-record--readonly .treatment-record__patient small::after {
+  content: ":";
+}
 .admin-history-list { display: grid; gap: .55rem; }
 .admin-history-list article {
   display: flex;
