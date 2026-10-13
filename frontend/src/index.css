@@ -2603,24 +2603,53 @@ strong {
   .field--full { grid-column: auto; }
   .appointment-row { grid-template-columns: max-content minmax(0,1fr) auto; gap: .6rem; }
   .appointment-row > div:nth-of-type(2) { display: none; }
+  .queue-page {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: clip;
+  }
   .queue-page .section-heading {
     flex-wrap: wrap;
     align-items: flex-start;
+    min-width: 0;
+  }
+  .queue-page .section-heading > div,
+  .queue-page .section-heading p,
+  .queue-page .section-heading h1 {
+    min-width: 0;
+    max-width: 100%;
+  }
+  .queue-page .section-heading p {
+    overflow-wrap: anywhere;
+  }
+  .queue-page .queue-hero,
+  .queue-page .queue-progress-card,
+  .queue-page .glass-card,
+  .queue-page .checkin-card {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+  .queue-page .queue-hero *,
+  .queue-page .queue-progress-card * {
+    min-width: 0;
   }
   .queue-hero {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: start;
     flex-direction: unset;
-    gap: .85rem;
+    gap: .7rem;
     min-width: 0;
     overflow: hidden;
+    padding: 1rem .9rem;
   }
   .queue-hero > div:first-child { min-width: 0; }
   .queue-hero__numbers {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    gap: .75rem;
+    gap: .7rem;
   }
   .queue-hero__numbers > div { min-width: 0; }
   .queue-hero__numbers strong {
@@ -2629,12 +2658,32 @@ strong {
     font-size: 1rem;
     line-height: 1.3;
   }
+  .queue-hero__ticket strong {
+    overflow-wrap: anywhere;
+  }
   .queue-glow-ring {
     align-self: start;
     margin-top: 0;
-    width: 56px;
-    height: 56px;
+    width: 52px;
+    height: 52px;
     box-shadow: 0 0 0 6px rgba(219, 176, 255, 0.08), 0 0 24px rgba(193, 119, 255, 0.45);
+  }
+  .queue-progress-card {
+    padding: .95rem .9rem 1.05rem;
+    overflow-x: clip;
+  }
+  .queue-page .card-heading {
+    flex-wrap: wrap;
+    gap: .65rem;
+    min-width: 0;
+  }
+  .queue-page .status-pill {
+    width: auto;
+    max-width: 100%;
+    white-space: normal;
+    line-height: 1.25;
+    height: auto;
+    min-height: 25px;
   }
   .queue-disclaimer {
     display: grid;
@@ -2655,7 +2704,53 @@ strong {
   .queue-estimate-note {
     overflow-wrap: anywhere;
   }
-  .queue-stepper { overflow-x: auto; grid-template-columns: repeat(5, minmax(85px, 1fr)); padding-bottom: .25rem; }
+  .queue-page .queue-stepper {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: .2rem .12rem;
+    margin: 1.05rem 0 1rem;
+    overflow-x: clip;
+  }
+  .queue-page .queue-step {
+    min-width: 0;
+    gap: .32rem;
+    padding: 0 .1rem;
+  }
+  .queue-page .queue-step > span {
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+  }
+  .queue-page .queue-step:not(:last-child)::after {
+    top: 11px;
+    left: calc(50% + 14px);
+    width: calc(100% - 28px);
+  }
+  .queue-page .queue-step strong {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    line-height: 1.2;
+  }
+  .queue-page .queue-toggle {
+    min-width: 0;
+    gap: .65rem;
+    align-items: flex-start;
+  }
+  .queue-page .queue-toggle > i {
+    min-width: 38px;
+    flex-shrink: 0;
+  }
+  .queue-page .queue-toggle > span {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+  .queue-page .queue-toggle strong,
+  .queue-page .queue-toggle small {
+    overflow-wrap: anywhere;
+  }
+  .mobile-nav {
+    padding-bottom: max(.38rem, env(safe-area-inset-bottom, 0px));
+  }
   .care-timeline { grid-template-columns: 1fr 1fr; }
   .queue-table__header, .queue-table__row { grid-template-columns: .8fr 1fr .8fr; padding-right: 0; padding-left: 0; }
   .records-summary-grid { grid-template-columns: repeat(2,1fr); }
@@ -2745,6 +2840,22 @@ strong {
   .appointments-page .admin-heading-actions .button,
   .appointments-page .empty-state .button {
     width: auto;
+  }
+}
+
+@media (max-width: 360px) {
+  .queue-hero {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .queue-glow-ring {
+    justify-self: start;
+  }
+  .queue-page .queue-stepper {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    row-gap: .85rem;
+  }
+  .queue-page .queue-step:nth-child(3)::after {
+    display: none;
   }
 }
 
