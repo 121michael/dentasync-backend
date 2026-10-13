@@ -33,6 +33,17 @@ const emptyTreatment = {
   forCurrentVisit: false,
 };
 
+function treatmentToForm(treatment) {
+  return {
+    name: procedureFormValue(treatment?.name || treatment?.treatment || ""),
+    treatmentDate: String(treatment?.date || treatment?.treatmentDate || "").slice(0, 10),
+    durationMinutes: treatment?.durationMinutes != null ? String(treatment.durationMinutes) : "",
+    toothNumber: treatment?.toothNumber || treatment?.tooth_number || "",
+    diagnosisNotes: treatment?.diagnosis || treatment?.diagnosisNotes || "",
+    amountCharged: treatment?.amountCharged != null ? String(treatment.amountCharged) : "",
+  };
+}
+
 const emptyAgeSexForm = {
   age: "",
   gender: "",
@@ -171,6 +182,7 @@ export function DentistRecordsPage() {
   const [treatmentFormOpen, setTreatmentFormOpen] = useState(false);
   const [savingTreatment, setSavingTreatment] = useState(false);
   const [editingTreatmentId, setEditingTreatmentId] = useState(null);
+  const [editSnapshot, setEditSnapshot] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deletingTreatment, setDeletingTreatment] = useState(false);
   const [chartRefreshKey, setChartRefreshKey] = useState(0);
@@ -255,6 +267,7 @@ export function DentistRecordsPage() {
       setProcedureErrors({});
       setTreatmentFormOpen(false);
       setEditingTreatmentId(null);
+      setEditSnapshot(null);
       setDeleteTarget(null);
       setAgeSexOpen(false);
       await refreshPatientDetail(patient.id);
@@ -320,10 +333,25 @@ export function DentistRecordsPage() {
     });
   }
 
+  function requestCloseEdit() {
+    if (!editingTreatmentId) return true;
+    if (savingTreatment) return false;
+    if (editSnapshot && JSON.stringify(treatmentForm) !== JSON.stringify(editSnapshot)) {
+      const confirmed = window.confirm(
+        "You have unsaved changes. Discard them and close Edit Treatment?"
+      );
+      if (!confirmed) return false;
+    }
+    setEditingTreatmentId(null);
+    setTreatmentForm(emptyTreatment);
+    setEditSnapshot(null);
+    return true;
+  }
+
   function openAddTreatment() {
+    if (!requestCloseEdit()) return;
     setError("");
     setSuccess("");
-    setEditingTreatmentId(null);
     setTreatmentForm(emptyTreatment);
     setTreatmentDrafts([newProcedureDraft()]);
     setActiveDraftIndex(0);
@@ -332,7 +360,9 @@ export function DentistRecordsPage() {
   }
 
   function appendProcedureDraft() {
+    if (!requestCloseEdit()) return;
     setEditingTreatmentId(null);
+    setEditSnapshot(null);
     setTreatmentDrafts((current) => {
       const next = [...current, newProcedureDraft()];
       setActiveDraftIndex(next.length - 1);
@@ -359,6 +389,7 @@ export function DentistRecordsPage() {
     setActiveDraftIndex(0);
     setProcedureErrors({});
     setEditingTreatmentId(null);
+    setEditSnapshot(null);
   }
 
   function updateProcedureDraft(index, patch) {
@@ -396,19 +427,14 @@ export function DentistRecordsPage() {
     event.stopPropagation();
     setError("");
     setSuccess("");
-    setEditingTreatmentId(treatment.id);
-    setTreatmentForm({
-      name: procedureFormValue(treatment.name || treatment.treatment || ""),
-      treatmentDate: String(treatment.date || treatment.treatmentDate || "").slice(0, 10),
-      durationMinutes: treatment.durationMinutes != null ? String(treatment.durationMinutes) : "",
-      toothNumber: treatment.toothNumber || treatment.tooth_number || "",
-      diagnosisNotes: treatment.diagnosis || treatment.diagnosisNotes || "",
-      amountCharged: treatment.amountCharged != null ? String(treatment.amountCharged) : "",
-    });
+    setTreatmentFormOpen(false);
     setTreatmentDrafts([newProcedureDraft()]);
     setActiveDraftIndex(0);
     setProcedureErrors({});
-    revealTreatmentForm();
+    const next = treatmentToForm(treatment);
+    setEditingTreatmentId(treatment.id);
+    setTreatmentForm(next);
+    setEditSnapshot(next);
   }
 
   function validateProcedureDraft(draft, index) {
@@ -452,7 +478,9 @@ export function DentistRecordsPage() {
         };
         const response = await api.updateDentistTreatment(detail.patient.id, editingTreatmentId, payload);
         setSuccess(response.message || "Treatment saved. Dental chart updated automatically.");
-        closeTreatmentForm();
+        setEditingTreatmentId(null);
+        setTreatmentForm(emptyTreatment);
+        setEditSnapshot(null);
         await refreshPatientDetail(detail.patient.id, { silent: true });
         setChartRefreshKey((key) => key + 1);
         await load({ silent: true });
@@ -951,28 +979,13 @@ export function DentistRecordsPage() {
                   <div className="dentist-panel__heading">
                     <div>
                       <span className="eyebrow">Clinical information</span>
-                      <h2>{editingTreatmentId ? "Edit Treatment" : "Add Treatment"}</h2>
+                      <h2>Add Treatment</h2>
                     </div>
                   </div>
                   <p className="muted-copy">
-                    {editingTreatmentId
-                      ? "The selected treatment is loaded below. Change any field and Save Changes to update this record only — the dental chart recalculates automatically."
-                      : "Add every procedure for this visit here, then save once. Click a procedure section, then click its tooth on the dental chart below. All procedures stay on the same check-in."}
+                    Add every procedure for this visit here, then save once. Click a procedure section, then click its tooth on the dental chart below. All procedures stay on the same check-in.
                   </p>
                   <form className="dentist-form" onSubmit={saveTreatment}>
-                    {editingTreatmentId ? (
-                      <ProcedureFields
-                        draft={treatmentForm}
-                        requiredTooth={toothRequired}
-                        onChange={(patch) =>
-                          setTreatmentForm((current) => ({
-                            ...current,
-                            ...patch,
-                          }))
-                        }
-                      />
-                    ) : (
-                      <>
                         {treatmentDrafts.map((draft, index) => (
                           <section
                             key={draft.key}
@@ -1060,8 +1073,6 @@ export function DentistRecordsPage() {
                             )}
                           </span>
                         </div>
-                      </>
-                    )}
                     <div className="dentist-form__actions">
                       <button
                         type="button"
@@ -1072,13 +1083,7 @@ export function DentistRecordsPage() {
                         Cancel
                       </button>
                       <button type="submit" className="button button--primary" disabled={savingTreatment}>
-                        {savingTreatment
-                          ? editingTreatmentId
-                            ? "Saving Changes…"
-                            : "Saving Procedures…"
-                          : editingTreatmentId
-                            ? "Save Changes"
-                            : "Save All Procedures"}
+                        {savingTreatment ? "Saving Procedures…" : "Save All Procedures"}
                       </button>
                     </div>
                   </form>
@@ -1092,19 +1097,10 @@ export function DentistRecordsPage() {
             patientCategory={detail.patient.patientCategory}
             patientAge={detail.patient.age}
             refreshKey={chartRefreshKey}
-            pickMode={treatmentFormOpen}
-            selectedTeeth={parseToothList(
-              editingTreatmentId
-                ? treatmentForm.toothNumber
-                : treatmentDrafts[activeDraftIndex]?.toothNumber
-            )}
+            pickMode={treatmentFormOpen && !editingTreatmentId}
+            selectedTeeth={parseToothList(treatmentDrafts[activeDraftIndex]?.toothNumber)}
             onTeethChange={(teeth) => {
-              const toothNumber = teeth.join(", ");
-              if (editingTreatmentId) {
-                setTreatmentForm((current) => ({ ...current, toothNumber }));
-                return;
-              }
-              updateProcedureDraft(activeDraftIndex, { toothNumber });
+              updateProcedureDraft(activeDraftIndex, { toothNumber: teeth.join(", ") });
             }}
           />
 
@@ -1254,6 +1250,47 @@ export function DentistRecordsPage() {
               )}
             </div>
           </section>
+        </DentistModal>
+      ) : null}
+
+      {editingTreatmentId && detail?.patient ? (
+        <DentistModal
+          stacked
+          closeOnEscape
+          className="dentist-modal--edit-treatment"
+          title="Edit Treatment"
+          onClose={requestCloseEdit}
+        >
+          {error ? <p className="inline-alert inline-alert--error">{error}</p> : null}
+          <p className="muted-copy">
+            The selected treatment is loaded below. Change any field and Save Changes to update this
+            record only — the dental chart recalculates automatically.
+          </p>
+          <form className="dentist-form" onSubmit={saveTreatment}>
+            <ProcedureFields
+              draft={treatmentForm}
+              requiredTooth={toothRequired}
+              onChange={(patch) =>
+                setTreatmentForm((current) => ({
+                  ...current,
+                  ...patch,
+                }))
+              }
+            />
+            <div className="dentist-modal__actions">
+              <button
+                type="button"
+                className="button button--secondary"
+                onClick={requestCloseEdit}
+                disabled={savingTreatment}
+              >
+                Cancel
+              </button>
+              <button type="submit" className="button button--primary" disabled={savingTreatment}>
+                {savingTreatment ? "Saving Changes…" : "Save Changes"}
+              </button>
+            </div>
+          </form>
         </DentistModal>
       ) : null}
 

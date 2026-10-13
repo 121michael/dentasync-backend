@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { X } from "lucide-react";
 import { statusLabel } from "../dentistUtils";
 
@@ -23,7 +24,24 @@ export function DentistSummaryCard({ label, value, detail, icon: Icon, tone = "p
   );
 }
 
-export function DentistModal({ title, children, onClose, wide = false, stacked = false }) {
+export function DentistModal({
+  title,
+  children,
+  onClose,
+  wide = false,
+  stacked = false,
+  closeOnEscape = false,
+  className = "",
+}) {
+  useEffect(() => {
+    if (!closeOnEscape) return undefined;
+    function onKey(event) {
+      if (event.key === "Escape") onClose?.();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [closeOnEscape, onClose]);
+
   return (
     <div
       className={`dentist-modal-backdrop${stacked ? " dentist-modal-backdrop--stacked" : ""}`}
@@ -31,7 +49,7 @@ export function DentistModal({ title, children, onClose, wide = false, stacked =
       onMouseDown={onClose}
     >
       <section
-        className={`dentist-modal ${wide ? "dentist-modal--wide" : ""}`}
+        className={`dentist-modal ${wide ? "dentist-modal--wide" : ""} ${className}`.trim()}
         role="dialog"
         aria-modal="true"
         aria-label={title}

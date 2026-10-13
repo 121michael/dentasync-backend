@@ -5656,6 +5656,13 @@ body.is-queue-display .staff-mobile-nav {
   .treatment-record__patient {
     grid-template-columns: 1fr;
   }
+  .dentist-modal--edit-treatment {
+    width: min(100%, calc(100vw - 1.5rem));
+    max-height: calc(100dvh - 1.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  }
+  .dentist-modal--edit-treatment .field-grid--two {
+    grid-template-columns: 1fr;
+  }
 }
 .dentist-row-actions { display: flex; flex-wrap: wrap; gap: .35rem; }
 .dentist-status {
@@ -5697,7 +5704,7 @@ body.is-queue-display .staff-mobile-nav {
   inset: 0;
   display: grid;
   place-items: center;
-  padding: 1rem;
+  padding: max(1rem, env(safe-area-inset-top, 0px)) max(1rem, env(safe-area-inset-right, 0px)) max(1rem, env(safe-area-inset-bottom, 0px)) max(1rem, env(safe-area-inset-left, 0px));
   background: rgba(24, 13, 35, .52);
   backdrop-filter: blur(3px);
 }
@@ -5713,6 +5720,13 @@ body.is-queue-display .staff-mobile-nav {
 }
 .dentist-modal__header { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: 1rem; }
 .dentist-modal__header h2 { font-size: 1.12rem; }
+.dentist-modal--edit-treatment {
+  width: min(100%, 640px);
+  max-height: min(760px, calc(100dvh - 2rem));
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: #fff;
+}
 .dentist-form { display: grid; gap: .9rem; }
 .dentist-modal__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .5rem; }
 .dentist-confirm-copy { color: var(--text); font-size: .84rem; line-height: 1.55; }
