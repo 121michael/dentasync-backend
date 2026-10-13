@@ -6,7 +6,6 @@ import {
   CircleCheck,
   ClipboardList,
   Clock3,
-  HeartPulse,
   MapPin,
   ShieldCheck,
   Sparkles,
@@ -99,8 +98,6 @@ export function DashboardPage() {
 
   const appointment = dashboard.nextAppointment;
   const firstName = dashboard.patient?.firstName || "there";
-  const wellness = dashboard.wellness || {};
-  const healthScore = wellness.oralHealthScore;
 
   return (
     <div className="dashboard-page">
@@ -219,47 +216,6 @@ export function DashboardPage() {
       </section>
 
       <section className="dashboard-lower-grid">
-        <article className="glass-card wellness-card">
-          <div className="card-heading">
-            <div>
-              <span className="eyebrow">Preventive care</span>
-              <h2>Dental wellness progress</h2>
-            </div>
-            <span className="card-icon card-icon--lavender">
-              <HeartPulse size={20} />
-            </span>
-          </div>
-          <div className="wellness-card__score">
-            <div className="score-ring" style={{ "--score": `${healthScore || 0}%` }}>
-              <strong>{healthScore ?? "—"}</strong>
-              <small>{healthScore === null ? "pending" : "/ 100"}</small>
-            </div>
-            <div>
-              <strong>
-                {healthScore === null ? "Your first assessment is ahead" : "Assessment recorded"}
-              </strong>
-              <p>
-                {healthScore === null
-                  ? "Your clinician will add an individualized wellness score after your next visit."
-                  : prettyDate(wellness.assessmentDate, "Your oral health score")}
-              </p>
-            </div>
-          </div>
-          <div className="wellness-card__facts">
-            <span>
-              <small>Last cleaning</small>
-              <strong>{prettyDate(wellness.lastCleaning, "Not recorded")}</strong>
-            </span>
-            <span>
-              <small>Next recommended checkup</small>
-              <strong>{prettyDate(wellness.nextCheckup)}</strong>
-            </span>
-          </div>
-          <div className="progress-track" aria-label={`Preventive care progress ${healthScore || 0}%`}>
-            <span style={{ width: `${healthScore || 0}%` }} />
-          </div>
-        </article>
-
         <article className="glass-card quick-actions-card">
           <div className="card-heading">
             <div>
