@@ -2397,13 +2397,10 @@ strong {
 .membership-card__identity strong { color: #fff; font-size: 1.23rem; letter-spacing: -.04em; }
 .membership-card__identity small { color: rgba(255,255,255,.7); font-size: .65rem; }
 .membership-card__bottom { align-items: flex-end; }
-.membership-card__bottom > div:not(.qr-grid) { display: grid; gap: .2rem; }
+.membership-card__bottom > div { display: grid; gap: .2rem; }
 .membership-card__bottom > div > span { color: rgba(255,255,255,.6); font-size: .56rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
 .membership-card__bottom strong { color: #fff; font-size: .7rem; }
 .membership-card__verified { display: flex !important; align-items: center; gap: .32rem; color: #f8ecff; }
-.qr-grid { display: grid; width: 50px; height: 50px; grid-template-columns: repeat(7, 1fr); gap: 2px; padding: 4px; background: #fff; }
-.qr-grid i { background: transparent; }
-.qr-grid i.is-filled { background: #251138; }
 
 .profile-layout {
   display: grid;
@@ -2762,7 +2759,6 @@ strong {
   .membership-card { min-height: 300px; gap: 1.7rem; }
   .membership-card__bottom { display: grid; grid-template-columns: 1fr 1fr; }
   .membership-card__verified { grid-column: 1 / 2; }
-  .qr-grid { grid-column: 2 / 3; grid-row: 1 / span 2; justify-self: end; }
   .profile-security-stack { grid-template-columns: 1fr; }
   .profile-save-button { width: 100%; justify-self: stretch; }
   .support-grid { grid-template-columns: 1fr; }
