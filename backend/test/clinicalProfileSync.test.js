@@ -62,6 +62,13 @@ test("enrichRecordsFromLinkedProfiles overlays account profile basics", async ()
             date_of_birth: "2005-01-10",
             gender: "Male",
             address: "Quezon City",
+            emergency_contact_name: "Maria Dela Cruz",
+            emergency_contact_relationship: "Spouse",
+            emergency_contact_phone: "09180001111",
+            allergies: "Penicillin",
+            existing_conditions: "Hypertension",
+            current_medications: "Amlodipine",
+            dental_concerns: "Sensitivity on upper left",
           },
         ],
       };
@@ -94,4 +101,11 @@ test("enrichRecordsFromLinkedProfiles overlays account profile basics", async ()
   assert.equal(enriched.age, 21);
   assert.equal(enriched.profileLocked, true);
   assert.equal(enriched.accountLinked, true);
+  assert.equal(enriched.emergencyContactName, "Maria Dela Cruz");
+  assert.equal(enriched.emergencyContactRelationship, "Spouse");
+  assert.equal(enriched.emergencyContactPhone, "09180001111");
+  assert.equal(enriched.allergies, "Penicillin");
+  assert.equal(enriched.existingConditions, "Hypertension");
+  assert.equal(enriched.currentMedications, "Amlodipine");
+  assert.equal(enriched.dentalConcerns, "Sensitivity on upper left");
 });

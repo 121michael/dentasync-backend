@@ -835,6 +835,33 @@ export function DentistRecordsPage() {
                 <strong>Category:</strong> {detail.patient.patientCategory || "—"}
               </p>
               <p>
+                <strong>Emergency Contact Name:</strong>{" "}
+                {detail.patient.emergencyContactName?.trim() || "—"}
+              </p>
+              <p>
+                <strong>Relationship:</strong>{" "}
+                {detail.patient.emergencyContactRelationship?.trim() || "—"}
+              </p>
+              <p>
+                <strong>Emergency Mobile Number:</strong>{" "}
+                {detail.patient.emergencyContactPhone?.trim() || "—"}
+              </p>
+              <p>
+                <strong>Allergies:</strong> {detail.patient.allergies?.trim() || "—"}
+              </p>
+              <p>
+                <strong>Existing Conditions:</strong>{" "}
+                {detail.patient.existingConditions?.trim() || "—"}
+              </p>
+              <p>
+                <strong>Current Medications:</strong>{" "}
+                {detail.patient.currentMedications?.trim() || "—"}
+              </p>
+              <p>
+                <strong>Dental Concerns:</strong>{" "}
+                {detail.patient.dentalConcerns?.trim() || "—"}
+              </p>
+              <p>
                 <strong>Record type:</strong>{" "}
                 {isProfileLocked(detail.patient)
                   ? "Linked account (profile synced)"

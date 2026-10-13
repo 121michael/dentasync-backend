@@ -144,6 +144,13 @@ function mapClinicalRecord(row, extras = {}) {
     ageSex: formatAgeSex(age, gender),
     address: row.address || "",
     notes: row.notes || "",
+    emergencyContactName: row.emergency_contact_name || "",
+    emergencyContactRelationship: row.emergency_contact_relationship || "",
+    emergencyContactPhone: row.emergency_contact_phone || "",
+    allergies: row.allergies || "",
+    existingConditions: row.existing_conditions || "",
+    currentMedications: row.current_medications || "",
+    dentalConcerns: row.dental_concerns || "",
     linkedUserId: row.linked_user_id || null,
     patientId: row.patient_id || null,
     patientCategory: row.patient_category || null,
@@ -247,7 +254,14 @@ async function enrichRecordsFromLinkedProfiles(db, records) {
          COALESCE(profile.date_of_birth, profile.birth_date) AS date_of_birth,
          profile.gender,
          profile.address,
-         profile.patient_category AS profile_patient_category
+         profile.patient_category AS profile_patient_category,
+         profile.emergency_contact_name,
+         profile.emergency_contact_relationship,
+         profile.emergency_contact_phone,
+         profile.allergies,
+         profile.existing_conditions,
+         profile.current_medications,
+         profile.dental_concerns
        FROM users AS account
        LEFT JOIN patient_portal_profiles AS profile
          ON profile.user_id::text = account.id::text
@@ -266,7 +280,14 @@ async function enrichRecordsFromLinkedProfiles(db, records) {
            account.phone,
            profile.date_of_birth,
            profile.gender,
-           profile.address
+           profile.address,
+           profile.emergency_contact_name,
+           profile.emergency_contact_relationship,
+           profile.emergency_contact_phone,
+           profile.allergies,
+           profile.existing_conditions,
+           profile.current_medications,
+           profile.dental_concerns
          FROM users AS account
          LEFT JOIN patient_portal_profiles AS profile
            ON profile.user_id::text = account.id::text
@@ -322,6 +343,20 @@ async function enrichRecordsFromLinkedProfiles(db, records) {
         account.profile_patient_category ||
         record.patientCategory ||
         null,
+      emergencyContactName:
+        stringValue(account.emergency_contact_name, 120) || record.emergencyContactName || "",
+      emergencyContactRelationship:
+        stringValue(account.emergency_contact_relationship, 80) ||
+        record.emergencyContactRelationship ||
+        "",
+      emergencyContactPhone:
+        stringValue(account.emergency_contact_phone, 40) || record.emergencyContactPhone || "",
+      allergies: stringValue(account.allergies, 1200) || record.allergies || "",
+      existingConditions:
+        stringValue(account.existing_conditions, 1200) || record.existingConditions || "",
+      currentMedications:
+        stringValue(account.current_medications, 1200) || record.currentMedications || "",
+      dentalConcerns: stringValue(account.dental_concerns, 1200) || record.dentalConcerns || "",
       profileLocked: true,
       accountLinked: true,
     };

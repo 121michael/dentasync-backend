@@ -5717,7 +5717,7 @@ body.is-queue-display .staff-mobile-nav {
 .dentist-modal__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .5rem; }
 .dentist-confirm-copy { color: var(--text); font-size: .84rem; line-height: 1.55; }
 .dentist-detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .65rem; margin-bottom: 1rem; }
-.dentist-detail-grid p { padding: .7rem; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-muted); font-size: .74rem; }
+.dentist-detail-grid p { padding: .7rem; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-muted); font-size: .74rem; overflow-wrap: anywhere; }
 .dentist-history-list { display: grid; gap: .55rem; }
 .dentist-history-list article {
   display: flex;
