@@ -35,7 +35,7 @@ function initials(user) {
   return `${user?.firstName?.[0] || ""}${user?.lastName?.[0] || ""}`.toUpperCase() || "AD";
 }
 
-export function PortalLayout({ theme, onToggleTheme }) {
+export function PortalLayout({ theme, onToggleTheme, onThemeChange }) {
   const { user, logout, actingAs, principal, startSession } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -113,7 +113,7 @@ export function PortalLayout({ theme, onToggleTheme }) {
   const hasUnread = unreadCount > 0;
 
   return (
-    <div className="portal-shell">
+    <div className="portal-shell" data-theme={theme}>
       <aside className={`portal-sidebar ${isMenuOpen ? "is-open" : ""}`}>
         <div className="portal-sidebar__brand">
           <BrandMark />
@@ -217,7 +217,7 @@ export function PortalLayout({ theme, onToggleTheme }) {
           </div>
         ) : null}
         <main className="portal-content">
-          <Outlet />
+          <Outlet context={{ theme, onThemeChange }} />
         </main>
       </div>
 

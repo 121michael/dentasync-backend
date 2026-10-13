@@ -35,7 +35,7 @@
   --sidebar-width: 250px;
 }
 
-:root[data-theme="dark"] {
+.portal-shell[data-theme="dark"] {
   color: #ece6f5;
   background: #150f1d;
   --canvas: #150f1d;
@@ -703,7 +703,7 @@ strong {
   box-shadow: -24px 0 60px rgba(17, 6, 30, 0.15);
 }
 
-:root[data-theme="dark"] .auth-panel {
+.portal-shell[data-theme="dark"] .auth-panel {
   background: #21192c;
 }
 
@@ -984,6 +984,8 @@ strong {
 /* Application shell */
 .portal-shell {
   min-height: 100vh;
+  color: var(--text);
+  background: var(--canvas);
 }
 
 .portal-sidebar {
@@ -1187,7 +1189,7 @@ strong {
   background: #ffffff;
 }
 
-:root[data-theme="dark"] .tooth-loader__backdrop {
+.portal-shell[data-theme="dark"] .tooth-loader__backdrop {
   background: #ffffff;
 }
 
@@ -1505,7 +1507,7 @@ strong {
 .metric-card--amber .metric-card__icon { color: var(--amber); background: var(--amber-wash); }
 .metric-card--violet .metric-card__icon { color: #7b4eb2; background: #f1e9fa; }
 
-:root[data-theme="dark"] .metric-card--violet .metric-card__icon { background: #382445; }
+.portal-shell[data-theme="dark"] .metric-card--violet .metric-card__icon { background: #382445; }
 
 .metric-card__label {
   overflow: hidden;

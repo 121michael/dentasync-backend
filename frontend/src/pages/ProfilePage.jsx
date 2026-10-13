@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useOutletContext } from "react-router-dom";
 import {
   AlertTriangle,
   BadgeCheck,
@@ -60,8 +61,11 @@ function profileToForm(profile) {
   };
 }
 
-export function ProfilePage({ theme, onThemeChange }) {
+export function ProfilePage() {
+  const { theme = "light", onThemeChange } = useOutletContext() || {};
   const { updateUser } = useAuth();
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
   const [profile, setProfile] = useState(null);
   const [form, setForm] = useState(null);
   const [preferences, setPreferences] = useState({
@@ -88,7 +92,7 @@ export function ProfilePage({ theme, onThemeChange }) {
       ]);
       setProfile(profileResponse.profile);
       setForm(profileToForm(profileResponse.profile));
-      setPreferences(profileResponse.preferences);
+      setPreferences({ ...profileResponse.preferences, theme: themeRef.current || "light" });
       setSecurity(securityResponse);
     } catch (loadError) {
       setError(loadError.message);
@@ -135,9 +139,9 @@ export function ProfilePage({ theme, onThemeChange }) {
     setError("");
     try {
       const response = await api.updatePreferences(nextPreferences);
-      setPreferences(response.preferences);
-      if (response.preferences.theme !== theme) {
-        onThemeChange(response.preferences.theme);
+      setPreferences({ ...response.preferences, theme: nextPreferences.theme || theme });
+      if (nextPreferences.theme && nextPreferences.theme !== theme && typeof onThemeChange === "function") {
+        onThemeChange(nextPreferences.theme);
       }
     } catch (preferenceError) {
       setError(preferenceError.message);

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { BrowserRouter, Navigate, Outlet, Route, Routes, useNavigate, useSearchParams } from "react-router-dom";
 import { AuthProvider } from "./auth";
 import { LoadingState } from "./components/UI";
@@ -75,10 +75,17 @@ function RequireAuthenticated() {
   return <Outlet />;
 }
 
-function PatientPortal({ theme, onThemeChange }) {
+function PatientPortal() {
   const { user } = useAuth();
+  const [theme, setTheme] = useState("light");
   if (roleFor(user) !== "patient") return <Navigate to={landingRoute(user)} replace />;
-  return <PortalLayout theme={theme} onToggleTheme={() => onThemeChange(theme === "dark" ? "light" : "dark")} />;
+  return (
+    <PortalLayout
+      theme={theme}
+      onToggleTheme={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+      onThemeChange={setTheme}
+    />
+  );
 }
 
 function StaffPortal() {
@@ -122,13 +129,6 @@ function AccessDeniedPage() {
 }
 
 function PortalRoutes() {
-  const [theme, setTheme] = useState(() => localStorage.getItem("amethyst_theme") || "light");
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    localStorage.setItem("amethyst_theme", theme);
-  }, [theme]);
-
   return (
     <Routes>
       <Route path="/" element={<WalkInOrLogin />} />
@@ -144,7 +144,7 @@ function PortalRoutes() {
         <Route path="/reset-password/:token" element={<PasswordResetPage mode="reset" />} />
       </Route>
       <Route element={<RequireAuthenticated />}>
-        <Route element={<PatientPortal theme={theme} onThemeChange={setTheme} />}>
+        <Route element={<PatientPortal />}>
           <Route path="/patient/dashboard" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/appointments" element={<AppointmentsPage />} />
@@ -153,7 +153,7 @@ function PortalRoutes() {
           <Route path="/records" element={<Navigate to="/dashboard" replace />} />
           <Route path="/assistant" element={<ClinicAssistantPage />} />
           <Route path="/family" element={<FamilyPage />} />
-          <Route path="/profile" element={<ProfilePage theme={theme} onThemeChange={setTheme} />} />
+          <Route path="/profile" element={<ProfilePage />} />
           <Route path="/notifications" element={<NotificationsPage />} />
           <Route path="/support" element={<SupportPage />} />
         </Route>
