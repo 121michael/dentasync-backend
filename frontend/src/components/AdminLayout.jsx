@@ -12,7 +12,6 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
-  Settings,
   Shield,
   Users,
   X,
@@ -44,7 +43,6 @@ const navigation = [
   { to: "/admin/notifications", label: "Notifications", icon: Bell },
   { to: "/admin/analytics", label: "General Analytics", icon: BarChart3 },
   { to: "/admin/ai-settings", label: "Manage AI Settings", icon: Bot },
-  { to: "/admin/settings", label: "System Settings", icon: Settings },
   { to: "/admin/sync-data", label: "Sync Data", icon: Cloud },
   { to: "/admin/archived-records", label: "Archive", icon: Archive },
 ];
