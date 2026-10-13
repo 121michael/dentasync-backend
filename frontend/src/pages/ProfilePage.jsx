@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import {
   AlertTriangle,
@@ -103,11 +103,6 @@ export function ProfilePage() {
     load();
   }, [load]);
 
-  const qrCells = useMemo(
-    () => Array.from({ length: 49 }, (_, index) => [0, 1, 2, 6, 7, 8, 42, 43, 44, 48].includes(index) || (index * 13 + 5) % 5 < 2),
-    []
-  );
-
   function updateForm(event) {
     setForm((current) => ({ ...current, [event.target.name]: event.target.value }));
   }
@@ -203,9 +198,6 @@ export function ProfilePage() {
           </div>
           <div className="membership-card__verified">
             <BadgeCheck size={17} /> {profile.verified ? "Verified" : "Verification pending"}
-          </div>
-          <div className="qr-grid" aria-label="Membership QR code">
-            {qrCells.map((filled, index) => <i key={index} className={filled ? "is-filled" : ""} />)}
           </div>
         </div>
       </section>
