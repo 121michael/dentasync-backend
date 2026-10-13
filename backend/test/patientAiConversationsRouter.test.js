@@ -8,6 +8,7 @@ const test = require("node:test");
 const express = require("express");
 const { createPatientPortalRouter } = require("../routes/patientPortal");
 const { invalidateAiSettingsCache } = require("../services/aiSettings");
+const { resetAssistantRateLimit } = require("../services/clinicAssistant");
 
 function createSharedStore() {
   const conversations = [];
@@ -15,7 +16,7 @@ function createSharedStore() {
   return { conversations, messages };
 }
 
-function createDb(store, userId) {
+function createDb(store, userId, aiSettings = {}) {
   return {
     async query(sql, params = []) {
       if (sql.includes("setting_key = 'ai'")) {
@@ -29,6 +30,7 @@ function createDb(store, userId) {
                 diagnosticsSensitivity: "balanced",
                 predictiveDiagnostics: true,
                 waitingTimePrediction: true,
+                ...aiSettings,
               },
             },
           ],
@@ -116,15 +118,16 @@ function createDb(store, userId) {
   };
 }
 
-async function startPortal(store, userId) {
+async function startPortal(store, userId, aiSettings) {
   invalidateAiSettingsCache();
+  resetAssistantRateLimit();
   const uploadDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "amethyst-ai-history-"));
   const app = express();
   app.use(express.json());
   app.use(
     "/api/patient",
     createPatientPortalRouter({
-      db: createDb(store, userId),
+      db: createDb(store, userId, aiSettings),
       authenticateToken(req, _res, next) {
         req.user = { id: userId, role: "patient" };
         req.authUser = { id: userId, role: "patient" };
@@ -267,5 +270,39 @@ test("one patient cannot open or continue another patient's conversation", async
   } finally {
     await owner.close();
     await stranger.close();
+  }
+});
+
+test("disabled AI chatbot setting is not bypassed by the chat route", async () => {
+  const store = createSharedStore();
+  const portal = await startPortal(store, "patient-1", { amethystAiEnabled: true, aiChatbot: false });
+  try {
+    const status = await fetch(`${portal.url}/assistant/status`);
+    const statusBody = await status.json();
+    assert.equal(statusBody.available, false);
+    const chat = await fetch(`${portal.url}/assistant/chat`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ message: "What are the clinic hours?" }),
+    });
+    assert.equal(chat.status, 503);
+    assert.equal(store.messages.length, 0);
+  } finally {
+    await portal.close();
+  }
+});
+
+test("master AI off disables the patient chatbot", async () => {
+  const store = createSharedStore();
+  const portal = await startPortal(store, "patient-1", { amethystAiEnabled: false, aiChatbot: true });
+  try {
+    const chat = await fetch(`${portal.url}/assistant/chat`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ message: "How should I brush?" }),
+    });
+    assert.equal(chat.status, 503);
+  } finally {
+    await portal.close();
   }
 });
