@@ -1,5 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, ImagePlus, Menu, Plus, SendHorizontal, Sparkles, X } from "lucide-react";
+import {
+  Bot,
+  CalendarDays,
+  Clock3,
+  ImagePlus,
+  MapPin,
+  Menu,
+  MessageSquare,
+  Plus,
+  SendHorizontal,
+  Sparkles,
+  UsersRound,
+  X,
+} from "lucide-react";
 import { api } from "../api";
 import { SectionHeading } from "../components/UI";
 
@@ -7,6 +20,24 @@ const WELCOME_MESSAGE = {
   role: "assistant",
   text: "Hi — I can help with Amethyst Dental hours, location, services, booking, queue check-in, and questions about teeth and oral care. You can ask in English or Tagalog (or Taglish). Use + to attach a dental photo or X-ray for a preliminary look. I cannot diagnose conditions or replace your dentist.\n\nKumusta — makakatulong ako sa oras, lokasyon, serbisyo, booking, pila, at tanong tungkol sa ngipin. Puwede kang magtanong sa English o Tagalog. Hindi ako makakapag-diagnose o pumalit sa dentista.",
 };
+
+const SUGGESTED_PROMPTS = [
+  { icon: Clock3, label: "Clinic hours", text: "What are the clinic hours today?" },
+  { icon: MapPin, label: "Location", text: "Where is the clinic located?" },
+  { icon: CalendarDays, label: "My appointment", text: "When is my next appointment?" },
+  { icon: UsersRound, label: "Queue status", text: "What is my current queue number?" },
+];
+
+function sourceLabel(source) {
+  const key = String(source || "").toLowerCase();
+  if (key.includes("patient")) return "Your visit";
+  if (key.includes("catalog")) return "Services";
+  if (key.includes("oral")) return "Oral care";
+  if (key.includes("gemini")) return "AI assistant";
+  if (key.includes("privacy") || key.includes("safety") || key.includes("procedure")) return "Clinic guide";
+  if (key.includes("faq") || key.includes("clinic")) return "Clinic info";
+  return null;
+}
 
 function manilaDayStamp(value) {
   return new Intl.DateTimeFormat("en-CA", {
@@ -216,9 +247,9 @@ export function ClinicAssistantPage() {
     setError("");
   }
 
-  async function sendMessage(event) {
-    event.preventDefault();
-    const message = input.trim();
+  async function sendMessage(event, presetText) {
+    event?.preventDefault();
+    const message = String(presetText ?? input).trim();
     if ((!message && !attachment) || busy || !available) return;
 
     setError("");
@@ -353,7 +384,10 @@ export function ClinicAssistantPage() {
                             onClick={() => openConversation(item.id)}
                             disabled={Boolean(openingId)}
                           >
-                            <span>{item.title || "New Conversation"}</span>
+                            <span>
+                              <MessageSquare size={13} aria-hidden="true" />
+                              {item.title || "New Conversation"}
+                            </span>
                             <small>{formatHistoryTime(item.updatedAt || item.createdAt, group.label)}</small>
                           </button>
                         </li>
@@ -383,10 +417,16 @@ export function ClinicAssistantPage() {
             >
               {menuOpen ? <X size={18} /> : <Menu size={18} />}
             </button>
+            <span className="assistant-chatbar__mark" aria-hidden="true">
+              <Bot size={18} />
+            </span>
             <div className="assistant-chatbar__title">
               <p>AI Clinic Assistant</p>
               <small>{currentTitle}</small>
             </div>
+            <span className={`assistant-presence${available ? " is-online" : ""}`}>
+              {available ? "Online" : "Unavailable"}
+            </span>
           </header>
 
           <div className="assistant-disclaimer" role="note">
@@ -417,7 +457,13 @@ export function ClinicAssistantPage() {
                   </span>
                 ) : null}
                 <div>
+                  {item.role === "assistant" ? (
+                    <span className="assistant-bubble__name">Amethyst Assistant</span>
+                  ) : null}
                   <p>{item.text}</p>
+                  {item.attachmentPreview ? (
+                    <img className="assistant-bubble__photo" src={item.attachmentPreview} alt="" />
+                  ) : null}
                   {item.attachmentName ? (
                     <small className="assistant-attachment-label">Attached: {item.attachmentName}</small>
                   ) : null}
@@ -430,23 +476,48 @@ export function ClinicAssistantPage() {
                       (preliminary)
                     </small>
                   ) : null}
-                  {item.source ? <small>Source: {item.source}</small> : null}
+                  {sourceLabel(item.source) ? (
+                    <small className="assistant-source">{sourceLabel(item.source)}</small>
+                  ) : null}
                 </div>
               </article>
             ))}
             {busy ? (
-              <article className="assistant-bubble assistant-bubble--assistant">
+              <article className="assistant-bubble assistant-bubble--assistant assistant-bubble--typing">
                 <span className="assistant-bubble__avatar" aria-hidden="true">
                   <Bot size={16} />
                 </span>
-                <p>{attachment || messages.at(-1)?.attachmentName ? "Reviewing image…" : "Thinking…"}</p>
+                <div>
+                  <span className="assistant-bubble__name">Amethyst Assistant</span>
+                  <p className="assistant-typing" aria-label={messages.at(-1)?.attachmentName ? "Reviewing image" : "Thinking"}>
+                    <i />
+                    <i />
+                    <i />
+                  </p>
+                </div>
               </article>
             ) : null}
           </div>
 
+          {messages.length <= 1 && available && !busy ? (
+            <div className="assistant-suggestions" aria-label="Suggested questions">
+              {SUGGESTED_PROMPTS.map(({ icon: Icon, label, text }) => (
+                <button
+                  key={label}
+                  type="button"
+                  className="assistant-suggestion"
+                  onClick={(event) => sendMessage(event, text)}
+                >
+                  <Icon size={15} aria-hidden="true" />
+                  {label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+
           {attachment ? (
             <div className="assistant-attachment-chip">
-              <ImagePlus size={15} />
+              {previewUrl ? <img src={previewUrl} alt="" /> : <ImagePlus size={15} />}
               <span>{attachment.name}</span>
               <button type="button" className="icon-button" onClick={clearAttachment} aria-label="Remove attachment">
                 <X size={14} />
