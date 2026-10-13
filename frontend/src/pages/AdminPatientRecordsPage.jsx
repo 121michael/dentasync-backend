@@ -223,7 +223,7 @@ export function AdminPatientRecordsPage() {
 
       {detail && record ? (
         <AdminModal title="Patient Record" onClose={() => setDetail(null)} wide>
-          <div className="admin-detail-grid">
+          <div className="admin-detail-grid admin-patient-record-details">
             <p><small>Patient</small><strong>{record.fullName}</strong></p>
             <p><small>Patient ID</small><strong>{record.patientId || record.recordCode || record.id}</strong></p>
             <p><small>Date of Birth</small><strong>{formatHistoryDate(record.dateOfBirth)}</strong></p>
