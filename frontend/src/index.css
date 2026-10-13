@@ -4028,6 +4028,15 @@ body.is-queue-display .staff-mobile-nav {
 .staff-toast--error { background: #9c3655; }
 .staff-toast--success { background: #1f7a4d; }
 .staff-modal--confirm { max-width: 420px; }
+.logout-confirm-backdrop {
+  z-index: 80;
+  padding: max(0.75rem, env(safe-area-inset-top, 0px)) max(0.75rem, env(safe-area-inset-right, 0px)) max(0.75rem, env(safe-area-inset-bottom, 0px)) max(0.75rem, env(safe-area-inset-left, 0px));
+}
+.logout-confirm-backdrop .staff-modal--confirm {
+  width: min(100%, 420px);
+  max-width: calc(100vw - 1.5rem);
+  max-height: calc(100vh - 1.5rem);
+}
 .staff-confirm-copy { margin: 0 0 1rem; color: var(--text); font-size: .84rem; line-height: 1.55; }
 .staff-status--not_checked_in { color: #92400e; background: #fef3c7; }
 .staff-status--waiting { color: #9a3412; background: #ffedd5; }

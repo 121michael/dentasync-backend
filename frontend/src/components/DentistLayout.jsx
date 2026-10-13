@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   Bell,
   CalendarDays,
@@ -16,6 +16,8 @@ import { api } from "../api";
 import { useAuth } from "../useAuth";
 import { dentistInitials } from "../dentistUtils";
 import { BrandMark } from "./BrandMark";
+import { LogoutConfirmDialog } from "./LogoutConfirmDialog";
+import { useLogoutConfirm } from "./useLogoutConfirm";
 import { onNotificationsChanged } from "../notificationEvents";
 
 const navigation = [
@@ -28,8 +30,8 @@ const navigation = [
 ];
 
 export function DentistLayout() {
-  const { user, logout } = useAuth();
-  const navigate = useNavigate();
+  const { user } = useAuth();
+  const { requestLogout, logoutDialogProps } = useLogoutConfirm();
   const location = useLocation();
   const [isOpen, setIsOpen] = useState(false);
   const [profile, setProfile] = useState(null);
@@ -87,11 +89,6 @@ export function DentistLayout() {
     };
   }, [location.pathname]);
 
-  function handleLogout() {
-    logout();
-    navigate("/login", { replace: true });
-  }
-
   const displayName =
     profile?.fullName ||
     user?.fullName ||
@@ -140,7 +137,7 @@ export function DentistLayout() {
               <small>{specialization}</small>
             </span>
           </div>
-          <button className="dentist-nav__link dentist-nav__button" onClick={handleLogout}>
+          <button className="dentist-nav__link dentist-nav__button" onClick={requestLogout}>
             <LogOut size={18} aria-hidden="true" />
             <span>Logout</span>
           </button>
@@ -177,6 +174,7 @@ export function DentistLayout() {
           <Outlet />
         </main>
       </div>
+      <LogoutConfirmDialog {...logoutDialogProps} />
     </div>
   );
 }

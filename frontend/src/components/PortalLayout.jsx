@@ -17,6 +17,8 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { BrandMark } from "./BrandMark";
+import { LogoutConfirmDialog } from "./LogoutConfirmDialog";
+import { useLogoutConfirm } from "./useLogoutConfirm";
 import { useAuth } from "../useAuth";
 import { api } from "../api";
 import { onNotificationsChanged } from "../notificationEvents";
@@ -36,8 +38,9 @@ function initials(user) {
 }
 
 export function PortalLayout({ theme, onToggleTheme, onThemeChange }) {
-  const { user, logout, actingAs, principal, startSession } = useAuth();
+  const { user, actingAs, principal, startSession } = useAuth();
   const navigate = useNavigate();
+  const { requestLogout, logoutDialogProps } = useLogoutConfirm();
   const location = useLocation();
   const [unreadCount, setUnreadCount] = useState(0);
   const [switchingBack, setSwitchingBack] = useState(false);
@@ -87,11 +90,6 @@ export function PortalLayout({ theme, onToggleTheme, onThemeChange }) {
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [refreshAlerts]);
-
-  function handleLogout() {
-    logout();
-    navigate("/login", { replace: true });
-  }
 
   function closeMenu() {
     setIsMenuOpen(false);
@@ -145,7 +143,7 @@ export function PortalLayout({ theme, onToggleTheme, onThemeChange }) {
             <CircleHelp size={19} aria-hidden="true" />
             <span>Help &amp; Support</span>
           </NavLink>
-          <button className="portal-nav__link portal-nav__button" onClick={handleLogout}>
+          <button className="portal-nav__link portal-nav__button" onClick={requestLogout}>
             <LogOut size={19} aria-hidden="true" />
             <span>Logout</span>
           </button>
@@ -236,6 +234,7 @@ export function PortalLayout({ theme, onToggleTheme, onThemeChange }) {
           </NavLink>
         ))}
       </nav>
+      <LogoutConfirmDialog {...logoutDialogProps} />
     </div>
   );
 }
