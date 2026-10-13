@@ -38,6 +38,7 @@ const TAGALOG_MARKERS = [
   "hindi",
   "salamat",
   "anong",
+  "ano ang",
   "ano po",
   "kailan",
   "saan",
@@ -158,6 +159,9 @@ const CLINIC_TOPICS = [
       "business hours",
       "what time do you",
       "until what time",
+      "oprating hours",
+      "opning hours",
+      "clinic hour",
       "oras bukas",
       "oras ng klinika",
       "oras ng clinic",
@@ -257,8 +261,8 @@ const CLINIC_TOPICS = [
     build: (_clinic, _dentists, _services, lang) =>
       pick(
         lang,
-        "After your appointment is confirmed, check in from Queue Status or with staff via RFID or QR. Your queue number and estimated wait appear on the patient Queue page. Staff and dentists use the same clinic queue.",
-        "Kapag confirmed na ang appointment, mag-check in sa Queue Status o sa staff gamit ang RFID o QR. Makikita ang queue number at estimated wait sa Queue page. Iisa ang pila ng staff at dentist."
+        "After your appointment is confirmed, open Queue Status in the patient portal, or check in with staff using your RFID card or the clinic QR code. Daily queue numbers look like A-001 (regular), S-001 (senior), P-001 (pediatric), or W-001 (PWD) and restart each clinic day. Your number, status, and estimated wait (when available) appear on Queue Status. If check-in fails, ask the front desk — I cannot check you in from chat.",
+        "Kapag confirmed na ang appointment, buksan ang Queue Status sa patient portal, o mag-check in sa staff gamit ang RFID o QR ng klinika. Ang daily queue number ay parang A-001 (regular), S-001 (senior), P-001 (pediatric), o W-001 (PWD) at nagtatapos bawat araw. Makikita ang numero, status, at estimated wait (kung meron) sa Queue Status. Kung hindi mag-check in, tanungin ang front desk — hindi kita ma-check in mula sa chat."
       ),
   },
   {
@@ -267,7 +271,10 @@ const CLINIC_TOPICS = [
       "book",
       "booking",
       "appointment",
+      "appoinment",
       "schedule a visit",
+      "available slot",
+      "availability",
       "reserve",
       "mag-book",
       "magbook",
@@ -279,8 +286,8 @@ const CLINIC_TOPICS = [
     build: (_clinic, _dentists, _services, lang) =>
       pick(
         lang,
-        "Book from Appointments in the patient portal. Choose a service, date, and time, then submit for clinic confirmation. You do not pick a dentist — the clinic assigns an available clinician for that slot.",
-        "Mag-book sa Appointments sa patient portal. Pumili ng serbisyo, petsa, at oras, tapos i-submit para sa confirmation ng klinika. Hindi ka pumipili ng dentist — ang clinic ang mag-a-assign ng available na clinician sa slot na iyon."
+        "Book from Appointments in the patient portal. Choose a service, date, and an open time shown there, then submit for clinic confirmation. Open slots are only those listed on Appointments — I cannot invent availability or complete a booking in chat. You do not pick a dentist; the clinic assigns an available clinician for that slot.",
+        "Mag-book sa Appointments sa patient portal. Pumili ng serbisyo, petsa, at bukas na oras na makikita doon, tapos i-submit para sa confirmation ng klinika. Ang open slots ay ang naka-lista sa Appointments lang — hindi ako makakaimbento ng availability o makakapag-book sa chat. Hindi ka pumipili ng dentist; ang clinic ang mag-a-assign ng available na clinician sa slot na iyon."
       ),
   },
   {
@@ -395,6 +402,39 @@ const CLINIC_TOPICS = [
         lang,
         `For urgent dental pain or swelling, book Emergency Dental Care if a slot is available, or call ${clinic.name} at ${clinic.phone}. This assistant cannot diagnose emergencies — seek in-person care for severe symptoms.`,
         `Kung matindi ang sakit ng ngipin o may pamamaga, mag-book ng Emergency Dental Care kung may slot, o tumawag sa ${clinic.name} sa ${clinic.phone}. Hindi makakapag-diagnose ang assistant na ito — magpatingin mismo kung malala ang sintomas.`
+      ),
+  },
+  {
+    id: "account",
+    keywords: [
+      "register",
+      "registration",
+      "verify account",
+      "verification code",
+      "otp",
+      "sign up",
+      "create account",
+      "password",
+      "forgot password",
+      "reset password",
+      "cannot login",
+      "can't log in",
+      "family",
+      "dependent",
+      "dependents",
+      "anak",
+      "my profile",
+      "dental record",
+      "patient portal",
+      "mag-register",
+      "magregister",
+      "password ko",
+    ],
+    build: (clinic, _dentists, _services, lang) =>
+      pick(
+        lang,
+        `Create an account from Register, then complete email OTP verification before signing in. Reset a forgotten password from Forgot password on the login page. Add family members from Family; clinic admin must approve a dependent before they can be used. Update personal details in My Profile. This chat cannot reset passwords or approve dependents — contact ${clinic.name} at ${clinic.phone} or the front desk if you are locked out.`,
+        `Gumawa ng account sa Register, tapos tapusin ang email OTP verification bago mag-sign in. I-reset ang nakalimutang password sa Forgot password sa login page. Magdagdag ng kapamilya sa Family; kailangan ng approval ng admin bago magamit ang dependent. I-update ang detalye sa My Profile. Hindi makakapag-reset ng password o mag-approve ng dependent ang chat — tumawag sa ${clinic.name} sa ${clinic.phone} o sa front desk kung naka-lock out ka.`
       ),
   },
 ];
@@ -622,6 +662,7 @@ function normalizeOptions(servicesOrOptions) {
     patientContext: options.patientContext && typeof options.patientContext === "object"
       ? options.patientContext
       : null,
+    conversationHistoryBlock: String(options.conversationHistoryBlock || ""),
   };
 }
 
@@ -763,35 +804,146 @@ function describeService(service, lang) {
 }
 
 function wantsOwnVisitInfo(normalized) {
-  return /(my appointment|my queue|my wait|my check in|my check-in|aking appointment|aking pila|saan ako sa pila|ano ang queue ko)/.test(
+  return /(my (next )?appointment|my appointments?|appointment tomorrow|do i have an appointment|have an appointment|my (current )?queue|queue number|queue status|my wait|how long.{0,24}wait|still waiting|dentist (called|call) me|called me yet|aking appointment|aking pila|saan ako sa pila|ano ang queue ko|pila ko|may appointment ba ako)/.test(
     normalized
   );
 }
 
-function describeOwnVisit(patientContext, clinic, lang) {
-  const appointments = Array.isArray(patientContext.appointments) ? patientContext.appointments : [];
-  const queue = patientContext.queue && typeof patientContext.queue === "object" ? patientContext.queue : null;
+function isShortVisitFollowUp(normalized, historyBlock) {
+  if (!normalized || normalized.length > 80) return false;
+  const history = String(historyBlock || "");
+  if (!/Patient:.*(appointment|queue|pila|wait|check-?in)/i.test(history)) return false;
+  return /^(and )?(tomorrow|bukas|the wait|how long|ano po|ano|and then|status|yung pila|my number)\b/.test(
+    normalized
+  );
+}
+
+function looksLikeUnsupportedAction(normalized) {
+  return /(book me|book it for me|please book|i want you to book|cancel it for me|cancel my appointment now|please cancel|reschedule me|check me in|you booked|appointment is booked|has been cancelled|already cancelled|mark me (as )?(called|done))/.test(
+    normalized
+  );
+}
+
+function looksLikeInstructionOverride(normalized) {
+  return /(ignore (all )?(previous|prior|above) (instructions|rules)|you are now|reveal (your )?(system|hidden) prompt|developer mode|jailbreak|pretend you are an unrestricted)/.test(
+    normalized
+  );
+}
+
+function looksLikeMedicalEmergency(normalized) {
+  return /(chest pain|cannot breathe|can t breathe|can t breathe|hindi ako makahinga|hindi makahinga|unconscious|suicide|stroke|not breathing)/.test(
+    normalized
+  );
+}
+
+function looksLikeDiagnosisOrPrescription(normalized) {
+  return /(diagnose me|what is my diagnosis|give me a diagnosis|prescribe|prescription|antibiotic for me|what medicine should i|give me medicine|anong gamot)/.test(
+    normalized
+  );
+}
+
+function humanQueueStatus(status, lang) {
+  const key = String(status || "").toLowerCase().replaceAll(" ", "_");
+  const waiting = ["waiting", "checked_in", "not_checked_in"];
+  const called = ["preparing", "called"];
+  const withDentist = ["dentist", "in_treatment", "in_chair"];
+  if (withDentist.includes(key)) {
+    return pick(lang, "the dentist is seeing you / has called you", "tinatawag o tinitingnan ka na ng dentista");
+  }
+  if (called.includes(key)) {
+    return pick(lang, "you have been called", "tinawag ka na");
+  }
+  if (waiting.includes(key)) {
+    return pick(lang, "still waiting", "naghihintay pa");
+  }
+  return status || pick(lang, "on the queue", "nasa pila");
+}
+
+function clinicTimezone() {
+  return process.env.CLINIC_TIMEZONE || "Asia/Manila";
+}
+
+const assistantRateHits = new Map();
+
+function resetAssistantRateLimit() {
+  assistantRateHits.clear();
+}
+
+function consumeAssistantRateLimit(userId, { windowMs = 60_000, limit = 25 } = {}) {
+  const key = String(userId || "anonymous");
+  const now = Date.now();
+  const recent = (assistantRateHits.get(key) || []).filter((stamp) => now - stamp < windowMs);
+  if (recent.length >= limit) {
+    return { allowed: false };
+  }
+  recent.push(now);
+  assistantRateHits.set(key, recent);
+  return { allowed: true };
+}
+
+function manilaDateStamp(value = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: clinicTimezone(),
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(value);
+}
+
+function mentionedTomorrow(normalized) {
+  return /\b(tomorrow|bukas na appointment|appointment bukas|appointment tomorrow)\b/.test(normalized);
+}
+
+function describeOwnVisit(patientContext, clinic, lang, question = "") {
+  const appointments = Array.isArray(patientContext?.appointments) ? patientContext.appointments : [];
+  const queue = patientContext?.queue && typeof patientContext.queue === "object" ? patientContext.queue : null;
+  const normalized = normalizeQuestion(question);
+  const tomorrow = mentionedTomorrow(normalized);
+  const tomorrowStamp = (() => {
+    const now = new Date();
+    const today = manilaDateStamp(now);
+    const [year, month, day] = today.split("-").map(Number);
+    return manilaDateStamp(new Date(Date.UTC(year, month - 1, day + 1, 4, 0, 0)));
+  })();
+  const listed = tomorrow ? appointments.filter((item) => item.date === tomorrowStamp) : appointments;
   const parts = [];
-  if (queue) {
+  if (queue && !tomorrow) {
     const wait =
       queue.waitMinutes == null
-        ? ""
-        : pick(lang, ` Estimated wait is about ${queue.waitMinutes} minutes.`, ` Mga ${queue.waitMinutes} minuto ang estimated wait.`);
+        ? pick(lang, " No wait estimate is available yet.", " Wala pang estimated wait.")
+        : pick(
+            lang,
+            ` Estimated wait is about ${queue.waitMinutes} minutes.`,
+            ` Mga ${queue.waitMinutes} minuto ang estimated wait.`
+          );
+    const called = /called|dentist|in_treatment|in_chair|preparing/i.test(String(queue.status || ""));
     parts.push(
       pick(
         lang,
-        `Your queue number is ${queue.token || queue.queueNumber || "assigned"} (status: ${queue.status || "waiting"}).${wait}`,
-        `Ang iyong queue number ay ${queue.token || queue.queueNumber || "nakatalaga"} (status: ${queue.status || "waiting"}).${wait}`
+        `Your queue number is ${queue.token || queue.queueNumber || "assigned"} — ${humanQueueStatus(queue.status, lang)}.${wait}${
+          called ? "" : " The dentist has not called you based on the current queue status."
+        }`,
+        `Ang iyong queue number ay ${queue.token || queue.queueNumber || "nakatalaga"} — ${humanQueueStatus(queue.status, lang)}.${wait}${
+          called ? "" : " Hindi ka pa tinatawag ng dentista ayon sa kasalukuyang status ng pila."
+        }`
       )
     );
   }
-  if (appointments.length) {
-    const next = appointments[0];
+  if (listed.length) {
+    const next = listed[0];
     parts.push(
       pick(
         lang,
-        `Your next listed visit is ${next.service || "a dental visit"} on ${next.date || "the scheduled date"} at ${next.time || "the scheduled time"} (${next.status || "scheduled"}).`,
-        `Ang iyong susunod na bisita ay ${next.service || "dental visit"} sa ${next.date || "takdang petsa"} nang ${next.time || "takdang oras"} (${next.status || "scheduled"}).`
+        `${tomorrow ? "Tomorrow" : "Your next listed visit"} is ${next.service || "a dental visit"} on ${next.date || "the scheduled date"} at ${next.time || "the scheduled time"} (${next.status || "scheduled"}).`,
+        `${tomorrow ? "Bukas" : "Ang iyong susunod na bisita"} ay ${next.service || "dental visit"} sa ${next.date || "takdang petsa"} nang ${next.time || "takdang oras"} (${next.status || "scheduled"}).`
+      )
+    );
+  } else if (tomorrow) {
+    parts.push(
+      pick(
+        lang,
+        "I do not see an appointment tomorrow on your signed-in account.",
+        "Walang appointment bukas sa naka-sign in mong account."
       )
     );
   }
@@ -805,8 +957,8 @@ function describeOwnVisit(patientContext, clinic, lang) {
   parts.push(
     pick(
       lang,
-      "This is only your own visit information. I cannot share other patients' records.",
-      "Sarili mong impormasyon ng bisita lang ito. Hindi ako puwedeng magbahagi ng rekord ng ibang pasyente."
+      "This is only your own visit information from DentaSync. I cannot share other patients' records.",
+      "Sarili mong impormasyon ng bisita mula sa DentaSync lang ito. Hindi ako puwedeng magbahagi ng rekord ng ibang pasyente."
     )
   );
   return parts.join(" ");
@@ -821,13 +973,56 @@ function languageInstruction(question) {
 }
 
 function answerFromCatalog(question, servicesOrOptions) {
-  const { services, dentists, clinic, knowledgeMode, patientContext } = normalizeOptions(
-    servicesOrOptions
-  );
+  const { services, dentists, clinic, knowledgeMode, patientContext, conversationHistoryBlock } =
+    normalizeOptions(servicesOrOptions);
   const normalized = normalizeQuestion(question);
   const lang = detectLanguage(question);
   if (looksLikeOtherPatientRequest(question)) {
     return { answer: privacyRefusal(lang), source: "privacy", language: lang };
+  }
+  if (looksLikeInstructionOverride(normalized)) {
+    return {
+      answer: pick(
+        lang,
+        "I can only help as the Amethyst Dental patient assistant. Ask about clinic hours, services, your own appointment or queue, or general oral care.",
+        "Bilang assistant ng pasyente ng Amethyst Dental lang ako makakatulong. Magtanong tungkol sa oras, serbisyo, sarili mong appointment o pila, o pangkalahatang alaga sa ngipin."
+      ),
+      source: "safety",
+      language: lang,
+    };
+  }
+  if (looksLikeMedicalEmergency(normalized)) {
+    return {
+      answer: pick(
+        lang,
+        "If this could be a medical emergency (for example chest pain, trouble breathing, or loss of consciousness), seek emergency medical assistance immediately. For urgent dental pain during clinic hours, call the clinic or book Emergency Dental Care.",
+        "Kung posibleng emergency medikal (halimbawa pananakit ng dibdib, hirap huminga, o nawalan ng malay), humingi agad ng emergency medical assistance. Para sa malubhang sakit ng ngipin habang bukas ang klinika, tumawag sa clinic o mag-book ng Emergency Dental Care."
+      ),
+      source: "safety",
+      language: lang,
+    };
+  }
+  if (looksLikeDiagnosisOrPrescription(normalized)) {
+    return {
+      answer: pick(
+        lang,
+        "I cannot diagnose a condition or prescribe medication. AI information is preliminary and does not replace examination or diagnosis by a licensed dentist. Please book an oral examination or contact clinic staff.",
+        "Hindi ako makakapag-diagnose o magreseta ng gamot. Preliminary lang ang AI at hindi pumapalit sa exam o diagnosis ng lisensyadong dentista. Mag-book ng oral examination o kausapin ang staff."
+      ),
+      source: "safety",
+      language: lang,
+    };
+  }
+  if (looksLikeUnsupportedAction(normalized)) {
+    return {
+      answer: pick(
+        lang,
+        "I cannot book, cancel, reschedule, or check you in from this chat. Use Appointments to submit or cancel a visit, Queue Status or the front desk for RFID/QR check-in, and contact staff if something fails. I will not say a booking or cancellation succeeded unless DentaSync confirms it.",
+        "Hindi ako makakapag-book, mag-cancel, mag-reschedule, o mag-check in mula sa chat. Gamitin ang Appointments para mag-submit o mag-cancel, ang Queue Status o front desk para sa RFID/QR check-in, at tawagan ang staff kung may sira. Hindi ako magsasabing successful ang booking o cancel kung hindi kino-confirm ng DentaSync."
+      ),
+      source: "procedure",
+      language: lang,
+    };
   }
   if (!normalized) {
     return {
@@ -841,9 +1036,12 @@ function answerFromCatalog(question, servicesOrOptions) {
     };
   }
 
-  if (patientContext && wantsOwnVisitInfo(normalized)) {
+  if (
+    patientContext &&
+    (wantsOwnVisitInfo(normalized) || isShortVisitFollowUp(normalized, conversationHistoryBlock))
+  ) {
     return {
-      answer: describeOwnVisit(patientContext, clinic, lang),
+      answer: describeOwnVisit(patientContext, clinic, lang, question),
       source: "patient-own",
       language: lang,
     };
@@ -970,16 +1168,18 @@ async function loadClinicKnowledge(db) {
 async function loadAuthorizedPatientContext(db, userId, { includeWait = true } = {}) {
   if (!db || !userId) return null;
   const context = { appointments: [], queue: null };
+  const tz = clinicTimezone();
   try {
     const appointments = await db.query(
       `SELECT service_name, appointment_date::text AS appointment_date,
               appointment_time::text AS appointment_time, status
        FROM patient_portal_appointments
        WHERE user_id = $1
-         AND LOWER(COALESCE(status, 'pending')) <> 'cancelled'
-       ORDER BY appointment_date DESC, appointment_time DESC
+         AND LOWER(COALESCE(status, 'pending')) NOT IN ('cancelled', 'denied', 'completed', 'no_show')
+         AND appointment_date >= (CURRENT_TIMESTAMP AT TIME ZONE $2)::date
+       ORDER BY appointment_date ASC, appointment_time ASC
        LIMIT 3`,
-      [String(userId)]
+      [String(userId), tz]
     );
     context.appointments = appointments.rows.map((row) => ({
       service: row.service_name,
@@ -988,36 +1188,146 @@ async function loadAuthorizedPatientContext(db, userId, { includeWait = true } =
       status: row.status,
     }));
   } catch (error) {
-    if (error?.code !== "42P01" && error?.code !== "42703") {
+    if (error?.code === "42P01" || error?.code === "42703") {
+      try {
+        const fallback = await db.query(
+          `SELECT service_name, appointment_date::text AS appointment_date,
+                  appointment_time::text AS appointment_time, status
+           FROM patient_portal_appointments
+           WHERE user_id = $1
+             AND LOWER(COALESCE(status, 'pending')) <> 'cancelled'
+           ORDER BY appointment_date ASC, appointment_time ASC
+           LIMIT 3`,
+          [String(userId)]
+        );
+        context.appointments = fallback.rows.map((row) => ({
+          service: row.service_name,
+          date: String(row.appointment_date || "").slice(0, 10),
+          time: String(row.appointment_time || "").slice(0, 5),
+          status: row.status,
+        }));
+      } catch (fallbackError) {
+        if (fallbackError?.code !== "42P01" && fallbackError?.code !== "42703") {
+          console.warn("Patient assistant appointment context skipped:", fallbackError.message);
+        }
+      }
+    } else {
       console.warn("Patient assistant appointment context skipped:", error.message);
     }
   }
   try {
     const queue = await db.query(
-      `SELECT token, position, status, estimated_wait_minutes
+      `SELECT token, position, status, estimated_wait_minutes,
+              wait_estimate_duration_minutes
        FROM patient_portal_queue_entries
        WHERE user_id = $1
-         AND DATE(checked_in_at) = CURRENT_DATE
+         AND (checked_in_at AT TIME ZONE $2)::date = (CURRENT_TIMESTAMP AT TIME ZONE $2)::date
          AND status NOT IN ('completed', 'no_show')
        ORDER BY checked_in_at DESC
        LIMIT 1`,
-      [String(userId)]
+      [String(userId), tz]
     );
     if (queue.rows[0]) {
+      const waitValue = includeWait
+        ? queue.rows[0].wait_estimate_duration_minutes ?? queue.rows[0].estimated_wait_minutes
+        : null;
       context.queue = {
         token: queue.rows[0].token,
         queueNumber: queue.rows[0].token,
         position: queue.rows[0].position,
         status: queue.rows[0].status,
-        waitMinutes: includeWait ? queue.rows[0].estimated_wait_minutes : null,
+        waitMinutes: waitValue == null ? null : Number(waitValue),
       };
     }
   } catch (error) {
-    if (error?.code !== "42P01" && error?.code !== "42703") {
+    if (error?.code === "42P01" || error?.code === "42703") {
+      try {
+        const fallback = await db.query(
+          `SELECT token, position, status, estimated_wait_minutes
+           FROM patient_portal_queue_entries
+           WHERE user_id = $1
+             AND DATE(checked_in_at) = CURRENT_DATE
+             AND status NOT IN ('completed', 'no_show')
+           ORDER BY checked_in_at DESC
+           LIMIT 1`,
+          [String(userId)]
+        );
+        if (fallback.rows[0]) {
+          context.queue = {
+            token: fallback.rows[0].token,
+            queueNumber: fallback.rows[0].token,
+            position: fallback.rows[0].position,
+            status: fallback.rows[0].status,
+            waitMinutes: includeWait ? fallback.rows[0].estimated_wait_minutes : null,
+          };
+        }
+      } catch (fallbackError) {
+        if (fallbackError?.code !== "42P01" && fallbackError?.code !== "42703") {
+          console.warn("Patient assistant queue context skipped:", fallbackError.message);
+        }
+      }
+    } else {
       console.warn("Patient assistant queue context skipped:", error.message);
     }
   }
   return context;
+}
+
+function slimPatientContext(patientContext) {
+  if (!patientContext || typeof patientContext !== "object") return null;
+  const appointments = Array.isArray(patientContext.appointments)
+    ? patientContext.appointments.slice(0, 3).map((item) => ({
+        service: item.service || null,
+        date: item.date || null,
+        time: item.time || null,
+        status: item.status || null,
+      }))
+    : [];
+  const queue = patientContext.queue
+    ? {
+        queueNumber: patientContext.queue.token || patientContext.queue.queueNumber || null,
+        status: patientContext.queue.status || null,
+        waitMinutes: patientContext.queue.waitMinutes ?? null,
+      }
+    : null;
+  return { appointments, queue };
+}
+
+async function generateGeminiText(apiKey, prompt) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.3, maxOutputTokens: 420 },
+        }),
+        signal: controller.signal,
+      }
+    );
+    if (!response.ok) {
+      const error = new Error(`gemini-http-${response.status}`);
+      error.code = response.status === 429 ? "rate_limit" : "http";
+      throw error;
+    }
+    const payload = await response.json();
+    const text = payload?.candidates?.[0]?.content?.parts
+      ?.map((part) => part.text)
+      .join("\n")
+      .trim();
+    if (!text) {
+      const error = new Error("gemini-empty");
+      error.code = "empty";
+      throw error;
+    }
+    return text;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function answerWithOptionalGemini(question, servicesOrOptions) {
@@ -1029,7 +1339,7 @@ async function answerWithOptionalGemini(question, servicesOrOptions) {
   const oralIntent =
     Boolean(matchTopic(normalized, ORAL_HEALTH_TOPICS)) || ORAL_FALLBACK_RE.test(normalized);
 
-  if (local.source === "privacy" || local.source === "restricted" || local.source === "patient-own") {
+  if (["privacy", "restricted", "patient-own", "safety", "procedure"].includes(local.source)) {
     return { ...local, model: "clinic-faq" };
   }
 
@@ -1039,16 +1349,21 @@ async function answerWithOptionalGemini(question, servicesOrOptions) {
   }
 
   try {
-    const ownVisit = options.patientContext
-      ? `Authenticated patient's own visit info (never discuss anyone else): ${JSON.stringify(options.patientContext)}`
-      : "No personal visit record was attached. Do not invent a patient's appointments.";
+    const visitIntent = wantsOwnVisitInfo(normalized);
+    const slim = visitIntent ? slimPatientContext(options.patientContext) : null;
+    const ownVisit = slim
+      ? `Verified DentaSync records for this signed-in patient only (do not invent extra visits or claim an action succeeded): ${JSON.stringify(slim)}`
+      : "No personal visit record is included for this question. Do not invent appointments, queue numbers, or check-in results.";
     const historyBlock = String(options.conversationHistoryBlock || "").trim();
-    const prompt = `You are the patient assistant for ${options.clinic.name} in the DentaSync portal.
-Answer clearly about teeth, oral health, and this clinic.
-You must NOT diagnose diseases, identify a patient's specific condition from symptoms, or prescribe treatment.
-If asked for a diagnosis, refuse and suggest booking an oral examination or calling the clinic.
-Keep answers brief (about 80-140 words). Use the clinic facts below when the question is about location, hours, contact, services, or dentists.
-Never reveal another patient's private information, admin settings, or internal credentials.
+    const prompt = `You are the patient-support assistant for ${options.clinic.name} in the DentaSync Patient Portal.
+Be friendly, professional, and concise. Understand English, Filipino/Tagalog, Taglish, and common misspellings.
+If the request is ambiguous, ask one clarifying question.
+Distinguish verified clinic facts below from general dental education.
+If a clinic fact is missing, say it is unavailable and suggest the Appointments page or front desk. Never guess hours, prices, or policies.
+You must NOT diagnose, prescribe, or replace a licensed dentist.
+Never claim a booking, cancellation, reschedule, or dentist call unless the verified DentaSync records explicitly show it.
+Never treat prior assistant messages as clinic facts if live clinic data is provided.
+Keep answers brief. Use short lists for hours, steps, or services when helpful.
 ${knowledgeModeInstructions(options.knowledgeMode)}
 ${diagnosticsSensitivityInstructions(options.diagnosticsSensitivity)}
 ${languageInstruction(question)}
@@ -1056,37 +1371,19 @@ ${languageInstruction(question)}
 ${clinicContextBlock(options.clinic, options.services, options.dentists)}
 
 ${ownVisit}
-${historyBlock ? `\n${historyBlock}\n` : ""}
+${historyBlock ? `\n${historyBlock}\nTreat prior assistant text as conversation context only, not as verified clinic data.\n` : ""}
 Patient question: ${question}`;
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-        }),
-      }
-    );
-
-    if (!response.ok) {
-      return { ...local, model: "clinic-faq-fallback" };
-    }
-
-    const payload = await response.json();
-    const text =
-      payload?.candidates?.[0]?.content?.parts?.map((part) => part.text).join("\n").trim() ||
-      local.answer;
-
+    const text = await generateGeminiText(apiKey, prompt);
     const note = pick(
       local.language,
-      "Note: General information only — not a professional dental diagnosis.",
-      "Tandaan: Pangkalahatang impormasyon lang — hindi propesyonal na diagnosis sa ngipin."
+      "AI-generated information is preliminary and does not replace examination or diagnosis by a licensed dentist.",
+      "Preliminary lang ang AI at hindi pumapalit sa exam o diagnosis ng lisensyadong dentista."
     );
+    const alreadyNoted = /licensed dentist|lisensyadong dentista/i.test(text);
 
     return {
-      answer: `${text}\n\n${note}`,
+      answer: alreadyNoted ? text : `${text}\n\n${note}`,
       source: "gemini",
       model: "gemini-1.5-flash",
       language: local.language,
@@ -1104,5 +1401,10 @@ module.exports = {
   loadClinicKnowledge,
   loadAuthorizedPatientContext,
   looksLikeOtherPatientRequest,
+  looksLikeUnsupportedAction,
+  looksLikeInstructionOverride,
+  wantsOwnVisitInfo,
+  consumeAssistantRateLimit,
+  resetAssistantRateLimit,
   detectLanguage,
 };

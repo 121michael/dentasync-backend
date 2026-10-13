@@ -104,7 +104,7 @@ export function ClinicAssistantPage() {
         );
       } catch {
         if (!cancelled) {
-          setAvailable(true);
+          setUnavailableMessage("");
         }
       }
     })();

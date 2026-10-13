@@ -15,6 +15,7 @@ const {
   loadClinicKnowledge,
   loadAuthorizedPatientContext,
   detectLanguage,
+  consumeAssistantRateLimit,
 } = require("../services/clinicAssistant");
 const {
   loadAiSettings,
@@ -1748,6 +1749,15 @@ function createPatientPortalRouter({
         return res.status(503).json({
           message: chatbotUnavailableMessage(lang),
           available: false,
+        });
+      }
+
+      if (!consumeAssistantRateLimit(userId).allowed) {
+        return res.status(429).json({
+          message:
+            lang === "tl"
+              ? "Masyadong maraming tanong sa AI Assistant. Sandali lang, tapos subukan ulit."
+              : "Too many AI Assistant questions. Please wait a moment and try again.",
         });
       }
 
