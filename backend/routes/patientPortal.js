@@ -25,6 +25,7 @@ const {
 const { analyzeDentalImageBuffer, DISCLAIMER: IMAGE_ANALYSIS_DISCLAIMER } = require("../services/dentalImageAnalysis");
 const staffCheckIn = require("../services/staffCheckIn");
 const { insertPatientNotification, mapPatientNotification } = require("../services/patientPortalNotifications");
+const dentalWellness = require("../services/dentalWellness");
 const staffWalkInQr = require("../services/staffWalkInQr");
 const staffRfidEvents = require("../services/staffRfidEvents");
 const clinicSchedule = require("../services/clinicSchedule");
@@ -708,6 +709,25 @@ function createPatientPortalRouter({
       const queue = queueResult.rows[0] || null;
       const counts = appointmentCountResult.rows[0];
       const smsPrefs = preferenceResult.rows[0] || {};
+      let wellness = {
+        oralHealthScore: null,
+        lastCleaning: null,
+        nextCheckup: null,
+        assessmentDate: null,
+      };
+      try {
+        const snapshot = await dentalWellness.getPortalWellness(db, userId);
+        wellness = {
+          oralHealthScore: snapshot.hasAssessment ? snapshot.oralHealthScore : null,
+          lastCleaning: snapshot.lastCleaning || null,
+          nextCheckup: snapshot.hasAssessment ? snapshot.nextCheckup : null,
+          assessmentDate: snapshot.hasAssessment ? snapshot.assessmentDate : null,
+        };
+      } catch (wellnessError) {
+        if (wellnessError?.code !== "42P01") {
+          throw wellnessError;
+        }
+      }
 
       return res.json({
         patient: {
@@ -727,11 +747,7 @@ function createPatientPortalRouter({
           queueToken: queue?.token || null,
           hmoStatus: profile.hmo_status || "not_enrolled",
         },
-        wellness: {
-          oralHealthScore: profile.oral_health_score ?? null,
-          lastCleaning: profile.last_cleaning || null,
-          nextCheckup: profile.next_checkup || null,
-        },
+        wellness,
         queue: queue
           ? {
               token: queue.token,

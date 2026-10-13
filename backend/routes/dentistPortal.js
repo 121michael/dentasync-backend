@@ -4,6 +4,7 @@ const crypto = require("crypto");
 const bcrypt = require("bcrypt");
 const express = require("express");
 const clinicalPatients = require("../services/clinicalPatients");
+const dentalWellness = require("../services/dentalWellness");
 const dentalChartSync = require("../services/dentalChartSync");
 const patientData = require("../services/patientData");
 const { writeAdminAudit } = require("../services/adminAudit");
@@ -1855,6 +1856,11 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
           };
         }),
         currentVisit: await clinicalPatients.listCurrentVisitForRecord(db, detail.record),
+        wellness: await dentalWellness.getWellnessForClinicalRecord(
+          db,
+          detail.record,
+          detail.treatments
+        ),
       });
     } catch (error) {
       if (clinicalPatients.isMissingRelation(error)) {
@@ -1864,6 +1870,42 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
       }
       console.error("Dentist patient detail error:", error.message);
       return res.status(500).json({ message: "Unable to load the patient record." });
+    }
+  });
+
+  router.put("/patients/:id/wellness-assessment", async (req, res) => {
+    const recordId = Number.parseInt(req.params.id, 10);
+    if (!Number.isSafeInteger(recordId) || recordId <= 0) {
+      return res.status(400).json({ message: "A valid patient record ID is required." });
+    }
+
+    try {
+      const detail = await clinicalPatients.getClinicalRecord(db, recordId);
+      if (!detail || detail.record.archived) {
+        return res.status(404).json({ message: "Patient record not found." });
+      }
+
+      const wellness = await dentalWellness.saveAssessment(
+        db,
+        detail.record,
+        req.body || {},
+        req.dentist
+      );
+      return res.json({
+        message: "Dental wellness assessment saved.",
+        wellness,
+      });
+    } catch (error) {
+      if (error?.status) {
+        return res.status(error.status).json({ message: error.message });
+      }
+      if (clinicalPatients.isMissingRelation(error)) {
+        return res.status(503).json({
+          message: "Clinical patient records are not available. Run npm run migrate:clinical-records.",
+        });
+      }
+      console.error("Dentist wellness assessment error:", error.message);
+      return res.status(500).json({ message: "Unable to save the wellness assessment." });
     }
   });
 

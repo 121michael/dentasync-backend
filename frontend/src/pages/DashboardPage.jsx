@@ -235,11 +235,13 @@ export function DashboardPage() {
               <small>{healthScore === null ? "pending" : "/ 100"}</small>
             </div>
             <div>
-              <strong>{healthScore === null ? "Your first assessment is ahead" : "Your oral health score"}</strong>
+              <strong>
+                {healthScore === null ? "Your first assessment is ahead" : "Assessment recorded"}
+              </strong>
               <p>
                 {healthScore === null
                   ? "Your clinician will add an individualized wellness score after your next visit."
-                  : "A calm, consistent care routine keeps your smile moving forward."}
+                  : prettyDate(wellness.assessmentDate, "Your oral health score")}
               </p>
             </div>
           </div>

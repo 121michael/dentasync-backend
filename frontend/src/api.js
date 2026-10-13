@@ -272,6 +272,13 @@ export const api = {
   createDentistPatient: (body) => request("/dentist/patients", { method: "POST", body }),
   getDentistPatient: (patientId, options = {}) =>
     request(`/dentist/patients/${patientId}`, options),
+  saveDentistWellnessAssessment: (patientId, body, options = {}) =>
+    request(`/dentist/patients/${patientId}/wellness-assessment`, {
+      method: "PUT",
+      body,
+      silent: true,
+      ...options,
+    }),
   getDentistPatientXrays: (patientId, options = {}) =>
     request(`/dentist/patients/${patientId}/xrays`, options),
   getDentistProfile: () => request("/dentist/profile"),

@@ -50,6 +50,24 @@ const emptyAgeSexForm = {
   dateOfBirth: "",
 };
 
+const emptyWellnessForm = {
+  oralHealthScore: "",
+  assessmentDate: "",
+  clinicalNotes: "",
+  nextCheckup: "",
+};
+
+function wellnessFormFromDetail(response) {
+  const wellness = response?.wellness || {};
+  return {
+    oralHealthScore:
+      wellness.hasAssessment && wellness.oralHealthScore != null ? String(wellness.oralHealthScore) : "",
+    assessmentDate: wellness.assessmentDate ? String(wellness.assessmentDate).slice(0, 10) : todayIsoDate(),
+    clinicalNotes: wellness.clinicalNotes || "",
+    nextCheckup: wellness.nextCheckup ? String(wellness.nextCheckup).slice(0, 10) : "",
+  };
+}
+
 function todayIsoDate() {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
 }
@@ -188,6 +206,8 @@ export function DentistRecordsPage() {
   const [chartRefreshKey, setChartRefreshKey] = useState(0);
   const [ageSexOpen, setAgeSexOpen] = useState(false);
   const [ageSexForm, setAgeSexForm] = useState(emptyAgeSexForm);
+  const [wellnessForm, setWellnessForm] = useState(emptyWellnessForm);
+  const [savingWellness, setSavingWellness] = useState(false);
   const treatmentFormRef = useRef(null);
   const focusHandledRef = useRef("");
   const focusedRowRef = useRef(null);
@@ -256,6 +276,7 @@ export function DentistRecordsPage() {
   async function refreshPatientDetail(patientId, { silent = false } = {}) {
     const response = await api.getDentistPatient(patientId, { silent });
     setDetail(response);
+    setWellnessForm(wellnessFormFromDetail(response));
     return response;
   }
 
@@ -270,6 +291,7 @@ export function DentistRecordsPage() {
       setEditSnapshot(null);
       setDeleteTarget(null);
       setAgeSexOpen(false);
+      setSavingWellness(false);
       await refreshPatientDetail(patient.id);
       setError("");
     } catch (viewError) {
@@ -323,6 +345,33 @@ export function DentistRecordsPage() {
       setError(saveError.message);
     } finally {
       setBusy(false);
+    }
+  }
+
+  function resetWellnessForm() {
+    setWellnessForm(wellnessFormFromDetail(detail));
+    setError("");
+  }
+
+  async function saveWellnessAssessment(event) {
+    event.preventDefault();
+    if (!detail?.patient?.id) return;
+    setSavingWellness(true);
+    setError("");
+    setSuccess("");
+    try {
+      const response = await api.saveDentistWellnessAssessment(detail.patient.id, {
+        oralHealthScore: wellnessForm.oralHealthScore === "" ? "" : Number(wellnessForm.oralHealthScore),
+        assessmentDate: wellnessForm.assessmentDate,
+        clinicalNotes: wellnessForm.clinicalNotes,
+        nextCheckup: wellnessForm.nextCheckup,
+      });
+      setSuccess(response.message || "Dental wellness assessment saved.");
+      await refreshPatientDetail(detail.patient.id, { silent: true });
+    } catch (saveError) {
+      setError(saveError.message);
+    } finally {
+      setSavingWellness(false);
     }
   }
 
@@ -963,6 +1012,95 @@ export function DentistRecordsPage() {
               </div>
             </form>
           ) : null}
+
+          <section className="treatment-record" style={{ marginTop: "1.25rem" }}>
+            <div className="treatment-record__header">
+              <div>
+                <span className="eyebrow">Preventive care</span>
+                <h2>Dental Wellness Assessment</h2>
+              </div>
+            </div>
+            <p className="muted-copy">
+              Enter the patient&apos;s wellness score after a clinical evaluation. Last cleaning is taken
+              from completed Oral Prophylaxis in treatment history.
+            </p>
+            <form className="dentist-form" onSubmit={saveWellnessAssessment}>
+              <div className="field-grid field-grid--two">
+                <label className="field">
+                  <span>Wellness Score</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="1"
+                    required
+                    value={wellnessForm.oralHealthScore}
+                    onChange={(event) =>
+                      setWellnessForm((current) => ({ ...current, oralHealthScore: event.target.value }))
+                    }
+                    placeholder="0–100"
+                  />
+                </label>
+                <label className="field">
+                  <span>Assessment Date</span>
+                  <input
+                    type="date"
+                    required
+                    value={wellnessForm.assessmentDate}
+                    onChange={(event) =>
+                      setWellnessForm((current) => ({ ...current, assessmentDate: event.target.value }))
+                    }
+                  />
+                </label>
+                <label className="field field--full">
+                  <span>Clinical Assessment / Notes</span>
+                  <textarea
+                    rows="3"
+                    value={wellnessForm.clinicalNotes}
+                    onChange={(event) =>
+                      setWellnessForm((current) => ({ ...current, clinicalNotes: event.target.value }))
+                    }
+                    placeholder="Enter assessment notes"
+                  />
+                </label>
+                <label className="field">
+                  <span>Last Cleaning</span>
+                  <input
+                    readOnly
+                    value={
+                      detail.wellness?.lastCleaning
+                        ? formatDentistDate(detail.wellness.lastCleaning)
+                        : "Not recorded"
+                    }
+                  />
+                </label>
+                <label className="field">
+                  <span>Next Recommended Checkup</span>
+                  <input
+                    type="date"
+                    required
+                    value={wellnessForm.nextCheckup}
+                    onChange={(event) =>
+                      setWellnessForm((current) => ({ ...current, nextCheckup: event.target.value }))
+                    }
+                  />
+                </label>
+              </div>
+              <div className="dentist-form__actions">
+                <button
+                  type="button"
+                  className="button button--secondary"
+                  onClick={resetWellnessForm}
+                  disabled={savingWellness}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="button button--primary" disabled={savingWellness}>
+                  {savingWellness ? "Saving…" : "Save Assessment"}
+                </button>
+              </div>
+            </form>
+          </section>
 
           <div
             ref={treatmentFormRef}
