@@ -231,9 +231,7 @@ export function AdminPatientRecordsPage() {
             <p><small>Contact</small><strong>{record.phone || "—"}</strong></p>
             <p><small>Email</small><strong>{record.email || "—"}</strong></p>
             <p><small>Address</small><strong>{record.address || "—"}</strong></p>
-            <p><small>Linked account</small><strong>{record.linkedUserId || "None"}</strong></p>
             <p><small>Created by</small><strong className="capitalize">{record.createdByRole || "—"}</strong></p>
-            <p><small>Notes</small><strong>{record.notes?.trim() ? record.notes : "—"}</strong></p>
           </div>
 
           <h3 className="admin-subheading">Appointments</h3>
