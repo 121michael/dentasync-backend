@@ -25,6 +25,17 @@ const emptyForm = {
   scheduleNotes: "",
 };
 
+const PH_MOBILE_PATTERN = /^09[0-9]{9}$/;
+const PH_MOBILE_MESSAGE = "Enter a valid 11-digit mobile number starting with 09.";
+
+function isValidManageUserMobile(value) {
+  return PH_MOBILE_PATTERN.test(String(value || ""));
+}
+
+function sanitizeManageUserMobileInput(value) {
+  return String(value || "").replace(/\D/g, "").slice(0, 11);
+}
+
 function isPendingAccount(user) {
   const status = String(user?.status || "").toLowerCase();
   return !user?.verified || status === "pending" || status === "unverified";
@@ -79,6 +90,7 @@ export function AdminManageUsersPage() {
   const [detail, setDetail] = useState(null);
   const [dependentDetail, setDependentDetail] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [phoneError, setPhoneError] = useState("");
   const [actionBusyId, setActionBusyId] = useState("");
   const [focusKey, setFocusKey] = useState(() => searchParams.get("focus") || "");
   const focusedRowRef = useRef(null);
@@ -171,6 +183,7 @@ export function AdminManageUsersPage() {
       ...emptyForm,
       position: tab === "staff" ? "Chief Clinic Coordinator" : emptyForm.position,
     });
+    setPhoneError("");
     setFormOpen(true);
   }
 
@@ -190,6 +203,7 @@ export function AdminManageUsersPage() {
       specialization: user.specialization || "",
       scheduleNotes: user.scheduleNotes || "",
     });
+    setPhoneError("");
     setFormOpen(true);
   }
 
@@ -197,6 +211,11 @@ export function AdminManageUsersPage() {
     event.preventDefault();
     if (tab === "patient") {
       pushToast("Administrators cannot create patient login accounts.", "error");
+      return;
+    }
+    if (!isValidManageUserMobile(form.phone)) {
+      setPhoneError(PH_MOBILE_MESSAGE);
+      pushToast(PH_MOBILE_MESSAGE, "error");
       return;
     }
     setBusy(true);
@@ -796,30 +815,79 @@ export function AdminManageUsersPage() {
 
       {formOpen ? (
         <AdminModal title={editing ? "Edit account" : "Provision Profile"} onClose={() => setFormOpen(false)} wide>
-          <form className="admin-form" onSubmit={saveUser}>
-            <label>First name<input required value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} /></label>
-            <label>Last name<input required value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} /></label>
-            <label>Email<input required type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></label>
-            <label>Phone<input required value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></label>
-            {!editing ? <label>Temporary password<input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Optional" /></label> : null}
-            {tab === "staff" ? (
-              <label>Operational role
-                <select value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })}>
-                  <option>Chief Clinic Coordinator</option>
-                  <option>Senior Desk Administrator</option>
-                  <option>Clinic Staff</option>
-                </select>
+          <form className="admin-form admin-form--manage-user" onSubmit={saveUser} noValidate>
+            <div className="admin-form--manage-user__grid">
+              <label>
+                First name
+                <input required value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} />
               </label>
-            ) : null}
-            {tab === "dentist" ? (
-              <>
-                <label>Specialization<input value={form.specialization} onChange={(e) => setForm({ ...form, specialization: e.target.value })} /></label>
-                <label>Schedule notes<textarea value={form.scheduleNotes} onChange={(e) => setForm({ ...form, scheduleNotes: e.target.value })} /></label>
-              </>
-            ) : null}
+              <label>
+                Last name
+                <input required value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} />
+              </label>
+              <label>
+                Email
+                <input required type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+              </label>
+              <label>
+                Mobile Number
+                <input
+                  required
+                  type="tel"
+                  inputMode="numeric"
+                  autoComplete="tel"
+                  maxLength={Math.max(11, String(form.phone || "").length)}
+                  pattern="09[0-9]{9}"
+                  placeholder="09XXXXXXXXX"
+                  value={form.phone}
+                  aria-invalid={phoneError || (form.phone && !isValidManageUserMobile(form.phone)) ? "true" : "false"}
+                  onChange={(e) => {
+                    setForm({ ...form, phone: sanitizeManageUserMobileInput(e.target.value) });
+                    setPhoneError("");
+                  }}
+                  onPaste={(event) => {
+                    event.preventDefault();
+                    const pasted = event.clipboardData.getData("text");
+                    setForm({ ...form, phone: sanitizeManageUserMobileInput(pasted) });
+                    setPhoneError("");
+                  }}
+                />
+                {phoneError || (form.phone && !isValidManageUserMobile(form.phone)) ? (
+                  <span className="admin-form--manage-user__error">{phoneError || PH_MOBILE_MESSAGE}</span>
+                ) : null}
+              </label>
+              {!editing ? (
+                <label className="admin-form--manage-user__full">
+                  Temporary password
+                  <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Optional" />
+                </label>
+              ) : null}
+              {tab === "staff" ? (
+                <label className="admin-form--manage-user__full">
+                  Operational role
+                  <select value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })}>
+                    <option>Chief Clinic Coordinator</option>
+                    <option>Senior Desk Administrator</option>
+                    <option>Clinic Staff</option>
+                  </select>
+                </label>
+              ) : null}
+              {tab === "dentist" ? (
+                <>
+                  <label className="admin-form--manage-user__full">
+                    Specialization
+                    <input value={form.specialization} onChange={(e) => setForm({ ...form, specialization: e.target.value })} />
+                  </label>
+                  <label className="admin-form--manage-user__full">
+                    Schedule notes
+                    <textarea value={form.scheduleNotes} onChange={(e) => setForm({ ...form, scheduleNotes: e.target.value })} />
+                  </label>
+                </>
+              ) : null}
+            </div>
             <div className="admin-modal__actions">
               <button type="button" className="button button--secondary" onClick={() => setFormOpen(false)}>Cancel</button>
-              <button className="button button--primary" disabled={busy}>{busy ? "Saving…" : "Save"}</button>
+              <button className="button button--primary" disabled={busy || !isValidManageUserMobile(form.phone)}>{busy ? "Saving…" : "Save"}</button>
             </div>
           </form>
         </AdminModal>

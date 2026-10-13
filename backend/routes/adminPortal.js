@@ -68,6 +68,32 @@ function normalizePhone(value) {
   return /^0\d{10}$/.test(digits) ? `63${digits.slice(1)}` : digits;
 }
 
+const PH_MOBILE_PATTERN = /^09[0-9]{9}$/;
+const PH_MOBILE_MESSAGE = "Enter a valid 11-digit mobile number starting with 09.";
+
+function parseManageUserMobile(value) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "string" && typeof value !== "number") {
+    return null;
+  }
+
+  const raw = String(value).trim();
+  if (!raw) {
+    return null;
+  }
+  if (/[A-Za-z]/.test(raw)) {
+    return null;
+  }
+
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length !== 11 || !PH_MOBILE_PATTERN.test(digits)) {
+    return null;
+  }
+  return digits;
+}
+
 function isIsoDate(value) {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     return false;
@@ -868,14 +894,14 @@ function createAdminPortalRouter({
     const firstName = stringValue(req.body?.firstName, 80);
     const lastName = stringValue(req.body?.lastName, 80);
     const email = req.body?.email !== undefined ? normalizeEmail(req.body.email) : undefined;
-    const phone = req.body?.phone !== undefined ? normalizePhone(req.body.phone) : undefined;
+    const phone = req.body?.phone !== undefined ? parseManageUserMobile(req.body.phone) : undefined;
     const statusInput = stringValue(req.body?.status, 40)?.toLowerCase();
 
     if (req.body?.email !== undefined && !email) {
       return res.status(400).json({ message: "Provide a valid email address." });
     }
     if (req.body?.phone !== undefined && !phone) {
-      return res.status(400).json({ message: "Provide a valid phone number." });
+      return res.status(400).json({ message: PH_MOBILE_MESSAGE });
     }
     if (statusInput && !["active", "inactive"].includes(statusInput)) {
       return res.status(400).json({ message: "Status must be active or inactive." });
@@ -1015,14 +1041,17 @@ function createAdminPortalRouter({
     const firstName = stringValue(req.body?.firstName, 80);
     const lastName = stringValue(req.body?.lastName, 80);
     const email = normalizeEmail(req.body?.email);
-    const phone = normalizePhone(req.body?.phone);
+    const phone = parseManageUserMobile(req.body?.phone);
     const password = typeof req.body?.password === "string" ? req.body.password : null;
     const position = stringValue(req.body?.position, 120) || "";
 
-    if (!firstName || !lastName || !email || !phone) {
+    if (!firstName || !lastName || !email) {
       return res.status(400).json({
         message: "First name, last name, email, and phone are required.",
       });
+    }
+    if (!phone) {
+      return res.status(400).json({ message: PH_MOBILE_MESSAGE });
     }
     if (password && password.length < 10) {
       return res.status(400).json({
@@ -1142,7 +1171,7 @@ function createAdminPortalRouter({
     const firstName = stringValue(req.body?.firstName, 80);
     const lastName = stringValue(req.body?.lastName, 80);
     const email = req.body?.email !== undefined ? normalizeEmail(req.body.email) : undefined;
-    const phone = req.body?.phone !== undefined ? normalizePhone(req.body.phone) : undefined;
+    const phone = req.body?.phone !== undefined ? parseManageUserMobile(req.body.phone) : undefined;
     const statusInput = stringValue(req.body?.status, 40)?.toLowerCase();
     const position = stringValue(req.body?.position, 120);
 
@@ -1150,7 +1179,7 @@ function createAdminPortalRouter({
       return res.status(400).json({ message: "Provide a valid email address." });
     }
     if (req.body?.phone !== undefined && !phone) {
-      return res.status(400).json({ message: "Provide a valid phone number." });
+      return res.status(400).json({ message: PH_MOBILE_MESSAGE });
     }
     if (statusInput && !["active", "inactive"].includes(statusInput)) {
       return res.status(400).json({ message: "Status must be active or inactive." });
@@ -1234,16 +1263,19 @@ function createAdminPortalRouter({
     const firstName = stringValue(req.body?.firstName, 80);
     const lastName = stringValue(req.body?.lastName, 80);
     const email = normalizeEmail(req.body?.email);
-    const phone = normalizePhone(req.body?.phone);
+    const phone = parseManageUserMobile(req.body?.phone);
     const password = typeof req.body?.password === "string" ? req.body.password : null;
     const specialization = stringValue(req.body?.specialization, 180) || "";
     const scheduleNotes = stringValue(req.body?.scheduleNotes, 2000) || "";
     const catalogDentistId = stringValue(req.body?.catalogDentistId, 80) || null;
 
-    if (!firstName || !lastName || !email || !phone) {
+    if (!firstName || !lastName || !email) {
       return res.status(400).json({
         message: "First name, last name, email, and phone are required.",
       });
+    }
+    if (!phone) {
+      return res.status(400).json({ message: PH_MOBILE_MESSAGE });
     }
     if (password && password.length < 10) {
       return res.status(400).json({
@@ -1343,7 +1375,7 @@ function createAdminPortalRouter({
     const firstName = stringValue(req.body?.firstName, 80);
     const lastName = stringValue(req.body?.lastName, 80);
     const email = req.body?.email !== undefined ? normalizeEmail(req.body.email) : undefined;
-    const phone = req.body?.phone !== undefined ? normalizePhone(req.body.phone) : undefined;
+    const phone = req.body?.phone !== undefined ? parseManageUserMobile(req.body.phone) : undefined;
     const statusInput = stringValue(req.body?.status, 40)?.toLowerCase();
     const specializationProvided = Object.prototype.hasOwnProperty.call(
       req.body || {},
@@ -1364,7 +1396,7 @@ function createAdminPortalRouter({
       return res.status(400).json({ message: "Provide a valid email address." });
     }
     if (req.body?.phone !== undefined && !phone) {
-      return res.status(400).json({ message: "Provide a valid phone number." });
+      return res.status(400).json({ message: PH_MOBILE_MESSAGE });
     }
     if (statusInput && !["active", "inactive"].includes(statusInput)) {
       return res.status(400).json({ message: "Status must be active or inactive." });
@@ -3055,6 +3087,7 @@ module.exports = {
   stringValue,
   normalizeEmail,
   normalizePhone,
+  parseManageUserMobile,
   isIsoDate,
   isTime,
   numericId,

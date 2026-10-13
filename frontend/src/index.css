@@ -4548,6 +4548,60 @@ body.is-queue-display .staff-mobile-nav {
 .admin-modal__header h2 { font-size: 1.12rem; letter-spacing: -.035em; }
 .admin-form,
 .admin-settings-stack { display: grid; gap: .9rem; }
+.admin-form--manage-user {
+  min-width: 0;
+}
+.admin-form--manage-user__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+  min-width: 0;
+}
+.admin-form--manage-user label {
+  display: grid;
+  gap: 0.38rem;
+  min-width: 0;
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+.admin-form--manage-user input,
+.admin-form--manage-user select,
+.admin-form--manage-user textarea {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 0.62rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text);
+  background: var(--surface-solid);
+}
+.admin-form--manage-user textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+.admin-form--manage-user__full {
+  grid-column: 1 / -1;
+}
+.admin-form--manage-user__error {
+  color: var(--danger);
+  font-size: 0.72rem;
+  font-weight: 500;
+}
+.admin-page .admin-modal-backdrop {
+  padding:
+    max(0.75rem, env(safe-area-inset-top, 0px))
+    max(0.75rem, env(safe-area-inset-right, 0px))
+    max(0.75rem, env(safe-area-inset-bottom, 0px))
+    max(0.75rem, env(safe-area-inset-left, 0px));
+}
+.admin-page .admin-modal {
+  max-width: calc(100vw - 1.5rem);
+  overflow-x: hidden;
+  overflow-y: auto;
+}
 .admin-modal__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .5rem; margin-top: .15rem; }
 .admin-confirm-copy { color: var(--text); font-size: .84rem; line-height: 1.55; }
 .admin-detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .65rem; margin-bottom: 1rem; }
@@ -5233,6 +5287,7 @@ body.is-queue-display .staff-mobile-nav {
   .admin-table th { padding: .65rem 1rem; }
   .admin-table td { padding: .78rem 1rem; }
   .admin-detail-grid { grid-template-columns: 1fr; }
+  .admin-form--manage-user__grid { grid-template-columns: 1fr; }
   .admin-notification { grid-template-columns: 39px minmax(0, 1fr); }
   .admin-notification .button { grid-column: 2 / 3; justify-self: start; }
   .admin-profile-card__details { grid-template-columns: 1fr; }
