@@ -3,6 +3,13 @@ import { api } from "./api";
 import { AuthContext } from "./authContext";
 
 const TOKEN_KEY = "amethyst_access_token";
+const PATIENT_THEME_KEY = "amethyst_theme";
+
+function resetPatientThemePreference() {
+  localStorage.removeItem(PATIENT_THEME_KEY);
+  sessionStorage.removeItem(PATIENT_THEME_KEY);
+  delete document.documentElement.dataset.theme;
+}
 
 const EMPTY_SESSION = {
   actingAs: false,
@@ -20,7 +27,9 @@ export function AuthProvider({ children }) {
     let cancelled = false;
 
     async function hydrate() {
+      delete document.documentElement.dataset.theme;
       if (!token) {
+        resetPatientThemePreference();
         setUser(null);
         setSession(EMPTY_SESSION);
         setIsLoading(false);
@@ -36,6 +45,7 @@ export function AuthProvider({ children }) {
         }
       } catch {
         localStorage.removeItem(TOKEN_KEY);
+        resetPatientThemePreference();
         if (!cancelled) {
           setToken(null);
           setUser(null);
@@ -76,6 +86,7 @@ export function AuthProvider({ children }) {
       logout() {
         localStorage.removeItem(TOKEN_KEY);
         sessionStorage.removeItem("amethyst_pending_otp");
+        resetPatientThemePreference();
         setToken(null);
         setUser(null);
         setSession(EMPTY_SESSION);
