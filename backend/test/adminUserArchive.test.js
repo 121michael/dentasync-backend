@@ -130,6 +130,23 @@ async function startPortal(seedUsers, { missingPatientColumns = false } = {}) {
       };
     }
 
+    if (sql.includes("password_hash") && sql.includes("id::text = ANY") && sql.includes("FROM users")) {
+      const ids = Array.isArray(params[0]) ? params[0].map(String) : [];
+      return {
+        rows: ids
+          .map((id) => users.get(id))
+          .filter(Boolean)
+          .map((user) => ({
+            id: String(user.id),
+            has_password: Boolean(user.password_hash),
+          })),
+      };
+    }
+
+    if (sql.includes("FROM password_reset_requests")) {
+      return { rows: [] };
+    }
+
     if (sql.includes("FROM users AS account") && sql.includes("LOWER(account.role) = 'patient'")) {
       if (missingPatientColumns && sql.includes("account.patient_id")) {
         const error = new Error('column "patient_id" does not exist');

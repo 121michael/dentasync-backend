@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Archive, Eye, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { Archive, Eye, KeyRound, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { Navigate, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
@@ -46,6 +46,11 @@ function categoryLabel(value) {
   if (raw === "pwd") return "PWD";
   if (raw === "regular" || raw === "regular_patient") return "Regular";
   return value ? String(value) : "Regular";
+}
+
+function patientPasswordStatusLabel(user) {
+  const status = String(user?.passwordStatus || "").trim();
+  return status || "—";
 }
 
 function archiveCategoryLabel(tab) {
@@ -231,6 +236,31 @@ export function AdminManageUsersPage() {
       await load();
     } catch (archiveError) {
       pushToast(archiveError.message || "Unable to archive this record.", "error");
+    } finally {
+      setActionBusyId("");
+    }
+  }
+
+  async function resetPatientPassword(user) {
+    const ok = await confirm({
+      title: "Reset Patient Password",
+      message: "Are you sure you want to initiate a password reset for this patient?",
+      confirmLabel: "Continue",
+      tone: "primary",
+    });
+    if (!ok) return;
+    setActionBusyId(`${user.id}:reset-password`);
+    try {
+      const response = await api.resetAdminAccountPassword(user.id);
+      pushToast(response.message || "A password reset link was sent to the patient's email.");
+      setDetail((current) =>
+        current && String(current.id) === String(user.id)
+          ? { ...current, passwordStatus: "Reset pending" }
+          : current
+      );
+      await load();
+    } catch (resetError) {
+      pushToast(resetError.message || "Unable to initiate a password reset.", "error");
     } finally {
       setActionBusyId("");
     }
@@ -440,8 +470,10 @@ export function AdminManageUsersPage() {
                   {tab !== "patient" ? <th>System ID</th> : null}
                   {tab === "staff" ? <th>Operational Role</th> : null}
                   {tab === "dentist" ? <th>Specialization</th> : null}
+                  {tab === "patient" ? <th>Email</th> : null}
                   {tab === "patient" ? <th>Phone</th> : null}
                   {tab !== "patient" ? <th>Contact Endpoint</th> : null}
+                  {tab === "patient" ? <th>Password Status</th> : null}
                   <th>{tab === "patient" ? "Status" : "Operational Status"}</th>
                   <th>Actions</th>
                 </tr>
@@ -472,8 +504,10 @@ export function AdminManageUsersPage() {
                       {tab === "dentist" ? (
                         <td>{user.specialization || "General Dentistry"}</td>
                       ) : null}
+                      {tab === "patient" ? <td>{user.email || "—"}</td> : null}
                       {tab === "patient" ? <td>{user.phone || "—"}</td> : null}
                       {tab !== "patient" ? <td>{user.email}</td> : null}
+                      {tab === "patient" ? <td>{patientPasswordStatusLabel(user)}</td> : null}
                       <td>
                         <AdminStatusBadge
                           status={
@@ -528,6 +562,13 @@ export function AdminManageUsersPage() {
                                   Suspend
                                 </button>
                               ) : null}
+                              <button
+                                className="button button--secondary button--compact"
+                                disabled={actionBusyId === `${user.id}:reset-password` || !user.email}
+                                onClick={() => resetPatientPassword(user)}
+                              >
+                                <KeyRound size={14} /> Reset Password
+                              </button>
                               <button
                                 className="button button--secondary button--compact"
                                 disabled={actionBusyId === `${user.id}:archive`}
@@ -836,7 +877,25 @@ export function AdminManageUsersPage() {
               <p><small>Category</small><strong>{categoryLabel(detail.patientCategory)}</strong></p>
             ) : null}
             <p><small>Status</small><strong className="capitalize">{detail.status}</strong></p>
+            {String(detail.role || "").toLowerCase() === "patient" ? (
+              <p><small>Password status</small><strong>{patientPasswordStatusLabel(detail)}</strong></p>
+            ) : null}
           </div>
+          {String(detail.role || "").toLowerCase() === "patient" ? (
+            <div className="admin-modal__actions">
+              <button type="button" className="button button--secondary" onClick={() => setDetail(null)}>
+                Close
+              </button>
+              <button
+                type="button"
+                className="button button--primary"
+                disabled={actionBusyId === `${detail.id}:reset-password` || !detail.email}
+                onClick={() => resetPatientPassword(detail)}
+              >
+                Reset Password
+              </button>
+            </div>
+          ) : null}
         </AdminModal>
       ) : null}
     </div>

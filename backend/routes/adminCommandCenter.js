@@ -3,6 +3,8 @@
 const crypto = require("crypto");
 const bcrypt = require("bcrypt");
 const { writeAdminAudit } = require("../services/adminAudit");
+const { insertPatientNotification } = require("../services/patientPortalNotifications");
+const { PasswordResetDeliveryError } = require("../services/passwordResetService");
 const { linkClinicalRecordsToUser } = require("../services/clinicalPatients");
 const {
   canPermanentlyDeleteAccount,
@@ -198,7 +200,7 @@ async function clientQueryWithColumnFallback(client, attempts) {
   throw lastError;
 }
 
-function attachAdminCommandCenterRoutes(router, { db }) {
+function attachAdminCommandCenterRoutes(router, { db, passwordResetService = null }) {
   router.get("/status", async (_req, res) => {
     try {
       let database = false;
@@ -763,25 +765,75 @@ function attachAdminCommandCenterRoutes(router, { db }) {
       return res.status(400).json({ message: "A valid account ID is required." });
     }
 
-    const temporaryPassword =
-      stringValue(req.body?.temporaryPassword, 72) ||
-      `Amethyst-${crypto.randomBytes(4).toString("hex")}`;
-
     try {
       const target = await db.query(
-        `SELECT id, email, is_archived FROM users WHERE id::text = $1 LIMIT 1`,
+        `SELECT id, first_name, last_name, email, role, status, is_verified, is_archived
+         FROM users
+         WHERE id::text = $1
+         LIMIT 1`,
         [accountId]
       );
       if (!target.rows.length || target.rows[0].is_archived) {
         return res.status(404).json({ message: "Account not found." });
       }
 
-      const targetRole = String(target.rows[0].role || "").toLowerCase();
+      const account = target.rows[0];
+      const targetRole = String(account.role || "").toLowerCase();
       if (targetRole === "staff" || targetRole === "dentist") {
         return res.status(403).json({
           message: "Password reset is not available for clinic staff or dentist accounts from User Management.",
         });
       }
+
+      if (targetRole === "patient") {
+        if (!passwordResetService?.issuePasswordReset) {
+          return res.status(503).json({
+            message: "Password reset is temporarily unavailable. Please try again later.",
+          });
+        }
+        const email = stringValue(account.email, 254);
+        if (!email) {
+          return res.status(400).json({
+            message: "This patient account does not have a verified email for password reset.",
+          });
+        }
+
+        const issued = await passwordResetService.issuePasswordReset(account);
+
+        try {
+          await insertPatientNotification(db, {
+            userId: account.id,
+            type: "security",
+            title: "Password reset requested",
+            body: "An administrator requested a password reset for your account. Use the link sent to your email to choose a new password. Your current password still works until you finish that reset.",
+            entityType: "account",
+            entityId: account.id,
+          });
+        } catch (notifyError) {
+          if (notifyError?.code !== "42P01") {
+            console.warn("Patient password-reset notification was not stored:", notifyError.message);
+          }
+        }
+
+        await audit(db, req, {
+          action: "reset_password",
+          targetType: "account",
+          targetId: accountId,
+          targetLabel: email,
+          result: "success",
+          detail: "Administrator initiated a patient password reset email. The current password was not changed.",
+        });
+
+        return res.json({
+          message: "A password reset link was sent to the patient's email. The current password was not changed.",
+          expiresAt: issued?.expiresAt || null,
+          delivery: "email",
+        });
+      }
+
+      const temporaryPassword =
+        stringValue(req.body?.temporaryPassword, 72) ||
+        `Amethyst-${crypto.randomBytes(4).toString("hex")}`;
 
       const passwordHash = await bcrypt.hash(temporaryPassword, 10);
       await db.query(
@@ -796,7 +848,7 @@ function attachAdminCommandCenterRoutes(router, { db }) {
         action: "reset_password",
         targetType: "account",
         targetId: accountId,
-        targetLabel: target.rows[0].email,
+        targetLabel: account.email,
         result: "warning",
         detail: "Administrator issued a temporary password reset.",
       });
@@ -806,6 +858,11 @@ function attachAdminCommandCenterRoutes(router, { db }) {
         temporaryPassword,
       });
     } catch (error) {
+      if (error instanceof PasswordResetDeliveryError) {
+        return res.status(503).json({
+          message: "Unable to send the reset email. Please try again later.",
+        });
+      }
       console.error("Admin reset password error:", error.message);
       return res.status(500).json({ message: "Unable to reset password." });
     }

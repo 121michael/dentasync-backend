@@ -199,6 +199,9 @@ function mapAccount(row, extras = {}) {
   if (extras.lastTreatment !== undefined || row.last_treatment !== undefined) {
     payload.lastTreatment = extras.lastTreatment ?? row.last_treatment ?? "";
   }
+  if (extras.passwordStatus !== undefined || row.password_status !== undefined) {
+    payload.passwordStatus = extras.passwordStatus ?? row.password_status ?? null;
+  }
 
   return payload;
 }
@@ -230,6 +233,70 @@ async function notifyPatient(client, payload) {
     if (error.code !== "42P01") {
       throw error;
     }
+  }
+}
+
+function patientPasswordStatusLabel({ hasPassword, resetPending }) {
+  if (resetPending) {
+    return "Reset pending";
+  }
+  return hasPassword ? "Password set" : "No password set";
+}
+
+async function overlayPatientPasswordStatus(db, accounts) {
+  if (!Array.isArray(accounts) || !accounts.length) {
+    return;
+  }
+
+  const ids = accounts.map((account) => String(account.id)).filter(Boolean);
+  if (!ids.length) {
+    return;
+  }
+
+  const hasPasswordById = new Map();
+  try {
+    const result = await db.query(
+      `SELECT id::text AS id,
+              (password_hash IS NOT NULL AND BTRIM(password_hash) <> '') AS has_password
+       FROM users
+       WHERE id::text = ANY($1::text[])`,
+      [ids]
+    );
+    for (const row of result.rows) {
+      hasPasswordById.set(String(row.id), Boolean(row.has_password));
+    }
+  } catch (error) {
+    if (error?.code !== "42703") {
+      throw error;
+    }
+  }
+
+  const pendingIds = new Set();
+  try {
+    const pending = await db.query(
+      `SELECT user_id
+       FROM password_reset_requests
+       WHERE user_id = ANY($1::text[])
+         AND used_at IS NULL
+         AND invalidated_at IS NULL
+         AND expires_at > CURRENT_TIMESTAMP`,
+      [ids]
+    );
+    for (const row of pending.rows) {
+      pendingIds.add(String(row.user_id));
+    }
+  } catch (error) {
+    if (error?.code !== "42P01") {
+      throw error;
+    }
+  }
+
+  for (const account of accounts) {
+    const id = String(account.id);
+    account.passwordStatus = patientPasswordStatusLabel({
+      hasPassword: hasPasswordById.get(id) === true,
+      resetPending: pendingIds.has(id),
+    });
   }
 }
 
@@ -330,7 +397,7 @@ function createAdminPortalRouter({
     db,
     uploadDirectory: path.join(process.cwd(), "uploads", "admin-document-sync"),
   });
-  attachAdminCommandCenterRoutes(router, { db });
+  attachAdminCommandCenterRoutes(router, { db, passwordResetService });
   attachClinicScheduleRoutes(router, { db });
   attachAdminDependentRoutes(router, { db });
 
@@ -625,23 +692,27 @@ function createAdminPortalRouter({
 
       const result = await db.query(selectSql, listParams);
       const key = role === "patient" ? "patients" : role === "dentist" ? "dentists" : "staff";
+      const accounts = result.rows.map((row) =>
+        mapAccount(row, {
+          position: row.operational_role || "",
+          operationalRole: row.operational_role || "",
+          dateOfBirth: row.date_of_birth || null,
+          gender: row.gender || "",
+          age: row.age ?? null,
+          lastTreatment: row.last_treatment || "",
+          lastVisit: row.last_visit || null,
+          patientId: row.patient_id || null,
+          patientCategory: row.patient_category || null,
+        })
+      );
+      if (role === "patient") {
+        await overlayPatientPasswordStatus(db, accounts);
+      }
       return {
         page,
         limit,
         total: count(countResult.rows[0]),
-        [key]: result.rows.map((row) =>
-          mapAccount(row, {
-            position: row.operational_role || "",
-            operationalRole: row.operational_role || "",
-            dateOfBirth: row.date_of_birth || null,
-            gender: row.gender || "",
-            age: row.age ?? null,
-            lastTreatment: row.last_treatment || "",
-            lastVisit: row.last_visit || null,
-            patientId: row.patient_id || null,
-            patientCategory: row.patient_category || null,
-          })
-        ),
+        [key]: accounts,
       };
     }
 
@@ -907,9 +978,11 @@ function createAdminPortalRouter({
       }
 
       const profile = profileResult.rows[0] || null;
+      const patient = mapAccount(patientResult.rows[0]);
+      await overlayPatientPasswordStatus(db, [patient]);
       return res.json({
         patient: {
-          ...mapAccount(patientResult.rows[0]),
+          ...patient,
           profile: profile
             ? {
                 dateOfBirth: profile.date_of_birth,
