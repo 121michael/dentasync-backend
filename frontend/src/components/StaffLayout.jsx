@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   Bell,
   CalendarDays,
@@ -19,6 +19,8 @@ import { staffInitials } from "../staffUtils";
 import { StaffConfirmModal, StaffToastStack } from "./StaffUI";
 import { onNotificationsChanged } from "../notificationEvents";
 import { BrandMark } from "./BrandMark";
+import { LogoutConfirmDialog } from "./LogoutConfirmDialog";
+import { useLogoutConfirm } from "./useLogoutConfirm";
 
 const StaffUiContext = createContext(null);
 
@@ -77,8 +79,8 @@ function StaffNavigation({ onNavigate, alerts }) {
 }
 
 export function StaffLayout() {
-  const { user, logout } = useAuth();
-  const navigate = useNavigate();
+  const { user } = useAuth();
+  const { requestLogout, logoutDialogProps } = useLogoutConfirm();
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [toasts, setToasts] = useState([]);
@@ -163,11 +165,6 @@ export function StaffLayout() {
     });
   }, []);
 
-  function handleLogout() {
-    logout();
-    navigate("/login", { replace: true });
-  }
-
   function closeMenu(to) {
     setIsMobileMenuOpen(false);
     if (to === "/staff/notifications") {
@@ -199,7 +196,7 @@ export function StaffLayout() {
                 <small>Front Desk Coordinator</small>
               </span>
             </div>
-            <button className="staff-nav__link staff-nav__button" onClick={handleLogout}>
+            <button className="staff-nav__link staff-nav__button" onClick={requestLogout}>
               <LogOut size={18} aria-hidden="true" />
               <span>Logout</span>
             </button>
@@ -277,6 +274,7 @@ export function StaffLayout() {
             onCancel={() => confirmState.resolve(false)}
           />
         ) : null}
+        <LogoutConfirmDialog {...logoutDialogProps} />
       </div>
     </StaffUiContext.Provider>
   );

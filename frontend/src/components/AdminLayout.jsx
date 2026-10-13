@@ -18,11 +18,12 @@ import {
   X,
 } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { useAuth } from "../useAuth";
 import { api } from "../api";
 import { AdminConfirmModal, AdminToastStack } from "./AdminUI";
 import { onNotificationsChanged } from "../notificationEvents";
 import { BrandMark } from "./BrandMark";
+import { LogoutConfirmDialog } from "./LogoutConfirmDialog";
+import { useLogoutConfirm } from "./useLogoutConfirm";
 
 const AdminUiContext = createContext(null);
 
@@ -65,7 +66,7 @@ const PAGE_TITLES = {
 };
 
 export function AdminLayout() {
-  const { logout } = useAuth();
+  const { requestLogout, logoutDialogProps } = useLogoutConfirm();
   const navigate = useNavigate();
   const location = useLocation();
   const [isOpen, setIsOpen] = useState(false);
@@ -157,11 +158,6 @@ export function AdminLayout() {
     };
   }, [location.pathname]);
 
-  function handleLogout() {
-    logout();
-    navigate("/login", { replace: true });
-  }
-
   async function runSecurityAudit() {
     try {
       await api.runAdminSecurityAudit();
@@ -226,7 +222,7 @@ export function AdminLayout() {
                 <small>Global Admin</small>
               </span>
             </div>
-            <button className="admin-nav__link admin-nav__button" onClick={handleLogout}>
+            <button className="admin-nav__link admin-nav__button" onClick={requestLogout}>
               <LogOut size={18} aria-hidden="true" />
               <span>Logout</span>
             </button>
@@ -292,6 +288,7 @@ export function AdminLayout() {
             onConfirm={() => confirmState.resolve(true)}
           />
         ) : null}
+        <LogoutConfirmDialog {...logoutDialogProps} />
       </div>
     </AdminUiContext.Provider>
   );
