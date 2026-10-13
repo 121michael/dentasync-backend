@@ -78,36 +78,19 @@ export function StaffQueueDisplay({ queue, onExit }) {
   return (
     <div className="staff-queue-board" role="dialog" aria-modal="true" aria-label="Live queue status">
       <header className="staff-queue-board__chrome">
-        <p>Amethyst Dental Clinic · Live Queue Status</p>
+        <div className="staff-queue-board__identity">
+          <p>Amethyst Dental Clinic</p>
+          <h1>Live Queue Status</h1>
+        </div>
         <button type="button" className="button button--secondary" onClick={onExit}>
           <X size={16} aria-hidden="true" /> Exit Display
         </button>
       </header>
 
-      <div className="staff-queue-board__stage">
-        <section className="staff-queue-board__waiting" aria-label="Waiting patients and estimates">
-          <div className="staff-queue-board__bar staff-queue-board__bar--wait">
-            <span>Up Next</span>
-            <span>Estimated Wait</span>
-          </div>
-          {model.waiting.length ? (
-            <ol className="staff-queue-board__waiting-list">
-              {model.waiting.map((row) => (
-                <li key={row.id} className="staff-queue-board__waiting-row">
-                  <strong>{row.queueNumber}</strong>
-                  <span>{row.waitLabel}</span>
-                </li>
-              ))}
-            </ol>
-          ) : (
-            <p className="staff-queue-board__empty">No patients waiting in queue.</p>
-          )}
-        </section>
-
-        <section className="staff-queue-board__serving" aria-label="Now serving">
-          <div className="staff-queue-board__bar staff-queue-board__bar--serve">Now Serving</div>
-          <div className="staff-queue-board__serving-stage">
-            <img src="/logo.png" alt="" className="staff-queue-board__mark" />
+      <div className="staff-queue-board__panel">
+        <div className="staff-queue-board__stage">
+          <section className="staff-queue-board__serving" aria-label="Now serving">
+            <h2>Now Serving</h2>
             {model.serving.length ? (
               <ul className="staff-queue-board__serving-list">
                 {model.serving.map((row) => (
@@ -125,11 +108,37 @@ export function StaffQueueDisplay({ queue, onExit }) {
             ) : (
               <p className="staff-queue-board__empty">No patient currently being served.</p>
             )}
-          </div>
-        </section>
-      </div>
+          </section>
 
-      <p className="staff-queue-board__ticker">Waiting times are estimates and may change.</p>
+          <section className="staff-queue-board__waiting" aria-label="Waiting patients and estimates">
+            <div className="staff-queue-board__waiting-head">
+              <h2>Next Patient</h2>
+              <h2>Estimated Waiting Time</h2>
+            </div>
+            {model.waiting.length ? (
+              <ol className="staff-queue-board__waiting-list">
+                {model.waiting.map((row, index) => (
+                  <li
+                    key={row.id}
+                    className={
+                      index === 0
+                        ? "staff-queue-board__waiting-row is-next"
+                        : "staff-queue-board__waiting-row"
+                    }
+                  >
+                    <strong>{row.queueNumber}</strong>
+                    <span>{row.waitLabel}</span>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="staff-queue-board__empty">No patients waiting.</p>
+            )}
+          </section>
+        </div>
+
+        <p className="staff-queue-board__disclaimer">Waiting times are estimates and may change.</p>
+      </div>
     </div>
   );
 }
