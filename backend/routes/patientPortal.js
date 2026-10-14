@@ -16,6 +16,7 @@ const {
   loadAuthorizedPatientContext,
   detectLanguage,
   consumeAssistantRateLimit,
+  APPROVED_HMO_PROVIDERS,
 } = require("../services/clinicAssistant");
 const {
   loadAiSettings,
@@ -454,7 +455,15 @@ function createPatientPortalRouter({
   router.use(authenticateToken, requirePatient);
 
   router.get("/catalog", (_req, res) => {
-    res.json({ services: SERVICES.map(mapCatalogService), dentists: DENTISTS });
+    res.json({
+      services: SERVICES.map(mapCatalogService),
+      dentists: DENTISTS,
+      hmoProviders: APPROVED_HMO_PROVIDERS.map((provider) => ({
+        id: provider.id,
+        name: provider.name,
+        filipinoDoctors: Boolean(provider.filipinoDoctors),
+      })),
+    });
   });
 
   router.get("/availability", async (req, res) => {
@@ -920,6 +929,14 @@ function createPatientPortalRouter({
     const normalizedBirthDate = isIsoDate(hmoBirthDate) ? hmoBirthDate : null;
     if (normalizedCoverage === "hmo" && (!normalizedProvider || !normalizedMemberNumber)) {
       return res.status(400).json({ message: "HMO provider and member number are required for HMO coverage." });
+    }
+    if (
+      normalizedCoverage === "hmo" &&
+      !APPROVED_HMO_PROVIDERS.some((provider) => provider.name === normalizedProvider)
+    ) {
+      return res.status(400).json({
+        message: "Select an approved HMO provider. Clinic staff must still verify eligibility and coverage.",
+      });
     }
 
     const hmoVerificationStatus =
