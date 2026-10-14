@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Download } from "lucide-react";
+import { CircleCheck, Clock3, Download, UsersRound } from "lucide-react";
 import { api } from "../api";
 import { ErrorState, LoadingState } from "../components/UI";
-import { AdminBarChart, AdminDonutChart, AdminStatCard } from "../components/AdminUI";
+import { AdminBarChart, AdminDonutChart, AdminLineChart, AdminStatCard } from "../components/AdminUI";
 import { useAdminUi } from "../components/AdminLayout";
 import { currencyPHP } from "../adminUtils";
 
@@ -55,8 +55,10 @@ export function AdminAnalyticsPage() {
 
   const summary = data.summary || {};
 
+  const dentistMax = Math.max(1, ...(data.dentistPerformance || []).map((entry) => Number(entry.completed || 0)));
+
   return (
-    <div className="admin-page">
+    <div className="admin-page admin-analytics-page">
       <section className="admin-panel">
         <div className="admin-panel__heading">
           <div>
@@ -102,10 +104,20 @@ export function AdminAnalyticsPage() {
       </section>
 
       <div className="admin-analytics-grid">
-        <AdminBarChart title="Revenue Trends" points={data.revenueByPeriod} />
+        <AdminBarChart
+          title="Revenue Trends"
+          eyebrow="Clinic revenue"
+          points={data.revenueByPeriod}
+          formatValue={currencyPHP}
+        />
         <AdminDonutChart title="Appointment Status" segments={segments} />
-        <AdminBarChart title="Patient Volume" points={data.patientVolume || []} valueKey="count" />
-        <AdminBarChart title="Patient Growth" points={data.patientGrowth} valueKey="count" />
+        <AdminBarChart
+          title="Patient Volume"
+          eyebrow="Visit volume"
+          points={data.patientVolume || []}
+          valueKey="count"
+        />
+        <AdminLineChart title="Patient Growth" points={data.patientGrowth} valueKey="count" />
         <section className="admin-chart-card">
           <div className="admin-panel__heading">
             <div>
@@ -113,10 +125,22 @@ export function AdminAnalyticsPage() {
               <h2>Waiting Room Efficiency</h2>
             </div>
           </div>
-          <div className="admin-overview-grid">
-            <article><span>Active queue</span><strong>{data.queuePerformance?.active ?? 0}</strong></article>
-            <article><span>Completed queue</span><strong>{data.queuePerformance?.completed ?? 0}</strong></article>
-            <article><span>Avg wait (min)</span><strong>{data.queuePerformance?.averageWaitMinutes ?? 0}</strong></article>
+          <div className="admin-analytics-kpis">
+            <article>
+              <UsersRound size={18} aria-hidden="true" />
+              <span>Active Queue</span>
+              <strong>{data.queuePerformance?.active ?? 0}</strong>
+            </article>
+            <article>
+              <CircleCheck size={18} aria-hidden="true" />
+              <span>Completed Queue</span>
+              <strong>{data.queuePerformance?.completed ?? 0}</strong>
+            </article>
+            <article>
+              <Clock3 size={18} aria-hidden="true" />
+              <span>Average Wait (Minutes)</span>
+              <strong>{data.queuePerformance?.averageWaitMinutes ?? 0}</strong>
+            </article>
           </div>
         </section>
         <section className="admin-chart-card">
@@ -126,12 +150,15 @@ export function AdminAnalyticsPage() {
               <h2>Dentist Completion Load</h2>
             </div>
           </div>
-          <div className="admin-history-list">
+          <div className="admin-dentist-load">
             {data.dentistPerformance.length ? data.dentistPerformance.map((entry) => (
               <article key={entry.dentist}>
-                <div>
+                <div className="admin-dentist-load__meta">
                   <strong>{entry.dentist}</strong>
                   <small>{entry.completed} completed · {entry.total} total</small>
+                </div>
+                <div className="admin-dentist-load__bar" aria-hidden="true">
+                  <span style={{ width: `${Math.round((Number(entry.completed || 0) / dentistMax) * 100)}%` }} />
                 </div>
                 <span className="admin-count-chip">{entry.completed}</span>
               </article>
