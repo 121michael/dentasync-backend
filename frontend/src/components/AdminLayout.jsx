@@ -167,6 +167,7 @@ export function AdminLayout() {
   }
 
   const hasUnread = alerts.unreadNotifications > 0;
+  const isRfidPage = location.pathname.startsWith("/admin/rfid");
   const uiValue = useMemo(
     () => ({ pushToast, confirm, systemStatus, pageTitle }),
     [pushToast, confirm, systemStatus, pageTitle]
@@ -174,7 +175,7 @@ export function AdminLayout() {
 
   return (
     <AdminUiContext.Provider value={uiValue}>
-      <div className="admin-shell">
+      <div className={`admin-shell${isRfidPage ? " admin-shell--rfid" : ""}`}>
         <aside className={`admin-sidebar ${isOpen ? "is-open" : ""}`}>
           <div className="admin-sidebar__brand">
             <BrandMark title="AMETHYST" subtitle="Administrative Suite" />
