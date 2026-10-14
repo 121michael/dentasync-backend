@@ -86,8 +86,15 @@ export function AdminRfidPage() {
   if (error && !rows) return <ErrorState message={error} onRetry={load} />;
   if (!rows) return <LoadingState label="Loading RFID assignments…" />;
 
+  function updateDraftTag(userId, value) {
+    setDraftTags((currentDraft) => ({
+      ...currentDraft,
+      [userId]: value,
+    }));
+  }
+
   return (
-    <div className="admin-page">
+    <div className="admin-page admin-rfid-page">
       {error ? <p className="inline-alert inline-alert--error">{error}</p> : null}
 
       <section className="admin-panel">
@@ -97,13 +104,13 @@ export function AdminRfidPage() {
             <h2>Patient RFID Tag Assignments</h2>
             <p>Assign or clear RFID tags for patient check-in only. Staff RFID assignment is not managed here.</p>
           </div>
-          <button className="button button--secondary" onClick={load}>
+          <button className="button button--secondary" onClick={load} type="button">
             <RefreshCw size={16} /> Refresh
           </button>
         </div>
 
         <form
-          className="admin-toolbar"
+          className="admin-toolbar admin-rfid-toolbar"
           onSubmit={(event) => {
             event.preventDefault();
             setApplied(search.trim());
@@ -117,84 +124,143 @@ export function AdminRfidPage() {
               placeholder="Search by name, email, phone, or RFID…"
             />
           </label>
-          <button className="button button--secondary button--compact">Search</button>
+          <button className="button button--secondary button--compact" type="submit">
+            Search
+          </button>
         </form>
 
         {rows.length ? (
-          <div className="admin-table-wrap">
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>Patient</th>
-                  <th>Account</th>
-                  <th>Current RFID</th>
-                  <th>Assign / update</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((user) => {
-                  const userId = String(user.id || user.userId || "");
-                  const current = user.rfidTag || user.rfid_tag || "";
-                  return (
-                    <tr key={userId || user.email}>
-                      <td>
-                        <strong>{user.fullName || user.name || "Patient"}</strong>
-                        <small>{user.email || user.phone || userId}</small>
-                      </td>
-                      <td>Patient</td>
-                      <td>
-                        {current ? <code>{current}</code> : <span className="muted-copy">Unassigned</span>}
-                      </td>
-                      <td>
-                        <label className="field">
-                          <span className="sr-only">RFID tag</span>
-                          <input
+          <>
+            <div className="admin-table-wrap admin-rfid-table-wrap">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>Patient</th>
+                    <th>Account</th>
+                    <th>Current RFID</th>
+                    <th>Assign / update</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((user) => {
+                    const userId = String(user.id || user.userId || "");
+                    const current = user.rfidTag || user.rfid_tag || "";
+                    return (
+                      <tr key={userId || user.email}>
+                        <td>
+                          <strong>{user.fullName || user.name || "Patient"}</strong>
+                          <small>{user.email || user.phone || userId}</small>
+                        </td>
+                        <td>Patient</td>
+                        <td>
+                          {current ? <code>{current}</code> : <span className="muted-copy">Unassigned</span>}
+                        </td>
+                        <td>
+                          <AssignTagField
+                            userId={userId}
                             value={draftTags[userId] || ""}
-                            onChange={(event) =>
-                              setDraftTags((currentDraft) => ({
-                                ...currentDraft,
-                                [userId]: event.target.value,
-                              }))
-                            }
-                            placeholder="Scan or type RFID tag"
+                            onChange={updateDraftTag}
                           />
-                        </label>
-                      </td>
-                      <td>
-                        <div className="staff-row-actions">
-                          <button
-                            type="button"
-                            className="button button--primary button--compact"
-                            disabled={Boolean(busy)}
-                            onClick={() => assignTag(user)}
-                          >
-                            <CreditCard size={14} />
-                            {busy === `assign-${userId}` ? "Saving…" : "Assign"}
-                          </button>
-                          {current ? (
-                            <button
-                              type="button"
-                              className="button button--danger button--compact"
-                              disabled={Boolean(busy)}
-                              onClick={() => clearTag(user)}
-                            >
-                              <Trash2 size={14} />
-                              {busy === `clear-${userId}` ? "Clearing…" : "Clear"}
-                            </button>
-                          ) : null}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                        </td>
+                        <td>
+                          <RfidRowActions
+                            user={user}
+                            userId={userId}
+                            current={current}
+                            busy={busy}
+                            onAssign={assignTag}
+                            onClear={clearTag}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="admin-rfid-cards" aria-label="Patient RFID assignments">
+              {rows.map((user) => {
+                const userId = String(user.id || user.userId || "");
+                const current = user.rfidTag || user.rfid_tag || "";
+                const contact = user.email || user.phone || userId;
+                return (
+                  <article className="admin-rfid-card" key={`card-${userId || user.email}`}>
+                    <header className="admin-rfid-card__header">
+                      <h3>{user.fullName || user.name || "Patient"}</h3>
+                      <p>{contact}</p>
+                    </header>
+                    <dl className="admin-rfid-card__meta">
+                      <div>
+                        <dt>Account</dt>
+                        <dd>Patient</dd>
+                      </div>
+                      <div>
+                        <dt>Current RFID</dt>
+                        <dd>
+                          {current ? <code>{current}</code> : <span className="muted-copy">Unassigned</span>}
+                        </dd>
+                      </div>
+                    </dl>
+                    <AssignTagField userId={userId} value={draftTags[userId] || ""} onChange={updateDraftTag} />
+                    <RfidRowActions
+                      user={user}
+                      userId={userId}
+                      current={current}
+                      busy={busy}
+                      onAssign={assignTag}
+                      onClear={clearTag}
+                    />
+                  </article>
+                );
+              })}
+            </div>
+          </>
         ) : (
           <EmptyState title="No patients found" detail="Try another search for a patient account." />
         )}
       </section>
+    </div>
+  );
+}
+
+function AssignTagField({ userId, value, onChange }) {
+  return (
+    <label className="field admin-rfid-tag-field">
+      <span className="sr-only">RFID tag</span>
+      <input
+        value={value}
+        onChange={(event) => onChange(userId, event.target.value)}
+        placeholder="Scan or type RFID tag"
+      />
+    </label>
+  );
+}
+
+function RfidRowActions({ user, userId, current, busy, onAssign, onClear }) {
+  return (
+    <div className="staff-row-actions admin-rfid-actions">
+      <button
+        type="button"
+        className="button button--primary button--compact"
+        disabled={Boolean(busy)}
+        onClick={() => onAssign(user)}
+      >
+        <CreditCard size={14} />
+        {busy === `assign-${userId}` ? "Saving…" : "Assign"}
+      </button>
+      {current ? (
+        <button
+          type="button"
+          className="button button--danger button--compact"
+          disabled={Boolean(busy)}
+          onClick={() => onClear(user)}
+        >
+          <Trash2 size={14} />
+          {busy === `clear-${userId}` ? "Clearing…" : "Clear"}
+        </button>
+      ) : null}
     </div>
   );
 }
