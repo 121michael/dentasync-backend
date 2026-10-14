@@ -16,6 +16,60 @@ const DEFAULT_CLINIC = {
   operatingHours: "Monday–Friday 9:00 AM–4:00 PM · Saturday–Sunday and holidays 11:00 AM–4:00 PM",
 };
 
+// Clinic-approved HMO catalog. Update this list (and aliases) to change chatbot answers without retraining Gemini.
+const APPROVED_HMO_PROVIDERS = [
+  { id: "maxicare", name: "Maxicare", aliases: ["maxicare"], filipinoDoctors: false },
+  { id: "icare", name: "iCare", aliases: ["icare", "i care"], filipinoDoctors: true },
+  { id: "pacific-cross", name: "Pacific Cross", aliases: ["pacific cross", "pacificcross"], filipinoDoctors: true },
+  { id: "etiqa", name: "Etiqa", aliases: ["etiqa"], filipinoDoctors: true },
+  { id: "lacson", name: "Lacson & Lacson", aliases: ["lacson", "lacson & lacson", "lacson and lacson"], filipinoDoctors: true },
+  { id: "hppi", name: "HPPI", aliases: ["hppi"], filipinoDoctors: true },
+  { id: "flexicare", name: "Flexicare", aliases: ["flexicare", "flexi care"], filipinoDoctors: true },
+  { id: "cocolife", name: "Cocolife", aliases: ["cocolife", "coco life"], filipinoDoctors: false },
+  { id: "valucare", name: "ValuCare", aliases: ["valucare", "valuecare", "valu care", "value care"], filipinoDoctors: false },
+];
+
+const UNLISTED_HMO_HINTS = [
+  "medicard",
+  "intellicare",
+  "philhealth",
+  "phil health",
+  "caritas",
+  "avega",
+  "insular",
+  "generali",
+  "blue cross",
+  "medicare",
+];
+
+function formatHmoProviderList(providers = APPROVED_HMO_PROVIDERS) {
+  const names = providers.map((item) => item.name);
+  if (names.length === 0) return "";
+  if (names.length === 1) return names[0];
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
+}
+
+const HMO_PROVIDER_LIST = formatHmoProviderList();
+
+const HMO_PRIVACY_EN =
+  "Your HMO information will be used for verification purposes only, to help the clinic check your account and eligibility for dental services. Your information will be handled in accordance with our privacy policy and applicable data protection requirements.";
+
+const HMO_PRIVACY_TL =
+  "Gagamitin ang iyong HMO information para sa verification lamang, upang matulungan ang klinika na i-check ang iyong account at eligibility para sa dental services. Hahawakan ito ayon sa aming privacy policy at applicable data protection requirements.";
+
+const HMO_DEFAULT_EN = `Amethyst Dental Clinic accommodates patients with ${HMO_PROVIDER_LIST}, subject to account verification, applicable accreditation arrangements, and coverage.
+
+Please book an appointment and follow our clinic's HMO verification process. Our clinic staff must confirm your account eligibility and the coverage available for your requested dental service before we can confirm whether it is covered.
+
+${HMO_PRIVACY_EN}`;
+
+const HMO_DEFAULT_TL = `Tumanggap ang Amethyst Dental Clinic ng pasyente na may ${HMO_PROVIDER_LIST}, subject sa account verification, applicable accreditation arrangements, at coverage.
+
+Mag-book ng appointment at sundan ang HMO verification process ng klinika. Kailangang kumpirmahin ng clinic staff ang eligibility ng account at ang coverage para sa hinihinging dental service bago namin masabing covered ito.
+
+${HMO_PRIVACY_TL}`;
+
 const GENERIC_SERVICE_TOKENS = new Set([
   "dental",
   "teeth",
@@ -235,13 +289,25 @@ const CLINIC_TOPICS = [
   },
   {
     id: "hmo",
-    keywords: ["hmo", "insurance", "coverage", "philhealth"],
-    build: (_clinic, _dentists, _services, lang) =>
-      pick(
-        lang,
-        "You can book with HMO coverage or pay out of pocket. If using HMO, provide your provider, member number, company name, and birth date during booking so staff can verify eligibility.",
-        "Pwede kang mag-book gamit ang HMO o magbayad nang cash. Kung HMO, ibigay ang provider, member number, kumpanya, at birthday habang nagbu-book para ma-verify ng staff ang eligibility."
-      ),
+    keywords: [
+      "hmo",
+      "insurance",
+      "coverage",
+      "maxicare",
+      "icare",
+      "pacific cross",
+      "etiqa",
+      "lacson",
+      "hppi",
+      "flexicare",
+      "cocolife",
+      "valucare",
+      "valuecare",
+      "philhealth",
+      "medicard",
+      "accreditation",
+    ],
+    build: (_clinic, _dentists, _services, lang) => pick(lang, HMO_DEFAULT_EN, HMO_DEFAULT_TL),
   },
   {
     id: "queue",
@@ -666,6 +732,179 @@ function normalizeOptions(servicesOrOptions) {
   };
 }
 
+function matchApprovedHmo(normalized) {
+  let best = null;
+  let bestLen = 0;
+  for (const provider of APPROVED_HMO_PROVIDERS) {
+    for (const alias of provider.aliases) {
+      if (normalized.includes(alias) && alias.length >= bestLen) {
+        best = provider;
+        bestLen = alias.length;
+      }
+    }
+  }
+  return best;
+}
+
+function matchUnlistedHmo(normalized) {
+  if (matchApprovedHmo(normalized)) return null;
+  return UNLISTED_HMO_HINTS.find((name) => normalized.includes(name)) || null;
+}
+
+function isHmoQuestion(normalized) {
+  if (!normalized) return false;
+  if (matchApprovedHmo(normalized) || matchUnlistedHmo(normalized)) return true;
+  return /\b(hmos?|insurance|philhealth|accreditation)\b/.test(normalized);
+}
+
+function looksLikeHmoCredentialRequest(normalized) {
+  return (
+    isHmoQuestion(normalized) &&
+    /\b(password|passwords|pin|otp|login credential|account login|hmo login|password ko|ihayag ang password)\b/.test(
+      normalized
+    )
+  );
+}
+
+function looksLikeHmoApprovalQuestion(normalized) {
+  return (
+    isHmoQuestion(normalized) &&
+    /\b(already approved|already verified|hmo already|approved na|na-verify|naverify|verification status|is my hmo already|approved ba)\b/.test(
+      normalized
+    )
+  );
+}
+
+function looksLikeHmoCoverageQuestion(normalized) {
+  return (
+    isHmoQuestion(normalized) &&
+    /\b(cover|covers|covered|coverage|sasaklaw|sakop|bayad ng hmo)\b/.test(normalized)
+  );
+}
+
+function looksLikeHmoInfoQuestion(normalized) {
+  return (
+    isHmoQuestion(normalized) &&
+    /\b(what information|what do i need|anong information|ano ang kailangan|member number|company name|birth date|birthday)\b/.test(
+      normalized
+    )
+  );
+}
+
+function ownHmoVerification(patientContext) {
+  const appointments = Array.isArray(patientContext?.appointments) ? patientContext.appointments : [];
+  const withStatus = appointments.find((item) => item.hmoVerificationStatus && item.hmoVerificationStatus !== "not_applicable");
+  if (!withStatus) return null;
+  return {
+    status: String(withStatus.hmoVerificationStatus || "").toLowerCase(),
+    provider: withStatus.hmoProvider || null,
+  };
+}
+
+function answerHmoQuestion(normalized, lang, patientContext) {
+  if (looksLikeHmoCredentialRequest(normalized)) {
+    return pick(
+      lang,
+      "I will never ask for your HMO password, PIN, or login credentials in this chat, and you should not send them here. Follow the clinic's HMO verification process in Appointments and with clinic staff only.",
+      "Hindi ako hihingi ng HMO password, PIN, o login credentials sa chat na ito, at huwag mong ipadala rito. Sundin ang HMO verification process sa Appointments at sa clinic staff lamang."
+    );
+  }
+
+  const unlisted = matchUnlistedHmo(normalized);
+  if (unlisted) {
+    return pick(
+      lang,
+      `I cannot confirm whether ${unlisted} is accommodated at Amethyst Dental Clinic. The approved list is ${HMO_PROVIDER_LIST}, each subject to account verification, accreditation arrangements, and coverage. Please contact clinic staff to ask about that provider. Do not send HMO passwords or PINs in this chat.`,
+      `Hindi ko makokompirmang tinatanggap ang ${unlisted} sa Amethyst Dental Clinic. Ang approved list ay ${HMO_PROVIDER_LIST}, bawat isa subject sa account verification, accreditation arrangements, at coverage. Makipag-ugnayan sa clinic staff tungkol sa provider na iyon. Huwag magpadala ng HMO password o PIN sa chat.`
+    );
+  }
+
+  if (looksLikeHmoApprovalQuestion(normalized)) {
+    const own = ownHmoVerification(patientContext);
+    if (own?.status === "verified") {
+      return pick(
+        lang,
+        `Clinic staff have recorded HMO verification as complete for a booking on your signed-in account${own.provider ? ` (${own.provider})` : ""}. That does not automatically mean a particular dental service is covered. Ask staff to confirm eligibility and benefits for the procedure you need. ${HMO_PRIVACY_EN}`,
+        `Naitala ng clinic staff na complete ang HMO verification para sa isang booking sa naka-sign in mong account${own.provider ? ` (${own.provider})` : ""}. Hindi nito automatic na sinasabing covered ang isang particular na dental service. Tanungin ang staff para kumpirmahin ang eligibility at benefits para sa procedure na kailangan mo. ${HMO_PRIVACY_TL}`
+      );
+    }
+    if (own?.status === "pending_verification") {
+      return pick(
+        lang,
+        "Your signed-in account shows an HMO booking that is still pending clinic staff verification. I cannot mark it as approved from this chat. Please wait for staff to confirm eligibility, plan benefits, and the requested dental service, or contact the front desk. " +
+          HMO_PRIVACY_EN,
+        "May HMO booking sa naka-sign in mong account na pending pa sa verification ng clinic staff. Hindi ko ito maaaring i-mark na approved mula sa chat. Hintayin ang staff na kumpirmahin ang eligibility, plan benefits, at hinihinging dental service, o tawagan ang front desk. " +
+          HMO_PRIVACY_TL
+      );
+    }
+    if (own?.status === "rejected") {
+      return pick(
+        lang,
+        "A booking on your signed-in account shows HMO verification was not approved. I cannot change that status. Please contact clinic staff about next steps. " + HMO_PRIVACY_EN,
+        "May booking sa naka-sign in mong account na hindi na-approve ang HMO verification. Hindi ko mababago ang status na iyon. Makipag-ugnayan sa clinic staff para sa susunod na hakbang. " + HMO_PRIVACY_TL
+      );
+    }
+    return pick(
+      lang,
+      "I cannot confirm whether your HMO account is already approved from this chat unless clinic staff have recorded verification on your signed-in booking. Please book an appointment and complete the clinic's HMO verification process, or ask the front desk. Being on the HMO list does not guarantee eligibility or coverage. " +
+        HMO_PRIVACY_EN,
+      "Hindi ko makokompirmang approved na ang iyong HMO account mula sa chat maliban kung naitala na ng staff ang verification sa naka-sign in mong booking. Mag-book ng appointment at sundan ang HMO verification process, o tanungin ang front desk. Ang pagiging listed na HMO ay hindi guarantee ng eligibility o coverage. " +
+        HMO_PRIVACY_TL
+    );
+  }
+
+  if (looksLikeHmoInfoQuestion(normalized)) {
+    return pick(
+      lang,
+      "For HMO verification, book from Appointments and complete the clinic's designated process. Staff typically need your HMO provider, member number, company name, and birth date so they can check your account, eligibility, plan benefits, and the requested dental service. Never send HMO passwords, PINs, or login credentials in this chat. " +
+        HMO_PRIVACY_EN,
+      "Para sa HMO verification, mag-book sa Appointments at sundan ang designated process ng klinika. Karaniwang kailangan ng staff ang HMO provider, member number, company name, at birthday para i-check ang account, eligibility, plan benefits, at hinihinging dental service. Huwag magpadala ng HMO password, PIN, o login credentials sa chat. " +
+        HMO_PRIVACY_TL
+    );
+  }
+
+  if (looksLikeHmoCoverageQuestion(normalized)) {
+    const provider = matchApprovedHmo(normalized);
+    const named = provider
+      ? pick(
+          lang,
+          ` ${provider.name} is among the listed providers.`,
+          ` Kasama ang ${provider.name} sa listed providers.`
+        )
+      : "";
+    const filipino = provider?.filipinoDoctors
+      ? pick(
+          lang,
+          " It is listed under Filipino Doctors, subject to the clinic's applicable accreditation and verification arrangements.",
+          " Nakalista ito under Filipino Doctors, subject sa applicable accreditation at verification arrangements ng klinika."
+        )
+      : "";
+    return pick(
+      lang,
+      `Coverage for a dental service such as cleaning depends on your HMO plan, eligibility, benefits, and the clinic's applicable arrangements.${named}${filipino} Being listed does not mean a procedure is covered without staff verification. Book an appointment so clinic staff can verify your account and the requested service before coverage is confirmed. I cannot promise copayments, limits, or approval codes. ${HMO_PRIVACY_EN}`,
+      `Ang coverage para sa dental service tulad ng cleaning ay depende sa HMO plan, eligibility, benefits, at applicable arrangements ng klinika.${named}${filipino} Ang pagiging listed ay hindi ibig sabihing covered ang procedure nang walang verification ng staff. Mag-book ng appointment para ma-verify ng staff ang account at hinihinging service bago kumpirmahin ang coverage. Hindi ako makakapangako ng copayment, limit, o approval code. ${HMO_PRIVACY_TL}`
+    );
+  }
+
+  const provider = matchApprovedHmo(normalized);
+  if (provider) {
+    const filipino = provider.filipinoDoctors
+      ? pick(
+          lang,
+          ` ${provider.name} is listed under Filipino Doctors, subject to the clinic's applicable accreditation and verification arrangements.`,
+          ` Nakalista ang ${provider.name} under Filipino Doctors, subject sa applicable accreditation at verification arrangements ng klinika.`
+        )
+      : "";
+    return pick(
+      lang,
+      `Amethyst Dental Clinic accommodates patients with ${provider.name}, subject to account verification, applicable accreditation arrangements, eligibility, and coverage.${filipino} Being on the HMO list does not guarantee that a particular dental service is covered. Please book an appointment and follow the clinic's HMO verification process. Clinic staff must confirm your account, eligibility, plan benefits, and the requested dental service before coverage can be confirmed. ${HMO_PRIVACY_EN}`,
+      `Tumanggap ang Amethyst Dental Clinic ng pasyente na may ${provider.name}, subject sa account verification, applicable accreditation arrangements, eligibility, at coverage.${filipino} Ang pagiging nasa HMO list ay hindi guarantee na covered ang isang particular na dental service. Mag-book ng appointment at sundan ang HMO verification process. Kailangang kumpirmahin ng clinic staff ang account, eligibility, plan benefits, at hinihinging dental service bago makumpirma ang coverage. ${HMO_PRIVACY_TL}`
+    );
+  }
+
+  return pick(lang, HMO_DEFAULT_EN, HMO_DEFAULT_TL);
+}
+
 function looksLikeOtherPatientRequest(question) {
   const normalized = normalizeQuestion(question);
   if (!normalized) return false;
@@ -705,9 +944,9 @@ If asked for clinical advice, tell the patient to contact staff or book an exam.
   }
   if (mode === "clinic") {
     return `Knowledge mode: clinic knowledge base.
-Prefer DentaSync clinic facts: hours, location, services, booking, cancellation, RFID/QR check-in, and queue status meanings.
+Prefer DentaSync clinic facts: hours, location, services, booking, cancellation, RFID/QR check-in, queue status meanings, and the approved HMO list.
 You may briefly explain general procedures the clinic offers.
-Do not invent hours, fees, or policies that are not in the clinic facts.`;
+Do not invent hours, fees, HMO coverage, or policies that are not in the clinic facts.`;
   }
   return `Knowledge mode: general dental guidance.
 You may explain general oral hygiene, brushing, flossing, common dental concerns, preventive care, procedure overviews, and when to seek professional care.
@@ -1036,6 +1275,14 @@ function answerFromCatalog(question, servicesOrOptions) {
     };
   }
 
+  if (isHmoQuestion(normalized)) {
+    return {
+      answer: answerHmoQuestion(normalized, lang, patientContext),
+      source: "hmo",
+      language: lang,
+    };
+  }
+
   if (
     patientContext &&
     (wantsOwnVisitInfo(normalized) || isShortVisitFollowUp(normalized, conversationHistoryBlock))
@@ -1129,7 +1376,11 @@ Services:
 ${serviceLines || "(see Appointments in the patient portal)"}
 
 Dentists:
-${dentistLines || "(assigned by the clinic)"}`;
+${dentistLines || "(assigned by the clinic)"}
+
+Approved HMO providers (do not add others; listing is not a coverage guarantee):
+${APPROVED_HMO_PROVIDERS.map((item) => `- ${item.name}${item.filipinoDoctors ? " (listed under Filipino Doctors; accreditation/verification arrangements apply)" : ""}`).join("\n")}
+Staff must verify account, eligibility, benefits, and the requested service after the patient books. Never claim an HMO is verified, never invent copays or covered procedures, and never ask for HMO passwords or PINs.`;
 }
 
 async function loadClinicProfile(db) {
@@ -1172,7 +1423,8 @@ async function loadAuthorizedPatientContext(db, userId, { includeWait = true } =
   try {
     const appointments = await db.query(
       `SELECT service_name, appointment_date::text AS appointment_date,
-              appointment_time::text AS appointment_time, status
+              appointment_time::text AS appointment_time, status,
+              hmo_provider, hmo_verification_status
        FROM patient_portal_appointments
        WHERE user_id = $1
          AND LOWER(COALESCE(status, 'pending')) NOT IN ('cancelled', 'denied', 'completed', 'no_show')
@@ -1186,6 +1438,8 @@ async function loadAuthorizedPatientContext(db, userId, { includeWait = true } =
       date: String(row.appointment_date || "").slice(0, 10),
       time: String(row.appointment_time || "").slice(0, 5),
       status: row.status,
+      hmoProvider: row.hmo_provider || null,
+      hmoVerificationStatus: row.hmo_verification_status || null,
     }));
   } catch (error) {
     if (error?.code === "42P01" || error?.code === "42703") {
@@ -1275,13 +1529,14 @@ async function loadAuthorizedPatientContext(db, userId, { includeWait = true } =
 
 function slimPatientContext(patientContext) {
   if (!patientContext || typeof patientContext !== "object") return null;
-  const appointments = Array.isArray(patientContext.appointments)
-    ? patientContext.appointments.slice(0, 3).map((item) => ({
-        service: item.service || null,
-        date: item.date || null,
-        time: item.time || null,
-        status: item.status || null,
-      }))
+    const appointments = Array.isArray(patientContext.appointments)
+      ? patientContext.appointments.slice(0, 3).map((item) => ({
+          service: item.service || null,
+          date: item.date || null,
+          time: item.time || null,
+          status: item.status || null,
+          hmoVerificationStatus: item.hmoVerificationStatus || null,
+        }))
     : [];
   const queue = patientContext.queue
     ? {
@@ -1339,7 +1594,7 @@ async function answerWithOptionalGemini(question, servicesOrOptions) {
   const oralIntent =
     Boolean(matchTopic(normalized, ORAL_HEALTH_TOPICS)) || ORAL_FALLBACK_RE.test(normalized);
 
-  if (["privacy", "restricted", "patient-own", "safety", "procedure"].includes(local.source)) {
+  if (["privacy", "restricted", "patient-own", "safety", "procedure", "hmo"].includes(local.source)) {
     return { ...local, model: "clinic-faq" };
   }
 
@@ -1406,5 +1661,7 @@ module.exports = {
   wantsOwnVisitInfo,
   consumeAssistantRateLimit,
   resetAssistantRateLimit,
+  APPROVED_HMO_PROVIDERS,
+  matchApprovedHmo,
   detectLanguage,
 };
