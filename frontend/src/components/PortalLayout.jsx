@@ -22,6 +22,7 @@ import { useLogoutConfirm } from "./useLogoutConfirm";
 import { useAuth } from "../useAuth";
 import { api } from "../api";
 import { onNotificationsChanged } from "../notificationEvents";
+import "../patientPortalPremium.css";
 
 const navigation = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -143,7 +144,7 @@ export function PortalLayout({ theme, onToggleTheme, onThemeChange }) {
             <CircleHelp size={19} aria-hidden="true" />
             <span>Help &amp; Support</span>
           </NavLink>
-          <button className="portal-nav__link portal-nav__button" onClick={requestLogout}>
+          <button type="button" className="portal-nav__link portal-nav__button" onClick={requestLogout}>
             <LogOut size={19} aria-hidden="true" />
             <span>Logout</span>
           </button>

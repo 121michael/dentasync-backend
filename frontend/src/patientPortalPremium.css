@@ -1,0 +1,508 @@
+/* Patient Portal premium visual system.
+   Scoped to .portal-shell so Admin, Staff, and Dentist shells are unchanged. */
+
+.portal-shell {
+  --portal-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --portal-duration: 200ms;
+  --portal-radius: 16px;
+  --portal-focus: 0 0 0 3px rgba(152, 100, 215, 0.22);
+}
+
+.portal-shell .portal-content > * {
+  animation: portal-page-in var(--portal-duration) var(--portal-ease);
+}
+
+@keyframes portal-page-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes portal-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes portal-bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.portal-shell .button {
+  transition:
+    transform var(--portal-duration) var(--portal-ease),
+    box-shadow var(--portal-duration) var(--portal-ease),
+    background var(--portal-duration) ease,
+    border-color var(--portal-duration) ease,
+    opacity var(--portal-duration) ease;
+}
+
+.portal-shell .button:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+}
+
+.portal-shell .button:focus-visible,
+.portal-shell .icon-button:focus-visible,
+.portal-shell .avatar-button:focus-visible,
+.portal-shell .portal-nav__link:focus-visible,
+.portal-shell .mobile-nav__link:focus-visible,
+.portal-shell .field input:focus-visible,
+.portal-shell .field select:focus-visible,
+.portal-shell .field textarea:focus-visible,
+.portal-shell .quick-action:focus-visible,
+.portal-shell .notification-row:focus-visible {
+  outline: 2px solid var(--amethyst-500);
+  outline-offset: 2px;
+}
+
+.portal-shell .icon-button,
+.portal-shell .avatar-button {
+  transition:
+    transform var(--portal-duration) var(--portal-ease),
+    border-color var(--portal-duration) ease,
+    box-shadow var(--portal-duration) ease,
+    background var(--portal-duration) ease;
+}
+
+.portal-shell .icon-button:hover,
+.portal-shell .avatar-button:hover {
+  box-shadow: var(--shadow-sm);
+  background: var(--surface-solid);
+}
+
+.portal-shell .icon-button:active,
+.portal-shell .avatar-button:active {
+  transform: scale(0.96);
+}
+
+.portal-shell .glass-card {
+  border-radius: var(--portal-radius);
+  box-shadow: 0 1px 0 rgba(91, 42, 134, 0.04), var(--shadow-sm);
+  backdrop-filter: none;
+  background: var(--surface-solid);
+}
+
+.portal-shell .section-heading h1 {
+  letter-spacing: -0.04em;
+}
+
+.portal-shell .section-heading p,
+.portal-shell .muted,
+.portal-shell .muted-copy {
+  color: var(--text-muted);
+}
+
+.portal-shell .status-pill {
+  letter-spacing: 0.02em;
+  transition: background var(--portal-duration) ease, color var(--portal-duration) ease;
+}
+
+.portal-shell .empty-state {
+  padding: 1.6rem 1.2rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--portal-radius);
+  background: var(--surface-muted);
+}
+
+.portal-shell .field input,
+.portal-shell .field select,
+.portal-shell .field textarea {
+  border-radius: 12px;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.portal-shell .inline-alert {
+  animation: portal-reveal 180ms var(--portal-ease);
+}
+
+/* Sidebar */
+.portal-shell .portal-sidebar {
+  padding: 1.65rem 0.9rem 1.15rem;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(196, 150, 245, 0.22), transparent 12rem),
+    linear-gradient(185deg, #32144d 0%, #241036 58%, #1b0d28 100%);
+  box-shadow: 8px 0 28px rgba(28, 12, 46, 0.18);
+}
+
+.portal-shell .portal-sidebar .brand-mark {
+  margin: 0 0 1.85rem 0.45rem;
+}
+
+.portal-shell .portal-nav,
+.portal-shell .portal-sidebar__footer {
+  gap: 0.2rem;
+}
+
+.portal-shell .portal-nav__link {
+  position: relative;
+  min-height: 44px;
+  padding: 0 0.78rem 0 0.9rem;
+  border-radius: 11px;
+  color: rgba(247, 238, 255, 0.72);
+  font-weight: 600;
+  transition:
+    background var(--portal-duration) ease,
+    color var(--portal-duration) ease,
+    box-shadow var(--portal-duration) ease,
+    transform 140ms ease;
+}
+
+.portal-shell .portal-nav__link svg {
+  flex: 0 0 auto;
+  opacity: 0.88;
+  transition: opacity var(--portal-duration) ease, transform var(--portal-duration) ease;
+}
+
+.portal-shell .portal-nav__link:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.07);
+  transform: none;
+}
+
+.portal-shell .portal-nav__link:hover svg,
+.portal-shell .portal-nav__link.is-active svg {
+  opacity: 1;
+}
+
+.portal-shell .portal-nav__link:active {
+  transform: scale(0.99);
+}
+
+.portal-shell .portal-nav__link.is-active {
+  color: #fff;
+  border-color: transparent;
+  background: rgba(213, 181, 246, 0.16);
+  box-shadow: inset 3px 0 0 #e2c8ff;
+}
+
+.portal-shell .portal-sidebar__footer {
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.portal-shell .portal-sidebar__footer .portal-nav__link {
+  color: rgba(247, 238, 255, 0.62);
+}
+
+.portal-shell .portal-header {
+  min-height: 72px;
+  backdrop-filter: blur(16px);
+}
+
+.portal-shell .portal-header__date .eyebrow {
+  letter-spacing: 0.1em;
+}
+
+.portal-shell .mobile-nav__link {
+  transition: color var(--portal-duration) ease, background var(--portal-duration) ease;
+}
+
+/* Dashboard */
+.portal-shell .dashboard-page,
+.portal-shell .family-page,
+.portal-shell .assistant-page {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.portal-shell .dashboard-welcome p {
+  max-width: 38rem;
+  line-height: 1.55;
+}
+
+.portal-shell .dashboard-welcome__seal {
+  padding: 0.4rem 0.7rem;
+  border-radius: 999px;
+  background: var(--emerald-wash);
+}
+
+.portal-shell .next-visit-card {
+  transition: box-shadow var(--portal-duration) ease, transform var(--portal-duration) ease;
+}
+
+.portal-shell .next-visit-card:hover {
+  box-shadow: 0 24px 40px rgba(69, 33, 100, 0.3);
+}
+
+.portal-shell .patient-checkin-card {
+  margin-top: 0;
+  padding: 1.25rem 1.3rem;
+}
+
+.portal-shell .patient-checkin-card .card-heading {
+  align-items: flex-start;
+  gap: 0.65rem;
+}
+
+.portal-shell .patient-checkin-card .card-heading h2 {
+  font-size: 1.15rem;
+}
+
+.portal-shell .patient-checkin-card .card-heading p {
+  max-width: 40rem;
+  margin-top: 0.28rem;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  font-weight: 500;
+}
+
+.portal-shell .patient-checkin-card__actions {
+  margin-top: 1rem;
+  align-items: stretch;
+}
+
+.portal-shell .metric-card {
+  transition: transform var(--portal-duration) ease, box-shadow var(--portal-duration) ease;
+}
+
+.portal-shell .metric-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.portal-shell .metric-card > strong,
+.portal-shell .metric-card > small,
+.portal-shell .metric-card__label {
+  overflow: visible;
+  white-space: normal;
+  text-overflow: unset;
+  overflow-wrap: anywhere;
+}
+
+.portal-shell .quick-action {
+  transition:
+    background var(--portal-duration) ease,
+    border-color var(--portal-duration) ease,
+    transform 140ms ease;
+}
+
+.portal-shell .quick-action:hover {
+  transform: translateX(2px);
+}
+
+.portal-shell .quick-action:active {
+  transform: none;
+}
+
+/* Booking */
+.portal-shell .booking-section {
+  transition: box-shadow var(--portal-duration) ease;
+}
+
+.portal-shell .coverage-option,
+.portal-shell .time-slot,
+.portal-shell .filter-pill {
+  transition:
+    border-color var(--portal-duration) ease,
+    background var(--portal-duration) ease,
+    color var(--portal-duration) ease,
+    box-shadow var(--portal-duration) ease;
+}
+
+.portal-shell .hmo-fields {
+  animation: portal-reveal 220ms var(--portal-ease);
+}
+
+.portal-shell .booking-select-field {
+  z-index: 4;
+}
+
+.portal-shell .booking-summary {
+  border: 1px solid var(--border);
+  background: var(--surface-solid);
+}
+
+.portal-shell .file-drop {
+  transition: border-color var(--portal-duration) ease, background var(--portal-duration) ease;
+}
+
+.portal-shell .file-drop:hover {
+  border-color: var(--amethyst-600);
+}
+
+/* Queue */
+.portal-shell .queue-hero,
+.portal-shell .queue-progress-card,
+.portal-shell .queue-list-card {
+  transition: opacity 240ms ease;
+}
+
+.portal-shell .queue-hero__numbers strong {
+  overflow-wrap: anywhere;
+}
+
+.portal-shell .queue-step > span {
+  transition: background var(--portal-duration) ease, border-color var(--portal-duration) ease;
+}
+
+/* Assistant */
+.portal-shell .assistant-bubble {
+  animation: portal-bubble-in 200ms var(--portal-ease);
+}
+
+.portal-shell .assistant-bubble p {
+  overflow-wrap: anywhere;
+}
+
+.portal-shell .assistant-composer .button {
+  min-width: 44px;
+}
+
+.portal-shell .assistant-suggestion {
+  transition: border-color var(--portal-duration) ease, background var(--portal-duration) ease;
+}
+
+/* Family */
+.portal-shell .family-page .booking-section {
+  padding: 1.25rem 1.3rem;
+}
+
+.portal-shell .family-page .card-heading {
+  margin-bottom: 0.85rem;
+}
+
+.portal-shell .family-page .card-heading + .button--primary {
+  width: fit-content;
+}
+
+.portal-shell .dependent-form {
+  display: grid;
+  gap: 0.85rem;
+  animation: portal-reveal 240ms var(--portal-ease);
+}
+
+.portal-shell .family-dependent-actions {
+  width: 100%;
+  margin-left: 0;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  padding-top: 0.25rem;
+}
+
+.portal-shell .family-dependents-table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.portal-shell .family-page .status-pill {
+  margin-top: 0.2rem;
+}
+
+/* Profile */
+.portal-shell .membership-card {
+  min-height: 240px;
+  gap: 1.6rem;
+}
+
+.portal-shell .membership-card__identity strong {
+  overflow-wrap: anywhere;
+}
+
+.portal-shell .profile-page .field {
+  min-width: 0;
+}
+
+.portal-shell .profile-page input {
+  overflow-wrap: anywhere;
+}
+
+/* Notifications */
+.portal-shell .notification-list {
+  border: 1px solid var(--border);
+  border-radius: var(--portal-radius);
+  background: var(--surface-solid);
+  overflow: hidden;
+}
+
+.portal-shell .notification-row {
+  transition: background var(--portal-duration) ease;
+}
+
+.portal-shell .notification-row:nth-child(-n + 12) {
+  animation: portal-reveal 220ms var(--portal-ease) both;
+}
+
+.portal-shell .notification-row:nth-child(1) { animation-delay: 0ms; }
+.portal-shell .notification-row:nth-child(2) { animation-delay: 30ms; }
+.portal-shell .notification-row:nth-child(3) { animation-delay: 60ms; }
+.portal-shell .notification-row:nth-child(4) { animation-delay: 90ms; }
+.portal-shell .notification-row:nth-child(5) { animation-delay: 120ms; }
+.portal-shell .notification-row:nth-child(6) { animation-delay: 150ms; }
+
+.portal-shell .notification-row p,
+.portal-shell .notification-row h2 {
+  overflow-wrap: anywhere;
+}
+
+/* Support */
+.portal-shell .support-card {
+  transition: transform var(--portal-duration) ease, box-shadow var(--portal-duration) ease;
+}
+
+.portal-shell .support-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.portal-shell .logout-confirm-backdrop .staff-modal--confirm {
+  animation: portal-reveal 180ms var(--portal-ease);
+  border-radius: 18px;
+}
+
+@media (max-width: 760px) {
+  .portal-shell .portal-sidebar {
+    transition: transform 220ms var(--portal-ease);
+  }
+
+  .portal-shell .dashboard-welcome,
+  .portal-shell .next-visit-card {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .portal-shell .family-page .card-heading + .button--primary,
+  .portal-shell .family-dependent-actions .button {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .portal-shell .portal-content > *,
+  .portal-shell .dependent-form,
+  .portal-shell .hmo-fields,
+  .portal-shell .assistant-bubble,
+  .portal-shell .notification-row,
+  .portal-shell .inline-alert,
+  .portal-shell .logout-confirm-backdrop .staff-modal--confirm {
+    animation: none !important;
+  }
+
+  .portal-shell .button,
+  .portal-shell .icon-button,
+  .portal-shell .avatar-button,
+  .portal-shell .portal-nav__link,
+  .portal-shell .metric-card,
+  .portal-shell .quick-action,
+  .portal-shell .support-card,
+  .portal-shell .next-visit-card {
+    transition: none !important;
+  }
+}
