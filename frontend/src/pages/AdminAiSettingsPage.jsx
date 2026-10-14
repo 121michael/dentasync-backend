@@ -137,8 +137,8 @@ export function AdminAiSettingsPage() {
         </div>
       </section>
 
-      <section className="admin-panel">
-        <form className="admin-form" onSubmit={saveMeta}>
+      <section className="admin-panel admin-ai-knowledge">
+        <form className="admin-form admin-ai-knowledge__form" onSubmit={saveMeta}>
           <label>
             Chatbot knowledge mode
             <select
