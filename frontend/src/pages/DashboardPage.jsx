@@ -206,7 +206,7 @@ export function DashboardPage() {
           icon={ShieldCheck}
           label="HMO coverage"
           value={
-            dashboard.metrics.hmoStatus === "not_enrolled"
+            !dashboard.metrics.hmoStatus || dashboard.metrics.hmoStatus === "not_enrolled"
               ? "Not enrolled"
               : dashboard.metrics.hmoStatus.replaceAll("_", " ")
           }
