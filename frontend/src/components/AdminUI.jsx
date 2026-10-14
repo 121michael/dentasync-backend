@@ -95,27 +95,38 @@ export function AdminStatCard({ label, value, detail, tone = "purple", icon: Ico
   );
 }
 
-export function AdminBarChart({ title, points = [], valueKey = "value", labelKey = "label" }) {
+export function AdminBarChart({
+  title,
+  points = [],
+  valueKey = "value",
+  labelKey = "label",
+  formatValue,
+  eyebrow = "Analytics",
+}) {
   const max = Math.max(1, ...points.map((point) => Number(point[valueKey] || 0)));
+  const display = (value) => (formatValue ? formatValue(value) : String(value));
   return (
     <section className="admin-chart-card">
       <div className="admin-panel__heading">
         <div>
-          <span className="eyebrow">Analytics</span>
+          <span className="eyebrow">{eyebrow}</span>
           <h2>{title}</h2>
         </div>
       </div>
       {points.length ? (
         <div className="admin-bar-chart" role="img" aria-label={title}>
-          {points.map((point) => {
+          {points.map((point, index) => {
             const value = Number(point[valueKey] || 0);
+            const label = point[labelKey];
+            const percent = value > 0 ? Math.max(4, (value / max) * 100) : 0;
             return (
-              <div className="admin-bar-chart__item" key={`${point[labelKey]}-${value}`}>
+              <div className="admin-bar-chart__item" key={`${label}-${index}`}>
                 <div className="admin-bar-chart__track">
-                  <span style={{ height: `${Math.max(8, (value / max) * 100)}%` }} />
+                  <span style={{ "--bar-height": `${percent}%` }} />
                 </div>
-                <small>{point[labelKey]}</small>
-                <strong>{value}</strong>
+                <small>{label}</small>
+                <strong>{display(value)}</strong>
+                <em className="admin-chart-tip">{`${label}: ${display(value)}`}</em>
               </div>
             );
           })}
@@ -127,8 +138,76 @@ export function AdminBarChart({ title, points = [], valueKey = "value", labelKey
   );
 }
 
+export function AdminLineChart({
+  title,
+  points = [],
+  valueKey = "count",
+  labelKey = "label",
+  formatValue,
+  eyebrow = "Trend",
+}) {
+  const display = (value) => (formatValue ? formatValue(value) : String(value));
+  const values = points.map((point) => Number(point[valueKey] || 0));
+  const max = Math.max(1, ...values);
+  const width = 100;
+  const height = 44;
+  const padX = 3;
+  const padY = 5;
+  const innerW = width - padX * 2;
+  const innerH = height - padY * 2;
+  const coords = values.map((value, index) => {
+    const x = values.length === 1 ? width / 2 : padX + (index / Math.max(1, values.length - 1)) * innerW;
+    const y = padY + innerH - (value / max) * innerH;
+    return { x, y, value, label: points[index][labelKey] };
+  });
+  const line = coords.map((point) => `${point.x},${point.y}`).join(" ");
+  const area = `${padX},${padY + innerH} ${line} ${padX + innerW},${padY + innerH}`;
+
+  return (
+    <section className="admin-chart-card">
+      <div className="admin-panel__heading">
+        <div>
+          <span className="eyebrow">{eyebrow}</span>
+          <h2>{title}</h2>
+        </div>
+      </div>
+      {points.length ? (
+        <div className="admin-line-chart" role="img" aria-label={title}>
+          <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true">
+            {[0.25, 0.5, 0.75].map((step) => (
+              <line
+                key={step}
+                x1={padX}
+                x2={width - padX}
+                y1={padY + innerH * (1 - step)}
+                y2={padY + innerH * (1 - step)}
+                className="admin-line-chart__grid"
+              />
+            ))}
+            {coords.length > 1 ? <polygon className="admin-line-chart__area" points={area} /> : null}
+            {coords.length > 1 ? <polyline className="admin-line-chart__line" points={line} /> : null}
+            {coords.map((point) => (
+              <circle key={`${point.label}-${point.x}`} cx={point.x} cy={point.y} r="1.15">
+                <title>{`${point.label}: ${display(point.value)}`}</title>
+              </circle>
+            ))}
+          </svg>
+          <div className="admin-line-chart__labels">
+            {points.map((point, index) => (
+              <small key={`${point[labelKey]}-${index}`}>{point[labelKey]}</small>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <p className="muted-copy">No chart data is available for this range.</p>
+      )}
+    </section>
+  );
+}
+
 export function AdminDonutChart({ title, segments = [] }) {
-  const total = segments.reduce((sum, segment) => sum + Number(segment.value || 0), 0) || 1;
+  const rawTotal = segments.reduce((sum, segment) => sum + Number(segment.value || 0), 0);
+  const total = rawTotal || 1;
   let cumulative = 0;
   const gradient = segments
     .map((segment) => {
@@ -148,10 +227,20 @@ export function AdminDonutChart({ title, segments = [] }) {
         </div>
       </div>
       <div className="admin-donut-wrap">
-        <div className="admin-donut" style={{ background: `conic-gradient(${gradient || "#ece6f5 0 100%"})` }} />
+        <div
+          className="admin-donut"
+          style={{ background: `conic-gradient(${gradient || "#ece6f5 0 100%"})` }}
+          role="img"
+          aria-label={`${title} total ${rawTotal}`}
+        >
+          <div className="admin-donut__hole">
+            <strong>{rawTotal}</strong>
+            <small>Total</small>
+          </div>
+        </div>
         <ul className="admin-donut-legend">
           {segments.map((segment) => (
-            <li key={segment.label}>
+            <li key={segment.label} title={`${segment.label}: ${segment.value}`}>
               <i style={{ background: segment.color }} />
               <span>{segment.label}</span>
               <strong>{segment.value}</strong>
