@@ -1727,15 +1727,49 @@ strong {
   grid-template-columns: minmax(0, 1fr) minmax(270px, 0.32fr);
   align-items: start;
   gap: 1rem;
+  overflow: visible;
 }
 
 .booking-form {
   display: grid;
   gap: 0.9rem;
+  overflow: visible;
 }
 
 .booking-section {
   padding: 1.3rem;
+  overflow: visible;
+}
+
+.booking-select-field {
+  position: relative;
+  z-index: 2;
+  margin-top: 1.1rem;
+}
+
+.booking-select-field select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: var(--surface-solid);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 1rem;
+  padding-right: 2.4rem;
+}
+
+.booking-select-field select:required:invalid {
+  color: var(--text-muted);
+}
+
+.booking-select-field select option {
+  color: var(--text-strong);
+}
+
+.booking-hmo-note {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.45;
 }
 
 .treatment-grid {
@@ -1934,6 +1968,11 @@ strong {
   margin-top: 0.9rem;
   padding-top: 0.9rem;
   border-top: 1px solid var(--border);
+  overflow: visible;
+}
+
+.hmo-fields .booking-select-field {
+  margin-top: 0;
 }
 
 .file-drop {

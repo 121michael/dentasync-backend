@@ -16,6 +16,8 @@ const {
   wantsOwnVisitInfo,
   consumeAssistantRateLimit,
   resetAssistantRateLimit,
+  APPROVED_HMO_PROVIDERS,
+  matchApprovedHmo,
 } = require("../services/clinicAssistant");
 const { SERVICES, DENTISTS } = require("../routes/patientPortal");
 
@@ -328,6 +330,141 @@ test("Taglish queue questions still match live status", () => {
   });
   assert.equal(result.language, "tl");
   assert.match(result.answer, /P-003/);
+});
+
+test("approved HMO knowledge is a maintainable clinic catalog, not a Gemini fine-tune", () => {
+  const names = APPROVED_HMO_PROVIDERS.map((item) => item.name);
+  assert.deepEqual(names, [
+    "Maxicare",
+    "iCare",
+    "Pacific Cross",
+    "Etiqa",
+    "Lacson & Lacson",
+    "HPPI",
+    "Flexicare",
+    "Cocolife",
+    "ValuCare",
+  ]);
+  assert.equal(matchApprovedHmo("maxicare").filipinoDoctors, false);
+  assert.equal(matchApprovedHmo("pacific cross").filipinoDoctors, true);
+  assert.equal(matchApprovedHmo("flexicare").filipinoDoctors, true);
+  assert.equal(matchApprovedHmo("medicard"), null);
+});
+
+test("HMO list answers use the approved providers and verification conditions", () => {
+  const result = answerFromCatalog("Which HMOs does the clinic accommodate?", options);
+  assert.equal(result.source, "hmo");
+  assert.match(result.answer, /Maxicare/);
+  assert.match(result.answer, /ValuCare/);
+  assert.match(result.answer, /account verification/i);
+  assert.match(result.answer, /privacy policy/i);
+  assert.doesNotMatch(result.answer, /Medicard/i);
+});
+
+test("Maxicare answers stay qualified and do not guarantee coverage", () => {
+  const result = answerFromCatalog("Do you accept Maxicare?", options);
+  assert.equal(result.source, "hmo");
+  assert.match(result.answer, /Maxicare/);
+  assert.match(result.answer, /does not guarantee/i);
+  assert.match(result.answer, /book an appointment/i);
+  assert.doesNotMatch(result.answer, /automatically covered/i);
+});
+
+test("Pacific Cross answers keep the Filipino Doctors accreditation qualification", () => {
+  const result = answerFromCatalog("I have Pacific Cross. Can I use it?", options);
+  assert.equal(result.source, "hmo");
+  assert.match(result.answer, /Pacific Cross/);
+  assert.match(result.answer, /Filipino Doctors/);
+  assert.match(result.answer, /accreditation/i);
+});
+
+test("HMO procedure coverage is not promised without verification", () => {
+  const result = answerFromCatalog("Does my HMO cover dental cleaning?", options);
+  assert.equal(result.source, "hmo");
+  assert.match(result.answer, /depends/i);
+  assert.doesNotMatch(result.answer, /cleaning is covered/i);
+  assert.doesNotMatch(result.answer, /we can confirm it is covered/i);
+});
+
+test("unlisted HMO providers are not claimed as accepted", () => {
+  const result = answerFromCatalog("Do you accept Medicard?", options);
+  assert.equal(result.source, "hmo");
+  assert.match(result.answer, /cannot confirm/i);
+  assert.match(result.answer, /clinic staff/i);
+  assert.doesNotMatch(result.answer, /accommodates patients with Medicard/i);
+});
+
+test("HMO approval status is not fabricated without recorded staff verification", () => {
+  const none = answerFromCatalog("Is my HMO already approved?", options);
+  assert.equal(none.source, "hmo");
+  assert.match(none.answer, /cannot confirm/i);
+
+  const pending = answerFromCatalog("Is my HMO already approved?", {
+    ...options,
+    patientContext: {
+      appointments: [{ hmoVerificationStatus: "pending_verification", hmoProvider: "Maxicare" }],
+      queue: null,
+    },
+  });
+  assert.match(pending.answer, /pending/i);
+  assert.doesNotMatch(pending.answer, /already approved/i);
+});
+
+test("chatbot never asks for HMO passwords or PINs", () => {
+  const result = answerFromCatalog("What is my Maxicare password and PIN?", options);
+  assert.equal(result.source, "hmo");
+  assert.match(result.answer, /never ask/i);
+  assert.match(result.answer, /password/i);
+  assert.doesNotMatch(result.answer, /send your PIN/i);
+});
+
+test("HMO information needed is the clinic verification process, not login credentials", () => {
+  const result = answerFromCatalog("What information do I need to provide for HMO?", options);
+  assert.equal(result.source, "hmo");
+  assert.match(result.answer, /member number/i);
+  assert.match(result.answer, /Never send HMO passwords/i);
+});
+
+test("asking whether an HMO is accepted is not treated as an approval-status check", () => {
+  const result = answerFromCatalog("Is my HMO accepted?", options);
+  assert.equal(result.source, "hmo");
+  assert.match(result.answer, /Maxicare/);
+  assert.match(result.answer, /book an appointment/i);
+  assert.doesNotMatch(result.answer, /clinic staff have recorded HMO verification as complete/i);
+});
+
+test("HMO catalog answers skip Gemini so knowledge updates apply immediately", async () => {
+  const previous = process.env.GEMINI_API_KEY;
+  process.env.GEMINI_API_KEY = "test-key";
+  const originalFetch = global.fetch;
+  let called = false;
+  global.fetch = async () => {
+    called = true;
+    throw new Error("gemini should not run for HMO catalog answers");
+  };
+  try {
+    const result = await answerWithOptionalGemini("Which HMOs does the clinic accommodate?", options);
+    assert.equal(result.source, "hmo");
+    assert.equal(result.model, "clinic-faq");
+    assert.equal(called, false);
+    assert.match(result.answer, /Cocolife/);
+  } finally {
+    global.fetch = originalFetch;
+    if (previous === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = previous;
+  }
+});
+
+test("another patient's HMO details stay private", () => {
+  const result = answerFromCatalog("What is another patient's HMO member number?", {
+    ...options,
+    patientContext: {
+      appointments: [{ hmoVerificationStatus: "verified", hmoProvider: "Maxicare" }],
+      queue: null,
+    },
+  });
+  assert.equal(result.source, "privacy");
+  assert.doesNotMatch(result.answer, /Maxicare/);
 });
 
 test("misspelled hour questions still use clinic schedule facts", () => {

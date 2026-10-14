@@ -8,7 +8,6 @@ import {
   Clock3,
   FileUp,
   ShieldCheck,
-  Stethoscope,
   X,
 } from "lucide-react";
 import { api } from "../api";
@@ -17,6 +16,18 @@ import { useAuth } from "../useAuth";
 import { matchesNotificationFocus } from "../notificationFocus";
 
 const PERIOD_ORDER = ["Morning", "Afternoon", "Evening"];
+
+const APPROVED_HMO_PROVIDERS = [
+  { id: "maxicare", name: "Maxicare", filipinoDoctors: false },
+  { id: "icare", name: "iCare", filipinoDoctors: true },
+  { id: "pacific-cross", name: "Pacific Cross", filipinoDoctors: true },
+  { id: "etiqa", name: "Etiqa", filipinoDoctors: true },
+  { id: "lacson", name: "Lacson & Lacson", filipinoDoctors: true },
+  { id: "hppi", name: "HPPI", filipinoDoctors: true },
+  { id: "flexicare", name: "Flexicare", filipinoDoctors: true },
+  { id: "cocolife", name: "Cocolife", filipinoDoctors: false },
+  { id: "valucare", name: "ValuCare", filipinoDoctors: false },
+];
 
 const LEGACY_SERVICE_NAMES = {
   "Dental Cleaning": "Dental Cleaning / Oral Prophylaxis",
@@ -205,6 +216,8 @@ export function AppointmentsPage() {
     () => catalog?.services.find((service) => service.id === form.serviceId),
     [catalog, form.serviceId]
   );
+  const hmoProviders = catalog?.hmoProviders?.length ? catalog.hmoProviders : APPROVED_HMO_PROVIDERS;
+  const selectedHmo = hmoProviders.find((provider) => provider.name === form.hmoProvider);
 
   function updateForm(event) {
     setForm((current) => ({ ...current, [event.target.name]: event.target.value }));
@@ -392,21 +405,25 @@ export function AppointmentsPage() {
                 <h2>Select your service</h2>
               </div>
             </div>
-            <div className="treatment-grid">
-              {catalog.services.map((service) => (
-                <button
-                  type="button"
-                  key={service.id}
-                  className={`treatment-option ${form.serviceId === service.id ? "is-selected" : ""}`}
-                  onClick={() => setForm((current) => ({ ...current, serviceId: service.id }))}
-                >
-                  <span className="treatment-option__icon">
-                    <Stethoscope size={19} />
-                  </span>
-                  <strong>{service.name}</strong>
-                </button>
-              ))}
-            </div>
+            <label className="field booking-select-field">
+              <span>Service</span>
+              <select
+                name="serviceId"
+                value={form.serviceId}
+                onChange={updateForm}
+                required
+                aria-label="Select a service"
+              >
+                <option value="" disabled>
+                  Select a service
+                </option>
+                {(catalog.services || []).map((service) => (
+                  <option key={service.id} value={service.id}>
+                    {service.name}
+                  </option>
+                ))}
+              </select>
+            </label>
           </section>
 
           <section className="glass-card booking-section">
@@ -531,9 +548,24 @@ export function AppointmentsPage() {
             {form.coverageType === "hmo" ? (
               <div className="hmo-fields">
                 <div className="field-row">
-                  <label className="field">
+                  <label className="field booking-select-field">
                     <span>HMO provider</span>
-                    <input name="hmoProvider" value={form.hmoProvider} onChange={updateForm} required />
+                    <select
+                      name="hmoProvider"
+                      value={form.hmoProvider}
+                      onChange={updateForm}
+                      required
+                      aria-label="Select HMO provider"
+                    >
+                      <option value="" disabled>
+                        Select HMO provider
+                      </option>
+                      {hmoProviders.map((provider) => (
+                        <option key={provider.id || provider.name} value={provider.name}>
+                          {provider.name}
+                        </option>
+                      ))}
+                    </select>
                   </label>
                   <label className="field">
                     <span>Member number</span>
@@ -556,6 +588,15 @@ export function AppointmentsPage() {
                     />
                   </label>
                 </div>
+                {form.hmoProvider ? (
+                  <p className="muted booking-hmo-note">
+                    {selectedHmo?.filipinoDoctors
+                      ? `${form.hmoProvider} is listed under Filipino Doctors, subject to the clinic's applicable accreditation and verification arrangements. `
+                      : ""}
+                    Being listed does not guarantee eligibility or coverage for a particular dental service. Clinic staff
+                    must verify your account, plan benefits, and the requested service.
+                  </p>
+                ) : null}
                 <label className="file-drop">
                   <FileUp size={21} />
                   <span>

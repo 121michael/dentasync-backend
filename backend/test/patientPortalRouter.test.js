@@ -54,6 +54,22 @@ test("patient portal exposes the booking catalog only to patient accounts", asyn
     assert.equal(body.services[0].id, "cleaning");
     assert.equal(body.dentists.length, 4);
     assert.equal(body.dentists[0].id, "dr-sarah-cruz");
+    assert.deepEqual(
+      body.hmoProviders.map((provider) => provider.name),
+      [
+        "Maxicare",
+        "iCare",
+        "Pacific Cross",
+        "Etiqa",
+        "Lacson & Lacson",
+        "HPPI",
+        "Flexicare",
+        "Cocolife",
+        "ValuCare",
+      ]
+    );
+    assert.equal(body.hmoProviders.find((provider) => provider.name === "Pacific Cross").filipinoDoctors, true);
+    assert.equal(body.hmoProviders.find((provider) => provider.name === "Maxicare").filipinoDoctors, false);
   } finally {
     await portal.close();
   }
