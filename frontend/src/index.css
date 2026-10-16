@@ -7589,8 +7589,6 @@ body.is-queue-display .staff-mobile-nav {
     animation: none !important;
   }
 }
-<<<<<<< HEAD
-=======
 
 /* RFID Tag Assignments — scoped mobile layout */
 .admin-rfid-cards { display: none; }
@@ -7824,4 +7822,3 @@ body.is-queue-display .staff-mobile-nav {
     flex: 1 1 100%;
   }
 }
->>>>>>> origin/cursor/admin-rfid-mobile-layout-5dfe
