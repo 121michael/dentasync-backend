@@ -17,6 +17,7 @@ import { useAuth } from "../useAuth";
 import { dentistInitials } from "../dentistUtils";
 import { BrandMark } from "./BrandMark";
 import { LogoutConfirmDialog } from "./LogoutConfirmDialog";
+import { RoleMobileBottomNav } from "./RoleMobileBottomNav";
 import { useLogoutConfirm } from "./useLogoutConfirm";
 import { onNotificationsChanged } from "../notificationEvents";
 
@@ -174,6 +175,27 @@ export function DentistLayout() {
           <Outlet />
         </main>
       </div>
+
+      <RoleMobileBottomNav
+        ariaLabel="Dentist mobile navigation"
+        hidden={isOpen}
+        primary={[
+          { to: "/dentist/dashboard", label: "Dashboard", icon: LayoutDashboard },
+          { to: "/dentist/queue", label: "Patient Queue", icon: UsersRound },
+          { to: "/dentist/appointments", label: "Appointments", icon: CalendarDays },
+          { to: "/dentist/patient-records", label: "Patient Records", icon: FolderOpen },
+        ]}
+        more={[
+          { to: "/dentist/notifications", label: "Notifications", icon: Bell, showDot: hasUnread },
+          { to: "/dentist/profile", label: "Profile", icon: UserRound },
+        ]}
+        onNavigate={(to) => {
+          setIsOpen(false);
+          if (to === "/dentist/notifications") {
+            setUnreadNotifications(0);
+          }
+        }}
+      />
       <LogoutConfirmDialog {...logoutDialogProps} />
     </div>
   );
