@@ -22,6 +22,7 @@ import { AdminConfirmModal, AdminToastStack } from "./AdminUI";
 import { onNotificationsChanged } from "../notificationEvents";
 import { BrandMark } from "./BrandMark";
 import { LogoutConfirmDialog } from "./LogoutConfirmDialog";
+import { RoleMobileBottomNav } from "./RoleMobileBottomNav";
 import { useLogoutConfirm } from "./useLogoutConfirm";
 
 const AdminUiContext = createContext(null);
@@ -275,6 +276,32 @@ export function AdminLayout() {
             <Outlet />
           </main>
         </div>
+
+        <RoleMobileBottomNav
+          ariaLabel="Admin mobile navigation"
+          hidden={isOpen}
+          primary={[
+            { to: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
+            { to: "/admin/users", label: "Manage User", icon: Users, showDot: alerts.pendingAccounts > 0 },
+            { to: "/admin/patient-records", label: "Patient Record", icon: FolderOpen },
+            { to: "/admin/analytics", label: "Analytics", icon: BarChart3 },
+          ]}
+          more={[
+            { to: "/admin/rfid", label: "RFID Tags", icon: CreditCard },
+            { to: "/admin/schedule", label: "Clinic Schedule", icon: CalendarDays, showDot: alerts.pendingAppointments > 0 },
+            { to: "/admin/notifications", label: "Notifications", icon: Bell, showDot: hasUnread },
+            { to: "/admin/ai-settings", label: "Manage AI Settings", icon: Bot },
+            { to: "/admin/sync-data", label: "Sync Data", icon: Cloud },
+            { to: "/admin/archived-records", label: "Archive", icon: Archive },
+          ]}
+          moreActivePrefixes={["/admin/audit-logs", "/admin/roster", "/admin/settings"]}
+          onNavigate={(to) => {
+            setIsOpen(false);
+            if (to === "/admin/notifications") {
+              setAlerts((current) => ({ ...current, unreadNotifications: 0 }));
+            }
+          }}
+        />
 
         <AdminToastStack toasts={toasts} onDismiss={(id) => setToasts((current) => current.filter((toast) => toast.id !== id))} />
         {confirmState ? (
