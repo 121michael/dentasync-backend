@@ -22,6 +22,7 @@ import { AdminConfirmModal, AdminToastStack } from "./AdminUI";
 import { onNotificationsChanged } from "../notificationEvents";
 import { BrandMark } from "./BrandMark";
 import { LogoutConfirmDialog } from "./LogoutConfirmDialog";
+import { FloatingCircleMenu } from "./FloatingCircleMenu";
 import { RoleMobileBottomNav } from "./RoleMobileBottomNav";
 import { useLogoutConfirm } from "./useLogoutConfirm";
 
@@ -301,6 +302,20 @@ export function AdminLayout() {
               setAlerts((current) => ({ ...current, unreadNotifications: 0 }));
             }
           }}
+        />
+
+        <FloatingCircleMenu
+          hidden={isOpen}
+          items={[
+            { to: "/admin/users", label: "Manage User", icon: Users },
+            { to: "/admin/patient-records", label: "Patient Record", icon: FolderOpen },
+            { to: "/admin/analytics", label: "Analytics", icon: BarChart3 },
+            { to: "/admin/schedule", label: "Schedule", icon: CalendarDays },
+            { to: "/admin/ai-settings", label: "AI Settings", icon: Bot },
+            { to: "/admin/sync-data", label: "Sync Data", icon: Cloud },
+            { to: "/admin/archived-records", label: "Archive", icon: Archive },
+          ]}
+          onNavigate={() => setIsOpen(false)}
         />
 
         <AdminToastStack toasts={toasts} onDismiss={(id) => setToasts((current) => current.filter((toast) => toast.id !== id))} />

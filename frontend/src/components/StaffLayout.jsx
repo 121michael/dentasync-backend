@@ -19,6 +19,7 @@ import { staffInitials } from "../staffUtils";
 import { StaffConfirmModal, StaffToastStack } from "./StaffUI";
 import { onNotificationsChanged } from "../notificationEvents";
 import { BrandMark } from "./BrandMark";
+import { FloatingCircleMenu } from "./FloatingCircleMenu";
 import { LogoutConfirmDialog } from "./LogoutConfirmDialog";
 import { useLogoutConfirm } from "./useLogoutConfirm";
 
@@ -262,6 +263,18 @@ export function StaffLayout() {
             </NavLink>
           ))}
         </nav>
+
+        <FloatingCircleMenu
+          hidden={isMobileMenuOpen}
+          items={[
+            { to: "/staff/dashboard", label: "Dashboard", icon: LayoutDashboard },
+            { to: "/staff/check-in", label: "Check-In", icon: ClipboardPlus },
+            { to: "/staff/queue", label: "Queue", icon: UsersRound },
+            { to: "/staff/appointments", label: "Appointments", icon: CalendarDays },
+            { to: "/staff/patient-records", label: "Records", icon: Stethoscope },
+          ]}
+          onNavigate={() => setIsMobileMenuOpen(false)}
+        />
 
         <StaffToastStack toasts={toasts} />
         {confirmState ? (

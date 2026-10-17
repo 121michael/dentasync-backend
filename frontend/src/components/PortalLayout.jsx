@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { BrandMark } from "./BrandMark";
+import { FloatingCircleMenu } from "./FloatingCircleMenu";
 import { LogoutConfirmDialog } from "./LogoutConfirmDialog";
 import { useLogoutConfirm } from "./useLogoutConfirm";
 import { useAuth } from "../useAuth";
@@ -235,6 +236,17 @@ export function PortalLayout({ theme, onToggleTheme, onThemeChange }) {
           </NavLink>
         ))}
       </nav>
+      <FloatingCircleMenu
+        hidden={isMenuOpen}
+        items={[
+          { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+          { to: "/appointments", label: "Appointments", icon: CalendarDays },
+          { to: "/queue", label: "Queue", icon: UsersRound },
+          { to: "/assistant", label: "AI Assistant", icon: Bot },
+          { to: "/family", label: "Family", icon: Users },
+        ]}
+        onNavigate={closeMenu}
+      />
       <LogoutConfirmDialog {...logoutDialogProps} />
     </div>
   );

@@ -17,6 +17,7 @@ import { useAuth } from "../useAuth";
 import { dentistInitials } from "../dentistUtils";
 import { BrandMark } from "./BrandMark";
 import { LogoutConfirmDialog } from "./LogoutConfirmDialog";
+import { FloatingCircleMenu } from "./FloatingCircleMenu";
 import { RoleMobileBottomNav } from "./RoleMobileBottomNav";
 import { useLogoutConfirm } from "./useLogoutConfirm";
 import { onNotificationsChanged } from "../notificationEvents";
@@ -195,6 +196,16 @@ export function DentistLayout() {
             setUnreadNotifications(0);
           }
         }}
+      />
+      <FloatingCircleMenu
+        hidden={isOpen}
+        items={[
+          { to: "/dentist/dashboard", label: "Dashboard", icon: LayoutDashboard },
+          { to: "/dentist/queue", label: "Patient Queue", icon: UsersRound },
+          { to: "/dentist/appointments", label: "Appointments", icon: CalendarDays },
+          { to: "/dentist/patient-records", label: "Records", icon: FolderOpen },
+        ]}
+        onNavigate={() => setIsOpen(false)}
       />
       <LogoutConfirmDialog {...logoutDialogProps} />
     </div>
