@@ -20,6 +20,7 @@ import { StaffConfirmModal, StaffToastStack } from "./StaffUI";
 import { onNotificationsChanged } from "../notificationEvents";
 import { BrandMark } from "./BrandMark";
 import { FloatingCircleMenu } from "./FloatingCircleMenu";
+import { RoleBottomDock } from "./RoleBottomDock";
 import { LogoutConfirmDialog } from "./LogoutConfirmDialog";
 import { useLogoutConfirm } from "./useLogoutConfirm";
 
@@ -251,30 +252,35 @@ export function StaffLayout() {
           </main>
         </div>
 
-        <nav className="staff-mobile-nav" aria-label="Mobile staff navigation">
-          {navigation.slice(0, 5).map(({ to, label, icon: Icon }) => (
-            <NavLink
-              key={to}
-              to={to}
-              className={({ isActive }) => `staff-mobile-nav__link ${isActive ? "is-active" : ""}`}
-            >
-              <Icon size={18} aria-hidden="true" />
-              <span>{label.split(" ")[0]}</span>
-            </NavLink>
-          ))}
-        </nav>
-
-        <FloatingCircleMenu
+        <RoleBottomDock
+          variant="compact"
           hidden={isMobileMenuOpen}
-          items={[
-            { to: "/staff/dashboard", label: "Dashboard", icon: LayoutDashboard },
-            { to: "/staff/check-in", label: "Check-In", icon: ClipboardPlus },
-            { to: "/staff/queue", label: "Queue", icon: UsersRound },
-            { to: "/staff/appointments", label: "Appointments", icon: CalendarDays },
-            { to: "/staff/patient-records", label: "Records", icon: Stethoscope },
-          ]}
-          onNavigate={() => setIsMobileMenuOpen(false)}
-        />
+          menu={
+            <FloatingCircleMenu
+              items={[
+                { to: "/staff/dashboard", label: "Dashboard", icon: LayoutDashboard },
+                { to: "/staff/check-in", label: "Check-In", icon: ClipboardPlus },
+                { to: "/staff/queue", label: "Queue", icon: UsersRound },
+                { to: "/staff/appointments", label: "Appointments", icon: CalendarDays },
+                { to: "/staff/patient-records", label: "Records", icon: Stethoscope },
+              ]}
+              onNavigate={() => setIsMobileMenuOpen(false)}
+            />
+          }
+        >
+          <nav className="staff-mobile-nav" aria-label="Mobile staff navigation">
+            {navigation.slice(0, 5).map(({ to, label, icon: Icon }) => (
+              <NavLink
+                key={to}
+                to={to}
+                className={({ isActive }) => `staff-mobile-nav__link ${isActive ? "is-active" : ""}`}
+              >
+                <Icon size={18} aria-hidden="true" />
+                <span>{label.split(" ")[0]}</span>
+              </NavLink>
+            ))}
+          </nav>
+        </RoleBottomDock>
 
         <StaffToastStack toasts={toasts} />
         {confirmState ? (

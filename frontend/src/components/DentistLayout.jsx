@@ -18,6 +18,7 @@ import { dentistInitials } from "../dentistUtils";
 import { BrandMark } from "./BrandMark";
 import { LogoutConfirmDialog } from "./LogoutConfirmDialog";
 import { FloatingCircleMenu } from "./FloatingCircleMenu";
+import { RoleBottomDock } from "./RoleBottomDock";
 import { RoleMobileBottomNav } from "./RoleMobileBottomNav";
 import { useLogoutConfirm } from "./useLogoutConfirm";
 import { onNotificationsChanged } from "../notificationEvents";
@@ -177,36 +178,41 @@ export function DentistLayout() {
         </main>
       </div>
 
-      <RoleMobileBottomNav
-        ariaLabel="Dentist mobile navigation"
+      <RoleBottomDock
+        variant="wide"
         hidden={isOpen}
-        primary={[
-          { to: "/dentist/dashboard", label: "Dashboard", icon: LayoutDashboard },
-          { to: "/dentist/queue", label: "Patient Queue", icon: UsersRound },
-          { to: "/dentist/appointments", label: "Appointments", icon: CalendarDays },
-          { to: "/dentist/patient-records", label: "Patient Records", icon: FolderOpen },
-        ]}
-        more={[
-          { to: "/dentist/notifications", label: "Notifications", icon: Bell, showDot: hasUnread },
-          { to: "/dentist/profile", label: "Profile", icon: UserRound },
-        ]}
-        onNavigate={(to) => {
-          setIsOpen(false);
-          if (to === "/dentist/notifications") {
-            setUnreadNotifications(0);
-          }
-        }}
-      />
-      <FloatingCircleMenu
-        hidden={isOpen}
-        items={[
-          { to: "/dentist/dashboard", label: "Dashboard", icon: LayoutDashboard },
-          { to: "/dentist/queue", label: "Patient Queue", icon: UsersRound },
-          { to: "/dentist/appointments", label: "Appointments", icon: CalendarDays },
-          { to: "/dentist/patient-records", label: "Records", icon: FolderOpen },
-        ]}
-        onNavigate={() => setIsOpen(false)}
-      />
+        menu={
+          <FloatingCircleMenu
+            items={[
+              { to: "/dentist/dashboard", label: "Dashboard", icon: LayoutDashboard },
+              { to: "/dentist/queue", label: "Patient Queue", icon: UsersRound },
+              { to: "/dentist/appointments", label: "Appointments", icon: CalendarDays },
+              { to: "/dentist/patient-records", label: "Records", icon: FolderOpen },
+            ]}
+            onNavigate={() => setIsOpen(false)}
+          />
+        }
+      >
+        <RoleMobileBottomNav
+          ariaLabel="Dentist mobile navigation"
+          primary={[
+            { to: "/dentist/dashboard", label: "Dashboard", icon: LayoutDashboard },
+            { to: "/dentist/queue", label: "Patient Queue", icon: UsersRound },
+            { to: "/dentist/appointments", label: "Appointments", icon: CalendarDays },
+            { to: "/dentist/patient-records", label: "Patient Records", icon: FolderOpen },
+          ]}
+          more={[
+            { to: "/dentist/notifications", label: "Notifications", icon: Bell, showDot: hasUnread },
+            { to: "/dentist/profile", label: "Profile", icon: UserRound },
+          ]}
+          onNavigate={(to) => {
+            setIsOpen(false);
+            if (to === "/dentist/notifications") {
+              setUnreadNotifications(0);
+            }
+          }}
+        />
+      </RoleBottomDock>
       <LogoutConfirmDialog {...logoutDialogProps} />
     </div>
   );
