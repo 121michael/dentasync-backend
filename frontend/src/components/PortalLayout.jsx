@@ -18,6 +18,7 @@ import {
 import { useCallback, useEffect, useState } from "react";
 import { BrandMark } from "./BrandMark";
 import { FloatingCircleMenu } from "./FloatingCircleMenu";
+import { RoleBottomDock } from "./RoleBottomDock";
 import { LogoutConfirmDialog } from "./LogoutConfirmDialog";
 import { useLogoutConfirm } from "./useLogoutConfirm";
 import { useAuth } from "../useAuth";
@@ -221,32 +222,35 @@ export function PortalLayout({ theme, onToggleTheme, onThemeChange }) {
         </main>
       </div>
 
-      <nav
-        className={`mobile-nav ${isMenuOpen ? "is-menu-open" : ""}`}
-        aria-label="Mobile patient portal navigation"
-      >
-        {navigation.slice(0, 5).map(({ to, label, icon: Icon }) => (
-          <NavLink
-            key={to}
-            to={to}
-            className={({ isActive }) => `mobile-nav__link ${isActive ? "is-active" : ""}`}
-          >
-            <Icon size={19} aria-hidden="true" />
-            <span>{label.split(" ")[0]}</span>
-          </NavLink>
-        ))}
-      </nav>
-      <FloatingCircleMenu
+      <RoleBottomDock
+        variant="compact"
         hidden={isMenuOpen}
-        items={[
-          { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-          { to: "/appointments", label: "Appointments", icon: CalendarDays },
-          { to: "/queue", label: "Queue", icon: UsersRound },
-          { to: "/assistant", label: "AI Assistant", icon: Bot },
-          { to: "/family", label: "Family", icon: Users },
-        ]}
-        onNavigate={closeMenu}
-      />
+        menu={
+          <FloatingCircleMenu
+            items={[
+              { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+              { to: "/appointments", label: "Appointments", icon: CalendarDays },
+              { to: "/queue", label: "Queue", icon: UsersRound },
+              { to: "/assistant", label: "AI Assistant", icon: Bot },
+              { to: "/family", label: "Family", icon: Users },
+            ]}
+            onNavigate={closeMenu}
+          />
+        }
+      >
+        <nav className="mobile-nav" aria-label="Mobile patient portal navigation">
+          {navigation.slice(0, 5).map(({ to, label, icon: Icon }) => (
+            <NavLink
+              key={to}
+              to={to}
+              className={({ isActive }) => `mobile-nav__link ${isActive ? "is-active" : ""}`}
+            >
+              <Icon size={19} aria-hidden="true" />
+              <span>{label.split(" ")[0]}</span>
+            </NavLink>
+          ))}
+        </nav>
+      </RoleBottomDock>
       <LogoutConfirmDialog {...logoutDialogProps} />
     </div>
   );
