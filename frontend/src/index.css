@@ -6488,14 +6488,20 @@ body.is-queue-display .staff-mobile-nav {
 
 .fdi-chart-shell {
   margin: 0.5rem 0 1.25rem;
+  min-width: 0;
+  max-width: 100%;
 }
 .fdi-chart-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.9fr);
+  grid-template-columns: minmax(0, 1.45fr) minmax(0, 0.9fr);
   gap: 1rem;
   align-items: start;
+  min-width: 0;
+  max-width: 100%;
 }
 .fdi-chart-canvas {
+  min-width: 0;
+  max-width: 100%;
   padding: 1rem 1rem 0.85rem;
 }
 .fdi-chart-canvas__head {
@@ -6504,17 +6510,30 @@ body.is-queue-display .staff-mobile-nav {
   gap: 0.75rem;
   align-items: flex-start;
   margin-bottom: 0.65rem;
+  min-width: 0;
+}
+.fdi-chart-canvas__head > div {
+  min-width: 0;
+  max-width: 100%;
+}
+.fdi-chart-canvas__head h2,
+.fdi-chart-canvas__head p {
+  overflow-wrap: anywhere;
 }
 .fdi-chart-canvas__head h2 {
   margin: 0.15rem 0 0.25rem;
 }
 .fdi-chart-count {
   color: var(--text-muted);
-  white-space: nowrap;
+  white-space: normal;
+  text-align: right;
 }
 .odo-scroll {
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
   overflow-x: auto;
+  overscroll-behavior-x: contain;
   padding-bottom: 0.35rem;
 }
 .odo-head-meta {
@@ -6546,20 +6565,21 @@ body.is-queue-display .staff-mobile-nav {
 .odo-chart {
   display: grid;
   gap: 1.1rem;
-  min-width: 660px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   margin: 0 auto;
   padding: 0.9rem 0.6rem 0.4rem;
   background: #fff;
   border: 1px solid var(--border);
   border-radius: 16px;
 }
-.odo-chart--primary {
-  min-width: 460px;
-}
 .odo-arch {
   display: grid;
   gap: 0.35rem;
   justify-items: center;
+  width: 100%;
+  min-width: 0;
 }
 .odo-arch__label {
   color: var(--text-muted);
@@ -6567,15 +6587,26 @@ body.is-queue-display .staff-mobile-nav {
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
+  text-align: center;
+  overflow-wrap: anywhere;
 }
 .odo-row {
   display: grid;
-  grid-template-columns:
-    repeat(var(--odo-half, 8), minmax(0, 1fr)) auto
-    repeat(var(--odo-half, 8), minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: start;
+  justify-items: stretch;
+  gap: 0.35rem;
+  width: 100%;
+  min-width: 0;
+  touch-action: pan-y;
+}
+.odo-quad {
+  display: grid;
+  grid-template-columns: repeat(var(--odo-half, 8), minmax(0, 1fr));
   align-items: start;
   justify-items: center;
   gap: 0.35rem;
+  min-width: 0;
   width: 100%;
 }
 .odo-midline {
@@ -6601,15 +6632,18 @@ body.is-queue-display .staff-mobile-nav {
   font-variant-numeric: tabular-nums;
 }
 .odo-tooth__button {
-  display: block;
+  display: grid;
+  place-items: center;
   width: 100%;
   max-width: 52px;
+  min-height: 44px;
   padding: 2px;
   border: 1px solid transparent;
   border-radius: 10px;
   background: transparent;
   line-height: 0;
   cursor: pointer;
+  touch-action: manipulation;
   transition: background 0.15s ease, border-color 0.15s ease;
 }
 .odo-tooth__button:hover {
@@ -6756,12 +6790,15 @@ body.is-queue-display .staff-mobile-nav {
   display: flex;
   flex-wrap: wrap;
   gap: 0.45rem;
+  width: 100%;
+  max-width: 100%;
   margin-top: 0.55rem;
 }
 .fdi-legend__item {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
+  max-width: 100%;
   padding: 0.28rem 0.55rem;
   border-radius: 999px;
   border: 1px solid var(--border);
@@ -6769,6 +6806,8 @@ body.is-queue-display .staff-mobile-nav {
   color: var(--text-muted);
   font-size: 0.72rem;
   font-weight: 600;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .fdi-legend__item::before {
   content: "";
@@ -6789,6 +6828,8 @@ body.is-queue-display .staff-mobile-nav {
 .fdi-legend__item--missing::before { background: #ece8f1; }
 
 .fdi-panel {
+  min-width: 0;
+  max-width: 100%;
   padding: 1rem;
   position: sticky;
   top: 0.5rem;
@@ -6799,6 +6840,12 @@ body.is-queue-display .staff-mobile-nav {
   gap: 0.75rem;
   align-items: flex-start;
   margin-bottom: 0.85rem;
+  min-width: 0;
+}
+.fdi-panel h3,
+.fdi-panel p,
+.fdi-readonly-block strong {
+  overflow-wrap: anywhere;
 }
 .fdi-panel__head h3 {
   margin: 0.15rem 0 0;
@@ -6979,16 +7026,13 @@ body.is-queue-display .staff-mobile-nav {
     width: min(100%, 96vw);
   }
   .odo-chart {
-    min-width: 600px;
     gap: 0.9rem;
   }
-  .odo-chart--primary {
-    min-width: 400px;
-  }
   .odo-tooth__button {
-    max-width: 38px;
+    max-width: 44px;
   }
-  .odo-row {
+  .odo-row,
+  .odo-quad {
     gap: 0.25rem;
   }
 }
@@ -7045,18 +7089,68 @@ body.is-queue-display .staff-mobile-nav {
   }
   .odo-head-meta {
     justify-items: start;
+    width: 100%;
+  }
+  .fdi-chart-count {
+    text-align: left;
+  }
+  .fdi-chart-canvas {
+    padding: 0.85rem 0.7rem 0.75rem;
+  }
+  .odo-scroll {
+    overflow-x: hidden;
   }
   .odo-chart {
-    min-width: 540px;
+    padding: 0.7rem 0.4rem 0.35rem;
   }
-  .odo-chart--primary {
-    min-width: 360px;
+  .odo-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.5rem;
+  }
+  .odo-midline {
+    width: 100%;
+    height: 1px;
+    margin: 0;
+    background: repeating-linear-gradient(
+      to right,
+      rgba(124, 58, 237, 0.4) 0 6px,
+      transparent 6px 12px
+    );
+  }
+  .odo-quad {
+    gap: 0.18rem;
   }
   .odo-tooth__button {
-    max-width: 32px;
+    max-width: 40px;
+    min-height: 44px;
   }
   .odo-tooth__number {
     font-size: 0.62rem;
+  }
+  .fdi-legend {
+    gap: 0.35rem;
+  }
+  .fdi-legend__item {
+    padding: 0.22rem 0.45rem;
+    font-size: 0.68rem;
+  }
+  .fdi-panel {
+    padding: 0.85rem 0.75rem;
+  }
+  .fdi-panel__head {
+    flex-wrap: wrap;
+  }
+  .fdi-panel__actions {
+    justify-content: stretch;
+  }
+  .fdi-panel__actions .button {
+    flex: 1;
+  }
+  .dentist-page,
+  .staff-patient-record {
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: clip;
   }
   .staff-record-info-grid,
   .staff-record-operations {
@@ -7081,6 +7175,17 @@ body.is-queue-display .staff-mobile-nav {
   .staff-money-input,
   .staff-money-input input {
     width: 100%;
+  }
+}
+
+@media (max-width: 360px) {
+  .odo-quad {
+    gap: 0.08rem;
+  }
+  .odo-tooth__button {
+    max-width: none;
+    min-height: 42px;
+    padding: 1px;
   }
 }
 

@@ -146,36 +146,37 @@ export function DentalChart({
 
   const recordedCount = all.filter((tooth) => hasChartStatus(chart[String(tooth)])).length;
 
+  function renderQuad(teeth, arch, side) {
+    return (
+      <div
+        className={`odo-quad odo-quad--${side}`}
+        style={{ "--odo-half": half }}
+        aria-label={`${arch} ${side} teeth`}
+      >
+        {teeth.map((tooth) => (
+          <Tooth
+            key={`${arch}-${tooth}`}
+            toothNumber={tooth}
+            arch={arch}
+            record={chart[String(tooth)]}
+            selected={
+              pickMode ? picked.has(String(tooth)) : String(selectedTooth) === String(tooth)
+            }
+            onSelect={selectTooth}
+          />
+        ))}
+      </div>
+    );
+  }
+
   function renderRow(teeth, arch) {
     const right = teeth.slice(0, half);
     const left = teeth.slice(half);
     return (
       <div className="odo-row" style={{ "--odo-half": half }}>
-        {right.map((tooth) => (
-          <Tooth
-            key={`${arch}-${tooth}`}
-            toothNumber={tooth}
-            arch={arch}
-            record={chart[String(tooth)]}
-            selected={
-              pickMode ? picked.has(String(tooth)) : String(selectedTooth) === String(tooth)
-            }
-            onSelect={selectTooth}
-          />
-        ))}
+        {renderQuad(right, arch, "right")}
         <span className="odo-midline" aria-hidden="true" />
-        {left.map((tooth) => (
-          <Tooth
-            key={`${arch}-${tooth}`}
-            toothNumber={tooth}
-            arch={arch}
-            record={chart[String(tooth)]}
-            selected={
-              pickMode ? picked.has(String(tooth)) : String(selectedTooth) === String(tooth)
-            }
-            onSelect={selectTooth}
-          />
-        ))}
+        {renderQuad(left, arch, "left")}
       </div>
     );
   }
