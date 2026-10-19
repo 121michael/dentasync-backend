@@ -17,3 +17,17 @@ test("device key compare is secret-based", () => {
   assert.equal(rfidDeskCheckIn.deviceKeyMatches("wrong", env), false);
   assert.equal(rfidDeskCheckIn.deviceKeyMatches("", env), false);
 });
+
+test("Render can authorize the ESP32 desk key without RFID_DEVICE_SECRET", () => {
+  const env = { RFID_DEVICE_SECRET: "" };
+  assert.equal(rfidDeskCheckIn.deviceSecretConfigured(env), true);
+  assert.equal(rfidDeskCheckIn.resolvedDeviceSecret(env), rfidDeskCheckIn.DEFAULT_RFID_DEVICE_SECRET);
+  assert.equal(rfidDeskCheckIn.deviceKeyMatches("dentasync-esp32-desk", env), true);
+  assert.equal(rfidDeskCheckIn.deviceKeyMatches("wrong", env), false);
+});
+
+test("RFID_DEVICE_SECRET on Render overrides the firmware default", () => {
+  const env = { RFID_DEVICE_SECRET: "render-override" };
+  assert.equal(rfidDeskCheckIn.deviceKeyMatches("render-override", env), true);
+  assert.equal(rfidDeskCheckIn.deviceKeyMatches("dentasync-esp32-desk", env), false);
+});

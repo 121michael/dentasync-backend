@@ -191,18 +191,34 @@ app.get("/", async (req, res) => {
   }
 });
 
-app.post("/api/public/rfid-check-in", async (req, res) => {
+function authorizePublicRfidReader(req, res) {
   const rfidDeskCheckIn = require("./services/rfidDeskCheckIn");
   if (!rfidDeskCheckIn.deviceSecretConfigured()) {
-    return res.status(503).json({
+    res.status(503).json({
       message: "RFID device check-in is not configured. Set RFID_DEVICE_SECRET on the API service.",
     });
+    return null;
   }
-  const provided =
-    req.get("x-rfid-device-key") || req.get("x-device-key") || req.body?.deviceKey || req.body?.secret;
+  const provided = rfidDeskCheckIn.readProvidedDeviceKey(req);
   if (!rfidDeskCheckIn.deviceKeyMatches(provided)) {
-    return res.status(403).json({ message: "RFID reader is not authorized." });
+    res.status(403).json({ message: "RFID reader is not authorized." });
+    return null;
   }
+  return rfidDeskCheckIn;
+}
+
+app.get("/api/public/rfid-check-in", (req, res) => {
+  if (!authorizePublicRfidReader(req, res)) return;
+  return res.json({
+    ok: true,
+    connected: true,
+    message: "ESP32 RFID reader is authorized on this API.",
+  });
+});
+
+app.post("/api/public/rfid-check-in", async (req, res) => {
+  const rfidDeskCheckIn = authorizePublicRfidReader(req, res);
+  if (!rfidDeskCheckIn) return;
   try {
     const result = await rfidDeskCheckIn.checkInByRfidTag(db, {
       rfidTag: req.body?.rfidTag || req.body?.uid || req.body?.tag,
