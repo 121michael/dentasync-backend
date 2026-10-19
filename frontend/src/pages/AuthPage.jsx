@@ -230,16 +230,20 @@ export function AuthPage() {
             aria-label="We create healthy beautiful smiles for your entire family"
           >
             <span className="auth-showcase__tagline-lead">We create</span>
-            <span className="auth-showcase__tagline-emphasis">Healthy</span>
-            <span className="auth-showcase__tagline-emphasis auth-showcase__tagline-emphasis--beautiful">
-              Beautiful
+            <span className="auth-showcase__tagline-main">
+              <span className="auth-showcase__tagline-emphasis">Healthy</span>
+              <span className="auth-showcase__tagline-emphasis auth-showcase__tagline-emphasis--beautiful">
+                Beautiful
+              </span>
+              <span className="auth-showcase__tagline-accent">Smiles</span>
             </span>
-            <span className="auth-showcase__tagline-accent">Smiles</span>
-            <span className="auth-showcase__tagline-support">
-              <span>For your</span>
-              <span>Entire</span>
+            <span className="auth-showcase__tagline-foot">
+              <span className="auth-showcase__tagline-support">
+                <span>For your</span>
+                <span>Entire</span>
+              </span>
+              <span className="auth-showcase__tagline-family">Family</span>
             </span>
-            <span className="auth-showcase__tagline-family">Family</span>
           </h1>
           <p>
             Schedule, track, and understand your dental journey through one calm,
