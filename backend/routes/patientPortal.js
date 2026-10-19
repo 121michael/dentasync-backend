@@ -1806,6 +1806,9 @@ function createPatientPortalRouter({
         diagnosticsSensitivity: settings.diagnosticsSensitivity,
         patientContext,
         conversationHistoryBlock: patientAiConversations.formatConversationHistoryBlock(priorMessages),
+        db,
+        usageUserId: userId,
+        usageUserRole: "patient",
       };
 
       async function persistAndRespond(payload) {
@@ -1861,6 +1864,9 @@ function createPatientPortalRouter({
             fileName: req.file.originalname,
             question,
             diagnosticsSensitivity: settings.diagnosticsSensitivity,
+            db,
+            usageUserId: userId,
+            usageUserRole: "patient",
           })
         : {
             status: "unavailable",

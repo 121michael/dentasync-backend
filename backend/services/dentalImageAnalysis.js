@@ -39,6 +39,9 @@ async function analyzeDentalImageBuffer({
   fileName,
   question,
   diagnosticsSensitivity = "balanced",
+  usageUserId = null,
+  usageUserRole = "patient",
+  db = null,
 } = {}) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -78,72 +81,110 @@ ${sensitivityPrompt(diagnosticsSensitivity)}
 
 Always end with: ${DISCLAIMER}`;
 
-  try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                { text: prompt },
+  const { parseGeminiUsage, trackAiUsage, withAiUsageContext } = require("./aiUsage");
+  return withAiUsageContext(
+    {
+      feature: "patient_image_analysis",
+      userId: usageUserId,
+      userRole: usageUserRole,
+      db,
+    },
+    async () => {
+      try {
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [
                 {
-                  inline_data: {
-                    mime_type: mimeType,
-                    data: buffer.toString("base64"),
-                  },
+                  parts: [
+                    { text: prompt },
+                    {
+                      inline_data: {
+                        mime_type: mimeType,
+                        data: buffer.toString("base64"),
+                      },
+                    },
+                  ],
                 },
               ],
-            },
-          ],
-        }),
+            }),
+          }
+        );
+
+        if (!response.ok) {
+          trackAiUsage({
+            feature: "patient_image_analysis",
+            outcome: "failed",
+            httpStatus: response.status,
+            model: "gemini-1.5-flash",
+          });
+          return unavailableResult(
+            "Preliminary image analysis could not be completed right now. Your upload was saved for your care team. Please try again later or consult your dentist."
+          );
+        }
+
+        const payload = await response.json();
+        const text =
+          payload?.candidates?.[0]?.content?.parts?.map((part) => part.text).join("\n").trim() ||
+          "";
+        const usage = parseGeminiUsage(payload);
+
+        if (!text) {
+          trackAiUsage({
+            feature: "patient_image_analysis",
+            outcome: "failed",
+            httpStatus: 200,
+            model: "gemini-1.5-flash",
+            usage,
+          });
+          return unavailableResult(
+            "No preliminary findings could be generated from this image. Please consult your dentist for professional evaluation."
+          );
+        }
+
+        trackAiUsage({
+          feature: "patient_image_analysis",
+          outcome: "success",
+          httpStatus: 200,
+          model: "gemini-1.5-flash",
+          usage,
+        });
+
+        const toothMatch = text.match(/\b([1-4][1-8])\b/);
+        const surfaceMatch = text.match(
+          /\b(occlusal|incisal|buccal|facial|lingual|palatal|mesial|distal)\b/i
+        );
+
+        return {
+          status: "completed",
+          summary: text.includes(DISCLAIMER) ? text : `${text}\n\n${DISCLAIMER}`,
+          findings: {
+            raw: text,
+            possibleToothNumber: toothMatch ? toothMatch[1] : null,
+            possibleSurface: surfaceMatch ? surfaceMatch[1].toLowerCase() : null,
+          },
+          confidence: null,
+          possibleToothNumber: toothMatch ? toothMatch[1] : null,
+          possibleSurface: surfaceMatch ? surfaceMatch[1].toLowerCase() : null,
+          disclaimer: DISCLAIMER,
+          model: "gemini-1.5-flash",
+        };
+      } catch (error) {
+        console.warn("Dental image analysis failed:", error.message);
+        trackAiUsage({
+          feature: "patient_image_analysis",
+          outcome: "failed",
+          model: "gemini-1.5-flash",
+        });
+        return unavailableResult(
+          "Preliminary image analysis failed unexpectedly. Your upload was saved. Please consult your dentist."
+        );
       }
-    );
-
-    if (!response.ok) {
-      return unavailableResult(
-        "Preliminary image analysis could not be completed right now. Your upload was saved for your care team. Please try again later or consult your dentist."
-      );
     }
-
-    const payload = await response.json();
-    const text =
-      payload?.candidates?.[0]?.content?.parts?.map((part) => part.text).join("\n").trim() ||
-      "";
-
-    if (!text) {
-      return unavailableResult(
-        "No preliminary findings could be generated from this image. Please consult your dentist for professional evaluation."
-      );
-    }
-
-    const toothMatch = text.match(/\b([1-4][1-8])\b/);
-    const surfaceMatch = text.match(
-      /\b(occlusal|incisal|buccal|facial|lingual|palatal|mesial|distal)\b/i
-    );
-
-    return {
-      status: "completed",
-      summary: text.includes(DISCLAIMER) ? text : `${text}\n\n${DISCLAIMER}`,
-      findings: {
-        raw: text,
-        possibleToothNumber: toothMatch ? toothMatch[1] : null,
-        possibleSurface: surfaceMatch ? surfaceMatch[1].toLowerCase() : null,
-      },
-      confidence: null,
-      possibleToothNumber: toothMatch ? toothMatch[1] : null,
-      possibleSurface: surfaceMatch ? surfaceMatch[1].toLowerCase() : null,
-      disclaimer: DISCLAIMER,
-      model: "gemini-1.5-flash",
-    };
-  } catch (error) {
-    console.warn("Dental image analysis failed:", error.message);
-    return unavailableResult(
-      "Preliminary image analysis failed unexpectedly. Your upload was saved. Please consult your dentist."
-    );
-  }
+  );
 }
 
 module.exports = {

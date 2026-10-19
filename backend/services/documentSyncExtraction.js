@@ -3141,7 +3141,7 @@ async function extractTextFromFile(filePath, mimeType, originalName) {
   throw new DocumentValidationError(UNSUPPORTED_DOCUMENT_MESSAGE);
 }
 
-async function extractDocumentData(filePath, mimeType, originalName) {
+async function extractDocumentDataUntracked(filePath, mimeType, originalName) {
   const extension = path.extname(originalName || filePath).toLowerCase();
   const isImage =
     (mimeType && mimeType.startsWith("image/")) ||
@@ -3328,6 +3328,18 @@ async function extractDocumentData(filePath, mimeType, originalName) {
     orientationDegrees: extracted.orientationDegrees || 0,
     autoFilledCount: filledCount,
   };
+}
+
+async function extractDocumentData(filePath, mimeType, originalName) {
+  const crypto = require("crypto");
+  const { withAiUsageContext, flushAiUsageAttempt } = require("./aiUsage");
+  return withAiUsageContext({ feature: "document_sync", requestId: crypto.randomUUID() }, async () => {
+    try {
+      return await extractDocumentDataUntracked(filePath, mimeType, originalName);
+    } finally {
+      flushAiUsageAttempt();
+    }
+  });
 }
 
 module.exports = {

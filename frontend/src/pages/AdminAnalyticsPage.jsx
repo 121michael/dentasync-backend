@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { CircleCheck, Clock3, Download, UsersRound } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CircleCheck, Clock3, Download, FileSpreadsheet, FileText, UsersRound } from "lucide-react";
 import { api } from "../api";
 import { ErrorState, LoadingState } from "../components/UI";
 import { AdminBarChart, AdminDonutChart, AdminLineChart, AdminStatCard } from "../components/AdminUI";
@@ -13,6 +13,9 @@ export function AdminAnalyticsPage() {
   const [to, setTo] = useState("");
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exporting, setExporting] = useState("");
+  const exportRef = useRef(null);
 
   const load = useCallback(async () => {
     try {
@@ -28,6 +31,14 @@ export function AdminAnalyticsPage() {
     load();
   }, [load, range, from, to]);
 
+  useEffect(() => {
+    function onPointer(event) {
+      if (!exportRef.current?.contains(event.target)) setExportOpen(false);
+    }
+    document.addEventListener("mousedown", onPointer);
+    return () => document.removeEventListener("mousedown", onPointer);
+  }, []);
+
   const segments = useMemo(() => {
     if (!data) return [];
     const breakdown = data.appointmentBreakdown;
@@ -40,12 +51,25 @@ export function AdminAnalyticsPage() {
     ];
   }, [data]);
 
-  async function exportReport() {
+  const aiOutcomeSegments = useMemo(() => {
+    const outcomes = data?.aiUsage?.outcomes;
+    if (!outcomes) return [];
+    return [
+      { label: "Successful", value: outcomes.success || 0, color: "#168567" },
+      { label: "Failed", value: outcomes.failed || 0, color: "#bb4d64" },
+    ];
+  }, [data]);
+
+  async function exportReport(format) {
+    setExporting(format);
+    setExportOpen(false);
     try {
-      await api.downloadAdminExport("appointments");
-      pushToast("Analytics report exported successfully.");
+      await api.downloadAdminAnalyticsExport(format, range, range === "custom" ? { from, to } : {});
+      pushToast(format === "pdf" ? "PDF report exported successfully." : "Excel report exported successfully.");
     } catch (exportError) {
       pushToast(exportError.message, "error");
+    } finally {
+      setExporting("");
     }
   }
 
@@ -54,8 +78,10 @@ export function AdminAnalyticsPage() {
   if (!data) return <LoadingState label="Select a custom date range…" />;
 
   const summary = data.summary || {};
-
+  const ai = data.aiUsage || {};
+  const aiSummary = ai.summary || {};
   const dentistMax = Math.max(1, ...(data.dentistPerformance || []).map((entry) => Number(entry.completed || 0)));
+  const busy = Boolean(exporting);
 
   return (
     <div className="admin-page admin-analytics-page">
@@ -80,7 +106,31 @@ export function AdminAnalyticsPage() {
                 <input type="date" value={to} onChange={(event) => setTo(event.target.value)} />
               </>
             ) : null}
-            <button className="button button--secondary" onClick={exportReport}><Download size={16} /> Export Report</button>
+            <div className="admin-export-menu" ref={exportRef}>
+              <button
+                className="button button--secondary"
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded={exportOpen}
+                disabled={busy}
+                onClick={() => setExportOpen((open) => !open)}
+              >
+                <Download size={16} />
+                {busy ? "Generating report…" : "Export Report"}
+              </button>
+              {exportOpen ? (
+                <div className="admin-export-menu__panel" role="menu">
+                  <button type="button" role="menuitem" disabled={busy} onClick={() => exportReport("pdf")}>
+                    <FileText size={16} aria-hidden="true" />
+                    <span>Export as PDF</span>
+                  </button>
+                  <button type="button" role="menuitem" disabled={busy} onClick={() => exportReport("xlsx")}>
+                    <FileSpreadsheet size={16} aria-hidden="true" />
+                    <span>Export as Excel (.xlsx)</span>
+                  </button>
+                </div>
+              ) : null}
+            </div>
           </div>
         </div>
       </section>
@@ -166,6 +216,89 @@ export function AdminAnalyticsPage() {
           </div>
         </section>
       </div>
+
+      <section className="admin-panel admin-ai-usage">
+        <div className="admin-panel__heading">
+          <div>
+            <span className="eyebrow">Provider usage</span>
+            <h2>AI Usage</h2>
+            <p>
+              Recorded Gemini requests for {ai.periodLabel || data.periodLabel}. Catalog-only answers are not counted.
+              {ai.trackingStartedAt
+                ? ` Complete tracking began ${new Date(ai.trackingStartedAt).toLocaleString()}. Earlier requests are not included.`
+                : " No AI requests have been recorded yet."}
+              {!ai.trackingAvailable ? " Usage tracking is not installed on this database yet." : ""}
+            </p>
+          </div>
+        </div>
+
+        <section className="admin-stat-grid admin-ai-usage__stats">
+          <AdminStatCard label="Total AI Requests" value={aiSummary.totalRequests ?? 0} tone="purple" />
+          <AdminStatCard label="Successful AI Requests" value={aiSummary.successfulRequests ?? 0} tone="emerald" />
+          <AdminStatCard label="Failed AI Requests" value={aiSummary.failedRequests ?? 0} tone="danger" />
+          <AdminStatCard label="Active AI Users" value={aiSummary.activeUsers ?? 0} tone="violet" />
+          {aiSummary.tokensAvailable ? (
+            <>
+              <AdminStatCard label="Input tokens used" value={aiSummary.inputTokens ?? 0} tone="violet" />
+              <AdminStatCard label="Output tokens used" value={aiSummary.outputTokens ?? 0} tone="purple" />
+              <AdminStatCard label="Total tokens used" value={aiSummary.totalTokens ?? 0} tone="amber" />
+            </>
+          ) : (
+            <AdminStatCard
+              label="Token usage"
+              value="—"
+              detail="Not reported by the provider for recorded requests"
+              tone="amber"
+            />
+          )}
+          {aiSummary.costAvailable ? (
+            <AdminStatCard
+              label="Estimated AI API cost"
+              value={`$${aiSummary.estimatedCostUsd}`}
+              detail="From configured per-million token rates"
+              tone="purple"
+            />
+          ) : null}
+        </section>
+
+        <div className="admin-analytics-grid">
+          <AdminLineChart
+            title="AI Requests Over Time"
+            eyebrow={ai.periodLabel || "Selected period"}
+            points={ai.requestsOverTime || []}
+            valueKey="count"
+          />
+          <AdminDonutChart title="AI Request Outcomes" segments={aiOutcomeSegments} />
+          {(ai.byFeature || []).length ? (
+            <AdminBarChart
+              title="AI Usage by Feature"
+              eyebrow="Verified AI functions"
+              points={ai.byFeature}
+              valueKey="count"
+              labelKey="label"
+            />
+          ) : null}
+          {(ai.tokensOverTime || []).length ? (
+            <AdminLineChart
+              title="Token Usage Over Time"
+              eyebrow="Provider-reported tokens"
+              points={ai.tokensOverTime.map((point) => ({ label: point.label, count: point.total ?? 0 }))}
+              valueKey="count"
+            />
+          ) : null}
+          {(ai.byRole || []).length ? (
+            <AdminBarChart
+              title="AI Usage by User Role"
+              eyebrow="Authenticated users"
+              points={ai.byRole.map((item) => ({
+                label: item.role,
+                count: item.count,
+              }))}
+              valueKey="count"
+            />
+          ) : null}
+        </div>
+      </section>
     </div>
   );
 }

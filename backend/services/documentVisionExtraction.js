@@ -94,22 +94,42 @@ Rules:
       if (!response.ok) {
         const detail = await response.text().catch(() => "");
         lastError = `${response.status} ${detail.slice(0, 120)}`;
+        const { noteAiAttempt } = require("./aiUsage");
+        noteAiAttempt({ outcome: "failed", httpStatus: response.status, model });
         continue;
       }
 
       const data = await response.json();
+      const { parseGeminiUsage, noteAiAttempt } = require("./aiUsage");
+      const usage = parseGeminiUsage(data);
       const text = String(data?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
       const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) continue;
+      if (!jsonMatch) {
+        noteAiAttempt({ outcome: "failed", httpStatus: 200, model, ...usage });
+        continue;
+      }
 
       try {
         const parsed = JSON.parse(jsonMatch[0]);
-        if (parsed && typeof parsed === "object") return parsed;
+        if (parsed && typeof parsed === "object") {
+          noteAiAttempt({
+            outcome: "success",
+            httpStatus: 200,
+            model,
+            inputTokens: usage.inputTokens,
+            outputTokens: usage.outputTokens,
+            totalTokens: usage.totalTokens,
+          });
+          return parsed;
+        }
       } catch {
+        noteAiAttempt({ outcome: "failed", httpStatus: 200, model, ...usage });
         continue;
       }
     } catch (error) {
       lastError = error.message || String(error);
+      const { noteAiAttempt } = require("./aiUsage");
+      noteAiAttempt({ outcome: "failed", model });
     }
   }
 
