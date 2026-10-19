@@ -871,6 +871,9 @@ function normalizeOptions(servicesOrOptions) {
       ? options.patientContext
       : null,
     conversationHistoryBlock: String(options.conversationHistoryBlock || ""),
+    db: options.db || null,
+    usageUserId: options.usageUserId || null,
+    usageUserRole: options.usageUserRole || null,
   };
 }
 
@@ -1754,8 +1757,19 @@ function slimPatientContext(patientContext) {
 }
 
 async function generateGeminiText(apiKey, prompt) {
+  const { parseGeminiUsage, trackAiUsage } = require("./aiUsage");
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 12000);
+  let recorded = false;
+  const record = (event) => {
+    if (recorded) return;
+    recorded = true;
+    trackAiUsage({
+      feature: "patient_assistant",
+      model: "gemini-1.5-flash",
+      ...event,
+    });
+  };
   try {
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
@@ -1770,6 +1784,7 @@ async function generateGeminiText(apiKey, prompt) {
       }
     );
     if (!response.ok) {
+      record({ outcome: "failed", httpStatus: response.status });
       const error = new Error(`gemini-http-${response.status}`);
       error.code = response.status === 429 ? "rate_limit" : "http";
       throw error;
@@ -1780,11 +1795,16 @@ async function generateGeminiText(apiKey, prompt) {
       .join("\n")
       .trim();
     if (!text) {
+      record({ outcome: "failed", httpStatus: 200, usage: parseGeminiUsage(payload) });
       const error = new Error("gemini-empty");
       error.code = "empty";
       throw error;
     }
+    record({ outcome: "success", httpStatus: 200, usage: parseGeminiUsage(payload) });
     return text;
+  } catch (error) {
+    record({ outcome: "failed" });
+    throw error;
   } finally {
     clearTimeout(timer);
   }
@@ -1808,7 +1828,16 @@ async function answerWithOptionalGemini(question, servicesOrOptions) {
     return { ...local, model: "clinic-faq" };
   }
 
+  const { withAiUsageContext } = require("./aiUsage");
   try {
+    return await withAiUsageContext(
+      {
+        feature: "patient_assistant",
+        userId: options.usageUserId || null,
+        userRole: options.usageUserRole || "patient",
+        db: options.db || null,
+      },
+      async () => {
     const visitIntent = wantsOwnVisitInfo(normalized);
     const slim = visitIntent ? slimPatientContext(options.patientContext) : null;
     const ownVisit = slim
@@ -1849,6 +1878,8 @@ Patient question: ${question}`;
       model: "gemini-1.5-flash",
       language: local.language,
     };
+      }
+    );
   } catch {
     return { ...local, model: "clinic-faq-fallback" };
   }

@@ -64,6 +64,11 @@ async function request(path, { method = "GET", body, headers = {}, authenticated
   }
 }
 
+function filenameFromDisposition(header, fallback) {
+  const match = String(header || "").match(/filename="?([^"]+)"?/i);
+  return match?.[1] || fallback;
+}
+
 async function download(path, filename, { silent = false, fullscreen } = {}) {
   const token = accessToken();
   const track = shouldTrackLoading(path, { method: "GET", silent, fullscreen });
@@ -82,7 +87,7 @@ async function download(path, filename, { silent = false, fullscreen } = {}) {
     const objectUrl = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = objectUrl;
-    anchor.download = filename;
+    anchor.download = filenameFromDisposition(response.headers.get("content-disposition"), filename);
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
@@ -445,4 +450,14 @@ export const api = {
   updateAdminPassword: (body) => request("/admin/password", { method: "PUT", body }),
   downloadAdminExport: (report) =>
     download(`/admin/export/${encodeURIComponent(report)}`, `${report}-export.csv`),
+  downloadAdminAnalyticsExport: (format, range = "month", extras = {}) => {
+    const search = new URLSearchParams({
+      format,
+      range,
+      ...Object.fromEntries(Object.entries(extras).filter(([, value]) => value)),
+    });
+    const fallback =
+      format === "pdf" ? "DentaSync_General_Analytics.pdf" : "DentaSync_General_Analytics.xlsx";
+    return download(`/admin/analytics/export?${search}`, fallback, { silent: true });
+  },
 };

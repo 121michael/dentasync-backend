@@ -447,10 +447,15 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
         }
         jobId = inserted.rows[0].id;
 
-        const extraction = await extractDocumentData(
-          req.file.path,
-          req.file.mimetype,
-          req.file.originalname
+        const { withAiUsageContext } = require("../services/aiUsage");
+        const extraction = await withAiUsageContext(
+          {
+            feature: "document_sync",
+            userId: String(req.admin.id),
+            userRole: "admin",
+            db,
+          },
+          () => extractDocumentData(req.file.path, req.file.mimetype, req.file.originalname)
         );
 
         const storedPayload = {
