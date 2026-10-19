@@ -17,7 +17,9 @@ const {
   consumeAssistantRateLimit,
   resetAssistantRateLimit,
   APPROVED_HMO_PROVIDERS,
+  APPROVED_CLINIC_SERVICES,
   matchApprovedHmo,
+  matchApprovedClinicService,
 } = require("../services/clinicAssistant");
 const { SERVICES, DENTISTS } = require("../routes/patientPortal");
 
@@ -550,6 +552,103 @@ test("gemini rate-limit responses fall back to catalog", async () => {
     const result = await answerWithOptionalGemini("What is tooth enamel?", options);
     assert.match(result.answer, /enamel/i);
     assert.equal(result.model, "clinic-faq-fallback");
+  } finally {
+    global.fetch = originalFetch;
+    if (previous === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = previous;
+  }
+});
+
+test("approved clinic prices are a maintainable catalog, not a Gemini fine-tune", () => {
+  const ids = APPROVED_CLINIC_SERVICES.map((item) => item.id);
+  assert.ok(ids.includes("cleaning"));
+  assert.ok(ids.includes("odontectomy"));
+  assert.ok(ids.includes("metal-braces"));
+  assert.ok(ids.includes("zirconia-crown"));
+  assert.equal(matchApprovedClinicService("how much is cleaning").id, "cleaning");
+  assert.equal(matchApprovedClinicService("how much is zirconia per tooth").id, "zirconia-crown");
+});
+
+test("cleaning and extraction answers use official starting prices, not guaranteed totals", () => {
+  const cleaning = answerFromCatalog("How much is cleaning?", options);
+  assert.equal(cleaning.source, "catalog");
+  assert.match(cleaning.answer, /Oral Prophylaxis/i);
+  assert.match(cleaning.answer, /Starting at ₱1,000/);
+  assert.match(cleaning.answer, /depending on the patient's case/i);
+  assert.doesNotMatch(cleaning.answer, /guaranteed final/i);
+  assert.doesNotMatch(cleaning.answer, /₱1,500/);
+
+  const extraction = answerFromCatalog("How much is tooth extraction?", options);
+  assert.match(extraction.answer, /₱1,500/);
+  assert.match(extraction.answer, /depending on the patient's case/i);
+});
+
+test("odontectomy answers keep the approved range without promising a quote", () => {
+  const result = answerFromCatalog("How much is odontectomy?", options);
+  assert.match(result.answer, /₱5,000/);
+  assert.match(result.answer, /₱15,000/);
+  assert.match(result.answer, /depending on the case/i);
+  assert.doesNotMatch(result.answer, /will cost ₱5,000\./i);
+});
+
+test("metal braces answers separate down payment from monthly adjustment", () => {
+  const result = answerFromCatalog("How much are metal braces, and what is the monthly adjustment?", options);
+  assert.match(result.answer, /₱5,000/);
+  assert.match(result.answer, /₱1,250/);
+  assert.match(result.answer, /down payment/i);
+  assert.match(result.answer, /monthly adjustment/i);
+  assert.match(result.answer, /Free cleaning/i);
+  assert.doesNotMatch(result.answer, /total cost of treatment is/i);
+});
+
+test("zirconia and invisible retainer answers stay per unit or per arch", () => {
+  const zirconia = answerFromCatalog("How much is zirconia per tooth?", options);
+  assert.match(zirconia.answer, /₱15,000 per unit/i);
+  assert.match(zirconia.answer, /not automatically the total/i);
+
+  const retainer = answerFromCatalog("How much are invisible retainers?", options);
+  assert.match(retainer.answer, /₱5,000/);
+  assert.match(retainer.answer, /upper or lower/i);
+  assert.doesNotMatch(retainer.answer, /covers both/i);
+});
+
+test("denture questions invite a free consultation instead of inventing types", () => {
+  const cost = answerFromCatalog("How much do dentures cost, and what types are available?", options);
+  assert.match(cost.answer, /₱7,500/);
+  assert.match(cost.answer, /FREE consultation/i);
+  assert.doesNotMatch(cost.answer, /acrylic partial/i);
+
+  const advice = answerFromCatalog("What denture material is best for me?", options);
+  assert.match(advice.answer, /depend/i);
+  assert.match(advice.answer, /₱7,500/);
+  assert.match(advice.answer, /FREE consultation/i);
+});
+
+test("consultation is described as free in English and Tagalog", () => {
+  const english = answerFromCatalog("Is consultation free?", options);
+  assert.match(english.answer, /FREE/i);
+  assert.match(english.answer, /Oral Examination/i);
+
+  const tagalog = answerFromCatalog("May free consultation po ba kayo?", options);
+  assert.equal(tagalog.language, "tl");
+  assert.match(tagalog.answer, /FREE/i);
+});
+
+test("approved price catalog answers skip Gemini so knowledge updates apply immediately", async () => {
+  const previous = process.env.GEMINI_API_KEY;
+  process.env.GEMINI_API_KEY = "test-key";
+  const originalFetch = global.fetch;
+  let called = false;
+  global.fetch = async () => {
+    called = true;
+    throw new Error("gemini should not run for approved price catalog answers");
+  };
+  try {
+    const result = await answerWithOptionalGemini("How much is cleaning?", options);
+    assert.equal(result.source, "catalog");
+    assert.equal(result.model, "clinic-faq");
+    assert.equal(called, false);
+    assert.match(result.answer, /₱1,000/);
   } finally {
     global.fetch = originalFetch;
     if (previous === undefined) delete process.env.GEMINI_API_KEY;
