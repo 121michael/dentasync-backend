@@ -279,26 +279,23 @@ export function AdminLayout() {
           </main>
         </div>
 
-        <RoleBottomDock
-          variant="wide"
-          hidden={isOpen}
-          menu={
-            <FloatingCircleMenu
-              items={[
-                { to: "/admin/users", label: "Manage User", icon: Users },
-                { to: "/admin/patient-records", label: "Patient Record", icon: FolderOpen },
-                { to: "/admin/analytics", label: "Analytics", icon: BarChart3 },
-                { to: "/admin/schedule", label: "Schedule", icon: CalendarDays },
-                { to: "/admin/ai-settings", label: "AI Settings", icon: Bot },
-                { to: "/admin/sync-data", label: "Sync Data", icon: Cloud },
-                { to: "/admin/archived-records", label: "Archive", icon: Archive },
-              ]}
-              onNavigate={() => setIsOpen(false)}
-            />
-          }
-        >
+        <RoleBottomDock variant="wide" hidden={isOpen}>
           <RoleMobileBottomNav
             ariaLabel="Admin mobile navigation"
+            center={
+              <FloatingCircleMenu
+                items={[
+                  { to: "/admin/users", label: "Manage User", icon: Users },
+                  { to: "/admin/patient-records", label: "Patient Record", icon: FolderOpen },
+                  { to: "/admin/analytics", label: "Analytics", icon: BarChart3 },
+                  { to: "/admin/schedule", label: "Schedule", icon: CalendarDays },
+                  { to: "/admin/ai-settings", label: "AI Settings", icon: Bot },
+                  { to: "/admin/sync-data", label: "Sync Data", icon: Cloud },
+                  { to: "/admin/archived-records", label: "Archive", icon: Archive },
+                ]}
+                onNavigate={() => setIsOpen(false)}
+              />
+            }
             primary={[
               { to: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
               { to: "/admin/users", label: "Manage User", icon: Users, showDot: alerts.pendingAccounts > 0 },
