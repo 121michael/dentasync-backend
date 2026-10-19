@@ -41,7 +41,7 @@ export function FloatingCircleMenu({ items, onNavigate, hidden = false }) {
         className="fab-menu__panel"
         id={panelId}
         aria-label="Quick destinations"
-        hidden={!open}
+        aria-hidden={!open}
       >
         {items.map(({ to, label, icon: Icon }) => (
           <NavLink

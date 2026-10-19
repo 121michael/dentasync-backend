@@ -178,23 +178,20 @@ export function DentistLayout() {
         </main>
       </div>
 
-      <RoleBottomDock
-        variant="wide"
-        hidden={isOpen}
-        menu={
-          <FloatingCircleMenu
-            items={[
-              { to: "/dentist/dashboard", label: "Dashboard", icon: LayoutDashboard },
-              { to: "/dentist/queue", label: "Patient Queue", icon: UsersRound },
-              { to: "/dentist/appointments", label: "Appointments", icon: CalendarDays },
-              { to: "/dentist/patient-records", label: "Records", icon: FolderOpen },
-            ]}
-            onNavigate={() => setIsOpen(false)}
-          />
-        }
-      >
+      <RoleBottomDock variant="wide" hidden={isOpen}>
         <RoleMobileBottomNav
           ariaLabel="Dentist mobile navigation"
+          center={
+            <FloatingCircleMenu
+              items={[
+                { to: "/dentist/dashboard", label: "Dashboard", icon: LayoutDashboard },
+                { to: "/dentist/queue", label: "Patient Queue", icon: UsersRound },
+                { to: "/dentist/appointments", label: "Appointments", icon: CalendarDays },
+                { to: "/dentist/patient-records", label: "Records", icon: FolderOpen },
+              ]}
+              onNavigate={() => setIsOpen(false)}
+            />
+          }
           primary={[
             { to: "/dentist/dashboard", label: "Dashboard", icon: LayoutDashboard },
             { to: "/dentist/queue", label: "Patient Queue", icon: UsersRound },
