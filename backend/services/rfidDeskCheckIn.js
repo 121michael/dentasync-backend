@@ -4,17 +4,28 @@ const crypto = require("crypto");
 const staffCheckIn = require("./staffCheckIn");
 const staffRfidEvents = require("./staffRfidEvents");
 
+// Used when Render has no RFID_DEVICE_SECRET. Firmware DEVICE_KEY must match.
+const DEFAULT_RFID_DEVICE_SECRET = "dentasync-esp32-desk";
+
+function resolvedDeviceSecret(env = process.env) {
+  return String(env.RFID_DEVICE_SECRET || "").trim() || DEFAULT_RFID_DEVICE_SECRET;
+}
+
 function deviceSecretConfigured(env = process.env) {
-  return Boolean(String(env.RFID_DEVICE_SECRET || "").trim());
+  return Boolean(resolvedDeviceSecret(env));
 }
 
 function deviceKeyMatches(provided, env = process.env) {
-  const expected = String(env.RFID_DEVICE_SECRET || "").trim();
+  const expected = resolvedDeviceSecret(env);
   const given = String(provided || "").trim();
   if (!expected || !given) return false;
   const left = crypto.createHash("sha256").update(expected).digest();
   const right = crypto.createHash("sha256").update(given).digest();
   return crypto.timingSafeEqual(left, right);
+}
+
+function readProvidedDeviceKey(req) {
+  return req.get("x-rfid-device-key") || req.get("x-device-key") || req.body?.deviceKey || req.body?.secret;
 }
 
 function mapSuccess(appointment, checkIn, walkInCreated) {
@@ -168,7 +179,10 @@ async function checkInByRfidTag(db, { rfidTag, notifyClinicStaff, notifyClinicDe
 }
 
 module.exports = {
+  DEFAULT_RFID_DEVICE_SECRET,
+  resolvedDeviceSecret,
   deviceSecretConfigured,
   deviceKeyMatches,
+  readProvidedDeviceKey,
   checkInByRfidTag,
 };
