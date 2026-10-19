@@ -138,6 +138,17 @@ export function AdminAiSettingsPage() {
       </section>
 
       <section className="admin-panel admin-ai-knowledge">
+        <div className="admin-panel__heading">
+          <div>
+            <span className="eyebrow">Approved knowledge</span>
+            <h2>Patient AI clinic prices</h2>
+            <p>
+              Official Amethyst Dental service prices live in the same clinic knowledge catalog the
+              Patient AI Assistant (Gemini-grounded) already uses. Chatbot knowledge mode below
+              still controls how broadly the assistant may speak; it does not replace those approved prices.
+            </p>
+          </div>
+        </div>
         <form className="admin-form admin-ai-knowledge__form" onSubmit={saveMeta}>
           <label>
             Chatbot knowledge mode
