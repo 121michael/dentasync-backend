@@ -225,11 +225,21 @@ export function AuthPage() {
         <BrandMark />
         <div className="auth-showcase__copy">
           <span className="eyebrow">Private dental care, beautifully connected</span>
-          <h1 className="auth-showcase__tagline">
-            <span className="auth-showcase__tagline-lead">More</span>
-            <span className="auth-showcase__tagline-emphasis">confidence</span>
-            <span className="auth-showcase__tagline-support">in every care</span>
-            <span className="auth-showcase__tagline-accent">moment.</span>
+          <h1
+            className="auth-showcase__tagline"
+            aria-label="We create healthy beautiful smiles for your entire family"
+          >
+            <span className="auth-showcase__tagline-lead">We create</span>
+            <span className="auth-showcase__tagline-emphasis">Healthy</span>
+            <span className="auth-showcase__tagline-emphasis auth-showcase__tagline-emphasis--beautiful">
+              Beautiful
+            </span>
+            <span className="auth-showcase__tagline-accent">Smiles</span>
+            <span className="auth-showcase__tagline-support">
+              <span>For your</span>
+              <span>Entire</span>
+            </span>
+            <span className="auth-showcase__tagline-family">Family</span>
           </h1>
           <p>
             Schedule, track, and understand your dental journey through one calm,
