@@ -19,7 +19,6 @@ import { useCallback, useEffect, useState } from "react";
 import { BrandMark } from "./BrandMark";
 import { FloatingCircleMenu } from "./FloatingCircleMenu";
 import { RoleBottomDock } from "./RoleBottomDock";
-import { CompactRoleNav } from "./RoleMobileBottomNav";
 import { LogoutConfirmDialog } from "./LogoutConfirmDialog";
 import { useLogoutConfirm } from "./useLogoutConfirm";
 import { useAuth } from "../useAuth";
@@ -223,27 +222,35 @@ export function PortalLayout({ theme, onToggleTheme, onThemeChange }) {
         </main>
       </div>
 
-      <RoleBottomDock variant="compact" hidden={isMenuOpen}>
-        <CompactRoleNav
-          className="mobile-nav"
-          ariaLabel="Mobile patient portal navigation"
-          center={
-            <FloatingCircleMenu
-              items={[
+      <RoleBottomDock variant="compact">
+        <FloatingCircleMenu
+          groups={[
+            {
+              id: "care",
+              label: "Care",
+              items: [
                 { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-                { to: "/appointments", label: "Appointments", icon: CalendarDays },
-                { to: "/queue", label: "Queue", icon: UsersRound },
+                { to: "/appointments", label: "Appointment", icon: CalendarDays },
+                { to: "/queue", label: "Queue Status", icon: UsersRound },
                 { to: "/assistant", label: "AI Assistant", icon: Bot },
                 { to: "/family", label: "Family", icon: Users },
-              ]}
-              onNavigate={closeMenu}
-            />
-          }
-          items={navigation.slice(0, 5).map(({ to, label, icon }) => ({
-            to,
-            label: label.split(" ")[0],
-            icon,
-          }))}
+              ],
+            },
+            {
+              id: "account",
+              label: "Account",
+              items: [
+                { to: "/profile", label: "My Profile", icon: UserRound },
+                { to: "/notifications", label: "Notifications", icon: Bell, showDot: hasUnread },
+                { to: "/support", label: "Help & Support", icon: CircleHelp },
+                { label: "Logout", icon: LogOut, onSelect: requestLogout },
+              ],
+            },
+          ]}
+          onNavigate={(to) => {
+            if (to === "/notifications") setUnreadCount(0);
+            closeMenu();
+          }}
         />
       </RoleBottomDock>
       <LogoutConfirmDialog {...logoutDialogProps} />

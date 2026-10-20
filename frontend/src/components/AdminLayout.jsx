@@ -24,7 +24,6 @@ import { BrandMark } from "./BrandMark";
 import { LogoutConfirmDialog } from "./LogoutConfirmDialog";
 import { FloatingCircleMenu } from "./FloatingCircleMenu";
 import { RoleBottomDock } from "./RoleBottomDock";
-import { RoleMobileBottomNav } from "./RoleMobileBottomNav";
 import { useLogoutConfirm } from "./useLogoutConfirm";
 
 const AdminUiContext = createContext(null);
@@ -279,38 +278,37 @@ export function AdminLayout() {
           </main>
         </div>
 
-        <RoleBottomDock variant="wide" hidden={isOpen}>
-          <RoleMobileBottomNav
-            ariaLabel="Admin mobile navigation"
-            center={
-              <FloatingCircleMenu
-                items={[
-                  { to: "/admin/users", label: "Manage User", icon: Users },
+        <RoleBottomDock variant="wide">
+          <FloatingCircleMenu
+            groups={[
+              {
+                id: "clinic",
+                label: "Clinic",
+                items: [
+                  { to: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
+                  { to: "/admin/users", label: "Manage User", icon: Users, showDot: alerts.pendingAccounts > 0 },
                   { to: "/admin/patient-records", label: "Patient Record", icon: FolderOpen },
-                  { to: "/admin/analytics", label: "Analytics", icon: BarChart3 },
-                  { to: "/admin/schedule", label: "Schedule", icon: CalendarDays },
-                  { to: "/admin/ai-settings", label: "AI Settings", icon: Bot },
+                  { to: "/admin/rfid", label: "RFID Tags", icon: CreditCard },
+                  { to: "/admin/schedule", label: "Clinic Schedule", icon: CalendarDays, showDot: alerts.pendingAppointments > 0 },
+                ],
+              },
+              {
+                id: "system",
+                label: "System",
+                items: [
+                  { to: "/admin/notifications", label: "Notifications", icon: Bell, showDot: hasUnread },
+                  { to: "/admin/analytics", label: "General Analytics", icon: BarChart3 },
+                  { to: "/admin/ai-settings", label: "Manage AI Settings", icon: Bot },
                   { to: "/admin/sync-data", label: "Sync Data", icon: Cloud },
                   { to: "/admin/archived-records", label: "Archive", icon: Archive },
-                ]}
-                onNavigate={() => setIsOpen(false)}
-              />
-            }
-            primary={[
-              { to: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
-              { to: "/admin/users", label: "Manage User", icon: Users, showDot: alerts.pendingAccounts > 0 },
-              { to: "/admin/patient-records", label: "Patient Record", icon: FolderOpen },
-              { to: "/admin/analytics", label: "Analytics", icon: BarChart3 },
+                ],
+              },
+              {
+                id: "session",
+                label: "Session",
+                items: [{ label: "Logout", icon: LogOut, onSelect: requestLogout }],
+              },
             ]}
-            more={[
-              { to: "/admin/rfid", label: "RFID Tags", icon: CreditCard },
-              { to: "/admin/schedule", label: "Clinic Schedule", icon: CalendarDays, showDot: alerts.pendingAppointments > 0 },
-              { to: "/admin/notifications", label: "Notifications", icon: Bell, showDot: hasUnread },
-              { to: "/admin/ai-settings", label: "Manage AI Settings", icon: Bot },
-              { to: "/admin/sync-data", label: "Sync Data", icon: Cloud },
-              { to: "/admin/archived-records", label: "Archive", icon: Archive },
-            ]}
-            moreActivePrefixes={["/admin/audit-logs", "/admin/roster", "/admin/settings"]}
             onNavigate={(to) => {
               setIsOpen(false);
               if (to === "/admin/notifications") {

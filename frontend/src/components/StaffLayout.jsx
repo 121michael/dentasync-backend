@@ -21,7 +21,6 @@ import { onNotificationsChanged } from "../notificationEvents";
 import { BrandMark } from "./BrandMark";
 import { FloatingCircleMenu } from "./FloatingCircleMenu";
 import { RoleBottomDock } from "./RoleBottomDock";
-import { CompactRoleNav } from "./RoleMobileBottomNav";
 import { LogoutConfirmDialog } from "./LogoutConfirmDialog";
 import { useLogoutConfirm } from "./useLogoutConfirm";
 
@@ -253,27 +252,37 @@ export function StaffLayout() {
           </main>
         </div>
 
-        <RoleBottomDock variant="compact" hidden={isMobileMenuOpen}>
-          <CompactRoleNav
-            className="staff-mobile-nav"
-            ariaLabel="Mobile staff navigation"
-            center={
-              <FloatingCircleMenu
-                items={[
+        <RoleBottomDock variant="compact">
+          <FloatingCircleMenu
+            groups={[
+              {
+                id: "operations",
+                label: "Operations",
+                items: [
                   { to: "/staff/dashboard", label: "Dashboard", icon: LayoutDashboard },
-                  { to: "/staff/check-in", label: "Check-In", icon: ClipboardPlus },
-                  { to: "/staff/queue", label: "Queue", icon: UsersRound },
-                  { to: "/staff/appointments", label: "Appointments", icon: CalendarDays },
-                  { to: "/staff/patient-records", label: "Records", icon: Stethoscope },
-                ]}
-                onNavigate={() => setIsMobileMenuOpen(false)}
-              />
-            }
-            items={navigation.slice(0, 5).map(({ to, label, icon }) => ({
-              to,
-              label: label.split(" ")[0],
-              icon,
-            }))}
+                  { to: "/staff/check-in", label: "Patient Check-In", icon: ClipboardPlus },
+                  { to: "/staff/appointments", label: "Appointments", icon: CalendarDays, showDot: alerts.pendingAppointments > 0 },
+                  { to: "/staff/patient-records", label: "Patient Records", icon: Stethoscope },
+                  { to: "/staff/queue", label: "Queue Management", icon: UsersRound },
+                  { to: "/staff/billing", label: "Billing & Invoices", icon: Receipt },
+                ],
+              },
+              {
+                id: "account",
+                label: "Account",
+                items: [
+                  { to: "/staff/notifications", label: "Notifications", icon: Bell, showDot: hasUnread },
+                  { to: "/staff/profile", label: "Profile", icon: UserRound },
+                  { label: "Logout", icon: LogOut, onSelect: requestLogout },
+                ],
+              },
+            ]}
+            onNavigate={(to) => {
+              setIsMobileMenuOpen(false);
+              if (to === "/staff/notifications") {
+                setAlerts((current) => ({ ...current, unreadNotifications: 0 }));
+              }
+            }}
           />
         </RoleBottomDock>
 
