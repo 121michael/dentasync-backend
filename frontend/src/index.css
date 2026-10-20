@@ -1231,7 +1231,7 @@ strong {
   position: fixed;
   inset: 0;
   z-index: 75;
-  pointer-events: all;
+  pointer-events: none;
   opacity: 0;
   visibility: hidden;
   transition:
@@ -1242,6 +1242,7 @@ strong {
 .tooth-loader--overlay.is-visible {
   opacity: 1;
   visibility: visible;
+  pointer-events: auto;
 }
 
 .tooth-loader--overlay.is-hiding {
@@ -8625,8 +8626,10 @@ body.is-queue-display .fab-menu {
   --fab-ease: cubic-bezier(0.22, 1, 0.36, 1);
   display: none;
   position: relative;
+  z-index: 1;
   align-items: center;
   justify-content: center;
+  isolation: isolate;
   pointer-events: none;
 }
 
@@ -8637,22 +8640,15 @@ body.is-queue-display .fab-menu {
 
 .fab-menu__scrim {
   position: fixed;
-  z-index: 27;
+  z-index: 1;
   inset: 0;
   border: 0;
   background:
     radial-gradient(circle at 50% 88%, rgba(91, 42, 134, 0.22), transparent 42%),
     rgba(18, 8, 28, 0.38);
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-  transition: opacity 280ms var(--fab-ease), visibility 280ms var(--fab-ease);
-}
-
-.fab-menu.is-open .fab-menu__scrim {
-  opacity: 1;
-  visibility: visible;
   pointer-events: auto;
+  cursor: pointer;
+  animation: fab-scrim-in 220ms var(--fab-ease);
 }
 
 .fab-menu__panel {
@@ -8670,17 +8666,17 @@ body.is-queue-display .fab-menu {
     #fff;
   box-shadow:
     0 18px 40px rgba(42, 16, 72, 0.22),
-    0 0 0 1px rgba(115, 59, 170, 0.12);
+    0 0 0 1px rgba(115, 59, 170, 0.12),
+    0 10px 18px rgba(50, 20, 80, 0.08);
   visibility: hidden;
   opacity: 0;
   pointer-events: none;
   transform: translateX(-50%) translateY(16px) scale(0.92);
   transform-origin: bottom center;
   transition:
-    opacity 320ms var(--fab-ease),
-    transform 420ms var(--fab-ease),
-    visibility 320ms var(--fab-ease);
-  filter: drop-shadow(0 10px 18px rgba(50, 20, 80, 0.08));
+    opacity 280ms var(--fab-ease),
+    transform 360ms var(--fab-ease),
+    visibility 280ms var(--fab-ease);
 }
 
 .fab-menu__panel::after {
@@ -8745,7 +8741,7 @@ body.is-queue-display .fab-menu {
   gap: 0.6rem;
   width: 100%;
   min-width: 0;
-  min-height: 46px;
+  min-height: 48px;
   padding: 0.44rem 0.58rem;
   border: 0;
   border-radius: 14px;
@@ -8758,8 +8754,10 @@ body.is-queue-display .fab-menu {
   line-height: 1.2;
   text-align: left;
   cursor: pointer;
+  touch-action: manipulation;
   opacity: 0;
   transform: translateY(8px);
+  pointer-events: auto;
   transition:
     color 180ms ease,
     background 180ms ease,
@@ -8926,6 +8924,11 @@ body.is-queue-display .fab-menu {
   to { opacity: 1; transform: scale(1); }
 }
 
+@keyframes fab-scrim-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 @keyframes fab-item-enter {
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
@@ -8976,6 +8979,7 @@ body.is-queue-display .fab-menu {
   .fab-menu__button,
   .fab-menu__button-glow,
   .fab-menu__button-ring,
+  .fab-menu__scrim,
   .fab-menu.is-open .fab-menu__item {
     animation: none;
   }
@@ -8985,7 +8989,6 @@ body.is-queue-display .fab-menu {
     transform: none;
   }
 
-  .fab-menu__scrim,
   .fab-menu__panel,
   .fab-menu.is-open .fab-menu__panel,
   .fab-menu__button-core,

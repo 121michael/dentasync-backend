@@ -20,7 +20,10 @@ function MenuEntry({ item, open, onNavigate, index }) {
         to={item.to}
         tabIndex={open ? 0 : -1}
         style={style}
-        onClick={() => onNavigate(item.to)}
+        onClick={(event) => {
+          event.stopPropagation();
+          onNavigate(item.to);
+        }}
         className={({ isActive }) => `fab-menu__item${isActive ? " is-active" : ""}`}
       >
         {content}
@@ -34,7 +37,8 @@ function MenuEntry({ item, open, onNavigate, index }) {
       tabIndex={open ? 0 : -1}
       style={style}
       className="fab-menu__item fab-menu__item--action"
-      onClick={() => {
+      onClick={(event) => {
+        event.stopPropagation();
         onNavigate();
         item.onSelect?.();
       }}
@@ -56,7 +60,7 @@ export function FloatingCircleMenu({ groups, items, onNavigate, hidden = false }
 
   useEffect(() => {
     setOpen(false);
-  }, [location.pathname]);
+  }, [location.pathname, location.search]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -66,6 +70,10 @@ export function FloatingCircleMenu({ groups, items, onNavigate, hidden = false }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
+
+  function closeMenu() {
+    setOpen(false);
+  }
 
   function handleNavigate(to) {
     setOpen(false);
@@ -78,19 +86,20 @@ export function FloatingCircleMenu({ groups, items, onNavigate, hidden = false }
 
   return (
     <div className={`fab-menu${open ? " is-open" : ""}${hidden ? " is-hidden" : ""}`}>
-      <button
-        type="button"
-        className="fab-menu__scrim"
-        tabIndex={open ? 0 : -1}
-        onClick={() => setOpen(false)}
-        aria-label="Close menu"
-      />
+      {open ? (
+        <div
+          className="fab-menu__scrim"
+          onClick={closeMenu}
+          aria-hidden="true"
+        />
+      ) : null}
 
       <nav
         className="fab-menu__panel"
         id={panelId}
         aria-label="Navigation menu"
         aria-hidden={!open}
+        onClick={(event) => event.stopPropagation()}
       >
         <div className="fab-menu__panel-inner">
           {sections.map((section) => (
