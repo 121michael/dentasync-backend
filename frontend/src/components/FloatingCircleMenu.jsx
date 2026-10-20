@@ -1,8 +1,9 @@
 import { useEffect, useId, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 
-function MenuEntry({ item, open, onNavigate }) {
+function MenuEntry({ item, open, onNavigate, index }) {
   const Icon = item.icon;
+  const style = { "--item-index": index };
   const content = (
     <>
       <span className="fab-menu__item-icon" aria-hidden="true">
@@ -18,6 +19,7 @@ function MenuEntry({ item, open, onNavigate }) {
       <NavLink
         to={item.to}
         tabIndex={open ? 0 : -1}
+        style={style}
         onClick={() => onNavigate(item.to)}
         className={({ isActive }) => `fab-menu__item${isActive ? " is-active" : ""}`}
       >
@@ -30,6 +32,7 @@ function MenuEntry({ item, open, onNavigate }) {
     <button
       type="button"
       tabIndex={open ? 0 : -1}
+      style={style}
       className="fab-menu__item fab-menu__item--action"
       onClick={() => {
         onNavigate();
@@ -71,16 +74,17 @@ export function FloatingCircleMenu({ groups, items, onNavigate, hidden = false }
 
   if (!sections.length) return null;
 
+  let itemIndex = 0;
+
   return (
     <div className={`fab-menu${open ? " is-open" : ""}${hidden ? " is-hidden" : ""}`}>
-      {open ? (
-        <button
-          type="button"
-          className="fab-menu__scrim"
-          onClick={() => setOpen(false)}
-          aria-label="Close menu"
-        />
-      ) : null}
+      <button
+        type="button"
+        className="fab-menu__scrim"
+        tabIndex={open ? 0 : -1}
+        onClick={() => setOpen(false)}
+        aria-label="Close menu"
+      />
 
       <nav
         className="fab-menu__panel"
@@ -88,21 +92,24 @@ export function FloatingCircleMenu({ groups, items, onNavigate, hidden = false }
         aria-label="Navigation menu"
         aria-hidden={!open}
       >
-        {sections.map((section) => (
-          <div key={section.id || section.label || "menu"} className="fab-menu__group">
-            {section.label ? <p className="fab-menu__group-label">{section.label}</p> : null}
-            <div className="fab-menu__group-list">
-              {(section.items || []).map((item) => (
-                <MenuEntry
-                  key={item.to || item.label}
-                  item={item}
-                  open={open}
-                  onNavigate={handleNavigate}
-                />
-              ))}
+        <div className="fab-menu__panel-inner">
+          {sections.map((section) => (
+            <div key={section.id || section.label || "menu"} className="fab-menu__group">
+              {section.label ? <p className="fab-menu__group-label">{section.label}</p> : null}
+              <div className="fab-menu__group-list">
+                {(section.items || []).map((item) => (
+                  <MenuEntry
+                    key={item.to || item.label}
+                    item={item}
+                    open={open}
+                    index={itemIndex++}
+                    onNavigate={handleNavigate}
+                  />
+                ))}
+              </div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </nav>
 
       <button
@@ -114,7 +121,11 @@ export function FloatingCircleMenu({ groups, items, onNavigate, hidden = false }
         aria-label={open ? "Close menu" : "Open menu"}
         onClick={() => setOpen((current) => !current)}
       >
-        <span className="fab-menu__button-label">Menu</span>
+        <span className="fab-menu__button-glow" aria-hidden="true" />
+        <span className="fab-menu__button-ring" aria-hidden="true" />
+        <span className="fab-menu__button-core">
+          <span className="fab-menu__button-label">Menu</span>
+        </span>
       </button>
     </div>
   );
