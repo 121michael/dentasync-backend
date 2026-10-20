@@ -242,6 +242,12 @@ export function PortalLayout({ theme, onToggleTheme, onThemeChange }) {
               items: [
                 { to: "/profile", label: "My Profile", icon: UserRound },
                 { to: "/notifications", label: "Notifications", icon: Bell, showDot: hasUnread },
+              ],
+            },
+            {
+              id: "support",
+              label: "Support",
+              items: [
                 { to: "/support", label: "Help & Support", icon: CircleHelp },
                 { label: "Logout", icon: LogOut, onSelect: requestLogout },
               ],
