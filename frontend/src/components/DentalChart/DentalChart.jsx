@@ -139,7 +139,7 @@ export function DentalChart({
   if (!chart) {
     return (
       <section className="fdi-chart-shell glass-card">
-        <LoadingState label="Loading Dental Chart…" />
+        <LoadingState inline label="Loading Dental Chart…" />
       </section>
     );
   }
