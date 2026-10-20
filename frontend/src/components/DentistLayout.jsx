@@ -19,7 +19,6 @@ import { BrandMark } from "./BrandMark";
 import { LogoutConfirmDialog } from "./LogoutConfirmDialog";
 import { FloatingCircleMenu } from "./FloatingCircleMenu";
 import { RoleBottomDock } from "./RoleBottomDock";
-import { RoleMobileBottomNav } from "./RoleMobileBottomNav";
 import { useLogoutConfirm } from "./useLogoutConfirm";
 import { onNotificationsChanged } from "../notificationEvents";
 
@@ -178,29 +177,28 @@ export function DentistLayout() {
         </main>
       </div>
 
-      <RoleBottomDock variant="wide" hidden={isOpen}>
-        <RoleMobileBottomNav
-          ariaLabel="Dentist mobile navigation"
-          center={
-            <FloatingCircleMenu
-              items={[
+      <RoleBottomDock variant="wide">
+        <FloatingCircleMenu
+          groups={[
+            {
+              id: "clinical",
+              label: "Clinical",
+              items: [
                 { to: "/dentist/dashboard", label: "Dashboard", icon: LayoutDashboard },
                 { to: "/dentist/queue", label: "Patient Queue", icon: UsersRound },
                 { to: "/dentist/appointments", label: "Appointments", icon: CalendarDays },
-                { to: "/dentist/patient-records", label: "Records", icon: FolderOpen },
-              ]}
-              onNavigate={() => setIsOpen(false)}
-            />
-          }
-          primary={[
-            { to: "/dentist/dashboard", label: "Dashboard", icon: LayoutDashboard },
-            { to: "/dentist/queue", label: "Patient Queue", icon: UsersRound },
-            { to: "/dentist/appointments", label: "Appointments", icon: CalendarDays },
-            { to: "/dentist/patient-records", label: "Patient Records", icon: FolderOpen },
-          ]}
-          more={[
-            { to: "/dentist/notifications", label: "Notifications", icon: Bell, showDot: hasUnread },
-            { to: "/dentist/profile", label: "Profile", icon: UserRound },
+                { to: "/dentist/patient-records", label: "Patient Records", icon: FolderOpen },
+              ],
+            },
+            {
+              id: "account",
+              label: "Account",
+              items: [
+                { to: "/dentist/notifications", label: "Notifications", icon: Bell, showDot: hasUnread },
+                { to: "/dentist/profile", label: "Profile", icon: UserRound },
+                { label: "Logout", icon: LogOut, onSelect: requestLogout },
+              ],
+            },
           ]}
           onNavigate={(to) => {
             setIsOpen(false);

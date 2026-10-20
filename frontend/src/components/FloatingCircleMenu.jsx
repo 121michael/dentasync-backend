@@ -1,10 +1,55 @@
 import { useEffect, useId, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 
-export function FloatingCircleMenu({ items, onNavigate, hidden = false }) {
+function MenuEntry({ item, open, onNavigate }) {
+  const Icon = item.icon;
+  const content = (
+    <>
+      <span className="fab-menu__item-icon" aria-hidden="true">
+        {Icon ? <Icon size={16} /> : null}
+      </span>
+      <span>{item.label}</span>
+      {item.showDot ? <span className="nav-alert-dot" aria-hidden="true" /> : null}
+    </>
+  );
+
+  if (item.to) {
+    return (
+      <NavLink
+        to={item.to}
+        tabIndex={open ? 0 : -1}
+        onClick={() => onNavigate(item.to)}
+        className={({ isActive }) => `fab-menu__item${isActive ? " is-active" : ""}`}
+      >
+        {content}
+      </NavLink>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      tabIndex={open ? 0 : -1}
+      className="fab-menu__item fab-menu__item--action"
+      onClick={() => {
+        onNavigate();
+        item.onSelect?.();
+      }}
+    >
+      {content}
+    </button>
+  );
+}
+
+export function FloatingCircleMenu({ groups, items, onNavigate, hidden = false }) {
   const location = useLocation();
   const [open, setOpen] = useState(false);
   const panelId = useId();
+  const sections = groups?.length
+    ? groups
+    : items?.length
+      ? [{ id: "menu", label: null, items }]
+      : [];
 
   useEffect(() => {
     setOpen(false);
@@ -24,7 +69,7 @@ export function FloatingCircleMenu({ items, onNavigate, hidden = false }) {
     onNavigate?.(to);
   }
 
-  if (!items?.length) return null;
+  if (!sections.length) return null;
 
   return (
     <div className={`fab-menu${open ? " is-open" : ""}${hidden ? " is-hidden" : ""}`}>
@@ -40,22 +85,23 @@ export function FloatingCircleMenu({ items, onNavigate, hidden = false }) {
       <nav
         className="fab-menu__panel"
         id={panelId}
-        aria-label="Quick destinations"
+        aria-label="Navigation menu"
         aria-hidden={!open}
       >
-        {items.map(({ to, label, icon: Icon }) => (
-          <NavLink
-            key={to}
-            to={to}
-            tabIndex={open ? 0 : -1}
-            onClick={() => handleNavigate(to)}
-            className={({ isActive }) => `fab-menu__item${isActive ? " is-active" : ""}`}
-          >
-            <span className="fab-menu__item-icon" aria-hidden="true">
-              <Icon size={16} />
-            </span>
-            <span>{label}</span>
-          </NavLink>
+        {sections.map((section) => (
+          <div key={section.id || section.label || "menu"} className="fab-menu__group">
+            {section.label ? <p className="fab-menu__group-label">{section.label}</p> : null}
+            <div className="fab-menu__group-list">
+              {(section.items || []).map((item) => (
+                <MenuEntry
+                  key={item.to || item.label}
+                  item={item}
+                  open={open}
+                  onNavigate={handleNavigate}
+                />
+              ))}
+            </div>
+          </div>
         ))}
       </nav>
 
