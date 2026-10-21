@@ -1263,12 +1263,14 @@ strong {
   display: grid;
   place-items: center;
   justify-items: center;
+  width: 100%;
+  min-width: 0;
 }
 
 .tooth-loader--overlay {
   position: fixed;
   inset: 0;
-  z-index: 40;
+  z-index: 100;
   pointer-events: auto;
 }
 
@@ -1296,8 +1298,9 @@ strong {
   padding: 0.4rem 1rem 1.2rem;
   background: transparent;
   box-shadow: none;
+  width: min(520px, calc(100vw - 2rem));
   min-width: 0;
-  max-width: 100%;
+  max-width: calc(100% - 1rem);
 }
 
 .tooth-loader--overlay .tooth-loader__content {
@@ -1305,71 +1308,51 @@ strong {
   place-content: center;
 }
 
-.tooth-loader__arcade {
+.tooth-loader--compact .tooth-loader__content {
+  width: min(350px, calc(100vw - 2rem));
+}
+
+.tooth-loader__arch {
   position: relative;
-  display: grid;
-  justify-items: center;
-  width: min(280px, 86vw);
-  overflow: hidden;
-  padding: 0.35rem 0.4rem 0;
-}
-
-.tooth-loader__row {
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  gap: 0.08rem;
-  height: 72px;
-  overflow: hidden;
-}
-
-.tooth-loader__sprout-wrap {
-  display: grid;
-  place-items: end center;
-  height: 100%;
-  transform-origin: 50% 100%;
-}
-
-.tooth-loader__sprout {
-  display: grid;
-  place-items: end center;
-  height: 100%;
-  transform: scaleY(0.08) translateY(10px);
-  transform-origin: 50% 100%;
-  animation: tooth-erupt 3.2s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  width: min(460px, calc(100% - 1.25rem));
+  max-width: calc(100vw - 2rem);
+  box-sizing: border-box;
+  padding: 0.25rem 0.15rem 0;
+  line-height: 0;
 }
 
 .tooth-loader__svg {
   display: block;
+  width: 100%;
+  height: auto;
   overflow: visible;
-  width: 48px;
-  height: 56px;
 }
 
-.tooth-loader--compact .tooth-loader__arcade {
-  width: min(210px, 80vw);
+.tooth-loader--compact .tooth-loader__arch {
+  width: min(310px, 84vw);
 }
 
-.tooth-loader--compact .tooth-loader__row {
-  height: 54px;
-}
-
-.tooth-loader--compact .tooth-loader__svg {
-  width: 36px;
-  height: 42px;
+.tooth-loader__tooth {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  will-change: transform, opacity;
+  animation: tooth-arch-erupt 5.4s cubic-bezier(0.22, 1, 0.36, 1) var(--tooth-delay) infinite both;
 }
 
 .tooth-loader__crown {
-  filter: drop-shadow(0 3px 6px rgba(109, 58, 168, 0.16));
+  paint-order: stroke fill;
 }
 
-.tooth-loader__gums {
-  width: 92%;
-  height: 14px;
-  margin-top: -6px;
-  border-radius: 40% 40% 10px 10px;
-  background: linear-gradient(180deg, #e7b7c8 0%, #d79aaf 58%, #c9869e 100%);
-  box-shadow: 0 4px 10px rgba(155, 64, 102, 0.16);
+.tooth-loader__detail {
+  opacity: 0.72;
+}
+
+.tooth-loader__gumline {
+  filter: drop-shadow(0 4px 6px rgba(140, 66, 104, 0.13));
+}
+
+.tooth-loader__gum-highlight {
+  pointer-events: none;
 }
 
 .tooth-loader__label {
@@ -1410,21 +1393,21 @@ strong {
 .tooth-loader__ellipsis span:nth-child(2) { animation-delay: 0.28s; }
 .tooth-loader__ellipsis span:nth-child(3) { animation-delay: 0.56s; }
 
-@keyframes tooth-erupt {
-  0% {
-    transform: scaleY(0.08) translateY(12px);
-    opacity: 0.35;
+@keyframes tooth-arch-erupt {
+  0%, 7% {
+    transform: translateY(5px) scaleY(0.04);
+    opacity: 0;
   }
-  28% {
+  25% {
     opacity: 1;
   }
-  42%, 68% {
-    transform: scaleY(1) translateY(0);
+  34%, 66% {
+    transform: translateY(0) scaleY(1);
     opacity: 1;
   }
-  100% {
-    transform: scaleY(0.08) translateY(12px);
-    opacity: 0.4;
+  92%, 100% {
+    transform: translateY(5px) scaleY(0.04);
+    opacity: 0;
   }
 }
 
@@ -1435,9 +1418,9 @@ strong {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tooth-loader__sprout {
+  .tooth-loader__tooth {
     animation: none;
-    transform: scaleY(1) translateY(0);
+    transform: translateY(0) scaleY(1);
     opacity: 1;
   }
 
@@ -1448,18 +1431,16 @@ strong {
 }
 
 @media (max-width: 640px) {
-  .loading-state.tooth-loader--page {
-    min-height: min(64vh, calc(100dvh - 9.5rem));
-    padding-bottom: 5.5rem;
+  body:has(.loading-state.tooth-loader--page) {
+    padding-bottom: 0;
   }
 
-  .tooth-loader__svg {
-    width: 40px;
-    height: 48px;
+  .tooth-loader__arch {
+    width: min(370px, calc(100% - 1rem));
   }
 
-  .tooth-loader__row {
-    height: 62px;
+  .tooth-loader--compact .tooth-loader__arch {
+    width: min(270px, 84vw);
   }
 }
 
