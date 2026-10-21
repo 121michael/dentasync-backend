@@ -844,7 +844,7 @@ export function AdminSyncPage() {
       {step === "processing" ? (
         <section className="admin-panel">
           <h2>Reading document…</h2>
-          <LoadingState label="Validating document content and extracting readable fields…" />
+          <LoadingState inline label="Validating document content and extracting readable fields…" />
           {localPreviewUrl ? (
             <div className="admin-doc-preview" style={{ marginTop: "1rem" }}>
               <span className="eyebrow">Document preview</span>

@@ -7,6 +7,8 @@ const listeners = new Set();
 
 let apiCount = 0;
 let routeCount = 0;
+let pageLoaderCount = 0;
+let pageLoaderLabel = "Loading";
 let visible = false;
 let showTimer = null;
 let hideTimer = null;
@@ -42,7 +44,7 @@ function clearHideTimer() {
 }
 
 function scheduleVisibility() {
-  const shouldShow = apiCount > 0 || routeCount > 0;
+  const shouldShow = (apiCount > 0 || routeCount > 0) && pageLoaderCount === 0;
 
   if (shouldShow) {
     clearHideTimer();
@@ -54,6 +56,11 @@ function scheduleVisibility() {
     const delay = routeCount > 0 ? ROUTE_SHOW_DELAY_MS : API_SHOW_DELAY_MS;
     showTimer = window.setTimeout(() => {
       showTimer = null;
+      if (pageLoaderCount > 0) {
+        visible = false;
+        notify();
+        return;
+      }
       visible = true;
       shownAt = Date.now();
       notify();
@@ -82,8 +89,10 @@ export function getLoadingSnapshot() {
   return {
     apiCount,
     routeCount,
-    busy: apiCount > 0 || routeCount > 0,
-    visible,
+    pageLoaderCount,
+    pageLoaderLabel,
+    busy: apiCount > 0 || routeCount > 0 || pageLoaderCount > 0,
+    visible: visible && pageLoaderCount === 0,
   };
 }
 
@@ -110,5 +119,22 @@ export function beginRouteLoading() {
 
 export function endRouteLoading() {
   routeCount = Math.max(0, routeCount - 1);
+  scheduleVisibility();
+}
+
+export function beginPageLoader(label) {
+  pageLoaderCount += 1;
+  if (label) pageLoaderLabel = String(label).replace(/\.+$/, "") || "Loading";
+  if (visible) {
+    visible = false;
+    clearShowTimer();
+    clearHideTimer();
+  }
+  scheduleVisibility();
+}
+
+export function endPageLoader() {
+  pageLoaderCount = Math.max(0, pageLoaderCount - 1);
+  if (pageLoaderCount === 0) pageLoaderLabel = "Loading";
   scheduleVisibility();
 }

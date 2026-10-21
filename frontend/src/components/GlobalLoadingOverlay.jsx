@@ -12,7 +12,7 @@ const ROUTE_HOLD_MS = 280;
 
 /**
  * Global tooth overlay for route changes and major GET data loads.
- * Mount once inside BrowserRouter. Mutations stay button-level only.
+ * Hidden whenever a page-level LoadingState already owns the visual loader.
  */
 export function GlobalLoadingOverlay() {
   const location = useLocation();
@@ -31,5 +31,9 @@ export function GlobalLoadingOverlay() {
     };
   }, [location.pathname, location.search]);
 
-  return <ToothLoader overlay active={snapshot.visible} label="Loading" />;
+  if (snapshot.pageLoaderCount > 0 || !snapshot.visible) {
+    return null;
+  }
+
+  return <ToothLoader overlay active label="Loading" />;
 }
