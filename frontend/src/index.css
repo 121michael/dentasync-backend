@@ -1344,14 +1344,19 @@ strong {
 }
 
 .tooth-loader__detail {
-  opacity: 0.72;
+  opacity: 0.42;
+}
+
+.tooth-loader__sheen {
+  opacity: 0.54;
 }
 
 .tooth-loader__gumline {
-  filter: drop-shadow(0 4px 6px rgba(140, 66, 104, 0.13));
+  filter: drop-shadow(0 4px 7px rgba(140, 66, 104, 0.11));
 }
 
-.tooth-loader__gum-highlight {
+.tooth-loader__gum-highlight,
+.tooth-loader__gum-shadow {
   pointer-events: none;
 }
 
