@@ -170,6 +170,7 @@ export function AdminLayout() {
 
   const hasUnread = alerts.unreadNotifications > 0;
   const isRfidPage = location.pathname.startsWith("/admin/rfid");
+  const hideStatusBar = location.pathname.startsWith("/admin/patient-records");
   const uiValue = useMemo(
     () => ({ pushToast, confirm, systemStatus, pageTitle }),
     [pushToast, confirm, systemStatus, pageTitle]
@@ -261,17 +262,19 @@ export function AdminLayout() {
             </div>
           </header>
 
-          <div className="admin-status-bar" role="status">
-            <span className={`admin-status-bar__pulse ${systemStatus.coreInfrastructureOnline ? "is-online" : "is-offline"}`}>
-              <Activity size={14} />
-              {systemStatus.coreInfrastructureOnline
-                ? "Core Infrastructure Online"
-                : "Core Infrastructure Offline"}
-            </span>
-            <span>
-              Active Operations Terminals: {systemStatus.activeOperationsTerminals || 0} Live Channels
-            </span>
-          </div>
+          {hideStatusBar ? null : (
+            <div className="admin-status-bar" role="status">
+              <span className={`admin-status-bar__pulse ${systemStatus.coreInfrastructureOnline ? "is-online" : "is-offline"}`}>
+                <Activity size={14} />
+                {systemStatus.coreInfrastructureOnline
+                  ? "Core Infrastructure Online"
+                  : "Core Infrastructure Offline"}
+              </span>
+              <span>
+                Active Operations Terminals: {systemStatus.activeOperationsTerminals || 0} Live Channels
+              </span>
+            </div>
+          )}
 
           <main className="admin-content">
             <Outlet />

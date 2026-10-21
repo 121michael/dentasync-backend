@@ -131,10 +131,6 @@ export function AdminPatientRecordsPage() {
           <div>
             <span className="eyebrow">Patient Search Registry Array</span>
             <h2>Patient Records Vault</h2>
-            <p>
-              View-only patient information from the same clinical records used by dentists. Administrators can
-              review details and treatment history, but cannot edit clinical data or access the dental chart.
-            </p>
           </div>
         </div>
 
