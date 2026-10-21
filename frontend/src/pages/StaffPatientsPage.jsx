@@ -264,10 +264,6 @@ export function StaffPatientsPage() {
           <div>
             <span className="eyebrow">Clinical registry</span>
             <h2>Patient Records</h2>
-            <p>
-              View the same shared dental record the dentist updates. Staff may edit Amount Paid and
-              Appointment only. Patient account verification is Admin-only.
-            </p>
           </div>
           <button className="button button--primary" onClick={openCreate}>
             <Plus size={16} /> Register Walk-in Patient

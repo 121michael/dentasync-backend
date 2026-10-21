@@ -1,6 +1,5 @@
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
-  Activity,
   Archive,
   BarChart3,
   Bell,
@@ -264,12 +263,6 @@ export function AdminLayout() {
 
           {hideStatusBar ? null : (
             <div className="admin-status-bar" role="status">
-              <span className={`admin-status-bar__pulse ${systemStatus.coreInfrastructureOnline ? "is-online" : "is-offline"}`}>
-                <Activity size={14} />
-                {systemStatus.coreInfrastructureOnline
-                  ? "Core Infrastructure Online"
-                  : "Core Infrastructure Offline"}
-              </span>
               <span>
                 Active Operations Terminals: {systemStatus.activeOperationsTerminals || 0} Live Channels
               </span>

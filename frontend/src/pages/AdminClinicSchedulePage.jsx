@@ -328,7 +328,7 @@ function AdminClinicCalendarPanel({ onOpenSlots }) {
         </AdminModal>
       ) : null}
 
-      {busy && !dayDetail ? <LoadingState label="Loading date…" /> : null}
+      {busy && !dayDetail ? <LoadingState inline label="Loading date…" /> : null}
     </>
   );
 }

@@ -1,8 +1,23 @@
+import { useEffect } from "react";
 import { AlertCircle, ArrowRight, Sparkles } from "lucide-react";
+import { beginPageLoader, endPageLoader } from "../loadingStore";
 import { ToothLoader } from "./ToothLoader";
 
-export function LoadingState({ label = "Preparing your care overview" }) {
-  return <ToothLoader compact label={label} className="loading-state tooth-loader--page" active />;
+export function LoadingState({ label = "Preparing your care overview", inline = false }) {
+  useEffect(() => {
+    if (inline) return undefined;
+    beginPageLoader(label);
+    return () => endPageLoader();
+  }, [inline, label]);
+
+  return (
+    <ToothLoader
+      compact={inline}
+      label={label}
+      className={inline ? "loading-state loading-state--inline" : "loading-state tooth-loader--page"}
+      active
+    />
+  );
 }
 
 export function ErrorState({ message, onRetry }) {

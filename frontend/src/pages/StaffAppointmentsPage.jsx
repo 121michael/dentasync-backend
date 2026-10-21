@@ -263,10 +263,6 @@ export function StaffAppointmentsPage() {
           <div>
             <span className="eyebrow">Scheduling desk</span>
             <h2>Appointment Management</h2>
-            <p>
-              Tap a patient RFID card to open their appointment instantly — no typing required.
-              Confirm, reschedule, and cancel as needed.
-            </p>
           </div>
           <button className="button button--secondary" onClick={load}>
             <RefreshCw size={16} /> Refresh

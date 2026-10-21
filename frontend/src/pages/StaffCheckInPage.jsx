@@ -127,7 +127,6 @@ export function StaffCheckInPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [scannerState, setScannerState] = useState("ready");
-  const [listeningHint, setListeningHint] = useState("Hold the patient card on the ESP32 RFID reader.");
 
   const loadLog = useCallback(async (options = {}) => {
     const query = options.query || logFilter;
@@ -183,7 +182,6 @@ export function StaffCheckInPage() {
         setVerified(eventToVerified(newest));
         setScannerState("success");
         setError("");
-        setListeningHint("Check-in complete. Ready for the next card.");
         pushToast(newest.message || "Patient checked in from RFID tap.");
         const today = defaultLogFilter();
         setFilterTab("today");
@@ -196,7 +194,6 @@ export function StaffCheckInPage() {
 
       setScannerState("error");
       setError(newest.message || "RFID tap failed.");
-      setListeningHint(newest.message || "RFID tap failed. Try again.");
       pushToast(newest.message || "RFID tap failed.", "error");
       window.setTimeout(() => setScannerState("ready"), 2200);
     } catch {
@@ -264,7 +261,6 @@ export function StaffCheckInPage() {
     setBusy(true);
     setError("");
     setScannerState("scanning");
-    setListeningHint("Card detected. Checking appointment…");
     try {
       const response = await api.staffCheckIn({ method: "rfid", rfidTag: tag });
       setVerified({ ...response, method: "rfid" });
@@ -283,7 +279,6 @@ export function StaffCheckInPage() {
         ? `${checkInError.message}${checkInError.message.includes(detail) ? "" : ` (${detail})`}`
         : checkInError.message;
       setError(message);
-      setListeningHint(message);
       pushToast(message, "error");
       setRfidCode("");
     } finally {
@@ -362,19 +357,10 @@ export function StaffCheckInPage() {
           <div>
             <span className="eyebrow">Walk-in arrival</span>
             <h2>Patient Check-In</h2>
-              <p>
-              RFID card taps and patient QR scans both check in here. The desk reader sends the card
-              UID; the patient camera reads the staff QR.
-            </p>
           </div>
           <button className="button button--secondary" onClick={loadLog}>
             <RefreshCw size={16} /> Refresh Log
           </button>
-        </div>
-
-        <div className="staff-checkin-hero">
-          <h3>Hold card on the RFID reader</h3>
-          <p>Staff does not type a name or UID. The physical reader sends the tap to DentaSync.</p>
         </div>
 
         <div className="admin-tabs" role="tablist" aria-label="Check-in method">
@@ -423,7 +409,6 @@ export function StaffCheckInPage() {
                       ? "Tap failed"
                       : "Listening for card tap"}
               </h3>
-              <p>{listeningHint}</p>
               <div className={`staff-rfid-status staff-rfid-status--${scannerState}`}>
                 <ShieldCheck size={16} />
                 <span>
@@ -437,9 +422,6 @@ export function StaffCheckInPage() {
                         : "Ready — tap the ESP32 reader"}
                 </span>
               </div>
-              <p className="muted-copy">
-                Tap the physical ESP32 + MFRC522 reader. Do not type in this screen.
-              </p>
             </article>
             <VerifiedPanel verified={verified} />
           </div>
@@ -448,10 +430,6 @@ export function StaffCheckInPage() {
             <article className="staff-scanner-card staff-scanner-card--qr">
               <QrCode size={34} />
               <h3>Staff-generated QR check-in</h3>
-              <p>
-                Generate a temporary clinic QR. The patient uses Scan staff QR with camera in the
-                patient app, or the phone camera app, then signs in if asked.
-              </p>
               {qrSession?.qrDataUrl && countdown > 0 ? (
                 <div className="staff-walkin-qr">
                   <img src={qrSession.qrDataUrl} alt="Temporary walk-in check-in QR code" />
@@ -471,9 +449,6 @@ export function StaffCheckInPage() {
                   <QrCode size={16} /> Generate QR Check-In
                 </button>
               )}
-              <p className="muted-copy">
-                The QR contains only a secure temporary token — never patient passwords or clinical data.
-              </p>
             </article>
             <VerifiedPanel
               verified={verified}
@@ -737,10 +712,7 @@ function VerifiedPanel({ verified, emptyHint }) {
     return (
       <article className="staff-verified-card staff-verified-card--idle">
         <h3>Awaiting card tap</h3>
-        <p>
-          {emptyHint ||
-            "When the patient taps the ESP32 reader, their appointment and queue number appear here. No typing."}
-        </p>
+        {emptyHint ? <p>{emptyHint}</p> : null}
       </article>
     );
   }
