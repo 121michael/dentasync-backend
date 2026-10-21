@@ -4,12 +4,14 @@ import {
   ArrowLeft,
   ArrowRight,
   CheckCircle2,
+  Clock,
   Eye,
   EyeOff,
   LockKeyhole,
   Mail,
   Phone,
   ShieldCheck,
+  Sparkles,
   X,
 } from "lucide-react";
 import { ApiError, api } from "../api";
@@ -245,10 +247,24 @@ export function AuthPage() {
               <span className="auth-showcase__tagline-family">Family</span>
             </span>
           </h1>
-          <p>
+          <p className="auth-showcase__lede">
             Schedule, track, and understand your dental journey through one calm,
             secure patient experience.
           </p>
+          <ul className="auth-showcase__highlights" aria-label="Clinic highlights">
+            <li>
+              <Clock size={16} aria-hidden="true" />
+              Open Daily
+            </li>
+            <li>
+              <Sparkles size={16} aria-hidden="true" />
+              Free Consultation
+            </li>
+            <li>
+              <ShieldCheck size={16} aria-hidden="true" />
+              HMO Accredited
+            </li>
+          </ul>
         </div>
         <div className="auth-showcase__features">
           {[
