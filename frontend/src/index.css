@@ -3153,7 +3153,7 @@ strong {
 .staff-status-bar {
   display: flex;
   flex-wrap: wrap;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: .55rem 1rem;
   padding: .55rem clamp(1.25rem, 3vw, 3rem);
   border-bottom: 1px solid rgba(91, 42, 134, 0.1);
@@ -3162,7 +3162,7 @@ strong {
   font-size: .72rem;
   font-weight: 700;
 }
-.staff-status-bar span:last-child { color: var(--amethyst-700); }
+.staff-status-bar span { color: var(--amethyst-700); }
 .staff-header__badge {
   display: inline-flex;
   width: max-content;
@@ -3801,13 +3801,6 @@ body.is-queue-display .staff-mobile-nav {
   .staff-verified-card__facts {
     grid-template-columns: 1fr;
   }
-}
-.staff-checkin-hero {
-  margin: 0 0 1rem;
-  padding: 1rem 1.1rem;
-  border-radius: 16px;
-  background: linear-gradient(135deg, rgba(91, 42, 134, .08), rgba(255,255,255,.9));
-  border: 1px solid rgba(91, 42, 134, .12);
 }
 .staff-log-heading {
   align-items: flex-start;
@@ -4453,7 +4446,7 @@ body.is-queue-display .staff-mobile-nav {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: .65rem 1rem;
   margin: .85rem clamp(1.25rem, 3vw, 3rem) 0;
   padding: .72rem 1rem;
@@ -4465,14 +4458,6 @@ body.is-queue-display .staff-mobile-nav {
   font-size: .74rem;
   font-weight: 650;
 }
-.admin-status-bar__pulse {
-  display: inline-flex;
-  align-items: center;
-  gap: .45rem;
-  color: var(--emerald);
-  font-weight: 750;
-}
-.admin-status-bar__pulse.is-offline { color: var(--danger); }
 .admin-content { width: min(1520px, 100%); margin: 0 auto; padding: clamp(1.2rem, 3vw, 2.35rem); }
 .admin-page { display: grid; gap: 1.15rem; }
 .admin-page .section-heading { align-items: center; }
@@ -8358,8 +8343,7 @@ body.is-queue-display .staff-mobile-nav {
     margin-right: 1rem;
   }
 
-  .admin-shell--rfid .admin-status-bar > span,
-  .admin-shell--rfid .admin-status-bar__pulse {
+  .admin-shell--rfid .admin-status-bar > span {
     display: flex;
     flex-wrap: wrap;
     min-width: 0;
