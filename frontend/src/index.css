@@ -4446,7 +4446,7 @@ body.is-queue-display .staff-mobile-nav {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: .65rem 1rem;
   margin: .85rem clamp(1.25rem, 3vw, 3rem) 0;
   padding: .72rem 1rem;
@@ -4458,14 +4458,6 @@ body.is-queue-display .staff-mobile-nav {
   font-size: .74rem;
   font-weight: 650;
 }
-.admin-status-bar__pulse {
-  display: inline-flex;
-  align-items: center;
-  gap: .45rem;
-  color: var(--emerald);
-  font-weight: 750;
-}
-.admin-status-bar__pulse.is-offline { color: var(--danger); }
 .admin-content { width: min(1520px, 100%); margin: 0 auto; padding: clamp(1.2rem, 3vw, 2.35rem); }
 .admin-page { display: grid; gap: 1.15rem; }
 .admin-page .section-heading { align-items: center; }
@@ -8351,8 +8343,7 @@ body.is-queue-display .staff-mobile-nav {
     margin-right: 1rem;
   }
 
-  .admin-shell--rfid .admin-status-bar > span,
-  .admin-shell--rfid .admin-status-bar__pulse {
+  .admin-shell--rfid .admin-status-bar > span {
     display: flex;
     flex-wrap: wrap;
     min-width: 0;
