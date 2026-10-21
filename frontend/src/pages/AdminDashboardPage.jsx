@@ -35,10 +35,6 @@ export function AdminDashboardPage() {
         <div>
           <span className="eyebrow eyebrow--light">Welcome back</span>
           <h2>Welcome Back, Administrator</h2>
-          <p>
-            Your centralized command node is ready. All clinic arrays, user permissions, AI diagnostic
-            parameters, and schedule matrices are operating at optimal capacity.
-          </p>
         </div>
         <div className="admin-welcome-card__actions">
           <Link className="button button--light" to="/admin/users"><Users size={16} /> Audit Accounts</Link>
