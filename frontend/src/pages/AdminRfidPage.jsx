@@ -102,7 +102,6 @@ export function AdminRfidPage() {
           <div>
             <span className="eyebrow">Access credentials</span>
             <h2>Patient RFID Tag Assignments</h2>
-            <p>Assign or clear RFID tags for patient check-in only. Staff RFID assignment is not managed here.</p>
           </div>
           <button className="button button--secondary" onClick={load} type="button">
             <RefreshCw size={16} /> Refresh
