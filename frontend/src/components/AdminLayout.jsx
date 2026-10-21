@@ -71,10 +71,6 @@ export function AdminLayout() {
   const [isOpen, setIsOpen] = useState(false);
   const [toasts, setToasts] = useState([]);
   const [confirmState, setConfirmState] = useState(null);
-  const [systemStatus, setSystemStatus] = useState({
-    coreInfrastructureOnline: true,
-    activeOperationsTerminals: 0,
-  });
   const [alerts, setAlerts] = useState({
     pendingAccounts: 0,
     pendingAppointments: 0,
@@ -117,13 +113,11 @@ export function AdminLayout() {
     let active = true;
     async function loadStatus() {
       try {
-        const [status, dashboard, notifications] = await Promise.all([
-          api.getAdminStatus({ silent: true }),
+        const [dashboard, notifications] = await Promise.all([
           api.getAdminDashboard({ silent: true }).catch(() => null),
           api.getAdminNotifications({ silent: true }).catch(() => null),
         ]);
         if (!active) return;
-        setSystemStatus(status);
         const unread = Array.isArray(notifications?.notifications)
           ? notifications.notifications.filter((item) => !item.read).length
           : 0;
@@ -133,12 +127,7 @@ export function AdminLayout() {
           unreadNotifications: unread,
         });
       } catch {
-        if (active) {
-          setSystemStatus({
-            coreInfrastructureOnline: false,
-            activeOperationsTerminals: 0,
-          });
-        }
+        // Keep the last loaded alert counts if a refresh fails.
       }
     }
     loadStatus();
@@ -169,10 +158,9 @@ export function AdminLayout() {
 
   const hasUnread = alerts.unreadNotifications > 0;
   const isRfidPage = location.pathname.startsWith("/admin/rfid");
-  const hideStatusBar = location.pathname.startsWith("/admin/patient-records");
   const uiValue = useMemo(
-    () => ({ pushToast, confirm, systemStatus, pageTitle }),
-    [pushToast, confirm, systemStatus, pageTitle]
+    () => ({ pushToast, confirm, pageTitle }),
+    [pushToast, confirm, pageTitle]
   );
 
   return (
@@ -260,14 +248,6 @@ export function AdminLayout() {
               </button>
             </div>
           </header>
-
-          {hideStatusBar ? null : (
-            <div className="admin-status-bar" role="status">
-              <span>
-                Active Operations Terminals: {systemStatus.activeOperationsTerminals || 0} Live Channels
-              </span>
-            </div>
-          )}
 
           <main className="admin-content">
             <Outlet />

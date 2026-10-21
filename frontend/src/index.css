@@ -4471,22 +4471,6 @@ body.is-queue-display .staff-mobile-nav {
 @media (min-width: 760px) {
   .admin-header__role { display: inline-flex; }
 }
-.admin-status-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-start;
-  gap: .65rem 1rem;
-  margin: .85rem clamp(1.25rem, 3vw, 3rem) 0;
-  padding: .72rem 1rem;
-  border: 1px solid rgba(91, 42, 134, .12);
-  border-radius: 16px;
-  color: var(--text-muted);
-  background: rgba(255,255,255,.82);
-  box-shadow: 0 10px 24px rgba(49, 24, 78, .05);
-  font-size: .74rem;
-  font-weight: 650;
-}
 .admin-content { width: min(1520px, 100%); margin: 0 auto; padding: clamp(1.2rem, 3vw, 2.35rem); }
 .admin-page { display: grid; gap: 1.15rem; }
 .admin-page .section-heading { align-items: center; }
@@ -8369,22 +8353,6 @@ body.is-queue-display .staff-mobile-nav {
     white-space: nowrap;
   }
 
-  .admin-shell--rfid .admin-status-bar {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: .45rem;
-    min-width: 0;
-    margin-left: 1rem;
-    margin-right: 1rem;
-  }
-
-  .admin-shell--rfid .admin-status-bar > span {
-    display: flex;
-    flex-wrap: wrap;
-    min-width: 0;
-    max-width: 100%;
-    overflow-wrap: anywhere;
-  }
 }
 
 @media (max-width: 760px) {
@@ -8515,12 +8483,6 @@ body.is-queue-display .staff-mobile-nav {
   .admin-shell--rfid .admin-header {
     padding-left: .85rem;
     padding-right: .85rem;
-  }
-
-  .admin-shell--rfid .admin-status-bar {
-    margin-left: .85rem;
-    margin-right: .85rem;
-    padding: .65rem .8rem;
   }
 
   .admin-rfid-page .admin-panel {
