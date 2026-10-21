@@ -1,4 +1,4 @@
-import { Clock3, Mail, MessageCircleHeart, Phone, ShieldCheck } from "lucide-react";
+import { Clock3, Mail, Phone } from "lucide-react";
 import { SectionHeading } from "../components/UI";
 
 export function SupportPage() {
@@ -28,21 +28,6 @@ export function SupportPage() {
           <p>Weekdays 9:00 AM – 4:00 PM. Weekends and holidays 11:00 AM – 4:00 PM, unless the clinic schedule is updated.</p>
           <strong>Mon–Fri 9–4 · Sat–Sun 11–4</strong>
         </article>
-      </section>
-      <section className="support-banner">
-        <MessageCircleHeart size={28} />
-        <div>
-          <span className="eyebrow">A calm answer is close</span>
-          <h2>For a dental emergency, call the clinic directly.</h2>
-          <p>Portal messages are reviewed during standard clinic hours and are not monitored for emergencies.</p>
-        </div>
-      </section>
-      <section className="privacy-banner">
-        <ShieldCheck size={20} />
-        <div>
-          <strong>Your care conversations stay private.</strong>
-          <span>Use your authorized patient account whenever you share personal health information.</span>
-        </div>
       </section>
     </div>
   );
