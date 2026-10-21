@@ -3153,7 +3153,7 @@ strong {
 .staff-status-bar {
   display: flex;
   flex-wrap: wrap;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: .55rem 1rem;
   padding: .55rem clamp(1.25rem, 3vw, 3rem);
   border-bottom: 1px solid rgba(91, 42, 134, 0.1);
@@ -3162,7 +3162,7 @@ strong {
   font-size: .72rem;
   font-weight: 700;
 }
-.staff-status-bar span:last-child { color: var(--amethyst-700); }
+.staff-status-bar span { color: var(--amethyst-700); }
 .staff-header__badge {
   display: inline-flex;
   width: max-content;
@@ -3801,13 +3801,6 @@ body.is-queue-display .staff-mobile-nav {
   .staff-verified-card__facts {
     grid-template-columns: 1fr;
   }
-}
-.staff-checkin-hero {
-  margin: 0 0 1rem;
-  padding: 1rem 1.1rem;
-  border-radius: 16px;
-  background: linear-gradient(135deg, rgba(91, 42, 134, .08), rgba(255,255,255,.9));
-  border: 1px solid rgba(91, 42, 134, .12);
 }
 .staff-log-heading {
   align-items: flex-start;

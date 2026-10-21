@@ -243,7 +243,6 @@ export function StaffLayout() {
           </header>
 
           <div className="staff-status-bar" role="status">
-            <span>Core clinic operations online</span>
             <span>Staff session active · live queue sync enabled</span>
           </div>
 
