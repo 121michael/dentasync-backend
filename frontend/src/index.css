@@ -2532,10 +2532,6 @@ strong {
 .document-row > div { display: grid; gap: .15rem; min-width: 0; }
 .document-row strong { overflow: hidden; font-size: .7rem; text-overflow: ellipsis; white-space: nowrap; }
 .document-row small { color: var(--text-muted); font-size: .6rem; text-transform: capitalize; }
-.privacy-banner { display: flex; align-items: center; gap: .8rem; padding: 1rem 1.15rem; border: 1px solid rgba(132, 82, 181, .22); border-radius: 15px; color: var(--amethyst-700); background: var(--amethyst-100); }
-.privacy-banner > div { display: grid; gap: .18rem; }
-.privacy-banner strong { color: inherit; font-size: .74rem; }
-.privacy-banner span { color: var(--text-muted); font-size: .66rem; }
 
 /* Profile */
 .membership-card {
@@ -2635,11 +2631,6 @@ strong {
 .support-card p { color: var(--text-muted); font-size: .73rem; line-height: 1.55; }
 .support-card a,
 .support-card > strong { color: var(--amethyst-700); font-size: .75rem; font-weight: 800; }
-.support-banner { display: flex; align-items: center; gap: 1rem; padding: 1.5rem; border-radius: 20px; color: #fff; background: linear-gradient(135deg, #2c1546, #61348c); }
-.support-banner > svg { flex-shrink: 0; color: #d6b4fb; }
-.support-banner > div { display: grid; gap: .35rem; }
-.support-banner h2 { color: #fff; font-size: 1.1rem; }
-.support-banner p { color: rgba(255,255,255,.73); font-size: .75rem; line-height: 1.55; }
 
 @media (max-width: 1180px) {
   .metrics-grid { grid-template-columns: repeat(2, 1fr); }
@@ -2648,6 +2639,8 @@ strong {
   .records-layout { grid-template-columns: 1fr; }
   .profile-layout { grid-template-columns: 1fr; }
   .profile-security-stack { grid-template-columns: repeat(3, 1fr); }
+  .support-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .support-grid .support-card:last-child { grid-column: 1 / -1; }
 }
 
 @media (max-width: 950px) {
@@ -2694,6 +2687,9 @@ strong {
 
 @media (max-width: 760px) {
   body { padding-bottom: 70px; }
+  body:has(.support-page) { padding-bottom: 0; }
+  .portal-shell:has(.support-page) { padding-bottom: 0; }
+  .support-page { padding-bottom: .75rem; }
   .portal-sidebar {
     display: flex;
     z-index: 30;
