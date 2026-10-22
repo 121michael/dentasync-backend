@@ -354,15 +354,14 @@ export function LandingHeader({ activeId, onNavigate }) {
                 </a>
               </li>
             ))}
-            <li className="landing-header__nav-signin">
-              <Link to="/login" onClick={() => setMenuOpen(false)}>
-                Sign in
-              </Link>
-            </li>
           </ul>
         </nav>
         <div className="landing-header__actions">
-          <Link to="/login" className="landing-header__signin">
+          <Link
+            to="/login"
+            className="landing-header__signin"
+            onClick={() => setMenuOpen(false)}
+          >
             Sign in
           </Link>
           <Link

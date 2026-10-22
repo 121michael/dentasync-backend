@@ -1,6 +1,5 @@
 import { useRef } from "react";
-import { Link } from "react-router-dom";
-import { ArrowRight, CheckCircle2, ChevronDown, Clock, LockKeyhole, ShieldCheck, Sparkles } from "lucide-react";
+import { CheckCircle2, ChevronDown, Clock, LockKeyhole, ShieldCheck, Sparkles } from "lucide-react";
 import {
   AboutSection,
   ContactSection,
@@ -69,18 +68,6 @@ export function LandingPage() {
                 HMO Accredited
               </li>
             </ul>
-            <div className="landing-hero__actions">
-              <a
-                href="#services"
-                className="landing-button landing-button--ghost"
-                onClick={(event) => {
-                  event.preventDefault();
-                  scrollToSection("services");
-                }}
-              >
-                Explore services
-              </a>
-            </div>
           </div>
           <a
             href="#about"
@@ -111,9 +98,6 @@ export function LandingPage() {
                 </li>
               ))}
             </ul>
-            <Link to="/login" className="button button--primary button--wide">
-              Sign in <ArrowRight size={18} aria-hidden="true" />
-            </Link>
             <p className="auth-security-note">
               <LockKeyhole size={15} aria-hidden="true" /> Your health information is protected with account-level
               access controls.
