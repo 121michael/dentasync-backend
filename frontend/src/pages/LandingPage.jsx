@@ -70,9 +70,6 @@ export function LandingPage() {
               </li>
             </ul>
             <div className="landing-hero__actions">
-              <Link to="/register" className="landing-button landing-button--gold">
-                Create Account <ArrowRight size={17} aria-hidden="true" />
-              </Link>
               <a
                 href="#services"
                 className="landing-button landing-button--ghost"
@@ -116,9 +113,6 @@ export function LandingPage() {
             </ul>
             <Link to="/login" className="button button--primary button--wide">
               Sign in <ArrowRight size={18} aria-hidden="true" />
-            </Link>
-            <Link to="/register" className="button button--secondary button--wide">
-              Create account
             </Link>
             <p className="auth-security-note">
               <LockKeyhole size={15} aria-hidden="true" /> Your health information is protected with account-level

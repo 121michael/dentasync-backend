@@ -11508,7 +11508,6 @@ body.is-queue-display .fab-menu {
 }
 
 .landing .landing-portal__card .button--primary {
-  margin-bottom: 0.7rem;
   background: linear-gradient(135deg, #4a1f73 0%, #6a35a0 100%);
   box-shadow: 0 16px 30px -16px rgba(74, 31, 115, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.14);
 }
@@ -11602,9 +11601,14 @@ body.is-queue-display .fab-menu {
   .landing .landing-hero .auth-showcase__tagline {
     font-size: clamp(1.8rem, 9.2vw, 2.4rem);
   }
+  .landing .landing-hero .landing-hero__actions {
+    display: flex;
+    justify-content: center;
+  }
   .landing .landing-hero .landing-hero__actions .landing-button {
+    min-width: min(100%, 15rem);
     min-height: 46px;
-    padding: 0 0.9rem;
+    padding: 0 1.4rem;
   }
   .landing .landing-portal h2 {
     font-size: 1.6rem;
