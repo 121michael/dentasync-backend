@@ -142,7 +142,7 @@ function createPostgresPasswordResetStore(pool) {
            r.expires_at <= CURRENT_TIMESTAMP AS expired,
            u.email
          FROM ${PASSWORD_RESET_REQUESTS_TABLE} r
-         LEFT JOIN users u ON u.id = r.user_id
+         LEFT JOIN users u ON u.id::text = r.user_id
          WHERE r.token_hash = $1
          FOR UPDATE OF r`,
         [tokenHash]

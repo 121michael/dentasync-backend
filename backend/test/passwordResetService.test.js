@@ -3,7 +3,10 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { hashesMatch } = require("../repositories/postgresPasswordResetStore");
+const {
+  createPostgresPasswordResetStore,
+  hashesMatch,
+} = require("../repositories/postgresPasswordResetStore");
 const {
   PASSWORD_RESET_TTL_SECONDS,
   PasswordResetDeliveryError,
@@ -206,4 +209,25 @@ test("a failed email delivery invalidates the new reset request", async () => {
   );
   const request = Array.from(fixture.store.requests.values())[0];
   assert.ok(request.invalidatedAt instanceof Date);
+});
+
+test("postgres reset lookup compares the TEXT user_id to users.id as text", async () => {
+  const statements = [];
+  const pool = {
+    async connect() {
+      return {
+        release() {},
+        async query(sql) {
+          statements.push(sql);
+          return { rows: [] };
+        },
+      };
+    },
+  };
+  const store = createPostgresPasswordResetStore(pool);
+  const result = await store.consumeAndReset({ tokenHash: "hash", passwordHash: "new-hash" });
+
+  assert.equal(result.status, "not_found");
+  const lookup = statements.find((sql) => sql.includes("LEFT JOIN users"));
+  assert.match(lookup, /u\.id::text = r\.user_id/);
 });
