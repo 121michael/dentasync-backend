@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -26,6 +26,7 @@ import {
   VisitSection,
   scrollToSection,
   useActiveSection,
+  useClinicInfo,
   useLandingReveal,
 } from "./landing/LandingSections";
 import { legalDocumentById } from "../legal/dentasyncLegal";
@@ -64,25 +65,10 @@ export function AuthPage() {
     acceptedPrivacy: false,
   });
   const [legalPreview, setLegalPreview] = useState(null);
-  const [clinicInfo, setClinicInfo] = useState(null);
-  const [clinicInfoStatus, setClinicInfoStatus] = useState("loading");
+  const { info: clinicInfo, status: clinicInfoStatus, retry: loadClinicInfo } = useClinicInfo();
   const landingRef = useRef(null);
   const activeSection = useActiveSection(LANDING_NAV.map((item) => item.id));
   useLandingReveal(landingRef, clinicInfoStatus);
-
-  const loadClinicInfo = useCallback(async () => {
-    setClinicInfoStatus("loading");
-    try {
-      setClinicInfo(await api.getPublicClinicInfo());
-      setClinicInfoStatus("ready");
-    } catch {
-      setClinicInfoStatus("error");
-    }
-  }, []);
-
-  useEffect(() => {
-    loadClinicInfo();
-  }, [loadClinicInfo]);
 
   function openCreateAccount() {
     if (screen !== "otp" && mode !== "register") {
