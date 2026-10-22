@@ -118,6 +118,7 @@ export const api = {
   getQueue: (options = {}) => request("/patient/queue", options),
   getPublicQueueDisplay: (options = {}) =>
     request("/public/queue-display", { authenticated: false, ...options }),
+  getPublicClinicInfo: () => request("/public/clinic-info", { authenticated: false, silent: true }),
   checkIn: (appointmentId) =>
     request("/patient/queue/check-in", { method: "POST", body: { appointmentId } }),
   getClinicAssistantStatus: () => request("/patient/assistant/status", { silent: true }),

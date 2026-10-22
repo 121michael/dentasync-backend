@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   ArrowRight,
-  CheckCircle2,
+  ChevronDown,
   Clock,
   Eye,
   EyeOff,
@@ -15,8 +15,19 @@ import {
   X,
 } from "lucide-react";
 import { ApiError, api } from "../api";
-import { BrandMark } from "../components/BrandMark";
 import { LegalDocument } from "../components/LegalDocument";
+import {
+  AboutSection,
+  ContactSection,
+  LANDING_NAV,
+  LandingFooter,
+  LandingHeader,
+  ServicesSection,
+  VisitSection,
+  scrollToSection,
+  useActiveSection,
+  useLandingReveal,
+} from "./landing/LandingSections";
 import { legalDocumentById } from "../legal/dentasyncLegal";
 import { useAuth } from "../useAuth";
 
@@ -53,6 +64,35 @@ export function AuthPage() {
     acceptedPrivacy: false,
   });
   const [legalPreview, setLegalPreview] = useState(null);
+  const [clinicInfo, setClinicInfo] = useState(null);
+  const [clinicInfoStatus, setClinicInfoStatus] = useState("loading");
+  const landingRef = useRef(null);
+  const activeSection = useActiveSection(LANDING_NAV.map((item) => item.id));
+  useLandingReveal(landingRef, clinicInfoStatus);
+
+  const loadClinicInfo = useCallback(async () => {
+    setClinicInfoStatus("loading");
+    try {
+      setClinicInfo(await api.getPublicClinicInfo());
+      setClinicInfoStatus("ready");
+    } catch {
+      setClinicInfoStatus("error");
+    }
+  }, []);
+
+  useEffect(() => {
+    loadClinicInfo();
+  }, [loadClinicInfo]);
+
+  function openCreateAccount() {
+    if (screen !== "otp" && mode !== "register") {
+      setMode("register");
+      setMessage("");
+      navigate("/register");
+    }
+    // Wait for the registration fields to render so the scroll lands on the final layout.
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => scrollToSection("create-account")));
+  }
 
   function safeNextPath() {
     const next = String(searchParams.get("next") || "").trim();
@@ -220,293 +260,331 @@ export function AuthPage() {
   const isRegistration = mode === "register";
 
   return (
-    <main className="auth-page">
-      <div className="auth-page__glow auth-page__glow--one" />
-      <div className="auth-page__glow auth-page__glow--two" />
-      <section className="auth-showcase">
-        <BrandMark />
-        <div className="auth-showcase__copy">
-          <span className="eyebrow">Private dental care, beautifully connected</span>
-          <h1
-            className="auth-showcase__tagline"
-            aria-label="We create healthy beautiful smiles for your entire family"
-          >
-            <span className="auth-showcase__tagline-lead">We create</span>
-            <span className="auth-showcase__tagline-main">
-              <span className="auth-showcase__tagline-emphasis">Healthy</span>
-              <span className="auth-showcase__tagline-emphasis auth-showcase__tagline-emphasis--beautiful">
-                Beautiful
-              </span>
-              <span className="auth-showcase__tagline-accent">Smiles</span>
-            </span>
-            <span className="auth-showcase__tagline-foot">
-              <span className="auth-showcase__tagline-support">
-                <span>For your</span>
-                <span>Entire</span>
-              </span>
-              <span className="auth-showcase__tagline-family">Family</span>
-            </span>
-          </h1>
-          <p className="auth-showcase__lede">
-            Schedule, track, and understand your dental journey through one calm,
-            secure patient experience.
-          </p>
-          <ul className="auth-showcase__highlights" aria-label="Clinic highlights">
-            <li>
-              <Clock size={16} aria-hidden="true" />
-              Open Daily
-            </li>
-            <li>
-              <Sparkles size={16} aria-hidden="true" />
-              Free Consultation
-            </li>
-            <li>
-              <ShieldCheck size={16} aria-hidden="true" />
-              HMO Accredited
-            </li>
-          </ul>
-        </div>
-        <div className="auth-showcase__features">
-          {[
-            "Effortless appointment planning",
-            "Secure treatment record access",
-            "Real-time clinic queue updates",
-          ].map((feature) => (
-            <span key={feature}>
-              <CheckCircle2 size={18} aria-hidden="true" /> {feature}
-            </span>
-          ))}
-        </div>
-      </section>
-
-      <section className="auth-panel">
-        {screen === "otp" ? (
-          <form className="auth-card" onSubmit={submitOtp}>
-            <button
-              type="button"
-              className="back-button"
-              onClick={() => {
-                setScreen("form");
-                setMessage("");
-              }}
+    <main className="landing" ref={landingRef}>
+      <LandingHeader activeId={activeSection} onNavigate={scrollToSection} onCreateAccount={openCreateAccount} />
+      <section className="auth-page" id="home" tabIndex={-1} aria-label="Home">
+        <div className="auth-page__glow auth-page__glow--one" />
+        <div className="auth-page__glow auth-page__glow--two" />
+        <section className="auth-showcase">
+          <div className="auth-showcase__copy">
+            <span className="eyebrow">Private dental care, beautifully connected</span>
+            <h1
+              className="auth-showcase__tagline"
+              aria-label="We create healthy beautiful smiles for your entire family"
             >
-              <ArrowLeft size={17} /> Back
-            </button>
-            <span className="auth-card__icon">
-              <Mail size={26} />
-            </span>
-            <span className="eyebrow">Confirm your email</span>
-            <h2>Enter your verification code</h2>
-            <p>
-              We sent a six-digit code to <strong>{pendingOtp?.email || "your inbox"}</strong>.
+              <span className="auth-showcase__tagline-lead">We create</span>
+              <span className="auth-showcase__tagline-main">
+                <span className="auth-showcase__tagline-emphasis">Healthy</span>
+                <span className="auth-showcase__tagline-emphasis auth-showcase__tagline-emphasis--beautiful">
+                  Beautiful
+                </span>
+                <span className="auth-showcase__tagline-accent">Smiles</span>
+              </span>
+              <span className="auth-showcase__tagline-foot">
+                <span className="auth-showcase__tagline-support">
+                  <span>For your</span>
+                  <span>Entire</span>
+                </span>
+                <span className="auth-showcase__tagline-family">Family</span>
+              </span>
+            </h1>
+            <p className="auth-showcase__lede">
+              Schedule, track, and understand your dental journey through one calm,
+              secure patient experience.
             </p>
-            <label className="field field--otp">
-              <span>Verification code</span>
-              <input
-                id="otp-code"
-                name="otp"
-                value={form.otp}
-                onChange={updateForm}
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                maxLength="6"
-                pattern="\d{6}"
-                placeholder="000000"
-                required
-              />
-            </label>
-            {message && <p className="form-message">{message}</p>}
-            <button className="button button--primary button--wide" disabled={isBusy}>
-              {isBusy ? "Verifying safely…" : "Verify & enter your portal"} <ArrowRight size={18} />
-            </button>
-            <button type="button" className="text-link text-link--center" onClick={resendCode} disabled={isBusy}>
-              Resend a new code
-            </button>
-          </form>
-        ) : (
-          <form className="auth-card" onSubmit={isRegistration ? submitRegistration : submitLogin}>
-            <span className="auth-card__icon">
-              <ShieldCheck size={26} />
-            </span>
-            <span className="eyebrow">{isRegistration ? "Begin your care journey" : "Welcome back"}</span>
-            <h2>{isRegistration ? "Create your private portal" : "Sign in to Amethyst Dental"}</h2>
-            <p>
-              {isRegistration
-                ? "Your account will be verified with a one-time code before access is granted."
-                : "Access your authorized patient or clinic workspace securely."}
-            </p>
+            <ul className="auth-showcase__highlights" aria-label="Clinic highlights">
+              <li>
+                <Clock size={16} aria-hidden="true" />
+                Open Daily
+              </li>
+              <li>
+                <Sparkles size={16} aria-hidden="true" />
+                Free Consultation
+              </li>
+              <li>
+                <ShieldCheck size={16} aria-hidden="true" />
+                HMO Accredited
+              </li>
+            </ul>
+            <div className="landing-hero__actions">
+              <button type="button" className="landing-button landing-button--gold" onClick={openCreateAccount}>
+                Create Account <ArrowRight size={17} aria-hidden="true" />
+              </button>
+              <a
+                href="#services"
+                className="landing-button landing-button--ghost"
+                onClick={(event) => {
+                  event.preventDefault();
+                  scrollToSection("services");
+                }}
+              >
+                Explore services
+              </a>
+            </div>
+          </div>
+          <a
+            href="#about"
+            className="landing-hero__scroll"
+            aria-label="Scroll to About Us"
+            onClick={(event) => {
+              event.preventDefault();
+              scrollToSection("about");
+            }}
+          >
+            <span>Discover</span>
+            <ChevronDown size={18} aria-hidden="true" />
+          </a>
+        </section>
 
-            {isRegistration && (
-              <div className="field-row">
-                <label className="field">
-                  <span>First name</span>
-                  <input name="firstName" value={form.firstName} onChange={updateForm} required />
-                </label>
-                <label className="field">
-                  <span>Last name</span>
-                  <input name="lastName" value={form.lastName} onChange={updateForm} required />
-                </label>
-              </div>
-            )}
-            <label className="field">
-              <span>Email address</span>
-              <span className="field__input-icon">
-                <Mail size={17} />
+        <section className="auth-panel" id="create-account" tabIndex={-1} aria-label="Create account or sign in">
+          {screen === "otp" ? (
+            <form className="auth-card" onSubmit={submitOtp}>
+              <button
+                type="button"
+                className="back-button"
+                onClick={() => {
+                  setScreen("form");
+                  setMessage("");
+                }}
+              >
+                <ArrowLeft size={17} /> Back
+              </button>
+              <span className="auth-card__icon">
+                <Mail size={26} />
+              </span>
+              <span className="eyebrow">Confirm your email</span>
+              <h2>Enter your verification code</h2>
+              <p>
+                We sent a six-digit code to <strong>{pendingOtp?.email || "your inbox"}</strong>.
+              </p>
+              <label className="field field--otp">
+                <span>Verification code</span>
                 <input
-                  name="email"
-                  type="email"
-                  value={form.email}
+                  id="otp-code"
+                  name="otp"
+                  value={form.otp}
                   onChange={updateForm}
-                  autoComplete="email"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength="6"
+                  pattern="\d{6}"
+                  placeholder="000000"
                   required
                 />
+              </label>
+              {message && <p className="form-message">{message}</p>}
+              <button className="button button--primary button--wide" disabled={isBusy}>
+                {isBusy ? "Verifying safely…" : "Verify & enter your portal"} <ArrowRight size={18} />
+              </button>
+              <button type="button" className="text-link text-link--center" onClick={resendCode} disabled={isBusy}>
+                Resend a new code
+              </button>
+            </form>
+          ) : (
+            <form className="auth-card" onSubmit={isRegistration ? submitRegistration : submitLogin}>
+              <span className="auth-card__icon">
+                <ShieldCheck size={26} />
               </span>
-            </label>
-            {isRegistration && (
+              <span className="eyebrow">{isRegistration ? "Begin your care journey" : "Welcome back"}</span>
+              <h2>{isRegistration ? "Create your private portal" : "Sign in to Amethyst Dental"}</h2>
+              <p>
+                {isRegistration
+                  ? "Your account will be verified with a one-time code before access is granted."
+                  : "Access your authorized patient or clinic workspace securely."}
+              </p>
+
+              {isRegistration && (
+                <div className="field-row">
+                  <label className="field">
+                    <span>First name</span>
+                    <input name="firstName" value={form.firstName} onChange={updateForm} required />
+                  </label>
+                  <label className="field">
+                    <span>Last name</span>
+                    <input name="lastName" value={form.lastName} onChange={updateForm} required />
+                  </label>
+                </div>
+              )}
               <label className="field">
-                <span>Mobile number</span>
+                <span>Email address</span>
                 <span className="field__input-icon">
-                  <Phone size={17} />
+                  <Mail size={17} />
                   <input
-                    name="phone"
-                    value={form.phone}
+                    name="email"
+                    type="email"
+                    value={form.email}
                     onChange={updateForm}
-                    placeholder="0917 123 4567"
-                    autoComplete="tel"
+                    autoComplete="email"
                     required
                   />
                 </span>
               </label>
-            )}
-            {isRegistration && (
-              <label className="field">
-                <span>Patient category</span>
-                <select
-                  name="patientCategory"
-                  value={form.patientCategory}
-                  onChange={updateForm}
-                  required
-                >
-                  <option value="regular">Regular Patient (A)</option>
-                  <option value="senior">Senior Citizen (S)</option>
-                  <option value="pediatric">Pediatric Patient (P)</option>
-                  <option value="pwd">Person with Disability / PWD (W)</option>
-                </select>
-              </label>
-            )}
-            <label className="field">
-              <span>Password</span>
-              <span className="field__input-icon">
-                <LockKeyhole size={17} />
-                <input
-                  name="password"
-                  type={showPassword ? "text" : "password"}
-                  value={form.password}
-                  onChange={updateForm}
-                  autoComplete={isRegistration ? "new-password" : "current-password"}
-                  minLength={isRegistration ? 10 : undefined}
-                  required
-                />
-                <button
-                  type="button"
-                  className="field__visibility"
-                  onClick={() => setShowPassword((current) => !current)}
-                  aria-label={showPassword ? "Hide password" : "Show password"}
-                >
-                  {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
-                </button>
-              </span>
-            </label>
-            {!isRegistration && (
-              <button
-                type="button"
-                className="text-link auth-card__forgot-link"
-                onClick={() => navigate("/forgot-password")}
-              >
-                Forgot password?
-              </button>
-            )}
-            {isRegistration ? (
-              <fieldset className="auth-consent">
-                <legend>Privacy &amp; Terms</legend>
-                <label className="auth-consent__check">
-                  <input
-                    type="checkbox"
-                    name="acceptedTerms"
-                    checked={form.acceptedTerms}
-                    onChange={updateForm}
-                  />
-                  <span>I have read and agree to the Terms and Conditions.</span>
-                </label>
-                <label className="auth-consent__check">
-                  <input
-                    type="checkbox"
-                    name="acceptedPrivacy"
-                    checked={form.acceptedPrivacy}
-                    onChange={updateForm}
-                  />
-                  <span>
-                    I acknowledge the DentaSync Privacy Notice and consent to the processing of my
-                    personal and health information for the purposes described therein.
+              {isRegistration && (
+                <label className="field">
+                  <span>Mobile number</span>
+                  <span className="field__input-icon">
+                    <Phone size={17} />
+                    <input
+                      name="phone"
+                      value={form.phone}
+                      onChange={updateForm}
+                      placeholder="0917 123 4567"
+                      autoComplete="tel"
+                      required
+                    />
                   </span>
                 </label>
-                <div className="auth-consent__actions">
-                  <button type="button" className="button button--secondary" onClick={() => setLegalPreview("terms")}>
-                    Terms &amp; Conditions
+              )}
+              {isRegistration && (
+                <label className="field">
+                  <span>Patient category</span>
+                  <select
+                    name="patientCategory"
+                    value={form.patientCategory}
+                    onChange={updateForm}
+                    required
+                  >
+                    <option value="regular">Regular Patient (A)</option>
+                    <option value="senior">Senior Citizen (S)</option>
+                    <option value="pediatric">Pediatric Patient (P)</option>
+                    <option value="pwd">Person with Disability / PWD (W)</option>
+                  </select>
+                </label>
+              )}
+              <label className="field">
+                <span>Password</span>
+                <span className="field__input-icon">
+                  <LockKeyhole size={17} />
+                  <input
+                    name="password"
+                    type={showPassword ? "text" : "password"}
+                    value={form.password}
+                    onChange={updateForm}
+                    autoComplete={isRegistration ? "new-password" : "current-password"}
+                    minLength={isRegistration ? 10 : undefined}
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="field__visibility"
+                    onClick={() => setShowPassword((current) => !current)}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                  >
+                    {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
                   </button>
-                  <button type="button" className="button button--secondary" onClick={() => setLegalPreview("privacy")}>
-                    Privacy Notice
-                  </button>
-                </div>
-              </fieldset>
-            ) : null}
-            {message && <p className="form-message">{message}</p>}
-            <button
-              className="button button--primary button--wide"
-              disabled={isBusy || (isRegistration && (!form.acceptedTerms || !form.acceptedPrivacy))}
-            >
-              {isBusy
-                ? "Please wait…"
-                : isRegistration
-                  ? "Create account"
-                  : "Enter your portal"}{" "}
-              <ArrowRight size={18} />
-            </button>
-            <div className="auth-tabs" role="tablist" aria-label="Portal access">
+                </span>
+              </label>
+              {!isRegistration && (
+                <button
+                  type="button"
+                  className="text-link auth-card__forgot-link"
+                  onClick={() => navigate("/forgot-password")}
+                >
+                  Forgot password?
+                </button>
+              )}
+              {isRegistration ? (
+                <fieldset className="auth-consent">
+                  <legend>Privacy &amp; Terms</legend>
+                  <label className="auth-consent__check">
+                    <input
+                      type="checkbox"
+                      name="acceptedTerms"
+                      checked={form.acceptedTerms}
+                      onChange={updateForm}
+                    />
+                    <span>I have read and agree to the Terms and Conditions.</span>
+                  </label>
+                  <label className="auth-consent__check">
+                    <input
+                      type="checkbox"
+                      name="acceptedPrivacy"
+                      checked={form.acceptedPrivacy}
+                      onChange={updateForm}
+                    />
+                    <span>
+                      I acknowledge the DentaSync Privacy Notice and consent to the processing of my
+                      personal and health information for the purposes described therein.
+                    </span>
+                  </label>
+                  <div className="auth-consent__actions">
+                    <button type="button" className="button button--secondary" onClick={() => setLegalPreview("terms")}>
+                      Terms &amp; Conditions
+                    </button>
+                    <button type="button" className="button button--secondary" onClick={() => setLegalPreview("privacy")}>
+                      Privacy Notice
+                    </button>
+                  </div>
+                </fieldset>
+              ) : null}
+              {message && <p className="form-message">{message}</p>}
               <button
-                type="button"
-                className={mode === "login" ? "is-active" : ""}
-                onClick={() => {
-                  setMode("login");
-                  setMessage("");
-                  navigate("/login");
-                }}
+                className="button button--primary button--wide"
+                disabled={isBusy || (isRegistration && (!form.acceptedTerms || !form.acceptedPrivacy))}
               >
-                Sign in
+                {isBusy
+                  ? "Please wait…"
+                  : isRegistration
+                    ? "Create account"
+                    : "Enter your portal"}{" "}
+                <ArrowRight size={18} />
               </button>
-              <button
-                type="button"
-                className={mode === "register" ? "is-active" : ""}
-                onClick={() => {
-                  setMode("register");
-                  setMessage("");
-                  navigate("/register");
-                }}
-              >
-                Create account
-              </button>
-            </div>
-          </form>
-        )}
-        <p className="auth-security-note">
-          <LockKeyhole size={15} /> Your health information is protected with account-level access controls.
-        </p>
-        <p className="auth-legal-links">
-          <Link to="/terms">Terms &amp; Conditions</Link>
-          <span aria-hidden="true"> · </span>
-          <Link to="/privacy">Privacy Notice</Link>
-        </p>
+              <div className="auth-tabs" role="tablist" aria-label="Portal access">
+                <button
+                  type="button"
+                  className={mode === "login" ? "is-active" : ""}
+                  onClick={() => {
+                    setMode("login");
+                    setMessage("");
+                    navigate("/login");
+                  }}
+                >
+                  Sign in
+                </button>
+                <button
+                  type="button"
+                  className={mode === "register" ? "is-active" : ""}
+                  onClick={() => {
+                    setMode("register");
+                    setMessage("");
+                    navigate("/register");
+                  }}
+                >
+                  Create account
+                </button>
+              </div>
+            </form>
+          )}
+          <p className="auth-security-note">
+            <LockKeyhole size={15} /> Your health information is protected with account-level access controls.
+          </p>
+          <p className="auth-legal-links">
+            <Link to="/terms">Terms &amp; Conditions</Link>
+            <span aria-hidden="true"> · </span>
+            <Link to="/privacy">Privacy Notice</Link>
+          </p>
+        </section>
       </section>
+      <AboutSection hmoProviders={clinicInfo?.hmoProviders} />
+      <ServicesSection
+        services={clinicInfo?.services || []}
+        status={clinicInfoStatus}
+        onRetry={loadClinicInfo}
+        onCreateAccount={openCreateAccount}
+      />
+      <VisitSection
+        locations={clinicInfo?.locations || []}
+        hours={clinicInfo?.hours}
+        status={clinicInfoStatus}
+        onRetry={loadClinicInfo}
+      />
+      <ContactSection
+        clinic={clinicInfo?.clinic}
+        status={clinicInfoStatus}
+        onRetry={loadClinicInfo}
+        onCreateAccount={openCreateAccount}
+      />
+      <LandingFooter clinicName={clinicInfo?.clinic?.name} />
       {legalPreview ? (
         <div
           className="legal-modal-backdrop"
