@@ -313,7 +313,7 @@ function SwipeCarousel({ label, items, getKey, activeIndex, onSelect, renderItem
   );
 }
 
-export function LandingHeader({ activeId, onNavigate, onCreateAccount }) {
+export function LandingHeader({ activeId, onNavigate }) {
   const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -357,16 +357,13 @@ export function LandingHeader({ activeId, onNavigate, onCreateAccount }) {
           </ul>
         </nav>
         <div className="landing-header__actions">
-          <button
-            type="button"
+          <Link
+            to="/register"
             className="landing-button landing-button--gold landing-header__cta"
-            onClick={() => {
-              setMenuOpen(false);
-              onCreateAccount();
-            }}
+            onClick={() => setMenuOpen(false)}
           >
             Create Account
-          </button>
+          </Link>
           <button
             type="button"
             className="landing-header__toggle"
@@ -447,7 +444,7 @@ function LoadState({ status, onRetry, tone = "light", label, lines = 3 }) {
   );
 }
 
-export function ServicesSection({ services, status, onRetry, onCreateAccount }) {
+export function ServicesSection({ services, status, onRetry }) {
   const [activeIndex, setActiveIndex] = useState(0);
   const active = services[activeIndex] || services[0];
 
@@ -492,9 +489,9 @@ export function ServicesSection({ services, status, onRetry, onCreateAccount }) 
               <p className="landing-service-detail__how">
                 Create your patient account to request this service once the clinic approves your registration.
               </p>
-              <button type="button" className="landing-button landing-button--gold" onClick={onCreateAccount}>
+              <Link to="/register" className="landing-button landing-button--gold">
                 Create Account <ArrowRight size={17} aria-hidden="true" />
-              </button>
+              </Link>
             </article>
           </div>
         ) : (
@@ -521,8 +518,83 @@ function LocationCard({ location }) {
   );
 }
 
-function LocationPanel({ locations, status, onRetry }) {
-  const [activeIndex, setActiveIndex] = useState(0);
+function mapQuery(location) {
+  return [location.name, location.address].filter(Boolean).join(", ");
+}
+
+const MAP_LOAD_TIMEOUT_MS = 15000;
+
+function ClinicMap({ location }) {
+  const frameRef = useRef(null);
+  const [inView, setInView] = useState(typeof IntersectionObserver === "undefined");
+  const [state, setState] = useState("loading");
+  const query = mapQuery(location);
+  const src = `https://maps.google.com/maps?q=${encodeURIComponent(query)}&z=17&hl=en&output=embed`;
+
+  useEffect(() => {
+    if (inView) return undefined;
+    const node = frameRef.current;
+    if (!node) return undefined;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setInView(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "300px 0px" }
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [inView]);
+
+  useEffect(() => {
+    if (!inView || state !== "loading") return undefined;
+    const timer = window.setTimeout(() => setState("failed"), MAP_LOAD_TIMEOUT_MS);
+    return () => window.clearTimeout(timer);
+  }, [inView, state]);
+
+  return (
+    <figure className="landing-map" ref={frameRef}>
+      {inView ? (
+        <iframe
+          title={`Map showing ${query}`}
+          src={src}
+          allowFullScreen
+          referrerPolicy="no-referrer-when-downgrade"
+          onLoad={() => setState("ready")}
+        />
+      ) : null}
+      {state !== "ready" ? (
+        <div className={`landing-map__overlay ${state === "failed" ? "is-failed" : ""}`} role="status">
+          <MapPin size={22} aria-hidden="true" />
+          {state === "failed" ? (
+            <>
+              <span>The map could not load right now.</span>
+              {location.directionsUrl ? (
+                <a href={location.directionsUrl} target="_blank" rel="noopener noreferrer">
+                  Open in Google Maps
+                </a>
+              ) : null}
+            </>
+          ) : (
+            <span>Loading map…</span>
+          )}
+        </div>
+      ) : null}
+      {location.directionsUrl ? (
+        <figcaption className="landing-map__caption">
+          <span>Map not loading?</span>
+          <a href={location.directionsUrl} target="_blank" rel="noopener noreferrer">
+            Open in Google Maps
+          </a>
+        </figcaption>
+      ) : null}
+    </figure>
+  );
+}
+
+function LocationPanel({ locations, status, onRetry, activeIndex, onSelect }) {
   const active = locations[activeIndex] || locations[0];
 
   if (status !== "ready") return <LoadState status={status} onRetry={onRetry} label="The clinic location" lines={2} />;
@@ -543,7 +615,7 @@ function LocationPanel({ locations, status, onRetry }) {
           items={locations}
           getKey={(location) => location.id}
           activeIndex={activeIndex}
-          onSelect={setActiveIndex}
+          onSelect={onSelect}
           renderItem={(location) => <LocationCard location={location} />}
         />
       ) : null}
@@ -610,16 +682,35 @@ function HoursPanel({ hours, status, onRetry }) {
 }
 
 export function VisitSection({ locations, hours, status, onRetry }) {
+  const [activeIndex, setActiveIndex] = useState(0);
+  const active = locations[activeIndex] || locations[0];
+  const hasMap = status === "loading" || (status === "ready" && Boolean(active?.address));
+
   return (
     <section id="locations" className="landing-section landing-section--ivory" tabIndex={-1} aria-labelledby="locations-title">
-      <div className="landing-section__inner landing-split landing-visit">
-        <div className="landing-visit__column">
+      <div className={`landing-section__inner landing-visit ${hasMap ? "has-map" : "landing-split"}`}>
+        <div className="landing-visit__column landing-visit__location">
           <SectionHeading id="locations-title" eyebrow="Locations" title="Visit the clinic." />
           <div className={status === "error" ? "landing-panel-slot" : "landing-panel"} data-reveal>
-            <LocationPanel locations={locations} status={status} onRetry={onRetry} />
+            <LocationPanel
+              locations={locations}
+              status={status}
+              onRetry={onRetry}
+              activeIndex={activeIndex}
+              onSelect={setActiveIndex}
+            />
           </div>
         </div>
-        <div className="landing-visit__column" id="hours" tabIndex={-1} aria-labelledby="hours-title" role="region">
+        {hasMap ? (
+          <div className="landing-visit__map" data-reveal>
+            {status === "ready" ? (
+              <ClinicMap key={active.id} location={active} />
+            ) : (
+              <div className="landing-map landing-map--placeholder" role="status" aria-label="Loading clinic map" />
+            )}
+          </div>
+        ) : null}
+        <div className="landing-visit__column landing-visit__hours" id="hours" tabIndex={-1} aria-labelledby="hours-title" role="region">
           <SectionHeading id="hours-title" eyebrow="Operating Hours" title="Opening times." />
           <div className={status === "error" ? "landing-panel-slot" : "landing-panel"} data-reveal>
             <HoursPanel hours={hours} status={status} onRetry={onRetry} />
@@ -630,7 +721,7 @@ export function VisitSection({ locations, hours, status, onRetry }) {
   );
 }
 
-export function ContactSection({ clinic, status, onRetry, onCreateAccount }) {
+export function ContactSection({ clinic, status, onRetry }) {
   const phoneHref = telHref(clinic?.phone);
   const hasContact = Boolean(clinic?.phone || clinic?.email || clinic?.address);
 
@@ -678,9 +769,9 @@ export function ContactSection({ clinic, status, onRetry, onCreateAccount }) {
               Contact details will appear here once the clinic publishes them.
             </p>
           )}
-          <button type="button" className="landing-button landing-button--gold" onClick={onCreateAccount}>
+          <Link to="/register" className="landing-button landing-button--gold">
             Create Account <ArrowRight size={17} aria-hidden="true" />
-          </button>
+          </Link>
         </div>
       </div>
     </section>

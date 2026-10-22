@@ -10107,6 +10107,302 @@ body.is-queue-display .fab-menu {
   margin-left: calc(46px + 1rem);
 }
 
+.landing-visit.has-map {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  grid-template-areas:
+    "location map"
+    "hours map";
+  grid-template-rows: auto 1fr;
+  gap: 2.75rem clamp(2.5rem, 5vw, 4.5rem);
+}
+
+.landing-visit.has-map .landing-visit__location {
+  grid-area: location;
+}
+
+.landing-visit.has-map .landing-visit__hours {
+  grid-area: hours;
+}
+
+.landing-visit__map {
+  grid-area: map;
+  min-width: 0;
+}
+
+.landing-map {
+  position: sticky;
+  top: calc(var(--lp-header-h) + 1.5rem);
+  height: min(560px, calc(100vh - var(--lp-header-h) - 3rem));
+  min-height: 360px;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--lp-line);
+  border-radius: var(--lp-radius);
+  background:
+    radial-gradient(circle at 30% 30%, rgba(215, 186, 251, 0.35), transparent 60%),
+    #f2eafb;
+  box-shadow: 0 24px 60px -36px rgba(29, 14, 48, 0.45);
+}
+
+.landing-map {
+  display: flex;
+  flex-direction: column;
+}
+
+.landing-map iframe {
+  display: block;
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+}
+
+.landing-map__caption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.25rem 0.75rem;
+  padding: 0.65rem 1rem;
+  border-top: 1px solid var(--lp-line);
+  color: var(--lp-muted);
+  background: #fff;
+  font-size: 0.8rem;
+}
+
+.landing-map__caption a {
+  color: var(--lp-plum-700);
+  font-weight: 700;
+  text-underline-offset: 3px;
+}
+
+.landing-map--placeholder {
+  animation: landing-pulse 1.6s ease-in-out infinite;
+}
+
+.landing-map__overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 0.6rem;
+  padding: 1.5rem;
+  color: var(--lp-plum-700);
+  font-size: 0.9rem;
+  text-align: center;
+  pointer-events: none;
+}
+
+.landing-map__overlay.is-failed {
+  pointer-events: auto;
+  background: #f6f1fb;
+}
+
+.landing-map__overlay a {
+  color: var(--lp-plum-700);
+  font-weight: 700;
+}
+
+@keyframes landing-pulse {
+  50% { opacity: 0.6; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-map--placeholder {
+    animation: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .landing-visit.has-map {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "location"
+      "map"
+      "hours";
+    grid-template-rows: none;
+    gap: 2rem;
+  }
+  .landing-visit.has-map .landing-visit__hours {
+    margin-top: 0.75rem;
+  }
+  .landing-map {
+    position: relative;
+    top: auto;
+    height: clamp(260px, 62vw, 420px);
+    min-height: 0;
+  }
+}
+
+/* Sign in / registration switch */
+.auth-switch {
+  margin: 0.15rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.86rem;
+  text-align: center;
+}
+
+.auth-switch a {
+  color: var(--amethyst-700);
+  font-weight: 750;
+  text-underline-offset: 3px;
+}
+
+/* Dedicated registration page */
+.register-page {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(168, 117, 232, 0.35), transparent 32rem),
+    linear-gradient(160deg, var(--lp-plum-900) 0%, var(--lp-plum-700) 55%, var(--lp-plum-950) 100%);
+  color: #f8f3ff;
+}
+
+.register-page__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  max-width: var(--lp-max);
+  margin: 0 auto;
+  padding: 1.1rem max(1.25rem, env(safe-area-inset-right, 0px)) 1.1rem max(1.25rem, env(safe-area-inset-left, 0px));
+}
+
+.register-page__brand {
+  color: #fff;
+  text-decoration: none;
+  border-radius: 14px;
+}
+
+.register-page__signin {
+  min-height: 40px;
+  padding: 0 1.1rem;
+  font-size: 0.82rem;
+}
+
+.register-page__body {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1fr);
+  gap: clamp(2rem, 5vw, 4.5rem);
+  align-items: start;
+  max-width: var(--lp-max);
+  margin: 0 auto;
+  padding: clamp(1rem, 4vw, 3rem) max(1.25rem, env(safe-area-inset-right, 0px)) 4rem max(1.25rem, env(safe-area-inset-left, 0px));
+}
+
+.register-page__intro {
+  display: grid;
+  gap: 1.2rem;
+  position: sticky;
+  top: 2rem;
+  padding-top: 1rem;
+}
+
+.register-page__intro .landing-eyebrow {
+  color: var(--lp-gold);
+}
+
+.register-page__intro h1 {
+  margin: 0;
+  color: #fff;
+  font-family: var(--lp-serif);
+  font-size: clamp(2rem, 3.6vw, 3rem);
+  font-weight: 500;
+  line-height: 1.12;
+  letter-spacing: -0.01em;
+}
+
+.register-page__steps {
+  display: grid;
+  gap: 1rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: register-step;
+}
+
+.register-page__steps li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 0.9rem;
+  row-gap: 0.15rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--lp-line-dark);
+  counter-increment: register-step;
+}
+
+.register-page__steps li::before {
+  content: counter(register-step, decimal-leading-zero);
+  grid-row: span 2;
+  color: var(--lp-gold);
+  font-family: var(--lp-serif);
+  font-size: 1.15rem;
+}
+
+.register-page__steps strong {
+  color: #fff;
+  font-size: 0.95rem;
+}
+
+.register-page__steps span {
+  color: rgba(248, 243, 255, 0.72);
+  font-size: 0.86rem;
+  line-height: 1.55;
+}
+
+.landing .register-page__panel {
+  justify-items: stretch;
+  padding: clamp(1.5rem, 4vw, 2.5rem);
+  border: 1px solid rgba(215, 184, 137, 0.28);
+  border-left: 1px solid rgba(215, 184, 137, 0.28);
+  border-radius: 24px;
+  background: var(--lp-ivory);
+  box-shadow: 0 32px 80px -40px rgba(10, 3, 20, 0.7);
+}
+
+.landing .register-page__panel .auth-card {
+  width: 100%;
+  max-width: none;
+}
+
+@media (max-width: 860px) {
+  .register-page__body {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.5rem;
+  }
+  .register-page__intro {
+    display: contents;
+  }
+  .register-page__intro h1 {
+    margin-top: -0.75rem;
+  }
+  .register-page__panel {
+    order: 1;
+  }
+  .register-page__steps {
+    order: 2;
+    margin-top: 0.5rem;
+  }
+}
+
+@media (max-width: 520px) {
+  .register-page__header .brand-mark__text small {
+    display: none;
+  }
+  .register-page__intro h1 {
+    font-size: 1.75rem;
+  }
+  .landing .register-page__panel {
+    padding: 1.35rem 1.1rem;
+    border-radius: 20px;
+  }
+  .landing .register-page__panel .field-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .landing-hours {
   display: grid;
   gap: 1rem;
