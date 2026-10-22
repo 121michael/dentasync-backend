@@ -1,35 +1,21 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   ArrowRight,
-  ChevronDown,
-  Clock,
+  CheckCircle2,
   Eye,
   EyeOff,
   LockKeyhole,
   Mail,
   Phone,
   ShieldCheck,
-  Sparkles,
   X,
 } from "lucide-react";
 import { ApiError, api } from "../api";
 import { BrandMark } from "../components/BrandMark";
 import { LegalDocument } from "../components/LegalDocument";
-import {
-  AboutSection,
-  ContactSection,
-  LANDING_NAV,
-  LandingFooter,
-  LandingHeader,
-  ServicesSection,
-  VisitSection,
-  scrollToSection,
-  useActiveSection,
-  useClinicInfo,
-  useLandingReveal,
-} from "./landing/LandingSections";
+import { PORTAL_FEATURES } from "./landing/LandingSections";
 import { legalDocumentById } from "../legal/dentasyncLegal";
 import { useAuth } from "../useAuth";
 
@@ -451,21 +437,21 @@ export function AuthPage() {
 
   return (
     <>
-      {isRegistration ? (
-        <main className="landing register-page">
-          <header className="register-page__header">
-            <Link to="/login" className="register-page__brand" aria-label="Amethyst Dental sign in">
-              <BrandMark />
-            </Link>
-            <Link to="/login" className="landing-button landing-button--ghost register-page__signin">
-              Sign in
-            </Link>
-          </header>
-          <div className="register-page__body">
-            <aside className="register-page__intro" aria-labelledby="register-intro-title">
-              <span className="landing-eyebrow">Begin your care journey</span>
-              <h1 id="register-intro-title">One secure portal for your family&apos;s smiles.</h1>
-              <ol className="register-page__steps">
+      <main className="landing auth-screen">
+        <header className="auth-screen__header">
+          <Link to="/" className="auth-screen__brand" aria-label="Amethyst Dental home">
+            <BrandMark />
+          </Link>
+          <Link to="/" className="landing-button landing-button--ghost auth-screen__home">
+            <ArrowLeft size={16} aria-hidden="true" /> Back to home
+          </Link>
+        </header>
+        <div className="auth-screen__body">
+          <aside className="auth-screen__intro" aria-labelledby="auth-intro-title">
+            <span className="landing-eyebrow">{isRegistration ? "Begin your care journey" : "Amethyst Dental portal"}</span>
+            <h1 id="auth-intro-title">One secure portal for your family&apos;s smiles.</h1>
+            {isRegistration ? (
+              <ol className="auth-screen__steps">
                 <li>
                   <strong>Register</strong>
                   <span>Share your details and agree to the clinic terms.</span>
@@ -479,15 +465,32 @@ export function AuthPage() {
                   <span>Sign in and book once the clinic approves your account.</span>
                 </li>
               </ol>
-            </aside>
-            <section className="auth-panel register-page__panel" aria-label="Create your account">
-              {authCard}
-            </section>
-          </div>
-        </main>
-      ) : (
-        <LandingShell>{authCard}</LandingShell>
-      )}
+            ) : (
+              <ul className="auth-screen__features">
+                {PORTAL_FEATURES.map((feature) => (
+                  <li key={feature}>
+                    <CheckCircle2 size={18} aria-hidden="true" />
+                    {feature}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </aside>
+          <section className="auth-panel auth-screen__panel" aria-label={isRegistration ? "Create your account" : "Sign in"}>
+            {screen !== "otp" ? (
+              <nav className="auth-tabs" aria-label="Account access">
+                <Link to="/login" className={isRegistration ? "" : "is-active"} aria-current={isRegistration ? undefined : "page"}>
+                  Sign in
+                </Link>
+                <Link to="/register" className={isRegistration ? "is-active" : ""} aria-current={isRegistration ? "page" : undefined}>
+                  Create account
+                </Link>
+              </nav>
+            ) : null}
+            {authCard}
+          </section>
+        </div>
+      </main>
       {legalPreview ? (
         <div
           className="legal-modal-backdrop"
@@ -524,106 +527,5 @@ export function AuthPage() {
         </div>
       ) : null}
     </>
-  );
-}
-
-function LandingShell({ children }) {
-  const { info: clinicInfo, status: clinicInfoStatus, retry: loadClinicInfo } = useClinicInfo();
-  const landingRef = useRef(null);
-  const activeSection = useActiveSection(LANDING_NAV.map((item) => item.id));
-  useLandingReveal(landingRef, clinicInfoStatus);
-
-  return (
-    <main className="landing" ref={landingRef}>
-      <LandingHeader activeId={activeSection} onNavigate={scrollToSection} />
-      <section className="auth-page" id="home" tabIndex={-1} aria-label="Home">
-        <div className="auth-page__glow auth-page__glow--one" />
-        <div className="auth-page__glow auth-page__glow--two" />
-        <section className="auth-showcase">
-          <div className="auth-showcase__copy">
-            <span className="eyebrow">Private dental care, beautifully connected</span>
-            <h1
-              className="auth-showcase__tagline"
-              aria-label="We create healthy beautiful smiles for your entire family"
-            >
-              <span className="auth-showcase__tagline-lead">We create</span>
-              <span className="auth-showcase__tagline-main">
-                <span className="auth-showcase__tagline-emphasis">Healthy</span>
-                <span className="auth-showcase__tagline-emphasis auth-showcase__tagline-emphasis--beautiful">
-                  Beautiful
-                </span>
-                <span className="auth-showcase__tagline-accent">Smiles</span>
-              </span>
-              <span className="auth-showcase__tagline-foot">
-                <span className="auth-showcase__tagline-support">
-                  <span>For your</span>
-                  <span>Entire</span>
-                </span>
-                <span className="auth-showcase__tagline-family">Family</span>
-              </span>
-            </h1>
-            <p className="auth-showcase__lede">
-              Schedule, track, and understand your dental journey through one calm,
-              secure patient experience.
-            </p>
-            <ul className="auth-showcase__highlights" aria-label="Clinic highlights">
-              <li>
-                <Clock size={16} aria-hidden="true" />
-                Open Daily
-              </li>
-              <li>
-                <Sparkles size={16} aria-hidden="true" />
-                Free Consultation
-              </li>
-              <li>
-                <ShieldCheck size={16} aria-hidden="true" />
-                HMO Accredited
-              </li>
-            </ul>
-            <div className="landing-hero__actions">
-              <Link to="/register" className="landing-button landing-button--gold">
-                Create Account <ArrowRight size={17} aria-hidden="true" />
-              </Link>
-              <a
-                href="#services"
-                className="landing-button landing-button--ghost"
-                onClick={(event) => {
-                  event.preventDefault();
-                  scrollToSection("services");
-                }}
-              >
-                Explore services
-              </a>
-            </div>
-          </div>
-          <a
-            href="#about"
-            className="landing-hero__scroll"
-            aria-label="Scroll to About Us"
-            onClick={(event) => {
-              event.preventDefault();
-              scrollToSection("about");
-            }}
-          >
-            <span>Discover</span>
-            <ChevronDown size={18} aria-hidden="true" />
-          </a>
-        </section>
-
-        <section className="auth-panel" id="sign-in" tabIndex={-1} aria-label="Sign in">
-          {children}
-        </section>
-      </section>
-      <AboutSection hmoProviders={clinicInfo?.hmoProviders} />
-      <ServicesSection services={clinicInfo?.services || []} status={clinicInfoStatus} onRetry={loadClinicInfo} />
-      <VisitSection
-        locations={clinicInfo?.locations || []}
-        hours={clinicInfo?.hours}
-        status={clinicInfoStatus}
-        onRetry={loadClinicInfo}
-      />
-      <ContactSection clinic={clinicInfo?.clinic} status={clinicInfoStatus} onRetry={loadClinicInfo} />
-      <LandingFooter clinicName={clinicInfo?.clinic?.name} />
-    </main>
   );
 }

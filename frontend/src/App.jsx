@@ -47,17 +47,20 @@ import { DentistProfilePage } from "./pages/DentistProfilePage";
 import { DentistNotificationsPage } from "./pages/DentistNotificationsPage";
 import { WalkInCheckInPage } from "./pages/WalkInCheckInPage";
 import { LegalPage } from "./pages/LegalPage";
+import { LandingPage } from "./pages/LandingPage";
 import { useAuth } from "./useAuth";
 
 function roleFor(user) {
   return String(user?.role || "").toLowerCase();
 }
 
-function WalkInOrLogin() {
+function WalkInOrLanding() {
   const [searchParams] = useSearchParams();
+  const { user, isLoading } = useAuth();
   const walkin = String(searchParams.get("walkin") || searchParams.get("token") || "").trim();
   if (walkin) return <WalkInCheckInPage />;
-  return <Navigate to="/login" replace />;
+  if (isLoading) return <LoadingState label="Checking your secure session" />;
+  return user ? <Navigate to={landingRoute(user)} replace /> : <LandingPage />;
 }
 
 function landingRoute(user) {
@@ -131,7 +134,7 @@ function AccessDeniedPage() {
 function PortalRoutes() {
   return (
     <Routes>
-      <Route path="/" element={<WalkInOrLogin />} />
+      <Route path="/" element={<WalkInOrLanding />} />
       <Route path="/queue-display" element={<QueueDisplayPage />} />
       <Route path="/walk-in-check-in" element={<WalkInCheckInPage />} />
       <Route path="/terms" element={<LegalPage />} />

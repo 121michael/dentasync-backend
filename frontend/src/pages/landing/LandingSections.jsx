@@ -94,7 +94,7 @@ export const LANDING_NAV = [
   { id: "contact", label: "Contact Us" },
 ];
 
-const PORTAL_FEATURES = [
+export const PORTAL_FEATURES = [
   "Effortless appointment planning",
   "Secure treatment record access",
   "Real-time clinic queue updates",
@@ -354,9 +354,17 @@ export function LandingHeader({ activeId, onNavigate }) {
                 </a>
               </li>
             ))}
+            <li className="landing-header__nav-signin">
+              <Link to="/login" onClick={() => setMenuOpen(false)}>
+                Sign in
+              </Link>
+            </li>
           </ul>
         </nav>
         <div className="landing-header__actions">
+          <Link to="/login" className="landing-header__signin">
+            Sign in
+          </Link>
           <Link
             to="/register"
             className="landing-button landing-button--gold landing-header__cta"

@@ -10251,7 +10251,7 @@ body.is-queue-display .fab-menu {
 }
 
 /* Dedicated registration page */
-.register-page {
+.auth-screen {
   min-height: 100vh;
   min-height: 100dvh;
   background:
@@ -10260,7 +10260,7 @@ body.is-queue-display .fab-menu {
   color: #f8f3ff;
 }
 
-.register-page__header {
+.auth-screen__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -10270,19 +10270,19 @@ body.is-queue-display .fab-menu {
   padding: 1.1rem max(1.25rem, env(safe-area-inset-right, 0px)) 1.1rem max(1.25rem, env(safe-area-inset-left, 0px));
 }
 
-.register-page__brand {
+.auth-screen__brand {
   color: #fff;
   text-decoration: none;
   border-radius: 14px;
 }
 
-.register-page__signin {
+.auth-screen__home {
   min-height: 40px;
   padding: 0 1.1rem;
   font-size: 0.82rem;
 }
 
-.register-page__body {
+.auth-screen__body {
   display: grid;
   grid-template-columns: minmax(0, 0.85fr) minmax(0, 1fr);
   gap: clamp(2rem, 5vw, 4.5rem);
@@ -10292,7 +10292,7 @@ body.is-queue-display .fab-menu {
   padding: clamp(1rem, 4vw, 3rem) max(1.25rem, env(safe-area-inset-right, 0px)) 4rem max(1.25rem, env(safe-area-inset-left, 0px));
 }
 
-.register-page__intro {
+.auth-screen__intro {
   display: grid;
   gap: 1.2rem;
   position: sticky;
@@ -10300,11 +10300,11 @@ body.is-queue-display .fab-menu {
   padding-top: 1rem;
 }
 
-.register-page__intro .landing-eyebrow {
+.auth-screen__intro .landing-eyebrow {
   color: var(--lp-gold);
 }
 
-.register-page__intro h1 {
+.auth-screen__intro h1 {
   margin: 0;
   color: #fff;
   font-family: var(--lp-serif);
@@ -10314,45 +10314,45 @@ body.is-queue-display .fab-menu {
   letter-spacing: -0.01em;
 }
 
-.register-page__steps {
+.auth-screen__steps {
   display: grid;
   gap: 1rem;
   margin: 0.5rem 0 0;
   padding: 0;
   list-style: none;
-  counter-reset: register-step;
+  counter-reset: auth-step;
 }
 
-.register-page__steps li {
+.auth-screen__steps li {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   column-gap: 0.9rem;
   row-gap: 0.15rem;
   padding-top: 1rem;
   border-top: 1px solid var(--lp-line-dark);
-  counter-increment: register-step;
+  counter-increment: auth-step;
 }
 
-.register-page__steps li::before {
-  content: counter(register-step, decimal-leading-zero);
+.auth-screen__steps li::before {
+  content: counter(auth-step, decimal-leading-zero);
   grid-row: span 2;
   color: var(--lp-gold);
   font-family: var(--lp-serif);
   font-size: 1.15rem;
 }
 
-.register-page__steps strong {
+.auth-screen__steps strong {
   color: #fff;
   font-size: 0.95rem;
 }
 
-.register-page__steps span {
+.auth-screen__steps span {
   color: rgba(248, 243, 255, 0.72);
   font-size: 0.86rem;
   line-height: 1.55;
 }
 
-.landing .register-page__panel {
+.landing .auth-screen__panel {
   justify-items: stretch;
   padding: clamp(1.5rem, 4vw, 2.5rem);
   border: 1px solid rgba(215, 184, 137, 0.28);
@@ -10362,43 +10362,167 @@ body.is-queue-display .fab-menu {
   box-shadow: 0 32px 80px -40px rgba(10, 3, 20, 0.7);
 }
 
-.landing .register-page__panel .auth-card {
+.landing .auth-screen__panel .auth-card {
   width: 100%;
   max-width: none;
 }
 
+.auth-screen__home {
+  gap: 0.4rem;
+}
+
+.auth-screen__features,
+.landing-portal__features {
+  display: grid;
+  gap: 0.85rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.auth-screen__features {
+  margin-top: 0.5rem;
+}
+
+.auth-screen__features li,
+.landing-portal__features li {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.auth-screen__features li {
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--lp-line-dark);
+  color: rgba(248, 243, 255, 0.85);
+  font-size: 0.95rem;
+}
+
+.auth-screen__features svg {
+  flex-shrink: 0;
+  color: var(--lp-gold);
+}
+
+.landing .auth-screen__panel .auth-tabs {
+  margin: 0 0 1.25rem;
+  background: #f0e8f8;
+}
+
+.auth-tabs a {
+  display: grid;
+  min-height: 40px;
+  place-items: center;
+  border-radius: 9px;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  font-weight: 750;
+  text-decoration: none;
+  transition: color 160ms ease, background-color 160ms ease;
+}
+
+.auth-tabs a:hover {
+  color: var(--amethyst-700);
+}
+
+.auth-tabs a.is-active {
+  color: var(--amethyst-700);
+  background: #fff;
+  box-shadow: var(--shadow-sm);
+}
+
+.auth-tabs a:focus-visible {
+  outline: 2px solid var(--amethyst-700);
+  outline-offset: 2px;
+}
+
+/* Landing hero portal card */
+.landing-portal__card {
+  gap: 1rem;
+}
+
+.landing-portal__features {
+  margin: 0.25rem 0 0.5rem;
+}
+
+.landing-portal__features li {
+  color: var(--lp-ink);
+  font-size: 0.95rem;
+}
+
+.landing-portal__features svg {
+  flex-shrink: 0;
+  color: var(--lp-gold-deep);
+}
+
+.landing-portal__card .button {
+  text-decoration: none;
+}
+
+.landing-header__signin {
+  padding: 0.5rem 0.75rem;
+  border-radius: 10px;
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 0.86rem;
+  font-weight: 650;
+  text-decoration: none;
+  transition: color 160ms ease;
+}
+
+.landing-header__signin:hover {
+  color: var(--lp-gold);
+}
+
+.landing-header__signin:focus-visible {
+  outline: 2px solid var(--lp-gold);
+  outline-offset: 2px;
+}
+
+.landing-header__nav .landing-header__nav-signin {
+  display: none;
+}
+
+@media (max-width: 520px) {
+  .landing-header__signin {
+    display: none;
+  }
+  .landing-header__nav .landing-header__nav-signin {
+    display: list-item;
+  }
+}
+
 @media (max-width: 860px) {
-  .register-page__body {
+  .auth-screen__body {
     grid-template-columns: minmax(0, 1fr);
     gap: 1.5rem;
   }
-  .register-page__intro {
+  .auth-screen__intro {
     display: contents;
   }
-  .register-page__intro h1 {
+  .auth-screen__intro h1 {
     margin-top: -0.75rem;
   }
-  .register-page__panel {
+  .auth-screen__panel {
     order: 1;
   }
-  .register-page__steps {
+  .auth-screen__steps,
+  .auth-screen__features {
     order: 2;
     margin-top: 0.5rem;
   }
 }
 
 @media (max-width: 520px) {
-  .register-page__header .brand-mark__text small {
+  .auth-screen__header .brand-mark__text small {
     display: none;
   }
-  .register-page__intro h1 {
+  .auth-screen__intro h1 {
     font-size: 1.75rem;
   }
-  .landing .register-page__panel {
+  .landing .auth-screen__panel {
     padding: 1.35rem 1.1rem;
     border-radius: 20px;
   }
-  .landing .register-page__panel .field-row {
+  .landing .auth-screen__panel .field-row {
     grid-template-columns: minmax(0, 1fr);
   }
 }
