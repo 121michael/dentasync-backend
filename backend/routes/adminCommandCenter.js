@@ -18,6 +18,8 @@ const {
 } = require("../services/aiSettings");
 
 const ACCOUNT_ROLES = new Set(["admin", "dentist", "staff", "patient"]);
+// Must match the statuses postgresPasswordResetStore refuses to issue reset links for.
+const RESET_BLOCKED_STATUSES = new Set(["inactive", "disabled", "suspended"]);
 const SCHEDULE_TYPES = new Set([
   "dentist",
   "staff",
@@ -797,6 +799,18 @@ function attachAdminCommandCenterRoutes(router, { db, passwordResetService = nul
             message: "This patient account does not have a verified email for password reset.",
           });
         }
+        if (account.is_verified !== true) {
+          return res.status(409).json({
+            message:
+              "This patient has not verified their email yet, so a reset link cannot be sent. Verify or approve the account first, then try again.",
+          });
+        }
+        if (RESET_BLOCKED_STATUSES.has(String(account.status || "active").toLowerCase())) {
+          return res.status(409).json({
+            message:
+              "This patient account is inactive, disabled, or suspended, so a reset link cannot be sent. Reactivate the account first, then try again.",
+          });
+        }
 
         const issued = await passwordResetService.issuePasswordReset(account);
 
@@ -863,7 +877,18 @@ function attachAdminCommandCenterRoutes(router, { db, passwordResetService = nul
           message: "Unable to send the reset email. Please try again later.",
         });
       }
+      if (error?.code === "PASSWORD_RESET_ACCOUNT_UNAVAILABLE") {
+        return res.status(409).json({
+          message:
+            "This patient account is not verified or not active, so a reset link cannot be sent. Verify or reactivate the account first, then try again.",
+        });
+      }
       console.error("Admin reset password error:", error.message);
+      if (error?.code === "42P01") {
+        return res.status(503).json({
+          message: "Password reset is not set up on this server yet. Please contact the system administrator.",
+        });
+      }
       return res.status(500).json({ message: "Unable to reset password." });
     }
   });

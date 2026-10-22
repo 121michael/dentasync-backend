@@ -207,6 +207,58 @@ test("admin can initiate a patient password reset without changing the current p
   }
 });
 
+async function postReset(portal, id = "patient-1") {
+  const response = await fetch(`${portal.url}/accounts/${id}/reset-password`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  return { status: response.status, body: await response.json() };
+}
+
+test("admin reset explains when the patient has not verified their email", async () => {
+  const portal = await startPortal({ target: { ...patientRow(), is_verified: false } });
+  try {
+    const { status, body } = await postReset(portal);
+    assert.equal(status, 409);
+    assert.match(body.message, /not verified their email/i);
+    assert.equal(portal.issuedCalls.length, 0);
+    assert.equal(portal.passwordHashUpdated, false);
+  } finally {
+    await portal.close();
+  }
+});
+
+test("admin reset explains when the patient account is inactive", async () => {
+  const portal = await startPortal({ target: { ...patientRow(), status: "Suspended" } });
+  try {
+    const { status, body } = await postReset(portal);
+    assert.equal(status, 409);
+    assert.match(body.message, /inactive, disabled, or suspended/i);
+    assert.equal(portal.issuedCalls.length, 0);
+  } finally {
+    await portal.close();
+  }
+});
+
+test("admin reset maps a store refusal to a clear message instead of a generic error", async () => {
+  const portal = await startPortal({
+    issuePasswordReset: async () => {
+      const error = new Error("The account is unavailable for a password reset.");
+      error.code = "PASSWORD_RESET_ACCOUNT_UNAVAILABLE";
+      throw error;
+    },
+  });
+  try {
+    const { status, body } = await postReset(portal);
+    assert.equal(status, 409);
+    assert.match(body.message, /not verified or not active/i);
+    assert.doesNotMatch(body.message, /^Unable to reset password\.$/);
+  } finally {
+    await portal.close();
+  }
+});
+
 test("admin cannot reset staff or dentist passwords from user management", async () => {
   const staffPortal = await startPortal({
     target: { ...patientRow(), id: "staff-1", role: "staff", email: "staff@example.com" },
