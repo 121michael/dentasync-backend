@@ -45,7 +45,9 @@ const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const db = require("./db");
 const { createAuthRouter } = require("./routes/auth");
-const { createPatientPortalRouter } = require("./routes/patientPortal");
+const { SERVICES: PATIENT_BOOKABLE_SERVICES, createPatientPortalRouter } = require("./routes/patientPortal");
+const { createPublicClinicInfoHandler } = require("./routes/publicClinicInfo");
+const { APPROVED_HMO_PROVIDERS } = require("./services/clinicAssistant");
 const { createStaffPortalRouter } = require("./routes/staffPortal");
 const { createAdminPortalRouter } = require("./routes/adminPortal");
 const { createDentistPortalRouter } = require("./routes/dentistPortal");
@@ -269,6 +271,15 @@ app.get("/api/public/walk-in-check-in/:token", async (req, res) => {
     return res.status(500).json({ message: "Unable to validate the walk-in QR code." });
   }
 });
+
+app.get(
+  "/api/public/clinic-info",
+  createPublicClinicInfoHandler({
+    db,
+    services: PATIENT_BOOKABLE_SERVICES,
+    hmoProviders: APPROVED_HMO_PROVIDERS,
+  })
+);
 
 app.get("/api/public/queue-display", async (_req, res) => {
   try {
