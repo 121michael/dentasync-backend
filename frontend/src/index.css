@@ -4792,6 +4792,70 @@ body.is-queue-display .staff-mobile-nav {
   font-size: 0.72rem;
   font-weight: 500;
 }
+.admin-password-reset {
+  width: min(100%, 440px);
+}
+.admin-password-reset__patient {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(152, 100, 215, 0.06);
+}
+.admin-password-reset__patient > div {
+  display: grid;
+  min-width: 0;
+}
+.admin-password-reset__patient strong {
+  overflow-wrap: anywhere;
+}
+.admin-password-reset__patient small {
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.admin-password-reset__icon {
+  display: grid;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 10px;
+  color: var(--amethyst-500);
+  background: rgba(152, 100, 215, 0.12);
+}
+.admin-password-reset__copy {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+.admin-password-reset__input {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.admin-form--manage-user .admin-password-reset__input input {
+  padding-right: 2.6rem;
+}
+.admin-password-reset__rules {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+}
+.admin-password-reset__rules li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.admin-password-reset__rules li.is-met {
+  color: var(--emerald);
+}
 .admin-page .admin-modal-backdrop {
   padding:
     max(0.75rem, env(safe-area-inset-top, 0px))

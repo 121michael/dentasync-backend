@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Archive, Eye, KeyRound, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { Archive, Check, Circle, Eye, EyeOff, KeyRound, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { Navigate, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
@@ -64,6 +64,46 @@ function patientPasswordStatusLabel(user) {
   return status || "—";
 }
 
+const PATIENT_PASSWORD_MIN_LENGTH = 10;
+const PATIENT_PASSWORD_MAX_BYTES = 72;
+const emptyPasswordReset = { newPassword: "", confirmPassword: "", showNew: false, showConfirm: false };
+
+function passwordByteLength(value) {
+  return new TextEncoder().encode(String(value || "")).length;
+}
+
+function passwordRequirementChecks(newPassword, confirmPassword) {
+  return [
+    {
+      id: "min",
+      label: `At least ${PATIENT_PASSWORD_MIN_LENGTH} characters`,
+      met: newPassword.length >= PATIENT_PASSWORD_MIN_LENGTH,
+    },
+    {
+      id: "max",
+      label: `No more than ${PATIENT_PASSWORD_MAX_BYTES} characters`,
+      met: newPassword.length > 0 && passwordByteLength(newPassword) <= PATIENT_PASSWORD_MAX_BYTES,
+    },
+    {
+      id: "match",
+      label: "Both passwords match",
+      met: newPassword.length > 0 && newPassword === confirmPassword,
+    },
+  ];
+}
+
+function passwordResetValidationError(newPassword, confirmPassword) {
+  if (!newPassword || !confirmPassword) return "Enter the new password and confirm it.";
+  if (newPassword.length < PATIENT_PASSWORD_MIN_LENGTH) {
+    return `The new password must be at least ${PATIENT_PASSWORD_MIN_LENGTH} characters.`;
+  }
+  if (passwordByteLength(newPassword) > PATIENT_PASSWORD_MAX_BYTES) {
+    return `The new password must be ${PATIENT_PASSWORD_MAX_BYTES} characters or fewer.`;
+  }
+  if (newPassword !== confirmPassword) return "The new password and confirmation do not match.";
+  return "";
+}
+
 function archiveCategoryLabel(tab) {
   if (tab === "staff") return "clinic staff";
   if (tab === "dentist") return "dentist";
@@ -92,6 +132,10 @@ export function AdminManageUsersPage() {
   const [busy, setBusy] = useState(false);
   const [phoneError, setPhoneError] = useState("");
   const [actionBusyId, setActionBusyId] = useState("");
+  const [passwordResetTarget, setPasswordResetTarget] = useState(null);
+  const [passwordReset, setPasswordReset] = useState(emptyPasswordReset);
+  const [passwordResetError, setPasswordResetError] = useState("");
+  const [passwordResetBusy, setPasswordResetBusy] = useState(false);
   const [focusKey, setFocusKey] = useState(() => searchParams.get("focus") || "");
   const focusedRowRef = useRef(null);
 
@@ -260,27 +304,65 @@ export function AdminManageUsersPage() {
     }
   }
 
-  async function resetPatientPassword(user) {
+  function resetPatientPassword(user) {
+    setPasswordReset(emptyPasswordReset);
+    setPasswordResetError("");
+    setPasswordResetTarget(user);
+  }
+
+  function closePasswordReset() {
+    if (passwordResetBusy) return;
+    setPasswordResetTarget(null);
+    setPasswordReset(emptyPasswordReset);
+    setPasswordResetError("");
+  }
+
+  function updatePasswordReset(field, value) {
+    setPasswordReset((current) => ({ ...current, [field]: value }));
+    setPasswordResetError("");
+  }
+
+  async function submitPasswordReset(event) {
+    event.preventDefault();
+    const user = passwordResetTarget;
+    if (!user || passwordResetBusy) return;
+    const validationError = passwordResetValidationError(passwordReset.newPassword, passwordReset.confirmPassword);
+    if (validationError) {
+      setPasswordResetError(validationError);
+      return;
+    }
     const ok = await confirm({
-      title: "Reset Patient Password",
-      message: "Are you sure you want to initiate a password reset for this patient?",
-      confirmLabel: "Continue",
+      title: "Confirm Password Reset",
+      message: `Set a new password for ${user.fullName || "this patient"}${
+        user.patientId ? ` (${user.patientId})` : ""
+      }? Their current password will stop working immediately. No email will be sent.`,
+      confirmLabel: "Reset Password",
       tone: "primary",
     });
     if (!ok) return;
+    setPasswordResetBusy(true);
     setActionBusyId(`${user.id}:reset-password`);
     try {
-      const response = await api.resetAdminAccountPassword(user.id);
-      pushToast(response.message || "A password reset link was sent to the patient's email.");
+      const response = await api.resetAdminAccountPassword(user.id, {
+        newPassword: passwordReset.newPassword,
+        confirmPassword: passwordReset.confirmPassword,
+      });
+      pushToast(response.message || "Password updated. The patient can now sign in with the new password.");
+      setPasswordResetTarget(null);
+      setPasswordReset(emptyPasswordReset);
+      setPasswordResetError("");
       setDetail((current) =>
         current && String(current.id) === String(user.id)
-          ? { ...current, passwordStatus: "Reset pending" }
+          ? { ...current, passwordStatus: "Password set" }
           : current
       );
       await load();
     } catch (resetError) {
-      pushToast(resetError.message || "Unable to initiate a password reset.", "error");
+      const message = resetError.message || "Unable to reset the password. The patient's current password was not changed.";
+      setPasswordResetError(message);
+      pushToast(message, "error");
     } finally {
+      setPasswordResetBusy(false);
       setActionBusyId("");
     }
   }
@@ -583,7 +665,7 @@ export function AdminManageUsersPage() {
                               ) : null}
                               <button
                                 className="button button--secondary button--compact"
-                                disabled={actionBusyId === `${user.id}:reset-password` || !user.email}
+                                disabled={actionBusyId === `${user.id}:reset-password`}
                                 onClick={() => resetPatientPassword(user)}
                               >
                                 <KeyRound size={14} /> Reset Password
@@ -957,13 +1039,85 @@ export function AdminManageUsersPage() {
               <button
                 type="button"
                 className="button button--primary"
-                disabled={actionBusyId === `${detail.id}:reset-password` || !detail.email}
-                onClick={() => resetPatientPassword(detail)}
+                disabled={actionBusyId === `${detail.id}:reset-password`}
+                onClick={() => {
+                  const user = detail;
+                  setDetail(null);
+                  resetPatientPassword(user);
+                }}
               >
                 Reset Password
               </button>
             </div>
           ) : null}
+        </AdminModal>
+      ) : null}
+      {passwordResetTarget ? (
+        <AdminModal title="Reset Patient Password" onClose={closePasswordReset}>
+          <form className="admin-form admin-form--manage-user admin-password-reset" onSubmit={submitPasswordReset} noValidate>
+            <div className="admin-password-reset__patient">
+              <span className="admin-password-reset__icon" aria-hidden="true">
+                <KeyRound size={18} />
+              </span>
+              <div>
+                <strong>{passwordResetTarget.fullName || "Patient account"}</strong>
+                <small>
+                  {passwordResetTarget.patientId ? `Patient ID ${passwordResetTarget.patientId}` : `System ID ${passwordResetTarget.id}`}
+                </small>
+              </div>
+            </div>
+            <p className="admin-password-reset__copy">
+              Set a new password for this patient. No email or verification code is sent. Share the new password with
+              the patient privately.
+            </p>
+            {[
+              { field: "newPassword", toggle: "showNew", label: "New Password", id: "admin-reset-new-password" },
+              { field: "confirmPassword", toggle: "showConfirm", label: "Confirm New Password", id: "admin-reset-confirm-password" },
+            ].map((input) => (
+              <label key={input.field} htmlFor={input.id}>
+                {input.label}
+                <span className="admin-password-reset__input">
+                  <input
+                    id={input.id}
+                    type={passwordReset[input.toggle] ? "text" : "password"}
+                    autoComplete="new-password"
+                    value={passwordReset[input.field]}
+                    disabled={passwordResetBusy}
+                    aria-invalid={passwordResetError ? "true" : "false"}
+                    aria-describedby="admin-reset-requirements"
+                    onChange={(event) => updatePasswordReset(input.field, event.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="field__visibility"
+                    onClick={() => updatePasswordReset(input.toggle, !passwordReset[input.toggle])}
+                    aria-label={passwordReset[input.toggle] ? `Hide ${input.label.toLowerCase()}` : `Show ${input.label.toLowerCase()}`}
+                  >
+                    {passwordReset[input.toggle] ? <EyeOff size={17} /> : <Eye size={17} />}
+                  </button>
+                </span>
+              </label>
+            ))}
+            <ul className="admin-password-reset__rules" id="admin-reset-requirements">
+              {passwordRequirementChecks(passwordReset.newPassword, passwordReset.confirmPassword).map((rule) => (
+                <li key={rule.id} className={rule.met ? "is-met" : ""}>
+                  {rule.met ? <Check size={14} aria-hidden="true" /> : <Circle size={14} aria-hidden="true" />}
+                  {rule.label}
+                </li>
+              ))}
+            </ul>
+            {passwordResetError ? (
+              <p className="admin-form--manage-user__error" role="alert">{passwordResetError}</p>
+            ) : null}
+            <div className="admin-modal__actions">
+              <button type="button" className="button button--secondary" onClick={closePasswordReset} disabled={passwordResetBusy}>
+                Cancel
+              </button>
+              <button type="submit" className="button button--primary" disabled={passwordResetBusy}>
+                {passwordResetBusy ? "Resetting…" : "Reset Password"}
+              </button>
+            </div>
+          </form>
         </AdminModal>
       ) : null}
     </div>

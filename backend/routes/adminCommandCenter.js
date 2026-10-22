@@ -20,6 +20,11 @@ const {
 const ACCOUNT_ROLES = new Set(["admin", "dentist", "staff", "patient"]);
 // Must match the statuses postgresPasswordResetStore refuses to issue reset links for.
 const RESET_BLOCKED_STATUSES = new Set(["inactive", "disabled", "suspended"]);
+// Same patient password policy and bcrypt cost as registration and Forgot password (routes/auth.js).
+const PATIENT_PASSWORD_MIN_LENGTH = 10;
+const PATIENT_PASSWORD_BCRYPT_COST = 12;
+// bcrypt ignores everything after 72 bytes, so longer passwords would silently match shorter ones.
+const BCRYPT_MAX_PASSWORD_BYTES = 72;
 const SCHEDULE_TYPES = new Set([
   "dentist",
   "staff",
@@ -167,6 +172,70 @@ async function audit(db, req, entry) {
     sessionId: req.headers?.authorization ? "session" : null,
     ...entry,
   });
+}
+
+function directPatientPasswordError(newPassword, confirmPassword) {
+  if (typeof newPassword !== "string" || !newPassword || typeof confirmPassword !== "string") {
+    return "Enter the new password and confirm it.";
+  }
+  if (newPassword.length < PATIENT_PASSWORD_MIN_LENGTH) {
+    return `The new password must be at least ${PATIENT_PASSWORD_MIN_LENGTH} characters.`;
+  }
+  if (Buffer.byteLength(newPassword, "utf8") > BCRYPT_MAX_PASSWORD_BYTES) {
+    return `The new password must be ${BCRYPT_MAX_PASSWORD_BYTES} characters or fewer.`;
+  }
+  if (newPassword !== confirmPassword) {
+    return "The new password and confirmation do not match.";
+  }
+  return null;
+}
+
+async function isManagedDependentAccount(db, accountId) {
+  try {
+    const result = await db.query(
+      `SELECT managed_by_user_id FROM users WHERE id::text = $1 LIMIT 1`,
+      [accountId]
+    );
+    return Boolean(result.rows[0]?.managed_by_user_id);
+  } catch (error) {
+    if (error?.code === "42703") return false;
+    throw error;
+  }
+}
+
+async function updatePatientPasswordHash(db, accountId, passwordHash) {
+  const statement = (withChangedAt) =>
+    `UPDATE users
+     SET password_hash = $1${withChangedAt ? ",\n         password_changed_at = CURRENT_TIMESTAMP" : ""}
+     WHERE id::text = $2
+       AND LOWER(role) = 'patient'
+       AND COALESCE(is_archived, FALSE) = FALSE
+     RETURNING id`;
+  try {
+    const result = await db.query(statement(true), [passwordHash, accountId]);
+    return result.rows.length > 0;
+  } catch (error) {
+    if (error?.code !== "42703") throw error;
+    const result = await db.query(statement(false), [passwordHash, accountId]);
+    return result.rows.length > 0;
+  }
+}
+
+async function invalidatePendingResetLinks(db, accountId) {
+  try {
+    await db.query(
+      `UPDATE password_reset_requests
+       SET invalidated_at = CURRENT_TIMESTAMP
+       WHERE user_id = $1
+         AND used_at IS NULL
+         AND invalidated_at IS NULL`,
+      [accountId]
+    );
+  } catch (error) {
+    if (error?.code !== "42P01") {
+      console.warn("Pending patient reset links were not invalidated:", error.message);
+    }
+  }
 }
 
 async function countActiveAdmins(client) {
@@ -784,6 +853,70 @@ function attachAdminCommandCenterRoutes(router, { db, passwordResetService = nul
       if (targetRole === "staff" || targetRole === "dentist") {
         return res.status(403).json({
           message: "Password reset is not available for clinic staff or dentist accounts from User Management.",
+        });
+      }
+
+      if (targetRole === "patient" && Object.hasOwn(req.body || {}, "newPassword")) {
+        const newPassword = req.body.newPassword;
+        const validationError = directPatientPasswordError(newPassword, req.body.confirmPassword);
+        if (validationError) {
+          return res.status(400).json({ message: validationError });
+        }
+        if (await isManagedDependentAccount(db, accountId)) {
+          return res.status(409).json({
+            message:
+              "This dependent is managed by a family account holder and signs in through that account, so a separate password cannot be set.",
+          });
+        }
+
+        const auditBase = {
+          action: "reset_password",
+          targetType: "account",
+          targetId: accountId,
+          targetLabel: account.email,
+        };
+        try {
+          const passwordHash = await bcrypt.hash(newPassword, PATIENT_PASSWORD_BCRYPT_COST);
+          const updated = await updatePatientPasswordHash(db, accountId, passwordHash);
+          if (!updated) {
+            return res.status(404).json({ message: "Account not found." });
+          }
+        } catch (directError) {
+          console.error("Admin direct password reset error:", directError.message);
+          await audit(db, req, {
+            ...auditBase,
+            result: "failed",
+            detail: "Administrator direct patient password reset failed. The password was not changed.",
+          });
+          return res.status(500).json({
+            message: "Unable to reset the password. The patient's current password was not changed.",
+          });
+        }
+
+        await invalidatePendingResetLinks(db, accountId);
+        try {
+          await insertPatientNotification(db, {
+            userId: account.id,
+            type: "security",
+            title: "Password changed by the clinic",
+            body: "An administrator set a new password for your account. If you did not ask the clinic for this, please contact the front desk.",
+            entityType: "account",
+            entityId: account.id,
+          });
+        } catch (notifyError) {
+          if (notifyError?.code !== "42P01") {
+            console.warn("Patient password-change notification was not stored:", notifyError.message);
+          }
+        }
+        await audit(db, req, {
+          ...auditBase,
+          result: "success",
+          detail: "Administrator set a new patient password directly. No email was sent.",
+        });
+
+        return res.json({
+          message: "Password updated. The patient can now sign in with the new password.",
+          delivery: "direct",
         });
       }
 

@@ -27,14 +27,20 @@ async function startPortal({
   target = patientRow(),
   issued = { requestId: "reset-1", expiresAt: "2026-10-13T01:00:00.000Z" },
   issuePasswordReset = async () => issued,
+  tokenUser = { id: "admin-1", role: "admin" },
+  callerIsAdmin = true,
+  failPasswordUpdate = false,
 } = {}) {
   const issuedCalls = [];
   let passwordHashUpdated = false;
+  let storedHash = null;
   const notifications = [];
   const audits = [];
+  const invalidatedLinks = [];
 
   async function query(sql, params = []) {
     if (sql.includes("FROM users") && sql.includes("LOWER(role) = 'admin'")) {
+      if (!callerIsAdmin) return { rows: [] };
       return {
         rows: [
           {
@@ -99,6 +105,15 @@ async function startPortal({
       return { rows: [] };
     }
 
+    if (sql.includes("UPDATE password_reset_requests")) {
+      invalidatedLinks.push(params);
+      return { rows: [] };
+    }
+
+    if (sql.includes("SELECT managed_by_user_id FROM users")) {
+      return { rows: [{ managed_by_user_id: target.managed_by_user_id || null }] };
+    }
+
     if (
       sql.includes("FROM users") &&
       sql.includes("id::text = $1") &&
@@ -109,8 +124,14 @@ async function startPortal({
     }
 
     if (sql.includes("SET password_hash")) {
+      if (failPasswordUpdate) {
+        const error = new Error("connection terminated unexpectedly");
+        error.code = "57P01";
+        throw error;
+      }
       passwordHashUpdated = true;
-      return { rows: [] };
+      storedHash = params[0];
+      return { rows: sql.includes("RETURNING id") ? [{ id: target.id }] : [] };
     }
 
     if (sql.includes("COUNT(*) AS count")) {
@@ -134,7 +155,7 @@ async function startPortal({
         },
       },
       authenticateToken(req, _res, next) {
-        req.user = { id: "admin-1", role: "admin" };
+        req.user = tokenUser;
         next();
       },
     })
@@ -148,8 +169,12 @@ async function startPortal({
     issuedCalls,
     notifications,
     audits,
+    invalidatedLinks,
     get passwordHashUpdated() {
       return passwordHashUpdated;
+    },
+    get storedHash() {
+      return storedHash;
     },
     url: `http://127.0.0.1:${server.address().port}/api/admin`,
     async close() {
@@ -274,5 +299,158 @@ test("admin cannot reset staff or dentist passwords from user management", async
     assert.equal(staffPortal.passwordHashUpdated, false);
   } finally {
     await staffPortal.close();
+  }
+});
+
+const NEW_PASSWORD = "Clinic-Set-Pass-2026";
+
+async function postDirectReset(portal, body, id = "patient-1") {
+  const response = await fetch(`${portal.url}/accounts/${id}/reset-password`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const text = await response.text();
+  return { status: response.status, body: JSON.parse(text), text };
+}
+
+async function captureConsole(run) {
+  const lines = [];
+  const original = { log: console.log, warn: console.warn, error: console.error, info: console.info };
+  for (const level of Object.keys(original)) {
+    console[level] = (...args) => lines.push(args.map(String).join(" "));
+  }
+  try {
+    await run();
+  } finally {
+    Object.assign(console, original);
+  }
+  return lines.join("\n");
+}
+
+test("admin can set a new patient password directly without sending an email", async () => {
+  const bcrypt = require("bcrypt");
+  const portal = await startPortal({ target: { ...patientRow(), is_verified: false } });
+  try {
+    let result;
+    const logs = await captureConsole(async () => {
+      result = await postDirectReset(portal, { newPassword: NEW_PASSWORD, confirmPassword: NEW_PASSWORD });
+    });
+    assert.equal(result.status, 200);
+    assert.equal(result.body.delivery, "direct");
+    assert.match(result.body.message, /can now sign in with the new password/i);
+    assert.equal(portal.issuedCalls.length, 0, "no reset email is issued");
+    assert.equal(portal.passwordHashUpdated, true);
+    assert.match(portal.storedHash, /^\$2[aby]\$12\$/);
+    assert.notEqual(portal.storedHash, NEW_PASSWORD);
+    assert.equal(await bcrypt.compare(NEW_PASSWORD, portal.storedHash), true);
+    assert.deepEqual(portal.invalidatedLinks, [["patient-1"]]);
+    assert.equal(portal.notifications.length, 1);
+
+    const audit = portal.audits.at(-1);
+    assert.ok(audit.params.includes("admin-1"), "audit records the administrator");
+    assert.ok(audit.params.includes("patient-1"), "audit records the target account");
+    assert.ok(audit.params.includes("success"), "audit records the outcome");
+
+    const exposed = [result.text, logs, JSON.stringify(portal.audits), JSON.stringify(portal.notifications)].join("\n");
+    assert.equal(exposed.includes(NEW_PASSWORD), false, "plaintext password must not leak");
+    assert.equal(exposed.includes(portal.storedHash), false, "password hash must not leak");
+    assert.equal(exposed.includes("$2b$10$hashed-secret-value"), false, "old hash must not leak");
+  } finally {
+    await portal.close();
+  }
+});
+
+test("admin direct reset rejects short, oversized, missing, and mismatched passwords", async () => {
+  const portal = await startPortal();
+  try {
+    const cases = [
+      [{ newPassword: "short", confirmPassword: "short" }, /at least 10 characters/i],
+      [{ newPassword: "x".repeat(73), confirmPassword: "x".repeat(73) }, /72 characters or fewer/i],
+      [{ newPassword: "", confirmPassword: "" }, /enter the new password/i],
+      [{ newPassword: NEW_PASSWORD }, /enter the new password/i],
+      [{ newPassword: 12345678901, confirmPassword: 12345678901 }, /enter the new password/i],
+      [{ newPassword: NEW_PASSWORD, confirmPassword: `${NEW_PASSWORD}x` }, /do not match/i],
+    ];
+    for (const [body, pattern] of cases) {
+      const result = await postDirectReset(portal, body);
+      assert.equal(result.status, 400, JSON.stringify(body));
+      assert.match(result.body.message, pattern);
+      assert.equal(result.text.includes(NEW_PASSWORD), false);
+    }
+    assert.equal(portal.passwordHashUpdated, false);
+    assert.equal(portal.issuedCalls.length, 0);
+  } finally {
+    await portal.close();
+  }
+});
+
+test("non-admin callers cannot set a patient password", async () => {
+  for (const role of ["staff", "dentist", "patient"]) {
+    const portal = await startPortal({ tokenUser: { id: `${role}-9`, role }, callerIsAdmin: false });
+    try {
+      const result = await postDirectReset(portal, { newPassword: NEW_PASSWORD, confirmPassword: NEW_PASSWORD });
+      assert.equal(result.status, 403, role);
+      assert.equal(portal.passwordHashUpdated, false, role);
+    } finally {
+      await portal.close();
+    }
+  }
+});
+
+test("admin direct reset is refused for staff, dentists, and family-managed dependents", async () => {
+  const staffPortal = await startPortal({ target: { ...patientRow(), id: "staff-1", role: "staff" } });
+  try {
+    const result = await postDirectReset(
+      staffPortal,
+      { newPassword: NEW_PASSWORD, confirmPassword: NEW_PASSWORD },
+      "staff-1"
+    );
+    assert.equal(result.status, 403);
+    assert.equal(staffPortal.passwordHashUpdated, false);
+  } finally {
+    await staffPortal.close();
+  }
+
+  const dependentPortal = await startPortal({ target: { ...patientRow(), managed_by_user_id: "patient-0" } });
+  try {
+    const result = await postDirectReset(dependentPortal, { newPassword: NEW_PASSWORD, confirmPassword: NEW_PASSWORD });
+    assert.equal(result.status, 409);
+    assert.match(result.body.message, /managed by a family account holder/i);
+    assert.equal(dependentPortal.passwordHashUpdated, false);
+  } finally {
+    await dependentPortal.close();
+  }
+});
+
+test("admin direct reset reports failure, not success, when the database update fails", async () => {
+  const portal = await startPortal({ failPasswordUpdate: true });
+  try {
+    let result;
+    const logs = await captureConsole(async () => {
+      result = await postDirectReset(portal, { newPassword: NEW_PASSWORD, confirmPassword: NEW_PASSWORD });
+    });
+    assert.equal(result.status, 500);
+    assert.match(result.body.message, /current password was not changed/i);
+    assert.equal(result.body.delivery, undefined);
+    assert.equal(portal.notifications.length, 0, "no success notification is sent");
+    assert.equal(portal.invalidatedLinks.length, 0);
+    assert.ok(portal.audits.at(-1).params.includes("failed"));
+    assert.equal([result.text, logs, JSON.stringify(portal.audits)].join("\n").includes(NEW_PASSWORD), false);
+    assert.equal(/\$2[aby]\$/.test([result.text, logs].join("\n")), false);
+  } finally {
+    await portal.close();
+  }
+});
+
+test("admin direct reset returns not found for unknown or archived patients", async () => {
+  const portal = await startPortal({ target: { ...patientRow(), is_archived: true } });
+  try {
+    const result = await postDirectReset(portal, { newPassword: NEW_PASSWORD, confirmPassword: NEW_PASSWORD });
+    assert.equal(result.status, 404);
+    assert.equal(result.body.message, "Account not found.");
+    assert.equal(portal.passwordHashUpdated, false);
+  } finally {
+    await portal.close();
   }
 });
