@@ -25,7 +25,7 @@ export function LandingPage() {
   return (
     <main className="landing" ref={landingRef}>
       <LandingHeader activeId={activeSection} onNavigate={scrollToSection} />
-      <section className="auth-page" id="home" tabIndex={-1} aria-label="Home">
+      <section className="auth-page landing-hero" id="home" tabIndex={-1} aria-label="Home">
         <div className="auth-page__glow auth-page__glow--one" />
         <div className="auth-page__glow auth-page__glow--two" />
         <section className="auth-showcase">
