@@ -6,7 +6,7 @@ import {
   CalendarClock,
   ChevronLeft,
   ChevronRight,
-  Clock,
+  ExternalLink,
   LockKeyhole,
   Mail,
   MapPin,
@@ -590,14 +590,18 @@ function ClinicMap({ location }) {
           )}
         </div>
       ) : null}
-      {location.directionsUrl ? (
-        <figcaption className="landing-map__caption">
-          <span>Map not loading?</span>
+      <figcaption className="landing-map__caption">
+        <span className="landing-map__place">
+          <MapPin size={15} aria-hidden="true" />
+          <span>{location.name}</span>
+        </span>
+        {location.directionsUrl ? (
           <a href={location.directionsUrl} target="_blank" rel="noopener noreferrer">
-            Open in Google Maps
+            Open in Google Maps <ExternalLink size={14} aria-hidden="true" />
+            <span className="sr-only"> (opens in a new tab)</span>
           </a>
-        </figcaption>
-      ) : null}
+        ) : null}
+      </figcaption>
     </figure>
   );
 }
@@ -639,6 +643,63 @@ function LocationPanel({ locations, status, onRetry, activeIndex, onSelect }) {
   );
 }
 
+function toMinutes(value) {
+  const [hour, minute] = String(value || "").split(":").map(Number);
+  return Number.isFinite(hour) && Number.isFinite(minute) ? hour * 60 + minute : null;
+}
+
+function clinicMinutesNow(timeZone) {
+  try {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+      timeZone: timeZone || "Asia/Manila",
+    }).formatToParts(new Date());
+    const value = (type) => Number(parts.find((part) => part.type === type)?.value);
+    return value("hour") * 60 + value("minute");
+  } catch {
+    return null;
+  }
+}
+
+function useClinicMinutes(timeZone) {
+  const [minutes, setMinutes] = useState(() => clinicMinutesNow(timeZone));
+  useEffect(() => {
+    setMinutes(clinicMinutesNow(timeZone));
+    const timer = window.setInterval(() => setMinutes(clinicMinutesNow(timeZone)), 60000);
+    return () => window.clearInterval(timer);
+  }, [timeZone]);
+  return minutes;
+}
+
+function todayStatus(today, nowMinutes) {
+  if (!today) return null;
+  const note = today.closed ? "" : today.source === "custom" ? "Special hours" : today.isHoliday ? "Holiday hours" : "";
+  if (today.closed) return { tone: "closed", label: "Closed today", note };
+  const open = toMinutes(today.open);
+  const close = toMinutes(today.close);
+  if (open === null || close === null || nowMinutes === null) {
+    return { tone: "open", label: `Open today · ${formatHourRange(today.open, today.close)}`, note };
+  }
+  if (nowMinutes < open) return { tone: "soon", label: `Opens today at ${formatClinicTime(today.open)}`, note };
+  if (nowMinutes < close) return { tone: "open", label: `Open now · until ${formatClinicTime(today.close)}`, note };
+  return { tone: "closed", label: "Closed for the day", note };
+}
+
+function HoursStatus({ hours }) {
+  const nowMinutes = useClinicMinutes(hours?.timezone);
+  const status = todayStatus(hours?.today, nowMinutes);
+  if (!status) return null;
+  return (
+    <p className={`landing-hours__today is-${status.tone}`} aria-live="polite">
+      <span className="landing-hours__dot" aria-hidden="true" />
+      {status.label}
+      {status.note ? <span className="landing-hours__note">{status.note}</span> : null}
+    </p>
+  );
+}
+
 function HoursPanel({ hours, status, onRetry }) {
   if (status !== "ready") return <LoadState status={status} onRetry={onRetry} label="Opening hours" />;
   const today = hours?.today;
@@ -647,14 +708,6 @@ function HoursPanel({ hours, status, onRetry }) {
 
   return (
     <div className="landing-hours">
-      {today ? (
-        <p className={`landing-hours__today ${today.closed ? "is-closed" : ""}`}>
-          <Clock size={16} aria-hidden="true" />
-          {today.closed ? "Closed today" : `Open today · ${formatHourRange(today.open, today.close)}`}
-          {today.source === "custom" ? <span> (special hours)</span> : null}
-          {today.isHoliday && !today.closed ? <span> (holiday hours)</span> : null}
-        </p>
-      ) : null}
       <dl className="landing-hours__table">
         {(hours?.weekly || []).map((row) => (
           <div key={row.id} className={row.id === todayRowId ? "is-today" : ""}>
@@ -693,13 +746,14 @@ export function VisitSection({ locations, hours, status, onRetry }) {
   const [activeIndex, setActiveIndex] = useState(0);
   const active = locations[activeIndex] || locations[0];
   const hasMap = status === "loading" || (status === "ready" && Boolean(active?.address));
+  const cardClass = (extra) => `${status === "error" ? "landing-panel-slot" : "landing-panel"} ${extra}`;
 
   return (
     <section id="locations" className="landing-section landing-section--ivory" tabIndex={-1} aria-labelledby="locations-title">
-      <div className={`landing-section__inner landing-visit ${hasMap ? "has-map" : "landing-split"}`}>
-        <div className="landing-visit__column landing-visit__location">
-          <SectionHeading id="locations-title" eyebrow="Locations" title="Visit the clinic." />
-          <div className={status === "error" ? "landing-panel-slot" : "landing-panel"} data-reveal>
+      <div className="landing-section__inner">
+        <SectionHeading id="locations-title" eyebrow="Locations" title="Visit the clinic." />
+        <div className={`landing-visit ${hasMap ? "has-map" : "no-map"}`}>
+          <div className={cardClass("landing-visit__location landing-location-card")} data-reveal>
             <LocationPanel
               locations={locations}
               status={status}
@@ -708,21 +762,31 @@ export function VisitSection({ locations, hours, status, onRetry }) {
               onSelect={setActiveIndex}
             />
           </div>
-        </div>
-        {hasMap ? (
-          <div className="landing-visit__map" data-reveal>
-            {status === "ready" ? (
-              <ClinicMap key={active.id} location={active} />
-            ) : (
-              <div className="landing-map landing-map--placeholder" role="status" aria-label="Loading clinic map" />
-            )}
-          </div>
-        ) : null}
-        <div className="landing-visit__column landing-visit__hours" id="hours" tabIndex={-1} aria-labelledby="hours-title" role="region">
-          <SectionHeading id="hours-title" eyebrow="Operating Hours" title="Opening times." />
-          <div className={status === "error" ? "landing-panel-slot" : "landing-panel"} data-reveal>
+          {hasMap ? (
+            <div className="landing-visit__map" data-reveal>
+              {status === "ready" ? (
+                <ClinicMap key={active.id} location={active} />
+              ) : (
+                <div className="landing-map landing-map--placeholder" role="status" aria-label="Loading clinic map" />
+              )}
+            </div>
+          ) : null}
+          <section
+            className={cardClass("landing-visit__hours landing-hours-card")}
+            id="hours"
+            tabIndex={-1}
+            aria-labelledby="hours-title"
+            data-reveal
+          >
+            <header className="landing-hours-card__head">
+              <div>
+                <span className="landing-eyebrow">Operating Hours</span>
+                <h3 id="hours-title">Opening times</h3>
+              </div>
+              {status === "ready" ? <HoursStatus hours={hours} /> : null}
+            </header>
             <HoursPanel hours={hours} status={status} onRetry={onRetry} />
-          </div>
+          </section>
         </div>
       </div>
     </section>

@@ -10045,13 +10045,58 @@ body.is-queue-display .fab-menu {
 
 /* Locations & hours */
 .landing-visit {
+  display: grid;
+  gap: 1.25rem clamp(1.75rem, 3.5vw, 3rem);
   align-items: start;
 }
 
-.landing-visit__column {
-  display: flex;
-  flex-direction: column;
+.landing-visit.has-map {
+  grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+  grid-template-areas:
+    "location map"
+    "hours map";
+  grid-template-rows: auto 1fr;
+}
+
+.landing-visit.no-map {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-areas: "location hours";
+}
+
+.landing-visit__location {
+  grid-area: location;
   min-width: 0;
+}
+
+.landing-visit__hours {
+  grid-area: hours;
+  min-width: 0;
+}
+
+.landing-visit__map {
+  grid-area: map;
+  align-self: stretch;
+  display: flex;
+  min-width: 0;
+}
+
+.landing-visit .landing-panel {
+  padding: clamp(1.35rem, 2.4vw, 1.75rem);
+  border-color: rgba(58, 25, 88, 0.09);
+  border-radius: 22px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(42, 22, 64, 0.04), 0 18px 40px -32px rgba(42, 22, 64, 0.35);
+}
+
+.landing-location-card.landing-panel {
+  transition: transform 240ms var(--lp-ease), box-shadow 240ms ease, border-color 240ms ease,
+    opacity 300ms ease;
+}
+
+.landing-location-card.landing-panel:hover {
+  transform: translateY(-2px);
+  border-color: rgba(58, 25, 88, 0.16);
+  box-shadow: 0 1px 2px rgba(42, 22, 64, 0.05), 0 24px 48px -30px rgba(42, 22, 64, 0.42);
 }
 
 .landing-locations {
@@ -10073,30 +10118,33 @@ body.is-queue-display .fab-menu {
 
 .landing-location__icon {
   display: grid;
-  width: 46px;
-  height: 46px;
+  width: 48px;
+  height: 48px;
   place-items: center;
-  border-radius: 14px;
+  border-radius: 15px;
   color: var(--lp-plum-700);
-  background: #f2eafb;
+  background: linear-gradient(145deg, #f5eefc, #ebdff8);
+  box-shadow: inset 0 0 0 1px rgba(124, 77, 180, 0.12);
 }
 
 .landing-location__text {
   display: grid;
-  gap: 0.3rem;
+  gap: 0.35rem;
   min-width: 0;
+  padding-top: 0.15rem;
 }
 
 .landing-location__name {
-  color: inherit;
+  color: var(--lp-ink);
   font-family: var(--lp-serif);
-  font-size: 1.3rem;
+  font-size: 1.4rem;
   font-weight: 500;
-  line-height: 1.25;
+  line-height: 1.2;
 }
 
 .landing-location address {
   color: var(--lp-muted);
+  font-size: 0.95rem;
   font-style: normal;
   line-height: 1.6;
   overflow-wrap: anywhere;
@@ -10104,50 +10152,37 @@ body.is-queue-display .fab-menu {
 
 .landing-location > .landing-button {
   justify-self: start;
-  margin-left: calc(46px + 1rem);
+  min-height: 44px;
+  margin-left: calc(48px + 1rem);
+  box-shadow: 0 8px 18px -10px rgba(58, 25, 88, 0.55);
 }
 
-.landing-visit.has-map {
-  display: grid;
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
-  grid-template-areas:
-    "location map"
-    "hours map";
-  grid-template-rows: auto 1fr;
-  gap: 2.75rem clamp(2.5rem, 5vw, 4.5rem);
+.landing-location > .landing-button:hover {
+  box-shadow: 0 12px 24px -12px rgba(58, 25, 88, 0.6);
 }
 
-.landing-visit.has-map .landing-visit__location {
-  grid-area: location;
+.landing-location > .landing-button svg {
+  transition: transform 220ms var(--lp-ease);
 }
 
-.landing-visit.has-map .landing-visit__hours {
-  grid-area: hours;
-}
-
-.landing-visit__map {
-  grid-area: map;
-  min-width: 0;
+.landing-location > .landing-button:hover svg {
+  transform: translate(1px, -1px);
 }
 
 .landing-map {
-  position: sticky;
-  top: calc(var(--lp-header-h) + 1.5rem);
-  height: min(560px, calc(100vh - var(--lp-header-h) - 3rem));
-  min-height: 360px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 420px;
   margin: 0;
   overflow: hidden;
-  border: 1px solid var(--lp-line);
-  border-radius: var(--lp-radius);
+  border: 1px solid rgba(58, 25, 88, 0.1);
+  border-radius: 22px;
   background:
     radial-gradient(circle at 30% 30%, rgba(215, 186, 251, 0.35), transparent 60%),
     #f2eafb;
-  box-shadow: 0 24px 60px -36px rgba(29, 14, 48, 0.45);
-}
-
-.landing-map {
-  display: flex;
-  flex-direction: column;
+  box-shadow: 0 1px 2px rgba(42, 22, 64, 0.04), 0 26px 56px -38px rgba(42, 22, 64, 0.45);
 }
 
 .landing-map iframe {
@@ -10163,18 +10198,47 @@ body.is-queue-display .fab-menu {
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 0.25rem 0.75rem;
-  padding: 0.65rem 1rem;
-  border-top: 1px solid var(--lp-line);
-  color: var(--lp-muted);
+  gap: 0.35rem 1rem;
+  padding: 0.8rem 1.1rem;
+  border-top: 1px solid rgba(58, 25, 88, 0.08);
   background: #fff;
-  font-size: 0.8rem;
+  font-size: 0.82rem;
+}
+
+.landing-map__place {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  color: var(--lp-ink);
+  font-weight: 600;
+}
+
+.landing-map__place svg {
+  flex-shrink: 0;
+  color: var(--lp-gold-deep);
 }
 
 .landing-map__caption a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 6px;
   color: var(--lp-plum-700);
   font-weight: 700;
+  text-decoration: none;
+  transition: color 180ms ease;
+}
+
+.landing-map__caption a:hover {
+  color: #5b2a86;
+  text-decoration: underline;
   text-underline-offset: 3px;
+}
+
+.landing-map__caption a:focus-visible {
+  outline: 2px solid var(--lp-gold);
+  outline-offset: 3px;
 }
 
 .landing-map--placeholder {
@@ -10183,7 +10247,8 @@ body.is-queue-display .fab-menu {
 
 .landing-map__overlay {
   position: absolute;
-  inset: 0;
+  inset: 0 0 auto;
+  bottom: 46px;
   display: grid;
   place-content: center;
   justify-items: center;
@@ -10209,30 +10274,53 @@ body.is-queue-display .fab-menu {
   50% { opacity: 0.6; }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .landing-map--placeholder {
-    animation: none;
-  }
-}
-
-@media (max-width: 900px) {
-  .landing-visit.has-map {
+@media (max-width: 960px) {
+  .landing-visit.has-map,
+  .landing-visit.no-map {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas:
       "location"
       "map"
       "hours";
     grid-template-rows: none;
-    gap: 2rem;
   }
-  .landing-visit.has-map .landing-visit__hours {
-    margin-top: 0.75rem;
+  .landing-visit.no-map {
+    grid-template-areas:
+      "location"
+      "hours";
   }
   .landing-map {
-    position: relative;
-    top: auto;
-    height: clamp(260px, 62vw, 420px);
     min-height: 0;
+    height: clamp(320px, 78vw, 440px);
+  }
+}
+
+@media (min-width: 720px) and (max-width: 960px) {
+  .landing-visit.has-map {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas:
+      "location location"
+      "map hours";
+  }
+  .landing-visit.has-map .landing-map {
+    height: 100%;
+    min-height: 360px;
+  }
+  .landing-visit .landing-location {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+  .landing-visit .landing-location > .landing-button {
+    margin-left: 0;
+  }
+}
+
+@media (max-width: 480px) {
+  .landing-map__place {
+    display: none;
+  }
+  .landing-map__caption {
+    justify-content: flex-end;
   }
 }
 
@@ -10527,6 +10615,29 @@ body.is-queue-display .fab-menu {
   }
 }
 
+.landing-hours-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  margin-bottom: 0.65rem;
+}
+
+.landing-hours-card__head > div {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.landing-hours-card__head h3 {
+  margin: 0;
+  color: var(--lp-ink);
+  font-family: var(--lp-serif);
+  font-size: 1.4rem;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
 .landing-hours {
   display: grid;
   gap: 1rem;
@@ -10536,24 +10647,43 @@ body.is-queue-display .fab-menu {
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.45rem;
-  justify-self: start;
+  gap: 0.4rem;
   margin: 0;
-  padding: 0.45rem 0.85rem;
+  padding: 0.32rem 0.75rem;
+  border: 1px solid rgba(21, 91, 70, 0.14);
   border-radius: 999px;
   color: #155b46;
-  background: #e6f4ee;
-  font-size: 0.84rem;
-  font-weight: 700;
+  background: #eef7f2;
+  font-size: 0.76rem;
+  font-weight: 650;
+  transition: color 300ms ease, background-color 300ms ease, border-color 300ms ease;
+}
+
+.landing-hours__today.is-soon {
+  border-color: rgba(169, 131, 77, 0.24);
+  color: #7a5a2b;
+  background: #faf3e6;
 }
 
 .landing-hours__today.is-closed {
+  border-color: rgba(138, 47, 67, 0.16);
   color: #8a2f43;
-  background: #fbe9ed;
+  background: #fbeff1;
 }
 
-.landing-hours__today span {
+.landing-hours__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.85;
+}
+
+.landing-hours__note {
+  padding-left: 0.4rem;
+  border-left: 1px solid currentColor;
   font-weight: 500;
+  opacity: 0.85;
 }
 
 .landing-hours__table {
@@ -10566,12 +10696,21 @@ body.is-queue-display .fab-menu {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.25rem 1rem;
-  padding: 0.85rem 0;
-  border-bottom: 1px solid var(--lp-line);
+  padding: 0.8rem 0.75rem;
+  margin-inline: -0.75rem;
+  border-bottom: 1px solid rgba(58, 25, 88, 0.08);
+  border-radius: 0;
+  transition: background-color 200ms ease;
 }
 
 .landing-hours__table > div:last-child {
   border-bottom: 0;
+}
+
+.landing-hours__table > div.is-today {
+  border-bottom-color: transparent;
+  border-radius: 12px;
+  background: #f7f1fc;
 }
 
 .landing-hours__table dt {
@@ -10579,15 +10718,17 @@ body.is-queue-display .fab-menu {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.3rem 0.55rem;
-  font-family: var(--lp-serif);
-  font-size: 1.08rem;
+  color: var(--lp-ink);
+  font-size: 0.95rem;
+  font-weight: 600;
 }
 
 .landing-hours__table dd {
   margin: 0;
+  color: var(--lp-ink);
   text-align: right;
   white-space: nowrap;
-  font-size: 0.95rem;
+  font-size: 0.92rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -10602,13 +10743,13 @@ body.is-queue-display .fab-menu {
 }
 
 .landing-hours__badge {
-  padding: 0.16rem 0.5rem;
+  padding: 0.14rem 0.5rem;
   border-radius: 999px;
-  color: var(--lp-plum-900);
-  background: var(--lp-gold);
-  font-family: Inter, Manrope, "Segoe UI", Arial, sans-serif;
-  font-size: 0.62rem;
-  font-weight: 700;
+  color: var(--lp-plum-700);
+  background: #fff;
+  box-shadow: inset 0 0 0 1px rgba(124, 77, 180, 0.2);
+  font-size: 0.6rem;
+  font-weight: 750;
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -10617,23 +10758,23 @@ body.is-queue-display .fab-menu {
   display: grid;
   gap: 0.6rem;
   padding-top: 1rem;
-  border-top: 1px solid var(--lp-line);
+  border-top: 1px solid rgba(58, 25, 88, 0.08);
 }
 
 .landing-hours__exceptions-title {
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
-  color: var(--lp-plum-700);
-  font-size: 0.74rem;
+  color: var(--lp-gold-deep);
+  font-size: 0.7rem;
   font-weight: 700;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
 }
 
 .landing-hours__exceptions ul {
   display: grid;
-  gap: 0.4rem;
+  gap: 0.45rem;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -10643,12 +10784,14 @@ body.is-queue-display .fab-menu {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
-  gap: 0.2rem 1rem;
-  font-size: 0.88rem;
+  gap: 0.15rem 1rem;
+  color: var(--lp-muted);
+  font-size: 0.86rem;
 }
 
 .landing-hours__exceptions li span:first-child {
-  font-weight: 700;
+  color: var(--lp-ink);
+  font-weight: 650;
 }
 
 /* Contact */
@@ -10902,7 +11045,7 @@ body.is-queue-display .fab-menu {
     gap: 2rem;
   }
   .landing-visit {
-    gap: 2.75rem;
+    gap: 1rem;
   }
   .landing-service-detail {
     grid-template-columns: minmax(0, 1fr);
