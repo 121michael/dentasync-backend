@@ -10451,8 +10451,7 @@ body.is-queue-display .fab-menu {
   gap: 0.4rem;
 }
 
-.auth-screen__features,
-.landing-portal__features {
+.auth-screen__features {
   display: grid;
   gap: 0.85rem;
   margin: 0;
@@ -10464,8 +10463,7 @@ body.is-queue-display .fab-menu {
   margin-top: 0.5rem;
 }
 
-.auth-screen__features li,
-.landing-portal__features li {
+.auth-screen__features li {
   display: flex;
   align-items: center;
   gap: 0.7rem;
@@ -10513,25 +10511,6 @@ body.is-queue-display .fab-menu {
 .auth-tabs a:focus-visible {
   outline: 2px solid var(--amethyst-700);
   outline-offset: 2px;
-}
-
-/* Landing hero portal card */
-.landing-portal__card {
-  gap: 1rem;
-}
-
-.landing-portal__features {
-  margin: 0.25rem 0 0.5rem;
-}
-
-.landing-portal__features li {
-  color: var(--lp-ink);
-  font-size: 0.95rem;
-}
-
-.landing-portal__features svg {
-  flex-shrink: 0;
-  color: var(--lp-gold-deep);
 }
 
 .landing-header__signin {
@@ -11320,91 +11299,6 @@ body.is-queue-display .fab-menu {
   background: linear-gradient(90deg, rgba(220, 192, 143, 0.7), transparent);
 }
 
-/* Patient portal panel */
-.landing .landing-hero .landing-portal {
-  z-index: 1;
-  border-left: 1px solid rgba(220, 192, 143, 0.28);
-  background:
-    radial-gradient(70% 50% at 100% 0%, rgba(215, 186, 251, 0.32), transparent 70%),
-    radial-gradient(60% 40% at 0% 100%, rgba(242, 167, 124, 0.1), transparent 70%),
-    linear-gradient(180deg, #fdfaf5 0%, #f8f2fb 100%);
-}
-
-.landing .landing-portal__card {
-  width: min(100%, 400px);
-  gap: 0;
-}
-
-.landing .landing-portal__card > * {
-  animation: hero-rise 700ms var(--lp-ease) both;
-}
-
-.landing .landing-portal__card > :nth-child(1) { animation-delay: 300ms; }
-.landing .landing-portal__card > :nth-child(2) { animation-delay: 380ms; }
-.landing .landing-portal__card > :nth-child(3) { animation-delay: 440ms; }
-.landing .landing-portal__card > :nth-child(4) { animation-delay: 520ms; }
-.landing .landing-portal__card > :nth-child(5) { animation-delay: 620ms; }
-.landing .landing-portal__card > :nth-child(6) { animation-delay: 680ms; }
-.landing .landing-portal__card > :nth-child(7) { animation-delay: 740ms; }
-
-.landing .landing-portal .auth-card__icon {
-  width: 52px;
-  height: 52px;
-  margin-bottom: 1.4rem;
-  border-radius: 16px;
-  color: var(--lp-plum-700);
-  background: linear-gradient(145deg, #ffffff 0%, #efe4fb 100%);
-  box-shadow: 0 10px 24px -14px rgba(58, 25, 88, 0.5), inset 0 0 0 1px rgba(124, 77, 180, 0.16);
-}
-
-.landing .landing-portal .eyebrow {
-  margin: 0 0 0.6rem;
-  color: #7a4bb0;
-  font-size: 0.7rem;
-  letter-spacing: 0.22em;
-}
-
-.landing .landing-portal h2 {
-  margin: 0 0 1.4rem;
-  color: var(--lp-ink);
-  font-family: var(--lp-serif);
-  font-size: clamp(1.7rem, 2.2vw, 2.15rem);
-  font-weight: 500;
-  letter-spacing: -0.01em;
-  line-height: 1.15;
-}
-
-.landing .landing-portal__features {
-  gap: 0;
-  margin: 0;
-  border-top: 1px solid rgba(58, 25, 88, 0.09);
-}
-
-.landing .landing-portal__features li {
-  gap: 0.8rem;
-  padding: 0.8rem 0;
-  border-bottom: 1px solid rgba(58, 25, 88, 0.09);
-  color: var(--lp-ink);
-  font-size: 0.94rem;
-}
-
-.landing .landing-portal__features svg {
-  width: 26px;
-  height: 26px;
-  padding: 5px;
-  border-radius: 50%;
-  color: var(--lp-gold-deep);
-  background: #f7efe2;
-  box-sizing: border-box;
-}
-
-.landing .landing-portal .auth-security-note {
-  margin: 1.25rem 0 0;
-  color: var(--lp-muted);
-  font-size: 0.78rem;
-  line-height: 1.55;
-}
-
 @media (max-width: 950px) {
   .landing .landing-hero .auth-showcase__copy {
     max-width: 36rem;
@@ -11427,13 +11321,6 @@ body.is-queue-display .fab-menu {
     max-width: 32rem;
     margin-inline: auto;
   }
-  .landing .landing-hero .landing-portal {
-    border-left: 0;
-    border-top: 1px solid rgba(220, 192, 143, 0.28);
-  }
-  .landing .landing-portal__card {
-    width: min(100%, 440px);
-  }
 }
 
 @media (max-width: 520px) {
@@ -11453,8 +11340,78 @@ body.is-queue-display .fab-menu {
   .landing .landing-hero .auth-showcase__tagline {
     font-size: clamp(1.8rem, 9.2vw, 2.4rem);
   }
-  .landing .landing-portal h2 {
-    font-size: 1.6rem;
+}
+
+/* Hero portrait */
+.landing .landing-hero {
+  grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
+}
+
+.landing .landing-hero .landing-hero__portrait {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  margin: 0;
+  padding-right: max(var(--lp-gutter), env(safe-area-inset-right, 0px));
+}
+
+.landing .landing-hero .landing-hero__portrait::before {
+  content: "";
+  position: absolute;
+  inset: 14% 4% 0 8%;
+  z-index: -1;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(170, 110, 230, 0.34), rgba(124, 66, 182, 0.12) 62%, transparent 100%);
+  pointer-events: none;
+}
+
+.landing .landing-hero .landing-hero__portrait img {
+  position: absolute;
+  right: max(var(--lp-gutter), env(safe-area-inset-right, 0px));
+  bottom: 0;
+  left: 0;
+  width: calc(100% - max(var(--lp-gutter), env(safe-area-inset-right, 0px)));
+  height: min(92%, 780px);
+  object-fit: contain;
+  object-position: center bottom;
+  -webkit-mask-image: linear-gradient(to bottom, #000 82%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 82%, transparent 100%);
+  animation: hero-portrait 1000ms var(--lp-ease) 240ms both;
+}
+
+@keyframes hero-portrait {
+  from { opacity: 0; transform: translate3d(0, 24px, 0); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (max-width: 950px) {
+  .landing .landing-hero {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .landing .landing-hero .auth-showcase {
+    padding-bottom: 0.5rem;
+  }
+  .landing .landing-hero .landing-hero__portrait {
+    display: flex;
+    justify-content: center;
+    padding: 0 var(--lp-gutter);
+  }
+  .landing .landing-hero .landing-hero__portrait::before {
+    inset: 10% 50% 0;
+    width: min(88vw, 460px);
+    transform: translateX(-50%);
+  }
+  .landing .landing-hero .landing-hero__portrait img {
+    position: static;
+    width: auto;
+    max-width: 100%;
+    height: clamp(320px, 62vw, 520px);
+  }
+}
+
+@media (max-width: 520px) {
+  .landing .landing-hero .landing-hero__portrait img {
+    height: clamp(300px, 92vw, 400px);
   }
 }
 

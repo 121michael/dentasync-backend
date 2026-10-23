@@ -1,12 +1,12 @@
 import { useRef } from "react";
-import { CheckCircle2, ChevronDown, Clock, LockKeyhole, ShieldCheck, Sparkles } from "lucide-react";
+import { ChevronDown, Clock, ShieldCheck, Sparkles } from "lucide-react";
+import dentistPortrait from "../assets/landing/dentist-portrait.webp";
 import {
   AboutSection,
   ContactSection,
   LANDING_NAV,
   LandingFooter,
   LandingHeader,
-  PORTAL_FEATURES,
   ServicesSection,
   VisitSection,
   scrollToSection,
@@ -83,27 +83,16 @@ export function LandingPage() {
           </a>
         </section>
 
-        <section className="auth-panel landing-portal" id="portal" aria-labelledby="portal-title">
-          <div className="auth-card landing-portal__card">
-            <span className="auth-card__icon">
-              <ShieldCheck size={26} aria-hidden="true" />
-            </span>
-            <span className="eyebrow">Patient portal</span>
-            <h2 id="portal-title">Your care, in one secure portal</h2>
-            <ul className="landing-portal__features">
-              {PORTAL_FEATURES.map((feature) => (
-                <li key={feature}>
-                  <CheckCircle2 size={17} aria-hidden="true" />
-                  {feature}
-                </li>
-              ))}
-            </ul>
-            <p className="auth-security-note">
-              <LockKeyhole size={15} aria-hidden="true" /> Your health information is protected with account-level
-              access controls.
-            </p>
-          </div>
-        </section>
+        <figure className="landing-hero__portrait">
+          <img
+            src={dentistPortrait}
+            alt="Dr. Evie Sunga in burgundy dental scrubs, smiling with arms crossed"
+            width="927"
+            height="1200"
+            decoding="async"
+            fetchPriority="high"
+          />
+        </figure>
       </section>
       <AboutSection hmoProviders={clinicInfo?.hmoProviders} />
       <ServicesSection services={clinicInfo?.services || []} status={clinicInfoStatus} onRetry={loadClinicInfo} />
