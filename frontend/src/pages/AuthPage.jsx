@@ -3,19 +3,16 @@ import { Link, useLocation, useNavigate, useSearchParams } from "react-router-do
 import {
   ArrowLeft,
   ArrowRight,
-  CheckCircle2,
   Eye,
   EyeOff,
   LockKeyhole,
   Mail,
   Phone,
-  ShieldCheck,
   X,
 } from "lucide-react";
 import { ApiError, api } from "../api";
 import { BrandMark } from "../components/BrandMark";
 import { LegalDocument } from "../components/LegalDocument";
-import { PORTAL_FEATURES } from "./landing/LandingSections";
 import { legalDocumentById } from "../legal/dentasyncLegal";
 import { useAuth } from "../useAuth";
 
@@ -234,11 +231,7 @@ export function AuthPage() {
           >
             <ArrowLeft size={17} /> Back
           </button>
-          <span className="auth-card__icon">
-            <Mail size={26} />
-          </span>
-          <span className="eyebrow">Confirm your email</span>
-          <h2>Enter your verification code</h2>
+          <h1>Enter your verification code</h1>
           <p>
             We sent a six-digit code to <strong>{pendingOtp?.email || "your inbox"}</strong>.
           </p>
@@ -267,11 +260,7 @@ export function AuthPage() {
         </form>
       ) : (
         <form className="auth-card" onSubmit={isRegistration ? submitRegistration : submitLogin}>
-          <span className="auth-card__icon">
-            <ShieldCheck size={26} />
-          </span>
-          <span className="eyebrow">{isRegistration ? "Patient registration" : "Welcome back"}</span>
-          <h2>{isRegistration ? "Create Your Account" : "Sign in to Amethyst Dental"}</h2>
+          <h1>{isRegistration ? "Create Your Account" : "Sign in to Amethyst Dental"}</h1>
           <p>
             {isRegistration
               ? "Your account will be verified with a one-time code before access is granted."
@@ -424,9 +413,6 @@ export function AuthPage() {
           </p>
         </form>
       )}
-      <p className="auth-security-note">
-        <LockKeyhole size={15} /> Your health information is protected with account-level access controls.
-      </p>
       <p className="auth-legal-links">
         <Link to="/terms">Terms &amp; Conditions</Link>
         <span aria-hidden="true"> · </span>
@@ -447,36 +433,7 @@ export function AuthPage() {
           </Link>
         </header>
         <div className="auth-screen__body">
-          <aside className="auth-screen__intro" aria-labelledby="auth-intro-title">
-            <span className="landing-eyebrow">{isRegistration ? "Begin your care journey" : "Amethyst Dental portal"}</span>
-            <h1 id="auth-intro-title">One secure portal for your family&apos;s smiles.</h1>
-            {isRegistration ? (
-              <ol className="auth-screen__steps">
-                <li>
-                  <strong>Register</strong>
-                  <span>Share your details and agree to the clinic terms.</span>
-                </li>
-                <li>
-                  <strong>Verify your email</strong>
-                  <span>Enter the six-digit code we send to your inbox.</span>
-                </li>
-                <li>
-                  <strong>Clinic approval</strong>
-                  <span>Sign in and book once the clinic approves your account.</span>
-                </li>
-              </ol>
-            ) : (
-              <ul className="auth-screen__features">
-                {PORTAL_FEATURES.map((feature) => (
-                  <li key={feature}>
-                    <CheckCircle2 size={18} aria-hidden="true" />
-                    {feature}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </aside>
-          <section className="auth-panel auth-screen__panel" aria-label={isRegistration ? "Create your account" : "Sign in"}>
+          <section className="auth-screen__panel" aria-label={isRegistration ? "Create your account" : "Sign in"}>
             {screen !== "otp" ? (
               <nav className="auth-tabs" aria-label="Account access">
                 <Link to="/login" className={isRegistration ? "" : "is-active"} aria-current={isRegistration ? undefined : "page"}>
