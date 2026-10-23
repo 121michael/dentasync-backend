@@ -82,7 +82,7 @@ ${sensitivityPrompt(diagnosticsSensitivity)}
 Always end with: ${DISCLAIMER}`;
 
   const { parseGeminiUsage, trackAiUsage, withAiUsageContext } = require("./aiUsage");
-  const { getGeminiModel, geminiGenerateUrl } = require("./geminiModel");
+  const { getGeminiModel, generateGeminiContent, extractGeminiText } = require("./geminiModel");
   const model = getGeminiModel();
   return withAiUsageContext(
     {
@@ -93,34 +93,26 @@ Always end with: ${DISCLAIMER}`;
     },
     async () => {
       try {
-        const response = await fetch(
-          geminiGenerateUrl(apiKey, model),
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              contents: [
-                {
-                  parts: [
-                    { text: prompt },
-                    {
-                      inline_data: {
-                        mime_type: mimeType,
-                        data: buffer.toString("base64"),
-                      },
-                    },
-                  ],
-                },
-              ],
-            }),
-          }
-        );
+        const result = await generateGeminiContent({
+          apiKey,
+          model,
+          parts: [
+            { text: prompt },
+            {
+              inline_data: {
+                mime_type: mimeType,
+                data: buffer.toString("base64"),
+              },
+            },
+          ],
+          generationConfig: { temperature: 0.2 },
+        });
 
-        if (!response.ok) {
+        if (!result.ok) {
           trackAiUsage({
             feature: "patient_image_analysis",
             outcome: "failed",
-            httpStatus: response.status,
+            httpStatus: result.status,
             model,
           });
           return unavailableResult(
@@ -128,10 +120,8 @@ Always end with: ${DISCLAIMER}`;
           );
         }
 
-        const payload = await response.json();
-        const text =
-          payload?.candidates?.[0]?.content?.parts?.map((part) => part.text).join("\n").trim() ||
-          "";
+        const payload = result.payload;
+        const text = extractGeminiText(payload);
         const usage = parseGeminiUsage(payload);
 
         if (!text) {

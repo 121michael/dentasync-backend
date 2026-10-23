@@ -56,50 +56,38 @@ Rules:
 - Ignore tooth chart drawings unless needed for notes.
 - If the image is a document but no patient/treatment fields are readable, still set isDocument true and leave all fields empty.`;
 
-  const { getGeminiModelCandidates, geminiGenerateUrl } = require("./geminiModel");
+  const { getGeminiModelCandidates, generateGeminiContent, extractGeminiText } = require("./geminiModel");
   const models = getGeminiModelCandidates();
 
   let lastError = "";
   for (const model of models) {
     try {
-      const response = await fetch(
-        geminiGenerateUrl(apiKey, model),
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [
-              {
-                parts: [
-                  { text: prompt },
-                  {
-                    inline_data: {
-                      mime_type: mimeType || "image/png",
-                      data: buffer.toString("base64"),
-                    },
-                  },
-                ],
-              },
-            ],
-            generationConfig: {
-              temperature: 0.1,
+      const result = await generateGeminiContent({
+        apiKey,
+        model,
+        parts: [
+          { text: prompt },
+          {
+            inline_data: {
+              mime_type: mimeType || "image/png",
+              data: buffer.toString("base64"),
             },
-          }),
-        }
-      );
+          },
+        ],
+        generationConfig: { temperature: 0.1 },
+      });
 
-      if (!response.ok) {
-        const detail = await response.text().catch(() => "");
-        lastError = `${response.status} ${detail.slice(0, 120)}`;
+      if (!result.ok) {
+        lastError = `${result.status} ${String(result.raw || "").slice(0, 120)}`;
         const { noteAiAttempt } = require("./aiUsage");
-        noteAiAttempt({ outcome: "failed", httpStatus: response.status, model });
+        noteAiAttempt({ outcome: "failed", httpStatus: result.status, model });
         continue;
       }
 
-      const data = await response.json();
+      const data = result.payload;
       const { parseGeminiUsage, noteAiAttempt } = require("./aiUsage");
       const usage = parseGeminiUsage(data);
-      const text = String(data?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
+      const text = extractGeminiText(data);
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
         noteAiAttempt({ outcome: "failed", httpStatus: 200, model, ...usage });

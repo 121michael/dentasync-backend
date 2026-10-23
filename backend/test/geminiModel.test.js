@@ -4,9 +4,13 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
   DEFAULT_GEMINI_MODEL,
+  DEFAULT_MAX_OUTPUT_TOKENS,
   getGeminiModel,
   getGeminiModelCandidates,
   geminiGenerateUrl,
+  geminiGenerationConfig,
+  extractGeminiText,
+  generateGeminiContent,
 } = require("../services/geminiModel");
 
 function withEnv(name, value, fn) {
@@ -68,4 +72,60 @@ test("GEMINI_MODEL_FALLBACKS prepend extra models after the primary", () => {
       assert.equal(models.filter((name) => name === "gemini-3.8-flash").length, 1);
     })
   );
+});
+
+test("generation config leaves room for Gemini 3 thinking plus visible text", () => {
+  const config = geminiGenerationConfig({ temperature: 0.3 });
+  assert.ok(config.maxOutputTokens >= 2048);
+  assert.equal(config.maxOutputTokens, DEFAULT_MAX_OUTPUT_TOKENS);
+  assert.equal(config.thinkingConfig.thinkingLevel, "low");
+  assert.equal(geminiGenerationConfig({ omitThinking: true }).thinkingConfig, undefined);
+});
+
+test("extractGeminiText ignores thought parts so empty thinking is not treated as an answer", () => {
+  assert.equal(extractGeminiText({ candidates: [{ content: { parts: [{ thought: true, text: "..." }] } }] }), "");
+  assert.equal(
+    extractGeminiText({
+      candidates: [
+        {
+          content: {
+            parts: [
+              { thought: true, text: "internal" },
+              { text: "Floss once a day." },
+            ],
+          },
+        },
+      ],
+    }),
+    "Floss once a day."
+  );
+});
+
+test("a 400 from thinkingConfig is retried without thinking settings", async () => {
+  const originalFetch = global.fetch;
+  const bodies = [];
+  global.fetch = async (_url, init) => {
+    bodies.push(JSON.parse(init.body));
+    if (bodies.length === 1) {
+      return { ok: false, status: 400, text: async () => "thinkingLevel not supported" };
+    }
+    return {
+      ok: true,
+      text: async () =>
+        JSON.stringify({ candidates: [{ content: { parts: [{ text: "ok" }] } }] }),
+    };
+  };
+  try {
+    const result = await generateGeminiContent({
+      apiKey: "test-key",
+      parts: [{ text: "hi" }],
+      generationConfig: { temperature: 0.3 },
+    });
+    assert.equal(bodies.length, 2);
+    assert.equal(bodies[0].generationConfig.thinkingConfig.thinkingLevel, "low");
+    assert.equal(bodies[1].generationConfig.thinkingConfig, undefined);
+    assert.equal(extractGeminiText(result.payload), "ok");
+  } finally {
+    global.fetch = originalFetch;
+  }
 });

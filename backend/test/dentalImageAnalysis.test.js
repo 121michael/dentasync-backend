@@ -11,8 +11,10 @@ test("image analysis calls the current Gemini Flash alias", async () => {
   delete process.env.GEMINI_MODEL;
   const originalFetch = global.fetch;
   let calledUrl = "";
-  global.fetch = async (input) => {
+  let calledBody = null;
+  global.fetch = async (input, init) => {
     calledUrl = String(input);
+    calledBody = JSON.parse(init.body);
     return {
       ok: true,
       json: async () => ({
@@ -41,6 +43,7 @@ test("image analysis calls the current Gemini Flash alias", async () => {
     assert.equal(result.model, "gemini-flash-latest");
     assert.match(calledUrl, /models\/gemini-flash-latest:generateContent/);
     assert.doesNotMatch(calledUrl, /gemini-1\.5-flash|gemini-2\.0-flash/);
+    assert.ok(calledBody.generationConfig.maxOutputTokens >= 2048);
   } finally {
     global.fetch = originalFetch;
     if (previous === undefined) delete process.env.GEMINI_API_KEY;

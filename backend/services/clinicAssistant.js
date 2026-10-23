@@ -1758,10 +1758,8 @@ function slimPatientContext(patientContext) {
 
 async function generateGeminiText(apiKey, prompt) {
   const { parseGeminiUsage, trackAiUsage } = require("./aiUsage");
-  const { getGeminiModel, geminiGenerateUrl } = require("./geminiModel");
+  const { getGeminiModel, generateGeminiContent, extractGeminiText } = require("./geminiModel");
   const model = getGeminiModel();
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 12000);
   let recorded = false;
   const record = (event) => {
     if (recorded) return;
@@ -1773,42 +1771,30 @@ async function generateGeminiText(apiKey, prompt) {
     });
   };
   try {
-    const response = await fetch(
-      geminiGenerateUrl(apiKey, model),
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.3, maxOutputTokens: 420 },
-        }),
-        signal: controller.signal,
-      }
-    );
-    if (!response.ok) {
-      record({ outcome: "failed", httpStatus: response.status });
-      const error = new Error(`gemini-http-${response.status}`);
-      error.code = response.status === 429 ? "rate_limit" : "http";
+    const result = await generateGeminiContent({
+      apiKey,
+      model,
+      parts: [{ text: prompt }],
+      generationConfig: { temperature: 0.3 },
+    });
+    if (!result.ok) {
+      record({ outcome: "failed", httpStatus: result.status });
+      const error = new Error(`gemini-http-${result.status}`);
+      error.code = result.status === 429 ? "rate_limit" : "http";
       throw error;
     }
-    const payload = await response.json();
-    const text = payload?.candidates?.[0]?.content?.parts
-      ?.map((part) => part.text)
-      .join("\n")
-      .trim();
+    const text = extractGeminiText(result.payload);
     if (!text) {
-      record({ outcome: "failed", httpStatus: 200, usage: parseGeminiUsage(payload) });
+      record({ outcome: "failed", httpStatus: 200, usage: parseGeminiUsage(result.payload) });
       const error = new Error("gemini-empty");
       error.code = "empty";
       throw error;
     }
-    record({ outcome: "success", httpStatus: 200, usage: parseGeminiUsage(payload) });
+    record({ outcome: "success", httpStatus: 200, usage: parseGeminiUsage(result.payload) });
     return text;
   } catch (error) {
     record({ outcome: "failed" });
     throw error;
-  } finally {
-    clearTimeout(timer);
   }
 }
 

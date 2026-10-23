@@ -534,8 +534,10 @@ test("oral-care Gemini calls use the current Flash alias, not a retired model", 
   delete process.env.GEMINI_MODEL;
   const originalFetch = global.fetch;
   let calledUrl = "";
-  global.fetch = async (input) => {
+  let calledBody = null;
+  global.fetch = async (input, init) => {
     calledUrl = String(input);
+    calledBody = JSON.parse(init.body);
     return {
       ok: true,
       json: async () => ({
@@ -549,6 +551,8 @@ test("oral-care Gemini calls use the current Flash alias, not a retired model", 
     assert.equal(result.model, "gemini-flash-latest");
     assert.match(calledUrl, /models\/gemini-flash-latest:generateContent/);
     assert.doesNotMatch(calledUrl, /gemini-1\.5-flash|gemini-2\.0-flash/);
+    assert.ok(calledBody.generationConfig.maxOutputTokens >= 2048);
+    assert.notEqual(calledBody.generationConfig.maxOutputTokens, 420);
   } finally {
     global.fetch = originalFetch;
     if (previous === undefined) delete process.env.GEMINI_API_KEY;
