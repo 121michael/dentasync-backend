@@ -82,6 +82,8 @@ ${sensitivityPrompt(diagnosticsSensitivity)}
 Always end with: ${DISCLAIMER}`;
 
   const { parseGeminiUsage, trackAiUsage, withAiUsageContext } = require("./aiUsage");
+  const { getGeminiModel, geminiGenerateUrl } = require("./geminiModel");
+  const model = getGeminiModel();
   return withAiUsageContext(
     {
       feature: "patient_image_analysis",
@@ -92,7 +94,7 @@ Always end with: ${DISCLAIMER}`;
     async () => {
       try {
         const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
+          geminiGenerateUrl(apiKey, model),
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -119,7 +121,7 @@ Always end with: ${DISCLAIMER}`;
             feature: "patient_image_analysis",
             outcome: "failed",
             httpStatus: response.status,
-            model: "gemini-1.5-flash",
+            model,
           });
           return unavailableResult(
             "Preliminary image analysis could not be completed right now. Your upload was saved for your care team. Please try again later or consult your dentist."
@@ -137,7 +139,7 @@ Always end with: ${DISCLAIMER}`;
             feature: "patient_image_analysis",
             outcome: "failed",
             httpStatus: 200,
-            model: "gemini-1.5-flash",
+            model,
             usage,
           });
           return unavailableResult(
@@ -149,7 +151,7 @@ Always end with: ${DISCLAIMER}`;
           feature: "patient_image_analysis",
           outcome: "success",
           httpStatus: 200,
-          model: "gemini-1.5-flash",
+          model,
           usage,
         });
 
@@ -170,14 +172,14 @@ Always end with: ${DISCLAIMER}`;
           possibleToothNumber: toothMatch ? toothMatch[1] : null,
           possibleSurface: surfaceMatch ? surfaceMatch[1].toLowerCase() : null,
           disclaimer: DISCLAIMER,
-          model: "gemini-1.5-flash",
+          model,
         };
       } catch (error) {
         console.warn("Dental image analysis failed:", error.message);
         trackAiUsage({
           feature: "patient_image_analysis",
           outcome: "failed",
-          model: "gemini-1.5-flash",
+          model,
         });
         return unavailableResult(
           "Preliminary image analysis failed unexpectedly. Your upload was saved. Please consult your dentist."

@@ -527,6 +527,37 @@ test("loadAuthorizedPatientContext returns upcoming visits for the signed-in use
   assert.equal(context.queue, null);
 });
 
+test("oral-care Gemini calls use the current Flash alias, not a retired model", async () => {
+  const previous = process.env.GEMINI_API_KEY;
+  const previousModel = process.env.GEMINI_MODEL;
+  process.env.GEMINI_API_KEY = "test-key";
+  delete process.env.GEMINI_MODEL;
+  const originalFetch = global.fetch;
+  let calledUrl = "";
+  global.fetch = async (input) => {
+    calledUrl = String(input);
+    return {
+      ok: true,
+      json: async () => ({
+        candidates: [{ content: { parts: [{ text: "Floss once a day. See a licensed dentist." }] } }],
+      }),
+    };
+  };
+  try {
+    const result = await answerWithOptionalGemini("How should I floss?", options);
+    assert.equal(result.source, "gemini");
+    assert.equal(result.model, "gemini-flash-latest");
+    assert.match(calledUrl, /models\/gemini-flash-latest:generateContent/);
+    assert.doesNotMatch(calledUrl, /gemini-1\.5-flash|gemini-2\.0-flash/);
+  } finally {
+    global.fetch = originalFetch;
+    if (previous === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = previous;
+    if (previousModel === undefined) delete process.env.GEMINI_MODEL;
+    else process.env.GEMINI_MODEL = previousModel;
+  }
+});
+
 test("gemini empty or failed responses fall back to catalog oral-care answers", async () => {
   const previous = process.env.GEMINI_API_KEY;
   process.env.GEMINI_API_KEY = "test-key";

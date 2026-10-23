@@ -32,6 +32,12 @@ In production the API refuses weak/missing JWT/OTP/reset secrets, restricts CORS
 to `FRONTEND_URL` / `CORS_ORIGINS`, sends basic browser security headers, and
 rate-limits login, registration, OTP, and forgot-password endpoints.
 
+Patient AI, image analysis, and document vision use `GEMINI_API_KEY`. The
+default model is `gemini-flash-latest` (Google's current Flash alias). Do not
+set `GEMINI_MODEL` to retired ids such as `gemini-1.5-flash` or
+`gemini-2.0-flash`; those return errors and every request is counted as Failed
+in Admin Analytics.
+
 ```bash
 npm start
 ```

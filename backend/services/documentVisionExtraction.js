@@ -56,17 +56,14 @@ Rules:
 - Ignore tooth chart drawings unless needed for notes.
 - If the image is a document but no patient/treatment fields are readable, still set isDocument true and leave all fields empty.`;
 
-  const models = [
-    "gemini-2.0-flash",
-    "gemini-1.5-flash",
-    "gemini-1.5-flash-latest",
-  ];
+  const { getGeminiModelCandidates, geminiGenerateUrl } = require("./geminiModel");
+  const models = getGeminiModelCandidates();
 
   let lastError = "";
   for (const model of models) {
     try {
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
+        geminiGenerateUrl(apiKey, model),
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },

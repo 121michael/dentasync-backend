@@ -1758,6 +1758,8 @@ function slimPatientContext(patientContext) {
 
 async function generateGeminiText(apiKey, prompt) {
   const { parseGeminiUsage, trackAiUsage } = require("./aiUsage");
+  const { getGeminiModel, geminiGenerateUrl } = require("./geminiModel");
+  const model = getGeminiModel();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 12000);
   let recorded = false;
@@ -1766,13 +1768,13 @@ async function generateGeminiText(apiKey, prompt) {
     recorded = true;
     trackAiUsage({
       feature: "patient_assistant",
-      model: "gemini-1.5-flash",
+      model,
       ...event,
     });
   };
   try {
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
+      geminiGenerateUrl(apiKey, model),
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1829,6 +1831,7 @@ async function answerWithOptionalGemini(question, servicesOrOptions) {
   }
 
   const { withAiUsageContext } = require("./aiUsage");
+  const { getGeminiModel } = require("./geminiModel");
   try {
     return await withAiUsageContext(
       {
@@ -1875,7 +1878,7 @@ Patient question: ${question}`;
     return {
       answer: alreadyNoted ? text : `${text}\n\n${note}`,
       source: "gemini",
-      model: "gemini-1.5-flash",
+      model: getGeminiModel(),
       language: local.language,
     };
       }
