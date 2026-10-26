@@ -562,6 +562,38 @@ test("oral-care Gemini calls use the current Flash alias, not a retired model", 
   }
 });
 
+test("catalog fallback after Gemini failure is recorded as successful because the patient still got an answer", async () => {
+  const previous = process.env.GEMINI_API_KEY;
+  process.env.GEMINI_API_KEY = "test-key";
+  const originalFetch = global.fetch;
+  global.fetch = async () => ({ ok: true, json: async () => ({ candidates: [] }) });
+  const outcomes = [];
+  const db = {
+    async query(sql, params) {
+      if (String(sql).includes("INSERT INTO ai_usage_events")) {
+        outcomes.push(params[2]);
+        return { rows: [{ id: 1 }] };
+      }
+      return { rows: [] };
+    },
+  };
+  try {
+    const result = await answerWithOptionalGemini("How should I floss?", {
+      ...options,
+      db,
+      usageUserId: "patient-1",
+    });
+    assert.match(result.answer, /Floss/i);
+    assert.equal(result.model, "clinic-faq-fallback");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.deepEqual(outcomes, ["success"]);
+  } finally {
+    global.fetch = originalFetch;
+    if (previous === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = previous;
+  }
+});
+
 test("gemini empty or failed responses fall back to catalog oral-care answers", async () => {
   const previous = process.env.GEMINI_API_KEY;
   process.env.GEMINI_API_KEY = "test-key";

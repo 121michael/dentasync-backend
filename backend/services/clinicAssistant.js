@@ -1778,14 +1778,12 @@ async function generateGeminiText(apiKey, prompt) {
       generationConfig: { temperature: 0.3 },
     });
     if (!result.ok) {
-      record({ outcome: "failed", httpStatus: result.status });
       const error = new Error(`gemini-http-${result.status}`);
       error.code = result.status === 429 ? "rate_limit" : "http";
       throw error;
     }
     const text = extractGeminiText(result.payload);
     if (!text) {
-      record({ outcome: "failed", httpStatus: 200, usage: parseGeminiUsage(result.payload) });
       const error = new Error("gemini-empty");
       error.code = "empty";
       throw error;
@@ -1793,7 +1791,6 @@ async function generateGeminiText(apiKey, prompt) {
     record({ outcome: "success", httpStatus: 200, usage: parseGeminiUsage(result.payload) });
     return text;
   } catch (error) {
-    record({ outcome: "failed" });
     throw error;
   }
 }
@@ -1870,6 +1867,15 @@ Patient question: ${question}`;
       }
     );
   } catch {
+    const { trackAiUsage } = require("./aiUsage");
+    trackAiUsage({
+      feature: "patient_assistant",
+      outcome: "success",
+      model: "clinic-faq-fallback",
+      userId: options.usageUserId || null,
+      userRole: options.usageUserRole || "patient",
+      db: options.db || null,
+    });
     return { ...local, model: "clinic-faq-fallback" };
   }
 }

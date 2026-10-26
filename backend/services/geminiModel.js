@@ -105,21 +105,23 @@ async function generateGeminiContent({
   generationConfig,
   timeoutMs = DEFAULT_TIMEOUT_MS,
 } = {}) {
-  const config = geminiGenerationConfig(generationConfig);
   const contents = [{ parts }];
-  let result = await postGeminiGenerate({
-    apiKey,
-    model,
-    timeoutMs,
-    body: { contents, generationConfig: config },
-  });
-  if (!result.ok && result.status === 400 && config.thinkingConfig) {
+  const attempts = [
+    geminiGenerationConfig(generationConfig),
+    geminiGenerationConfig({ ...generationConfig, thinkingConfig: { thinkingBudget: 0 } }),
+    geminiGenerationConfig({ ...generationConfig, omitThinking: true }),
+  ];
+  let result = { ok: false, status: 0, payload: null, raw: "" };
+  for (const [index, config] of attempts.entries()) {
     result = await postGeminiGenerate({
       apiKey,
       model,
       timeoutMs,
-      body: { contents, generationConfig: geminiGenerationConfig({ ...generationConfig, omitThinking: true }) },
+      body: { contents, generationConfig: config },
     });
+    if (result.ok && extractGeminiText(result.payload)) return result;
+    const retryable = result.ok || result.status === 400;
+    if (!retryable || index === attempts.length - 1) return result;
   }
   return result;
 }

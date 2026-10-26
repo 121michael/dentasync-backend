@@ -223,7 +223,9 @@ export function AdminAnalyticsPage() {
             <span className="eyebrow">Provider usage</span>
             <h2>AI Usage</h2>
             <p>
-              Recorded Gemini requests for {ai.periodLabel || data.periodLabel}. Catalog-only answers are not counted.
+              Recorded Gemini requests for {ai.periodLabel || data.periodLabel}. Clinic catalog
+              answers that never call Gemini are not counted. If Gemini is unavailable and the
+              assistant still replies from the clinic FAQ, that turn is counted as successful.
               {ai.trackingStartedAt
                 ? ` Complete tracking began ${new Date(ai.trackingStartedAt).toLocaleString()}. Earlier requests are not included.`
                 : " No AI requests have been recorded yet."}

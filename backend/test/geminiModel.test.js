@@ -101,7 +101,7 @@ test("extractGeminiText ignores thought parts so empty thinking is not treated a
   );
 });
 
-test("a 400 from thinkingConfig is retried without thinking settings", async () => {
+test("a 400 from thinkingLevel is retried with thinkingBudget 0", async () => {
   const originalFetch = global.fetch;
   const bodies = [];
   global.fetch = async (_url, init) => {
@@ -123,7 +123,7 @@ test("a 400 from thinkingConfig is retried without thinking settings", async () 
     });
     assert.equal(bodies.length, 2);
     assert.equal(bodies[0].generationConfig.thinkingConfig.thinkingLevel, "low");
-    assert.equal(bodies[1].generationConfig.thinkingConfig, undefined);
+    assert.equal(bodies[1].generationConfig.thinkingConfig.thinkingBudget, 0);
     assert.equal(extractGeminiText(result.payload), "ok");
   } finally {
     global.fetch = originalFetch;
