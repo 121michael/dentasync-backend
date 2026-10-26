@@ -11455,6 +11455,21 @@ body.is-queue-display .fab-menu {
   }
 }
 
+@media (max-width: 640px) {
+  .landing .landing-hero .auth-showcase__lede,
+  .landing .landing-hero .auth-showcase__highlights {
+    display: none;
+  }
+  .landing .landing-hero .auth-showcase {
+    gap: 0;
+    padding-top: 1.65rem;
+    padding-bottom: 1.5rem;
+  }
+  .landing .landing-hero .auth-showcase__copy {
+    gap: 0.85rem;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .landing .landing-hero::before,
   .landing .landing-hero::after,
