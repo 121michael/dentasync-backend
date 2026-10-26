@@ -24,6 +24,7 @@ export function LandingPage() {
     <main className="landing" ref={landingRef}>
       <LandingHeader activeId={activeSection} onNavigate={scrollToSection} />
       <section className="auth-page landing-hero" id="home" tabIndex={-1} aria-label="Home">
+        <span className="sr-only">Amethyst Dental Clinic reception desk and waiting area</span>
         <div className="auth-page__glow auth-page__glow--one" />
         <div className="auth-page__glow auth-page__glow--two" />
         <section className="auth-showcase">
@@ -81,17 +82,6 @@ export function LandingPage() {
             <ChevronDown size={18} aria-hidden="true" />
           </a>
         </section>
-
-        <figure className="landing-hero__scene">
-          <img
-            src="/landing/clinic-reception.jpg"
-            alt="Amethyst Dental Clinic reception desk and waiting area"
-            width="1320"
-            height="887"
-            decoding="async"
-            fetchPriority="high"
-          />
-        </figure>
       </section>
       <AboutSection hmoProviders={clinicInfo?.hmoProviders} />
       <ServicesSection services={clinicInfo?.services || []} status={clinicInfoStatus} onRetry={loadClinicInfo} />

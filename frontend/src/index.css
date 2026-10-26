@@ -11113,7 +11113,7 @@ body.is-queue-display .fab-menu {
 }
 
 .landing .landing-hero::before {
-  inset: -20% 30% -20% -20%;
+  inset: -20% 48% -20% -20%;
   z-index: 0;
   background:
     radial-gradient(38% 32% at 30% 30%, rgba(196, 150, 245, 0.28), transparent 70%),
@@ -11126,9 +11126,23 @@ body.is-queue-display .fab-menu {
 .landing .landing-hero::after {
   inset: 0;
   z-index: 0;
-  background:
-    linear-gradient(90deg, transparent 0%, transparent calc(100% - 1px), rgba(220, 192, 143, 0.06) 100%),
-    radial-gradient(140% 100% at 30% 50%, transparent 55%, rgba(8, 3, 16, 0.45) 100%);
+  background-color: #24103d;
+  background-image:
+    linear-gradient(
+      90deg,
+      #24103d 0%,
+      rgba(36, 16, 61, 0.98) 14%,
+      rgba(47, 21, 80, 0.92) 24%,
+      rgba(47, 21, 80, 0.62) 42%,
+      rgba(47, 21, 80, 0.28) 60%,
+      rgba(47, 21, 80, 0.1) 78%,
+      rgba(47, 21, 80, 0.16) 100%
+    ),
+    url("/landing/clinic-reception.jpg");
+  background-size: cover, cover;
+  background-position: center, 68% 48%;
+  background-repeat: no-repeat;
+  animation: hero-scene 1100ms var(--lp-ease) 80ms both;
 }
 
 .landing .landing-hero .auth-page__glow {
@@ -11343,91 +11357,108 @@ body.is-queue-display .fab-menu {
   }
 }
 
-/* Hero clinic reception */
+/* Hero clinic reception — seamless photo-to-purple blend */
 .landing .landing-hero {
-  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
 }
 
-.landing .landing-hero .landing-hero__scene {
+.landing .landing-hero .auth-showcase__copy {
   position: relative;
   z-index: 1;
-  align-self: center;
-  min-width: 0;
-  margin: 2.25rem max(1.1rem, env(safe-area-inset-right, 0px)) 2.25rem 0;
-  overflow: hidden;
-  border-radius: 36px 18px 18px 36px;
-  box-shadow:
-    0 28px 64px -30px rgba(10, 3, 20, 0.72),
-    inset 0 0 0 1px rgba(220, 192, 143, 0.16);
-  animation: hero-scene 900ms var(--lp-ease) 180ms both;
 }
 
-.landing .landing-hero .landing-hero__scene img {
-  display: block;
-  width: 100%;
-  height: min(68vh, 560px);
-  object-fit: cover;
-  object-position: 34% 52%;
-}
-
-.landing .landing-hero .landing-hero__scene::after {
+.landing .landing-hero .auth-showcase__copy::before {
   content: "";
   position: absolute;
-  inset: 0;
+  z-index: -1;
+  inset: -12% 8% -18% -18%;
+  max-width: 42rem;
   pointer-events: none;
-  background:
-    linear-gradient(90deg, rgba(36, 16, 61, 0.58) 0%, rgba(47, 21, 80, 0.22) 16%, rgba(47, 21, 80, 0.06) 32%, transparent 48%),
-    linear-gradient(0deg, rgba(47, 21, 80, 0.1), rgba(47, 21, 80, 0.1)),
-    linear-gradient(180deg, rgba(20, 8, 34, 0.06) 0%, transparent 18%, transparent 88%, rgba(20, 8, 34, 0.16) 100%);
+  background: radial-gradient(ellipse at 18% 42%, rgba(20, 8, 34, 0.42) 0%, rgba(20, 8, 34, 0.12) 48%, transparent 74%);
 }
 
 @keyframes hero-scene {
-  from { opacity: 0; transform: translate3d(12px, 0, 0); }
-  to { opacity: 1; transform: none; }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 @media (max-width: 1100px) {
-  .landing .landing-hero {
-    grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.85fr);
-  }
-  .landing .landing-hero .landing-hero__scene img {
-    height: min(62vh, 480px);
+  .landing .landing-hero::after {
+    background-position: center, 62% 48%;
+    background-image:
+      linear-gradient(
+        90deg,
+        #24103d 0%,
+        rgba(36, 16, 61, 0.98) 20%,
+        rgba(47, 21, 80, 0.92) 34%,
+        rgba(47, 21, 80, 0.58) 52%,
+        rgba(47, 21, 80, 0.22) 70%,
+        rgba(47, 21, 80, 0.12) 100%
+      ),
+      url("/landing/clinic-reception.jpg");
   }
 }
 
 @media (max-width: 950px) {
-  .landing .landing-hero {
-    grid-template-columns: minmax(0, 1fr);
-  }
   .landing .landing-hero .auth-showcase {
-    padding-bottom: 0.35rem;
+    padding-bottom: 2.5rem;
   }
-  .landing .landing-hero .landing-hero__scene {
-    width: min(100% - 2 * var(--lp-gutter), 560px);
-    max-width: none;
-    margin: 0 auto 1.75rem;
-    border-radius: 24px;
+  .landing .landing-hero::after {
+    background-position: center, 58% 42%;
+    background-image:
+      linear-gradient(
+        180deg,
+        #24103d 0%,
+        rgba(36, 16, 61, 0.96) 26%,
+        rgba(47, 21, 80, 0.68) 50%,
+        rgba(47, 21, 80, 0.28) 76%,
+        rgba(47, 21, 80, 0.28) 100%
+      ),
+      linear-gradient(
+        90deg,
+        #24103d 0%,
+        rgba(36, 16, 61, 0.72) 18%,
+        rgba(47, 21, 80, 0.28) 42%,
+        transparent 70%
+      ),
+      url("/landing/clinic-reception.jpg");
+    background-size: cover, cover, cover;
   }
-  .landing .landing-hero .landing-hero__scene img {
-    height: clamp(200px, 42vw, 300px);
+  .landing .landing-hero .auth-showcase__copy::before {
+    inset: -8% -6% -10% -6%;
+    margin-inline: auto;
+    background: radial-gradient(ellipse at 50% 36%, rgba(20, 8, 34, 0.5) 0%, rgba(20, 8, 34, 0.16) 52%, transparent 76%);
   }
 }
 
 @media (max-width: 520px) {
-  .landing .landing-hero .landing-hero__scene {
-    width: calc(100% - 2 * var(--lp-gutter));
-    margin-bottom: 1.35rem;
-    border-radius: 20px;
-  }
-  .landing .landing-hero .landing-hero__scene img {
-    height: clamp(168px, 46vw, 220px);
+  .landing .landing-hero::after {
+    background-position: center, 54% 38%;
+    background-image:
+      linear-gradient(
+        180deg,
+        #24103d 0%,
+        rgba(36, 16, 61, 0.96) 26%,
+        rgba(47, 21, 80, 0.62) 54%,
+        rgba(47, 21, 80, 0.28) 80%,
+        rgba(47, 21, 80, 0.34) 100%
+      ),
+      linear-gradient(
+        90deg,
+        #24103d 0%,
+        rgba(36, 16, 61, 0.78) 22%,
+        rgba(47, 21, 80, 0.28) 48%,
+        transparent 72%
+      ),
+      url("/landing/clinic-reception.jpg");
+    background-size: cover, cover, cover;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .landing .landing-hero::before,
-  .landing .landing-hero .auth-page__glow,
-  .landing .landing-hero .landing-hero__scene {
+  .landing .landing-hero::after,
+  .landing .landing-hero .auth-page__glow {
     animation: none !important;
   }
 }
