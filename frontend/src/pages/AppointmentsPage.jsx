@@ -14,6 +14,7 @@ import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
 import { useAuth } from "../useAuth";
 import { matchesNotificationFocus } from "../notificationFocus";
+import { getApprovedClinicPrice } from "../clinic/approvedClinicPrices";
 
 const PERIOD_ORDER = ["Morning", "Afternoon", "Evening"];
 
@@ -220,6 +221,10 @@ export function AppointmentsPage() {
     () => catalog?.services.find((service) => service.id === form.serviceId),
     [catalog, form.serviceId]
   );
+  const selectedServicePrice = useMemo(
+    () => getApprovedClinicPrice(selectedService),
+    [selectedService]
+  );
   const hmoProviders = catalog?.hmoProviders?.length ? catalog.hmoProviders : APPROVED_HMO_PROVIDERS;
   const selectedHmo = hmoProviders.find((provider) => provider.name === form.hmoProvider);
 
@@ -413,13 +418,18 @@ export function AppointmentsPage() {
               {(catalog.services || []).map((service) => {
                 const selected = form.serviceId === service.id;
                 const photoUrl = servicePhotoUrl(service);
+                const price = selected ? getApprovedClinicPrice(service) : null;
                 return (
                   <button
                     type="button"
                     key={service.id}
                     role="radio"
                     aria-checked={selected}
-                    aria-label={service.name}
+                    aria-label={
+                      price
+                        ? `${service.name}, ${price.priceLabel}`
+                        : service.name
+                    }
                     className={`treatment-option ${selected ? "is-selected" : ""}`}
                     onClick={() =>
                       setForm((current) => ({
@@ -445,10 +455,36 @@ export function AppointmentsPage() {
                       </span>
                     ) : null}
                     <strong>{service.name}</strong>
+                    {price ? <em>{price.priceLabel}</em> : null}
                   </button>
                 );
               })}
             </div>
+            {selectedServicePrice ? (
+              <aside className="treatment-price-panel" aria-live="polite">
+                <span className="eyebrow">Selected service</span>
+                <h3>{selectedServicePrice.title}</h3>
+                {selectedServicePrice.description ? (
+                  <p className="treatment-price-panel__description">{selectedServicePrice.description}</p>
+                ) : null}
+                <p className="treatment-price-panel__price">{selectedServicePrice.details}</p>
+                {selectedServicePrice.lines?.length ? (
+                  <dl className="treatment-price-panel__lines">
+                    {selectedServicePrice.lines.map((line) => (
+                      <div key={line.label}>
+                        <dt>{line.label}</dt>
+                        <dd>{line.value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                ) : null}
+                {selectedServicePrice.notes?.map((note) => (
+                  <p key={note} className="treatment-price-panel__note">
+                    {note}
+                  </p>
+                ))}
+              </aside>
+            ) : null}
           </section>
 
           <section className="glass-card booking-section">
@@ -661,6 +697,12 @@ export function AppointmentsPage() {
             <span>Service</span>
             <strong>{selectedService?.name || "Select a service"}</strong>
           </div>
+          {selectedServicePrice ? (
+            <div className="booking-summary__line">
+              <span>Price</span>
+              <strong>{selectedServicePrice.details}</strong>
+            </div>
+          ) : null}
           <div className="booking-summary__line">
             <span>Date</span>
             <strong>{form.appointmentDate ? displayDate(form.appointmentDate) : "Choose a date"}</strong>

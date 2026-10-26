@@ -2002,7 +2002,79 @@ strong {
 }
 
 .treatment-option small { color: var(--text-muted); font-size: 0.67rem; line-height: 1.45; }
-.treatment-option em { margin-top: auto; color: var(--amethyst-700); font-size: 0.65rem; font-style: normal; font-weight: 750; }
+.treatment-option em {
+  margin-top: -0.2rem;
+  padding: 0 0.28rem;
+  color: var(--amethyst-700);
+  font-size: 0.68rem;
+  font-style: normal;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.treatment-price-panel {
+  display: grid;
+  gap: 0.38rem;
+  min-width: 0;
+  margin-top: 0.95rem;
+  padding: 0.95rem 1rem;
+  overflow-wrap: anywhere;
+  border: 1px solid color-mix(in srgb, var(--amethyst-500) 35%, var(--border));
+  border-radius: 16px;
+  background: linear-gradient(180deg, var(--amethyst-100), color-mix(in srgb, var(--surface-solid) 88%, white));
+}
+
+.treatment-price-panel .eyebrow {
+  color: var(--amethyst-700);
+}
+
+.treatment-price-panel h3 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 1rem;
+  line-height: 1.35;
+}
+
+.treatment-price-panel__description,
+.treatment-price-panel__note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.treatment-price-panel__price {
+  margin: 0.15rem 0 0;
+  color: var(--amethyst-800);
+  font-size: 0.98rem;
+  font-weight: 750;
+  line-height: 1.4;
+}
+
+.treatment-price-panel__lines {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.35rem 0 0;
+}
+
+.treatment-price-panel__lines > div {
+  display: grid;
+  gap: 0.12rem;
+}
+
+.treatment-price-panel__lines dt {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.treatment-price-panel__lines dd {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 0.86rem;
+  font-weight: 650;
+  line-height: 1.4;
+}
 .appointment-history {
   margin-top: 0.35rem;
 }
