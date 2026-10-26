@@ -91,6 +91,10 @@ function displayServiceName(appointment) {
   return LEGACY_SERVICE_NAMES[raw] || raw || "Service not recorded";
 }
 
+function servicePhotoUrl(service) {
+  return service?.imageUrl || service?.image || service?.photoUrl || "";
+}
+
 function displayStatus(status) {
   return String(status || "pending").replaceAll("_", " ");
 }
@@ -405,25 +409,46 @@ export function AppointmentsPage() {
                 <h2>Select your service</h2>
               </div>
             </div>
-            <label className="field booking-select-field">
-              <span>Service</span>
-              <select
-                name="serviceId"
-                value={form.serviceId}
-                onChange={updateForm}
-                required
-                aria-label="Select a service"
-              >
-                <option value="" disabled>
-                  Select a service
-                </option>
-                {(catalog.services || []).map((service) => (
-                  <option key={service.id} value={service.id}>
-                    {service.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="treatment-grid" role="radiogroup" aria-label="Select a service">
+              {(catalog.services || []).map((service) => {
+                const selected = form.serviceId === service.id;
+                const photoUrl = servicePhotoUrl(service);
+                return (
+                  <button
+                    type="button"
+                    key={service.id}
+                    role="radio"
+                    aria-checked={selected}
+                    aria-label={service.name}
+                    className={`treatment-option ${selected ? "is-selected" : ""}`}
+                    onClick={() =>
+                      setForm((current) => ({
+                        ...current,
+                        serviceId: current.serviceId === service.id ? "" : service.id,
+                      }))
+                    }
+                  >
+                    <span className="treatment-option__media" aria-hidden="true">
+                      {photoUrl ? (
+                        <img
+                          src={photoUrl}
+                          alt=""
+                          className="treatment-option__photo"
+                        />
+                      ) : (
+                        <span className="treatment-option__placeholder" />
+                      )}
+                    </span>
+                    {selected ? (
+                      <span className="treatment-option__check">
+                        <Check size={14} aria-hidden="true" />
+                      </span>
+                    ) : null}
+                    <strong>{service.name}</strong>
+                  </button>
+                );
+              })}
+            </div>
           </section>
 
           <section className="glass-card booking-section">

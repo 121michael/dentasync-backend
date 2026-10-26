@@ -1911,47 +1911,96 @@ strong {
 
 .treatment-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.68rem;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 0.75rem;
   margin-top: 1.1rem;
 }
 
 .treatment-option {
   position: relative;
   display: grid;
-  min-height: 138px;
   align-content: start;
-  gap: 0.37rem;
-  padding: 0.9rem;
+  gap: 0.62rem;
+  min-width: 0;
+  padding: 0.45rem 0.45rem 0.7rem;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 16px;
   color: var(--text);
   text-align: left;
   background: var(--surface-solid);
-  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
 }
 
 .treatment-option:hover,
-.treatment-option.is-selected {
+.treatment-option:focus-visible {
   border-color: var(--amethyst-500);
-  background: var(--amethyst-100);
+  background: color-mix(in srgb, var(--amethyst-100) 70%, var(--surface-solid));
+}
+
+.treatment-option:focus-visible {
+  outline: 2px solid var(--amethyst-500);
+  outline-offset: 2px;
 }
 
 .treatment-option.is-selected {
-  box-shadow: 0 10px 24px rgba(105, 55, 155, 0.11);
+  border-color: var(--amethyst-600);
+  background: var(--amethyst-100);
+  box-shadow: 0 10px 24px rgba(105, 55, 155, 0.14);
 }
 
-.treatment-option__icon {
+.treatment-option__media {
+  display: block;
+  overflow: hidden;
+  aspect-ratio: 4 / 3;
+  border-radius: 12px;
+  background:
+    linear-gradient(160deg, rgba(240, 233, 251, 0.95) 0%, rgba(217, 196, 241, 0.55) 48%, rgba(255, 255, 255, 0.7) 100%);
+}
+
+.treatment-option__photo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+.treatment-option__placeholder {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background:
+    radial-gradient(120% 80% at 80% 0%, rgba(152, 100, 215, 0.16), transparent 58%),
+    linear-gradient(165deg, #f7f2fc 0%, #e6d7f6 52%, #f4eefb 100%);
+}
+
+.treatment-option__check {
+  position: absolute;
+  top: 0.72rem;
+  right: 0.72rem;
+  z-index: 1;
   display: grid;
-  width: 33px;
-  height: 33px;
+  width: 1.45rem;
+  height: 1.45rem;
   place-items: center;
-  border-radius: 10px;
-  color: var(--amethyst-700);
-  background: rgba(255,255,255,.75);
+  border-radius: 999px;
+  color: #fff;
+  background: var(--amethyst-700);
+  box-shadow: 0 4px 10px rgba(91, 42, 134, 0.28);
 }
 
-.treatment-option strong { font-size: 0.79rem; }
+.treatment-option strong {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  padding: 0 0.28rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
 .treatment-option small { color: var(--text-muted); font-size: 0.67rem; line-height: 1.45; }
 .treatment-option em { margin-top: auto; color: var(--amethyst-700); font-size: 0.65rem; font-style: normal; font-weight: 750; }
 .appointment-history {
@@ -2789,7 +2838,7 @@ strong {
   }
   .wellness-card, .quick-actions-card { padding: 1.05rem; }
   .time-slots { grid-template-columns: repeat(3, 1fr); }
-  .treatment-grid { grid-template-columns: 1fr; }
+  .treatment-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .schedule-fields, .field-row, .field-grid--two, .field-grid--three { grid-template-columns: 1fr; }
   .field--full { grid-column: auto; }
   .appointment-row { grid-template-columns: max-content minmax(0,1fr) auto; gap: .6rem; }
