@@ -96,6 +96,39 @@ function servicePhotoUrl(service) {
   return service?.imageUrl || service?.image || service?.photoUrl || "";
 }
 
+function ServicePriceDetails({ price, open }) {
+  if (!price) return null;
+  return (
+    <div className="treatment-option__details" aria-hidden={!open}>
+      <div className="treatment-option__details-inner">
+        <aside className="treatment-price-panel" aria-live={open ? "polite" : "off"}>
+          <span className="eyebrow">Selected service</span>
+          <h3>{price.title}</h3>
+          {price.description ? (
+            <p className="treatment-price-panel__description">{price.description}</p>
+          ) : null}
+          <p className="treatment-price-panel__price">{price.details}</p>
+          {price.lines?.length ? (
+            <dl className="treatment-price-panel__lines">
+              {price.lines.map((line) => (
+                <div key={line.label}>
+                  <dt>{line.label}</dt>
+                  <dd>{line.value}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : null}
+          {price.notes?.map((note) => (
+            <p key={note} className="treatment-price-panel__note">
+              {note}
+            </p>
+          ))}
+        </aside>
+      </div>
+    </div>
+  );
+}
+
 function displayStatus(status) {
   return String(status || "pending").replaceAll("_", " ");
 }
@@ -418,73 +451,54 @@ export function AppointmentsPage() {
               {(catalog.services || []).map((service) => {
                 const selected = form.serviceId === service.id;
                 const photoUrl = servicePhotoUrl(service);
-                const price = selected ? getApprovedClinicPrice(service) : null;
+                const price = getApprovedClinicPrice(service);
                 return (
-                  <button
-                    type="button"
+                  <div
                     key={service.id}
-                    role="radio"
-                    aria-checked={selected}
-                    aria-label={
-                      price
-                        ? `${service.name}, ${price.priceLabel}`
-                        : service.name
-                    }
-                    className={`treatment-option ${selected ? "is-selected" : ""}`}
-                    onClick={() =>
-                      setForm((current) => ({
-                        ...current,
-                        serviceId: current.serviceId === service.id ? "" : service.id,
-                      }))
-                    }
+                    className={`treatment-option-wrap ${selected ? "is-open" : ""}`}
                   >
-                    <span className="treatment-option__media" aria-hidden="true">
-                      {photoUrl ? (
-                        <img
-                          src={photoUrl}
-                          alt=""
-                          className="treatment-option__photo"
-                        />
-                      ) : (
-                        <span className="treatment-option__placeholder" />
-                      )}
-                    </span>
-                    {selected ? (
-                      <span className="treatment-option__check">
-                        <Check size={14} aria-hidden="true" />
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      aria-expanded={selected}
+                      aria-label={
+                        selected
+                          ? `${service.name}, ${price.priceLabel}`
+                          : service.name
+                      }
+                      className={`treatment-option ${selected ? "is-selected" : ""}`}
+                      onClick={() =>
+                        setForm((current) => ({
+                          ...current,
+                          serviceId: current.serviceId === service.id ? "" : service.id,
+                        }))
+                      }
+                    >
+                      <span className="treatment-option__media" aria-hidden="true">
+                        {photoUrl ? (
+                          <img
+                            src={photoUrl}
+                            alt=""
+                            className="treatment-option__photo"
+                          />
+                        ) : (
+                          <span className="treatment-option__placeholder" />
+                        )}
                       </span>
-                    ) : null}
-                    <strong>{service.name}</strong>
-                    {price ? <em>{price.priceLabel}</em> : null}
-                  </button>
+                      {selected ? (
+                        <span className="treatment-option__check">
+                          <Check size={14} aria-hidden="true" />
+                        </span>
+                      ) : null}
+                      <strong>{service.name}</strong>
+                      {selected ? <em>{price.priceLabel}</em> : null}
+                    </button>
+                    <ServicePriceDetails price={price} open={selected} />
+                  </div>
                 );
               })}
             </div>
-            {selectedServicePrice ? (
-              <aside className="treatment-price-panel" aria-live="polite">
-                <span className="eyebrow">Selected service</span>
-                <h3>{selectedServicePrice.title}</h3>
-                {selectedServicePrice.description ? (
-                  <p className="treatment-price-panel__description">{selectedServicePrice.description}</p>
-                ) : null}
-                <p className="treatment-price-panel__price">{selectedServicePrice.details}</p>
-                {selectedServicePrice.lines?.length ? (
-                  <dl className="treatment-price-panel__lines">
-                    {selectedServicePrice.lines.map((line) => (
-                      <div key={line.label}>
-                        <dt>{line.label}</dt>
-                        <dd>{line.value}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                ) : null}
-                {selectedServicePrice.notes?.map((note) => (
-                  <p key={note} className="treatment-price-panel__note">
-                    {note}
-                  </p>
-                ))}
-              </aside>
-            ) : null}
           </section>
 
           <section className="glass-card booking-section">
