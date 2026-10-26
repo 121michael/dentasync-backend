@@ -11098,6 +11098,7 @@ body.is-queue-display .fab-menu {
   --hero-gold: #dcc08f;
   --hero-peach: #f2a77c;
   isolation: isolate;
+  overflow-x: clip;
   background:
     radial-gradient(120% 90% at 0% 0%, rgba(120, 64, 182, 0.55) 0%, transparent 55%),
     radial-gradient(90% 70% at 40% 110%, rgba(84, 34, 124, 0.7) 0%, transparent 60%),
@@ -11342,46 +11343,56 @@ body.is-queue-display .fab-menu {
   }
 }
 
-/* Hero portrait */
+/* Hero clinic reception */
 .landing .landing-hero {
-  grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
 }
 
-.landing .landing-hero .landing-hero__portrait {
+.landing .landing-hero .landing-hero__scene {
   position: relative;
   z-index: 1;
+  align-self: center;
   min-width: 0;
-  margin: 0;
-  padding-right: max(var(--lp-gutter), env(safe-area-inset-right, 0px));
+  margin: 2.25rem max(1.1rem, env(safe-area-inset-right, 0px)) 2.25rem 0;
+  overflow: hidden;
+  border-radius: 36px 18px 18px 36px;
+  box-shadow:
+    0 28px 64px -30px rgba(10, 3, 20, 0.72),
+    inset 0 0 0 1px rgba(220, 192, 143, 0.16);
+  animation: hero-scene 900ms var(--lp-ease) 180ms both;
 }
 
-.landing .landing-hero .landing-hero__portrait::before {
+.landing .landing-hero .landing-hero__scene img {
+  display: block;
+  width: 100%;
+  height: min(68vh, 560px);
+  object-fit: cover;
+  object-position: 34% 52%;
+}
+
+.landing .landing-hero .landing-hero__scene::after {
   content: "";
   position: absolute;
-  inset: 14% 4% 0 8%;
-  z-index: -1;
-  border-radius: 50%;
-  background: radial-gradient(closest-side, rgba(170, 110, 230, 0.34), rgba(124, 66, 182, 0.12) 62%, transparent 100%);
+  inset: 0;
   pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(36, 16, 61, 0.58) 0%, rgba(47, 21, 80, 0.22) 16%, rgba(47, 21, 80, 0.06) 32%, transparent 48%),
+    linear-gradient(0deg, rgba(47, 21, 80, 0.1), rgba(47, 21, 80, 0.1)),
+    linear-gradient(180deg, rgba(20, 8, 34, 0.06) 0%, transparent 18%, transparent 88%, rgba(20, 8, 34, 0.16) 100%);
 }
 
-.landing .landing-hero .landing-hero__portrait img {
-  position: absolute;
-  right: max(var(--lp-gutter), env(safe-area-inset-right, 0px));
-  bottom: 0;
-  left: 0;
-  width: calc(100% - max(var(--lp-gutter), env(safe-area-inset-right, 0px)));
-  height: min(92%, 780px);
-  object-fit: contain;
-  object-position: center bottom;
-  -webkit-mask-image: linear-gradient(to bottom, #000 82%, transparent 100%);
-  mask-image: linear-gradient(to bottom, #000 82%, transparent 100%);
-  animation: hero-portrait 1000ms var(--lp-ease) 240ms both;
-}
-
-@keyframes hero-portrait {
-  from { opacity: 0; transform: translate3d(0, 24px, 0); }
+@keyframes hero-scene {
+  from { opacity: 0; transform: translate3d(12px, 0, 0); }
   to { opacity: 1; transform: none; }
+}
+
+@media (max-width: 1100px) {
+  .landing .landing-hero {
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.85fr);
+  }
+  .landing .landing-hero .landing-hero__scene img {
+    height: min(62vh, 480px);
+  }
 }
 
 @media (max-width: 950px) {
@@ -11389,35 +11400,34 @@ body.is-queue-display .fab-menu {
     grid-template-columns: minmax(0, 1fr);
   }
   .landing .landing-hero .auth-showcase {
-    padding-bottom: 0.5rem;
+    padding-bottom: 0.35rem;
   }
-  .landing .landing-hero .landing-hero__portrait {
-    display: flex;
-    justify-content: center;
-    padding: 0 var(--lp-gutter);
+  .landing .landing-hero .landing-hero__scene {
+    width: min(100% - 2 * var(--lp-gutter), 560px);
+    max-width: none;
+    margin: 0 auto 1.75rem;
+    border-radius: 24px;
   }
-  .landing .landing-hero .landing-hero__portrait::before {
-    inset: 10% 50% 0;
-    width: min(88vw, 460px);
-    transform: translateX(-50%);
-  }
-  .landing .landing-hero .landing-hero__portrait img {
-    position: static;
-    width: auto;
-    max-width: 100%;
-    height: clamp(320px, 62vw, 520px);
+  .landing .landing-hero .landing-hero__scene img {
+    height: clamp(200px, 42vw, 300px);
   }
 }
 
 @media (max-width: 520px) {
-  .landing .landing-hero .landing-hero__portrait img {
-    height: clamp(300px, 92vw, 400px);
+  .landing .landing-hero .landing-hero__scene {
+    width: calc(100% - 2 * var(--lp-gutter));
+    margin-bottom: 1.35rem;
+    border-radius: 20px;
+  }
+  .landing .landing-hero .landing-hero__scene img {
+    height: clamp(168px, 46vw, 220px);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .landing .landing-hero::before,
-  .landing .landing-hero .auth-page__glow {
+  .landing .landing-hero .auth-page__glow,
+  .landing .landing-hero .landing-hero__scene {
     animation: none !important;
   }
 }

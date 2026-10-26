@@ -1,6 +1,5 @@
 import { useRef } from "react";
 import { ChevronDown, Clock, ShieldCheck, Sparkles } from "lucide-react";
-import dentistPortrait from "../assets/landing/dentist-portrait.webp";
 import {
   AboutSection,
   ContactSection,
@@ -83,12 +82,12 @@ export function LandingPage() {
           </a>
         </section>
 
-        <figure className="landing-hero__portrait">
+        <figure className="landing-hero__scene">
           <img
-            src={dentistPortrait}
-            alt="Dr. Evie Sunga in burgundy dental scrubs, smiling with arms crossed"
-            width="927"
-            height="1200"
+            src="/landing/clinic-reception.jpg"
+            alt="Amethyst Dental Clinic reception desk and waiting area"
+            width="1320"
+            height="887"
             decoding="async"
             fetchPriority="high"
           />
