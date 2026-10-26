@@ -1,5 +1,7 @@
 const CASE_ASSESSMENT_NOTE =
   "Final price depends on your dental needs and the dentist's assessment.";
+const COMPACT_CASE_NOTE =
+  "Final price depends on the patient's dental needs and assessment.";
 const FREE_CONSULTATION_NOTE =
   "Book a FREE consultation / oral examination so our dentist can assess your needs.";
 const DENTURE_ADVICE_NOTE =
@@ -215,14 +217,29 @@ export function getApprovedClinicPrice(service) {
       ...UNAVAILABLE_PRICE,
       title: service.name || "Selected service",
       description: service.description || "",
+      compactNote: UNAVAILABLE_PRICE.notes[0] || "",
+      extraNotes: [],
     };
   }
+
+  const compactNote = match.dependsOnCase
+    ? COMPACT_CASE_NOTE
+    : match.notes?.includes(PER_UNIT_NOTE)
+      ? PER_UNIT_NOTE
+      : match.notes?.[0] || "";
+  const extraNotes = (match.notes || []).filter((note) => {
+    if (match.dependsOnCase && note === CASE_ASSESSMENT_NOTE) return false;
+    if (note === compactNote) return false;
+    return true;
+  });
 
   return {
     ...match,
     title: service.name || match.title,
     description: service.description || match.description,
     verified: true,
+    compactNote,
+    extraNotes,
   };
 }
 

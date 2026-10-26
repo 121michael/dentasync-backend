@@ -1861,20 +1861,20 @@ strong {
 
 .booking-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(270px, 0.32fr);
+  grid-template-columns: minmax(0, 1fr) minmax(248px, 0.3fr);
   align-items: start;
-  gap: 1rem;
+  gap: 0.85rem;
   overflow: visible;
 }
 
 .booking-form {
   display: grid;
-  gap: 0.9rem;
+  gap: 0.75rem;
   overflow: visible;
 }
 
 .booking-section {
-  padding: 1.3rem;
+  padding: 1rem 1.05rem 1.05rem;
   overflow: visible;
 }
 
@@ -1911,10 +1911,10 @@ strong {
 
 .treatment-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
   align-items: start;
-  gap: 0.75rem;
-  margin-top: 1.1rem;
+  gap: 0.58rem;
+  margin-top: 0.7rem;
 }
 
 .treatment-option-wrap {
@@ -1927,11 +1927,12 @@ strong {
   position: relative;
   display: grid;
   align-content: start;
-  gap: 0.62rem;
+  gap: 0.42rem;
   min-width: 0;
-  padding: 0.45rem 0.45rem 0.7rem;
+  min-height: 100%;
+  padding: 0.32rem 0.32rem 0.48rem;
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: 14px;
   color: var(--text);
   text-align: left;
   background: var(--surface-solid);
@@ -1942,7 +1943,7 @@ strong {
 .treatment-option:hover,
 .treatment-option:focus-visible {
   border-color: var(--amethyst-500);
-  background: color-mix(in srgb, var(--amethyst-100) 70%, var(--surface-solid));
+  background: color-mix(in srgb, var(--amethyst-100) 55%, var(--surface-solid));
 }
 
 .treatment-option:focus-visible {
@@ -1952,15 +1953,15 @@ strong {
 
 .treatment-option.is-selected {
   border-color: var(--amethyst-600);
-  background: var(--amethyst-100);
-  box-shadow: 0 10px 24px rgba(105, 55, 155, 0.14);
+  background: color-mix(in srgb, var(--amethyst-100) 82%, white);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--amethyst-500) 35%, transparent);
 }
 
 .treatment-option__media {
   display: block;
   overflow: hidden;
-  aspect-ratio: 4 / 3;
-  border-radius: 12px;
+  aspect-ratio: 16 / 10;
+  border-radius: 10px;
   background:
     linear-gradient(160deg, rgba(240, 233, 251, 0.95) 0%, rgba(217, 196, 241, 0.55) 48%, rgba(255, 255, 255, 0.7) 100%);
 }
@@ -1984,47 +1985,39 @@ strong {
 
 .treatment-option__check {
   position: absolute;
-  top: 0.72rem;
-  right: 0.72rem;
+  top: 0.48rem;
+  right: 0.48rem;
   z-index: 1;
   display: grid;
-  width: 1.45rem;
-  height: 1.45rem;
+  width: 1.15rem;
+  height: 1.15rem;
   place-items: center;
   border-radius: 999px;
   color: #fff;
   background: var(--amethyst-700);
-  box-shadow: 0 4px 10px rgba(91, 42, 134, 0.28);
+  box-shadow: 0 2px 6px rgba(91, 42, 134, 0.22);
 }
 
 .treatment-option strong {
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  padding: 0 0.28rem;
-  font-size: 0.8rem;
+  min-height: 2.16em;
+  padding: 0 0.18rem;
+  font-size: 0.74rem;
   font-weight: 700;
-  line-height: 1.35;
+  line-height: 1.28;
 }
 
 .treatment-option small { color: var(--text-muted); font-size: 0.67rem; line-height: 1.45; }
-.treatment-option em {
-  margin-top: -0.2rem;
-  padding: 0 0.28rem;
-  color: var(--amethyst-700);
-  font-size: 0.68rem;
-  font-style: normal;
-  font-weight: 750;
-  line-height: 1.35;
-}
 
 .treatment-option__details {
   display: grid;
   grid-template-rows: 0fr;
   opacity: 0;
   pointer-events: none;
-  transition: grid-template-rows 320ms ease, opacity 240ms ease;
+  transition: grid-template-rows 280ms ease, opacity 200ms ease;
 }
 
 .treatment-option-wrap.is-open .treatment-option__details {
@@ -2040,24 +2033,25 @@ strong {
 
 .treatment-price-panel {
   display: grid;
-  gap: 0.38rem;
+  gap: 0.18rem;
   min-width: 0;
-  margin-top: 0.55rem;
-  padding: 0.8rem 0.85rem;
+  margin-top: 0.4rem;
+  padding: 0.55rem 0.62rem 0.58rem;
   overflow-wrap: anywhere;
-  border: 1px solid color-mix(in srgb, var(--amethyst-500) 35%, var(--border));
-  border-radius: 14px;
-  background: linear-gradient(180deg, var(--amethyst-100), color-mix(in srgb, var(--surface-solid) 88%, white));
+  border: 1px solid color-mix(in srgb, var(--amethyst-600) 42%, var(--border));
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--amethyst-500) 16%, transparent);
 }
 
 .treatment-option-wrap.is-open .treatment-price-panel {
-  animation: treatment-details-in 340ms ease both;
+  animation: treatment-details-in 280ms ease both;
 }
 
 @keyframes treatment-details-in {
   from {
     opacity: 0;
-    transform: translate3d(0, 8px, 0);
+    transform: translate3d(0, 6px, 0);
   }
   to {
     opacity: 1;
@@ -2074,56 +2068,93 @@ strong {
   }
 }
 
-.treatment-price-panel .eyebrow {
-  color: var(--amethyst-700);
-}
-
 .treatment-price-panel h3 {
   margin: 0;
   color: var(--text-strong);
-  font-size: 1rem;
+  font-size: 0.86rem;
+  font-weight: 750;
+  line-height: 1.28;
+}
+
+.treatment-price-panel__description {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.74rem;
   line-height: 1.35;
 }
 
-.treatment-price-panel__description,
 .treatment-price-panel__note {
   margin: 0;
   color: var(--text-muted);
-  font-size: 0.82rem;
-  line-height: 1.5;
+  font-size: 0.7rem;
+  font-style: italic;
+  line-height: 1.35;
 }
 
 .treatment-price-panel__price {
-  margin: 0.15rem 0 0;
+  margin: 0.04rem 0 0;
   color: var(--amethyst-800);
-  font-size: 0.98rem;
+  font-size: 0.9rem;
   font-weight: 750;
-  line-height: 1.4;
+  line-height: 1.3;
+}
+
+.treatment-price-panel__more {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.22rem;
+  width: fit-content;
+  margin-top: 0.12rem;
+  padding: 0;
+  border: 0;
+  color: var(--amethyst-700);
+  font-size: 0.66rem;
+  font-weight: 700;
+  background: transparent;
+  cursor: pointer;
+}
+
+.treatment-price-panel__more svg {
+  transition: transform 180ms ease;
+}
+
+.treatment-price-panel__more[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.treatment-price-panel__extra {
+  display: grid;
+  gap: 0.22rem;
+  min-width: 0;
+}
+
+.treatment-price-panel__extra .treatment-price-panel__note {
+  font-style: normal;
 }
 
 .treatment-price-panel__lines {
   display: grid;
-  gap: 0.45rem;
-  margin: 0.35rem 0 0;
+  gap: 0.28rem;
+  margin: 0.12rem 0 0;
 }
 
 .treatment-price-panel__lines > div {
   display: grid;
-  gap: 0.12rem;
+  gap: 0.04rem;
 }
 
 .treatment-price-panel__lines dt {
   color: var(--text-muted);
-  font-size: 0.72rem;
+  font-size: 0.64rem;
   font-weight: 700;
 }
 
 .treatment-price-panel__lines dd {
   margin: 0;
   color: var(--text-strong);
-  font-size: 0.86rem;
+  font-size: 0.74rem;
   font-weight: 650;
-  line-height: 1.4;
+  line-height: 1.35;
 }
 .appointment-history {
   margin-top: 0.35rem;
@@ -2304,21 +2335,61 @@ strong {
   position: sticky;
   top: 98px;
   display: grid;
-  gap: 0.95rem;
-  padding: 1.3rem;
-  border: 1px solid rgba(119, 73, 166, 0.2);
-  border-radius: 20px;
+  gap: 0.55rem;
+  padding: 0.9rem 0.95rem 1rem;
+  border: 1px solid rgba(119, 73, 166, 0.18);
+  border-radius: 16px;
   background:
-    radial-gradient(circle at 85% 0, rgba(193, 151, 234, 0.25), transparent 10rem),
+    radial-gradient(circle at 85% 0, rgba(193, 151, 234, 0.18), transparent 9rem),
     var(--surface);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--shadow-sm);
 }
 
-.booking-summary h2 { font-size: 1.15rem; letter-spacing: -0.04em; }
-.booking-summary__line { display: grid; gap: 0.22rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--border); }
-.booking-summary__line span { color: var(--text-muted); font-size: 0.65rem; font-weight: 650; }
-.booking-summary__line strong { font-size: 0.76rem; }
-.booking-summary > p { color: var(--text-muted); font-size: 0.64rem; line-height: 1.5; }
+.booking-summary__toggle {
+  display: none;
+}
+
+.booking-summary__intro h2 {
+  margin: 0.12rem 0 0;
+  font-size: 1.02rem;
+  letter-spacing: -0.04em;
+}
+
+.booking-summary__body {
+  display: grid;
+  gap: 0;
+}
+
+.booking-summary__line {
+  display: grid;
+  grid-template-columns: 4.6rem minmax(0, 1fr);
+  align-items: start;
+  gap: 0.55rem;
+  padding: 0.42rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.booking-summary__line span {
+  color: var(--text-muted);
+  font-size: 0.62rem;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.booking-summary__line strong {
+  min-width: 0;
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.booking-summary > p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.62rem;
+  line-height: 1.45;
+}
 
 .appointment-history {
   padding: 1.3rem;
@@ -2807,11 +2878,21 @@ strong {
   .metrics-grid { grid-template-columns: repeat(2, 1fr); }
   .booking-layout { grid-template-columns: 1fr; }
   .booking-summary { position: static; }
+  .treatment-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
   .records-layout { grid-template-columns: 1fr; }
   .profile-layout { grid-template-columns: 1fr; }
   .profile-security-stack { grid-template-columns: repeat(3, 1fr); }
   .support-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .support-grid .support-card:last-child { grid-column: 1 / -1; }
+}
+
+@media (max-width: 820px) {
+  .treatment-option-wrap.is-open {
+    grid-column: 1 / -1;
+  }
+  .treatment-option-wrap.is-open .treatment-option {
+    width: min(100%, 230px);
+  }
 }
 
 @media (max-width: 950px) {
@@ -2960,7 +3041,71 @@ strong {
   }
   .wellness-card, .quick-actions-card { padding: 1.05rem; }
   .time-slots { grid-template-columns: repeat(3, 1fr); }
-  .treatment-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .treatment-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; margin-top: 0.55rem; }
+  .treatment-option-wrap.is-open {
+    grid-column: 1 / -1;
+  }
+  .treatment-option-wrap.is-open .treatment-option {
+    width: min(100%, calc((100% - 0.5rem) / 2));
+    max-width: 230px;
+  }
+  .appointments-page { gap: 0.85rem; }
+  .booking-form { gap: 0.65rem; }
+  .booking-section { padding: 0.85rem 0.8rem 0.9rem; }
+  .booking-summary {
+    gap: 0.5rem;
+    padding: 0.72rem 0.78rem 0.85rem;
+    border-radius: 14px;
+  }
+  .booking-summary__intro { display: none; }
+  .booking-summary__toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.7rem;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    color: inherit;
+    text-align: left;
+    background: transparent;
+    cursor: pointer;
+  }
+  .booking-summary__toggle span {
+    display: grid;
+    gap: 0.12rem;
+    min-width: 0;
+  }
+  .booking-summary__toggle strong {
+    font-size: 0.92rem;
+    letter-spacing: -0.03em;
+  }
+  .booking-summary__toggle small {
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+  .booking-summary__toggle svg {
+    flex-shrink: 0;
+    color: var(--amethyst-700);
+    transition: transform 180ms ease;
+  }
+  .booking-summary.is-open .booking-summary__toggle svg {
+    transform: rotate(180deg);
+  }
+  .booking-summary.is-open .booking-summary__toggle small {
+    display: none;
+  }
+  .booking-summary__body {
+    display: none;
+  }
+  .booking-summary.is-open .booking-summary__body {
+    display: grid;
+  }
+  .booking-summary .button--wide {
+    margin-top: 0.1rem;
+  }
   .schedule-fields, .field-row, .field-grid--two, .field-grid--three { grid-template-columns: 1fr; }
   .field--full { grid-column: auto; }
   .appointment-row { grid-template-columns: max-content minmax(0,1fr) auto; gap: .6rem; }

@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
   CalendarDays,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Clock3,
@@ -97,32 +98,66 @@ function servicePhotoUrl(service) {
 }
 
 function ServicePriceDetails({ price, open }) {
+  const [more, setMore] = useState(false);
+
+  useEffect(() => {
+    if (!open) setMore(false);
+  }, [open]);
+
   if (!price) return null;
+
+  const extraNotes = price.extraNotes || [];
+  const hasMore = Boolean(price.lines?.length || extraNotes.length);
+
   return (
     <div className="treatment-option__details" aria-hidden={!open}>
       <div className="treatment-option__details-inner">
         <aside className="treatment-price-panel" aria-live={open ? "polite" : "off"}>
-          <span className="eyebrow">Selected service</span>
           <h3>{price.title}</h3>
           {price.description ? (
             <p className="treatment-price-panel__description">{price.description}</p>
           ) : null}
-          <p className="treatment-price-panel__price">{price.details}</p>
-          {price.lines?.length ? (
-            <dl className="treatment-price-panel__lines">
-              {price.lines.map((line) => (
-                <div key={line.label}>
-                  <dt>{line.label}</dt>
-                  <dd>{line.value}</dd>
-                </div>
-              ))}
-            </dl>
+          <p className="treatment-price-panel__price">
+            {price.lines?.length ? price.details : price.priceLabel}
+          </p>
+          {price.compactNote ? (
+            <p className="treatment-price-panel__note">{price.compactNote}</p>
           ) : null}
-          {price.notes?.map((note) => (
-            <p key={note} className="treatment-price-panel__note">
-              {note}
-            </p>
-          ))}
+          {hasMore ? (
+            <>
+              <button
+                type="button"
+                className="treatment-price-panel__more"
+                aria-expanded={more}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setMore((current) => !current);
+                }}
+              >
+                {more ? "Less details" : "More details"}
+                <ChevronDown size={14} aria-hidden="true" />
+              </button>
+              {more ? (
+                <div className="treatment-price-panel__extra">
+                  {price.lines?.length ? (
+                    <dl className="treatment-price-panel__lines">
+                      {price.lines.map((line) => (
+                        <div key={line.label}>
+                          <dt>{line.label}</dt>
+                          <dd>{line.value}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  ) : null}
+                  {extraNotes.map((note) => (
+                    <p key={note} className="treatment-price-panel__note">
+                      {note}
+                    </p>
+                  ))}
+                </div>
+              ) : null}
+            </>
+          ) : null}
         </aside>
       </div>
     </div>
@@ -162,6 +197,7 @@ export function AppointmentsPage() {
     forPatientUserId: "",
   });
   const [authorizationFile, setAuthorizationFile] = useState(null);
+  const [visitSummaryOpen, setVisitSummaryOpen] = useState(false);
   const [focusKey, setFocusKey] = useState(() => searchParams.get("focus") || "");
   const focusedCardRef = useRef(null);
 
@@ -488,11 +524,10 @@ export function AppointmentsPage() {
                       </span>
                       {selected ? (
                         <span className="treatment-option__check">
-                          <Check size={14} aria-hidden="true" />
+                          <Check size={12} aria-hidden="true" />
                         </span>
                       ) : null}
                       <strong>{service.name}</strong>
-                      {selected ? <em>{price.priceLabel}</em> : null}
                     </button>
                     <ServicePriceDetails price={price} open={selected} />
                   </div>
@@ -704,30 +739,51 @@ export function AppointmentsPage() {
           </section>
         </div>
 
-        <aside className="booking-summary">
-          <span className="eyebrow">04 — Confirmation</span>
-          <h2>Your visit summary</h2>
-          <div className="booking-summary__line">
-            <span>Service</span>
-            <strong>{selectedService?.name || "Select a service"}</strong>
+        <aside className={`booking-summary ${visitSummaryOpen ? "is-open" : ""}`}>
+          <button
+            type="button"
+            className="booking-summary__toggle"
+            aria-expanded={visitSummaryOpen}
+            onClick={() => setVisitSummaryOpen((current) => !current)}
+          >
+            <span>
+              <span className="eyebrow">04 — Confirmation</span>
+              <strong>Visit Summary</strong>
+              <small>
+                {selectedService
+                  ? `${selectedService.name} · ${selectedServicePrice?.priceLabel || "Price to confirm"}`
+                  : "Select a service to review your visit"}
+              </small>
+            </span>
+            <ChevronDown size={18} aria-hidden="true" />
+          </button>
+          <div className="booking-summary__intro">
+            <span className="eyebrow">04 — Confirmation</span>
+            <h2>Your visit summary</h2>
           </div>
-          {selectedServicePrice ? (
+          <div className="booking-summary__body">
             <div className="booking-summary__line">
-              <span>Price</span>
-              <strong>{selectedServicePrice.details}</strong>
+              <span>Service</span>
+              <strong>{selectedService?.name || "Select a service"}</strong>
             </div>
-          ) : null}
-          <div className="booking-summary__line">
-            <span>Date</span>
-            <strong>{form.appointmentDate ? displayDate(form.appointmentDate) : "Choose a date"}</strong>
-          </div>
-          <div className="booking-summary__line">
-            <span>Time</span>
-            <strong>{form.appointmentTime ? displayTime(form.appointmentTime) : "Choose a time"}</strong>
-          </div>
-          <div className="booking-summary__line">
-            <span>Coverage</span>
-            <strong>{form.coverageType === "hmo" ? "HMO coverage" : "Out of pocket"}</strong>
+            {selectedServicePrice ? (
+              <div className="booking-summary__line">
+                <span>Price</span>
+                <strong>{selectedServicePrice.details}</strong>
+              </div>
+            ) : null}
+            <div className="booking-summary__line">
+              <span>Date</span>
+              <strong>{form.appointmentDate ? displayDate(form.appointmentDate) : "Choose a date"}</strong>
+            </div>
+            <div className="booking-summary__line">
+              <span>Time</span>
+              <strong>{form.appointmentTime ? displayTime(form.appointmentTime) : "Choose a time"}</strong>
+            </div>
+            <div className="booking-summary__line">
+              <span>Coverage</span>
+              <strong>{form.coverageType === "hmo" ? "HMO coverage" : "Out of pocket"}</strong>
+            </div>
           </div>
           <button
             className="button button--primary button--wide"
