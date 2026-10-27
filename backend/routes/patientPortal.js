@@ -100,11 +100,46 @@ const SERVICES = [
     estimatedCost: 15000,
   },
   {
-    id: "dentures-bridge-crown",
-    name: "Dentures / Fixed Bridge / Crown",
-    description: "Dentures, fixed bridge, or crown.",
+    id: "dentures",
+    name: "Dentures",
+    description: "Removable dentures to replace missing teeth. The dentist confirms the type and materials after an exam.",
     durationMinutes: 60,
-    estimatedCost: 10000,
+    estimatedCost: 7500,
+  },
+  {
+    id: "fixed-bridge",
+    name: "Fixed Bridge",
+    description: "A fixed bridge to replace missing teeth, priced per unit after the dentist assesses the case.",
+    durationMinutes: 60,
+    estimatedCost: 7000,
+  },
+  {
+    id: "dental-crowns",
+    name: "Dental Crowns",
+    description: "A dental crown to restore a tooth. Porcelain-fused-to-metal and zirconia options are confirmed after an exam.",
+    durationMinutes: 60,
+    estimatedCost: 7000,
+  },
+  {
+    id: "veneers",
+    name: "Veneers",
+    description: "Thin coverings placed on the front of teeth to improve appearance. The dentist confirms whether veneers are appropriate after an exam.",
+    durationMinutes: 60,
+    estimatedCost: 0,
+  },
+  {
+    id: "dental-implants",
+    name: "Dental Implants",
+    description: "A dental implant to replace a missing tooth. Suitability and treatment steps are confirmed after an exam.",
+    durationMinutes: 90,
+    estimatedCost: 0,
+  },
+  {
+    id: "gum-contouring",
+    name: "Gum Contouring",
+    description: "Gum contouring to reshape gum tissue. The dentist confirms whether this treatment is appropriate after an exam.",
+    durationMinutes: 60,
+    estimatedCost: 0,
   },
 ];
 
@@ -113,6 +148,7 @@ function mapCatalogService(service) {
   return {
     id: service.id,
     name: service.name,
+    description: service.description || "",
     estimatedCost: service.estimatedCost,
   };
 }

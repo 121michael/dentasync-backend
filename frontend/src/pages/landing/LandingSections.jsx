@@ -479,6 +479,17 @@ export function ServicesSection({ services, status, onRetry }) {
               onSelect={setActiveIndex}
               renderItem={(service, index) => (
                 <>
+                  <span className="landing-service-card__media" aria-hidden="true">
+                    {service.imageUrl || service.image || service.photoUrl ? (
+                      <img
+                        src={service.imageUrl || service.image || service.photoUrl}
+                        alt=""
+                        className="landing-service-card__photo"
+                      />
+                    ) : (
+                      <span className="landing-service-card__placeholder" />
+                    )}
+                  </span>
                   <span className="landing-service-card__top">
                     <span className="landing-service-card__index">{String(index + 1).padStart(2, "0")}</span>
                     <span className="landing-service-card__glyph">

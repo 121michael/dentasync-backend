@@ -656,6 +656,33 @@ test("approved price catalog answers skip Gemini so knowledge updates apply imme
   }
 });
 
+test("veneers implants and gum contouring do not invent peso amounts", () => {
+  const veneers = answerFromCatalog("How much are veneers?", options);
+  assert.equal(veneers.source, "catalog");
+  assert.match(veneers.answer, /Veneers/i);
+  assert.match(veneers.answer, /consultation/i);
+  assert.doesNotMatch(veneers.answer, /₱\d/);
+
+  const implants = answerFromCatalog("How much are dental implants?", options);
+  assert.match(implants.answer, /Dental Implants/i);
+  assert.match(implants.answer, /consultation/i);
+  assert.doesNotMatch(implants.answer, /₱\d/);
+
+  const gums = answerFromCatalog("How much is gum contouring?", options);
+  assert.match(gums.answer, /Gum Contouring/i);
+  assert.match(gums.answer, /consultation/i);
+  assert.doesNotMatch(gums.answer, /₱\d/);
+});
+
+test("dentures stay independent from crown and bridge prices", () => {
+  const dentures = answerFromCatalog("How much are dentures?", options);
+  assert.match(dentures.answer, /Starting at ₱7,500/);
+  assert.doesNotMatch(dentures.answer, /₱7,000 per unit/);
+
+  const bridge = answerFromCatalog("How much is a fixed bridge?", options);
+  assert.match(bridge.answer, /₱7,000 per unit/);
+});
+
 test("assistant chat rate limit blocks a burst of questions", () => {
   resetAssistantRateLimit();
   for (let index = 0; index < 25; index += 1) {
