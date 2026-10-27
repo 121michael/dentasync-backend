@@ -326,8 +326,7 @@
 }
 
 .portal-shell .booking-summary {
-  border: 1px solid var(--border);
-  background: var(--surface-solid);
+  border-color: color-mix(in srgb, var(--amethyst-600) 28%, rgba(212, 175, 122, 0.35));
 }
 
 .portal-shell .file-drop {

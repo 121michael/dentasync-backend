@@ -808,6 +808,9 @@ export function AppointmentsPage() {
             aria-expanded={visitSummaryOpen}
             onClick={() => setVisitSummaryOpen((current) => !current)}
           >
+            <span className="booking-summary__mark" aria-hidden="true">
+              <CalendarDays size={16} />
+            </span>
             <span>
               <span className="eyebrow">04 — Confirmation</span>
               <strong>Visit Summary</strong>
@@ -820,8 +823,13 @@ export function AppointmentsPage() {
             <ChevronDown size={18} aria-hidden="true" />
           </button>
           <div className="booking-summary__intro">
-            <span className="eyebrow">04 — Confirmation</span>
-            <h2>Your visit summary</h2>
+            <span className="booking-summary__mark" aria-hidden="true">
+              <CalendarDays size={18} />
+            </span>
+            <div>
+              <span className="eyebrow">04 — Confirmation</span>
+              <h2>Your visit summary</h2>
+            </div>
           </div>
           <div className="booking-summary__body">
             <div className="booking-summary__line">
