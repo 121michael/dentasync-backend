@@ -458,16 +458,21 @@ export function AppointmentsPage() {
 
   if (!isBooking) {
     return (
-      <div className="appointments-page">
+      <div className="appointments-page appointments-page--list">
         <SectionHeading
           eyebrow="Your bookings"
           title="Appointment"
           detail="Only appointments you booked appear here — not the service catalog or clinical treatment records."
         />
 
-        <div className="admin-heading-actions" style={{ marginBottom: "1rem" }}>
-          <button type="button" className="button button--primary" onClick={() => navigate("/appointments/book")}>
-            Book an Appointment <ChevronRight size={18} />
+        <div className="admin-heading-actions appointments-book-cta-wrap">
+          <button
+            type="button"
+            className="button button--primary appointments-book-cta"
+            onClick={() => navigate("/appointments/book")}
+          >
+            <CalendarDays size={16} aria-hidden="true" />
+            Book Appointment
           </button>
         </div>
 
@@ -529,11 +534,6 @@ export function AppointmentsPage() {
             <EmptyState
               title="No appointment history yet."
               detail="Book an appointment to see it listed here with the service you selected."
-              action={
-                <button type="button" className="button button--primary" onClick={() => navigate("/appointments/book")}>
-                  Book an Appointment
-                </button>
-              }
             />
           )}
         </section>

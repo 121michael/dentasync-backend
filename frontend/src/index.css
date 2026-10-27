@@ -1829,6 +1829,87 @@ strong {
   gap: 1.35rem;
 }
 
+.appointments-book-cta-wrap {
+  margin-bottom: 1rem;
+}
+
+.appointments-book-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0.55rem 1.05rem 0.55rem 0.85rem;
+  border: 0;
+  border-radius: 999px;
+  color: #fff;
+  letter-spacing: -0.02em;
+  background:
+    radial-gradient(circle at 22% 18%, rgba(255, 255, 255, 0.22), transparent 42%),
+    linear-gradient(145deg, #b57ae8 0%, var(--amethyst-600) 48%, #2f1148 100%);
+  box-shadow:
+    0 8px 18px rgba(62, 24, 98, 0.22),
+    0 0 0 3px color-mix(in srgb, var(--amethyst-100) 68%, transparent);
+  transition: transform 200ms ease, box-shadow 200ms ease, filter 200ms ease;
+}
+
+.appointments-book-cta svg {
+  flex: 0 0 auto;
+}
+
+@media (hover: hover) {
+  .appointments-book-cta:hover:not(:disabled),
+  .appointments-book-cta:focus-visible {
+    transform: translateY(-2px);
+    filter: brightness(1.05);
+    box-shadow:
+      0 12px 22px rgba(62, 24, 98, 0.28),
+      0 0 0 4px color-mix(in srgb, var(--amethyst-100) 78%, transparent);
+  }
+}
+
+.appointments-book-cta:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+@media (max-width: 1180px) {
+  .appointments-page--list {
+    padding-bottom: 1rem;
+  }
+
+  .appointments-page--list .appointments-book-cta-wrap {
+    margin-bottom: 0;
+  }
+
+  .appointments-page--list .appointments-book-cta {
+    position: fixed;
+    z-index: 23;
+    left: max(0.75rem, env(safe-area-inset-left, 0px));
+    right: auto;
+    bottom: calc(1.2rem + env(safe-area-inset-bottom, 0px));
+    width: max-content;
+    max-width: calc(100vw - 8.75rem);
+  }
+}
+
+@media (max-width: 980px) {
+  .appointments-page--list .appointments-book-cta {
+    bottom: calc(6.45rem + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .appointments-book-cta,
+  .appointments-book-cta:hover:not(:disabled),
+  .appointments-book-cta:focus-visible,
+  .appointments-book-cta:active:not(:disabled) {
+    transition: none !important;
+    transform: none;
+    filter: none;
+  }
+}
+
 .booking-progress {
   display: flex;
   flex-wrap: wrap;
@@ -3460,6 +3541,12 @@ strong {
     padding: 0.55rem 1rem;
     font-size: 0.8rem;
   }
+
+  .appointments-page--list .appointments-book-cta {
+    min-height: 44px;
+    padding: 0.55rem 1.05rem 0.55rem 0.85rem;
+    font-size: 0.82rem;
+  }
   .booking-summary .button--wide {
     width: auto;
     align-self: stretch;
@@ -3507,6 +3594,10 @@ strong {
   .appointments-page .admin-heading-actions .button,
   .appointments-page .empty-state .button {
     width: auto;
+  }
+
+  .appointments-page--list .appointments-book-cta {
+    width: max-content;
   }
 }
 
