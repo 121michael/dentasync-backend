@@ -3034,6 +3034,17 @@ strong {
   .auth-showcase__tagline-family {
     font-size: clamp(1.12rem, 8.8vw, 1.55rem);
   }
+  .landing .landing-hero .auth-showcase__tagline {
+    width: auto;
+    max-width: 100%;
+  }
+  .landing .landing-hero .auth-showcase__tagline-accent {
+    margin: 0 0 -0.12em 0.18em;
+    transform: rotate(-7deg);
+  }
+  .landing .landing-hero .auth-showcase__tagline-foot {
+    width: auto;
+  }
   .auth-panel { padding: 1.25rem; }
   .auth-card h2 { font-size: 1.5rem; }
   .dashboard-welcome h1 { font-size: 1.7rem; }
@@ -3066,6 +3077,16 @@ strong {
   .auth-showcase__tagline-foot {
     width: 86%;
     gap: 0.3em 0.45em;
+  }
+
+  .landing .landing-hero .auth-showcase__tagline-accent {
+    margin: 0 0 -0.12em 0.12em;
+    font-size: clamp(1.55rem, 0.84em, 2.1rem);
+    transform: rotate(-7deg);
+  }
+
+  .landing .landing-hero .auth-showcase__tagline-foot {
+    width: auto;
   }
 
   .queue-hero {
@@ -10888,39 +10909,52 @@ body.is-queue-display .fab-menu {
     grid-template-columns: minmax(0, 1fr);
     min-height: 0;
   }
-  .landing .auth-showcase {
-    min-height: 0;
-    align-items: center;
-    padding: 2.25rem var(--lp-gutter) 2.5rem;
-    text-align: center;
-  }
-  .landing .auth-showcase__copy {
-    justify-items: center;
-    gap: 1.1rem;
-  }
-  .landing .auth-showcase__tagline {
-    align-items: center;
-    font-size: clamp(1.6rem, 4.6vw, 2.3rem);
-  }
-  .landing .auth-showcase__tagline-lead {
-    text-align: center;
-  }
-  .landing .auth-showcase__tagline-main {
+  .landing .landing-hero .auth-showcase {
+    align-items: flex-start;
     justify-content: center;
+    min-height: clamp(520px, 82svh, 720px);
+    padding: 3rem max(var(--lp-gutter), env(safe-area-inset-left, 0px)) 4.5rem;
+    text-align: left;
   }
-  .landing .auth-showcase__tagline-foot {
-    justify-content: center;
+  .landing .landing-hero .auth-showcase__copy {
+    justify-items: start;
+    gap: 1.25rem;
+    max-width: 34rem;
   }
-  .landing .auth-showcase__highlights {
+  .landing .landing-hero .auth-showcase__tagline {
+    align-items: flex-start;
+    font-size: clamp(2.05rem, 6.2vw, 3.2rem);
+  }
+  .landing .landing-hero .auth-showcase__tagline-lead {
+    text-align: left;
+  }
+  .landing .landing-hero .auth-showcase__tagline-main {
+    justify-content: start;
+  }
+  .landing .landing-hero .auth-showcase__tagline-foot {
+    justify-content: flex-start;
+  }
+  .landing .landing-hero .auth-showcase__highlights {
     display: flex;
     flex-wrap: wrap;
-    justify-content: center;
-    gap: 0.4rem 1.1rem;
+    justify-content: flex-start;
+    gap: 0.5rem 1.15rem;
     margin: 0;
+    padding: 0;
+    list-style: none;
+    color: rgba(248, 241, 255, 0.86);
     font-size: 0.84rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
   }
-  .landing-hero__scroll {
-    display: none;
+  .landing .landing-hero .auth-showcase__highlights li {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.42rem;
+  }
+  .landing .landing-hero .auth-showcase__highlights svg {
+    flex-shrink: 0;
+    color: var(--hero-gold, #dcc08f);
   }
   .landing .auth-panel {
     padding: 2.5rem var(--lp-gutter) 2.75rem;
@@ -11036,9 +11070,9 @@ body.is-queue-display .fab-menu {
     width: 38px;
     height: 38px;
   }
-  .landing .auth-showcase {
-    padding-top: 1.75rem;
-    padding-bottom: 2rem;
+  .landing .landing-hero .auth-showcase {
+    padding-top: 2.25rem;
+    padding-bottom: 4rem;
   }
   .landing .auth-panel {
     padding-top: 2rem;
@@ -11074,8 +11108,8 @@ body.is-queue-display .fab-menu {
 }
 
 @media (max-width: 460px) {
-  .landing-header__brand .brand-mark__text {
-    display: none;
+  .landing-header__brand .brand-mark__text strong {
+    font-size: 0.82rem;
   }
 }
 
@@ -11316,44 +11350,35 @@ body.is-queue-display .fab-menu {
 
 @media (max-width: 950px) {
   .landing .landing-hero .auth-showcase__copy {
-    max-width: 36rem;
+    max-width: 34rem;
     gap: 1.25rem;
-  }
-  .landing .landing-hero .auth-showcase__copy .eyebrow::after {
-    content: "";
-    width: 2rem;
-    height: 1px;
-    background: linear-gradient(90deg, var(--hero-gold), transparent);
-  }
-  .landing .landing-hero .auth-showcase__tagline {
-    font-size: clamp(2.05rem, 6.4vw, 3.4rem);
-  }
-  .landing .landing-hero .auth-showcase__tagline-support {
-    text-align: right;
   }
   .landing .landing-hero .auth-showcase__lede {
     display: block;
-    max-width: 32rem;
-    margin-inline: auto;
+    max-width: 30rem;
+    margin-inline: 0;
+    text-align: left;
+  }
+  .landing .landing-hero .landing-hero__scroll {
+    display: inline-flex;
   }
 }
 
 @media (max-width: 520px) {
   .landing .landing-hero .auth-showcase__copy .eyebrow {
-    gap: 0.5rem;
-    font-size: 0.62rem;
-    letter-spacing: 0.18em;
-  }
-  .landing .landing-hero .auth-showcase__copy .eyebrow::before,
-  .landing .landing-hero .auth-showcase__copy .eyebrow::after {
-    display: none;
-  }
-  .landing .landing-hero .auth-showcase__copy .eyebrow {
-    max-width: 18rem;
-    line-height: 1.6;
+    gap: 0.55rem;
+    font-size: 0.64rem;
+    letter-spacing: 0.2em;
   }
   .landing .landing-hero .auth-showcase__tagline {
-    font-size: clamp(1.8rem, 9.2vw, 2.4rem);
+    font-size: clamp(1.72rem, 8.4vw, 2.35rem);
+  }
+  .landing .landing-hero .auth-showcase__tagline-accent {
+    font-size: clamp(1.7rem, 0.86em, 2.4rem);
+  }
+  .landing .landing-hero .auth-showcase__lede {
+    font-size: 0.95rem;
+    line-height: 1.65;
   }
 }
 
@@ -11400,73 +11425,48 @@ body.is-queue-display .fab-menu {
 }
 
 @media (max-width: 950px) {
-  .landing .landing-hero .auth-showcase {
-    padding-bottom: 2.5rem;
-  }
   .landing .landing-hero::after {
-    background-position: center, 58% 42%;
+    background-position: center, 72% 46%;
     background-image:
-      linear-gradient(
-        180deg,
-        #24103d 0%,
-        rgba(36, 16, 61, 0.96) 26%,
-        rgba(47, 21, 80, 0.68) 50%,
-        rgba(47, 21, 80, 0.28) 76%,
-        rgba(47, 21, 80, 0.28) 100%
-      ),
       linear-gradient(
         90deg,
         #24103d 0%,
-        rgba(36, 16, 61, 0.72) 18%,
-        rgba(47, 21, 80, 0.28) 42%,
-        transparent 70%
+        rgba(36, 16, 61, 0.98) 18%,
+        rgba(47, 21, 80, 0.9) 32%,
+        rgba(47, 21, 80, 0.55) 50%,
+        rgba(47, 21, 80, 0.22) 68%,
+        rgba(47, 21, 80, 0.12) 100%
       ),
       url("/landing/clinic-reception.jpg");
-    background-size: cover, cover, cover;
+    background-size: cover, cover;
   }
   .landing .landing-hero .auth-showcase__copy::before {
-    inset: -8% -6% -10% -6%;
-    margin-inline: auto;
-    background: radial-gradient(ellipse at 50% 36%, rgba(20, 8, 34, 0.5) 0%, rgba(20, 8, 34, 0.16) 52%, transparent 76%);
+    inset: -10% 12% -16% -14%;
+    margin-inline: 0;
+    background: radial-gradient(ellipse at 16% 42%, rgba(20, 8, 34, 0.46) 0%, rgba(20, 8, 34, 0.14) 50%, transparent 74%);
   }
 }
 
 @media (max-width: 520px) {
+  .landing .landing-hero .auth-showcase {
+    min-height: clamp(500px, 86svh, 640px);
+    padding-top: 2.25rem;
+    padding-bottom: 4rem;
+  }
   .landing .landing-hero::after {
-    background-position: center, 54% 38%;
+    background-position: center, 78% 44%;
     background-image:
-      linear-gradient(
-        180deg,
-        #24103d 0%,
-        rgba(36, 16, 61, 0.96) 26%,
-        rgba(47, 21, 80, 0.62) 54%,
-        rgba(47, 21, 80, 0.28) 80%,
-        rgba(47, 21, 80, 0.34) 100%
-      ),
       linear-gradient(
         90deg,
         #24103d 0%,
-        rgba(36, 16, 61, 0.78) 22%,
-        rgba(47, 21, 80, 0.28) 48%,
-        transparent 72%
+        rgba(36, 16, 61, 0.98) 22%,
+        rgba(47, 21, 80, 0.88) 38%,
+        rgba(47, 21, 80, 0.48) 56%,
+        rgba(47, 21, 80, 0.18) 74%,
+        rgba(47, 21, 80, 0.12) 100%
       ),
       url("/landing/clinic-reception.jpg");
-    background-size: cover, cover, cover;
-  }
-}
-
-@media (max-width: 640px) {
-  .landing .landing-hero .auth-showcase__lede,
-  .landing .landing-hero .auth-showcase__highlights {
-    display: none;
-  }
-  .landing .landing-hero .auth-showcase {
-    gap: 0;
-    padding-top: 1.65rem;
-    padding-bottom: 1.5rem;
-  }
-  .landing .landing-hero .auth-showcase__copy {
-    gap: 0.85rem;
+    background-size: cover, cover;
   }
 }
 
