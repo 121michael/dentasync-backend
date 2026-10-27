@@ -3387,10 +3387,15 @@ strong {
   .mobile-nav__link { display: grid; place-items: center; gap: .22rem; min-width: 0; min-height: 47px; padding: .15rem .1rem; border-radius: 11px; color: var(--text-muted); font-size: .52rem; font-weight: 750; }
   .mobile-nav__link span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .mobile-nav__link.is-active { color: var(--amethyst-700); background: var(--amethyst-100); }
-  .dashboard-welcome { align-items: flex-start; flex-direction: column; }
-  .next-visit-card { align-items: flex-start; flex-wrap: wrap; }
+  .dashboard-welcome { align-items: flex-start; flex-direction: column; gap: .7rem; }
+  .dashboard-page { gap: 1.05rem; }
+  .next-visit-card { align-items: flex-start; flex-wrap: wrap; gap: .85rem; padding: 1.15rem 1.15rem 1.2rem; }
+  .next-visit-card h2 { font-size: 1.18rem; }
   .next-visit-card .button { width: 100%; }
   .next-visit-card__details { display: grid; grid-template-columns: 1fr 1fr; }
+  .next-visit-card__details span:last-child { grid-column: 1 / -1; }
+  .portal-shell .patient-checkin-card { padding: 1.05rem 1.1rem 1.15rem; }
+  .portal-shell .patient-checkin-card__actions { margin-top: .75rem; padding-right: 3.4rem; }
   .metrics-grid { gap: .65rem; }
   .metric-card { padding: .85rem; }
   .metric-card > strong {
@@ -3766,9 +3771,12 @@ strong {
   }
   .auth-panel { padding: 1.25rem; }
   .auth-card h2 { font-size: 1.5rem; }
-  .dashboard-welcome h1 { font-size: 1.7rem; }
+  .dashboard-welcome h1 { font-size: 1.55rem; }
+  .dashboard-welcome p { font-size: 0.82rem; }
   .metrics-grid { grid-template-columns: 1fr 1fr; }
-  .next-visit-card__details { grid-template-columns: 1fr; }
+  .next-visit-card { padding: 1rem 1.05rem 1.1rem; }
+  .next-visit-card h2 { font-size: 1.08rem; }
+  .next-visit-card__details { grid-template-columns: 1fr 1fr; }
   .wellness-card__score { align-items: flex-start; flex-direction: column; }
   .booking-progress { gap: .4rem; }
   .booking-progress span { font-size: .58rem; }
@@ -3783,6 +3791,12 @@ strong {
 
   .appointments-page--list .appointments-book-cta {
     width: max-content;
+  }
+}
+
+@media (max-width: 760px) and (max-height: 850px) {
+  .dashboard-welcome p {
+    display: none;
   }
 }
 
