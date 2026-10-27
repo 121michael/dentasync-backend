@@ -122,9 +122,7 @@ function ServicePriceDetails({ price, open, panelRef }) {
           {price.description ? (
             <p className="treatment-price-panel__description">{price.description}</p>
           ) : null}
-          <p className="treatment-price-panel__price">
-            {price.lines?.length ? price.details : price.priceLabel}
-          </p>
+          <p className="treatment-price-panel__price">{price.priceLabel}</p>
           {price.compactNote ? (
             <p className="treatment-price-panel__note">{price.compactNote}</p>
           ) : null}
@@ -188,18 +186,20 @@ function TreatmentServiceOption({ service, selected, onSelect }) {
     const place = () => {
       const wrapBox = wrap.getBoundingClientRect();
       const gridBox = grid?.getBoundingClientRect();
-      const navClearance = window.matchMedia("(max-width: 720px)").matches ? 104 : 28;
-      const spaceBelow = Math.max(132, window.innerHeight - wrapBox.bottom - navClearance);
-      let width = wrapBox.width;
+      const mobile = window.matchMedia("(max-width: 980px)").matches;
+      const navClearance = mobile ? 112 : 28;
+      const viewPad = 12;
+      const spaceBelow = Math.max(140, window.innerHeight - wrapBox.bottom - navClearance);
+      const gridRight = gridBox ? gridBox.right - 6 : window.innerWidth - viewPad;
+      const gridLeft = gridBox ? gridBox.left + 6 : viewPad;
+      const maxWidth = Math.max(wrapBox.width, Math.min(gridRight, window.innerWidth - viewPad) - wrapBox.left);
+      const preferred = Math.min(328, Math.max(wrapBox.width, Math.min(268, maxWidth)));
+      let width = Math.min(preferred, maxWidth, window.innerWidth - viewPad * 2);
       let left = 0;
-      if (gridBox) {
-        const maxWidth = Math.max(120, gridBox.right - wrapBox.left - 6);
-        width = Math.min(width, maxWidth);
-        const overflowRight = wrapBox.left + left + width - (gridBox.right - 4);
-        if (overflowRight > 0) left -= overflowRight;
-        const overflowLeft = gridBox.left + 4 - (wrapBox.left + left);
-        if (overflowLeft > 0) left += overflowLeft;
-      }
+      const overflowRight = wrapBox.left + left + width - Math.min(gridRight, window.innerWidth - viewPad);
+      if (overflowRight > 0) left -= overflowRight;
+      const overflowLeft = Math.max(gridLeft, viewPad) - (wrapBox.left + left);
+      if (overflowLeft > 0) left += overflowLeft;
 
       panel.style.setProperty("--float-left", `${Math.round(left)}px`);
       panel.style.setProperty("--float-width", `${Math.round(width)}px`);
