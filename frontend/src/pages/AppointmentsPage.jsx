@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
   CalendarDays,
@@ -99,7 +99,7 @@ function servicePhotoUrl(service) {
   return service?.imageUrl || service?.image || service?.photoUrl || "";
 }
 
-function ServicePriceDetails({ price, open, panelRef, selectedOptionId, onSelectOption }) {
+function ServicePriceDetails({ price, open, selectedOptionId, onSelectOption }) {
   const [more, setMore] = useState(false);
 
   useEffect(() => {
@@ -114,7 +114,6 @@ function ServicePriceDetails({ price, open, panelRef, selectedOptionId, onSelect
 
   return (
     <div
-      ref={panelRef}
       className="treatment-option__details"
       aria-hidden={!open}
       inert={open ? undefined : true}
@@ -197,79 +196,18 @@ function ServicePriceDetails({ price, open, panelRef, selectedOptionId, onSelect
 }
 
 function TreatmentServiceOption({ service, selected, onSelect, selectedOptionId, onSelectOption }) {
-  const wrapRef = useRef(null);
-  const panelRef = useRef(null);
   const visual = attachServiceVisual(service);
   const photoUrl = servicePhotoUrl(visual);
   const price = getApprovedClinicPrice(visual);
 
-  useLayoutEffect(() => {
-    const wrap = wrapRef.current;
-    const panel = panelRef.current;
-    const grid = wrap?.closest(".treatment-grid");
-    if (!selected) {
-      grid?.style.removeProperty("--open-pad");
-      return undefined;
-    }
-    if (!wrap || !panel) return undefined;
-
-    const place = () => {
-      const wrapBox = wrap.getBoundingClientRect();
-      const gridBox = grid?.getBoundingClientRect();
-      const mobile = window.matchMedia("(max-width: 980px)").matches;
-      const navClearance = mobile ? 112 : 28;
-      const viewPad = 12;
-      const spaceBelow = Math.max(140, window.innerHeight - wrapBox.bottom - navClearance);
-      const gridRight = gridBox ? gridBox.right - 6 : window.innerWidth - viewPad;
-      const gridLeft = gridBox ? gridBox.left + 6 : viewPad;
-      const maxWidth = Math.max(wrapBox.width, Math.min(gridRight, window.innerWidth - viewPad) - wrapBox.left);
-      const preferred = Math.min(328, Math.max(wrapBox.width, Math.min(268, maxWidth)));
-      let width = Math.min(preferred, maxWidth, window.innerWidth - viewPad * 2);
-      let left = 0;
-      const overflowRight = wrapBox.left + left + width - Math.min(gridRight, window.innerWidth - viewPad);
-      if (overflowRight > 0) left -= overflowRight;
-      const overflowLeft = Math.max(gridLeft, viewPad) - (wrapBox.left + left);
-      if (overflowLeft > 0) left += overflowLeft;
-
-      panel.style.setProperty("--float-left", `${Math.round(left)}px`);
-      panel.style.setProperty("--float-width", `${Math.round(width)}px`);
-      panel.style.setProperty("--float-max-height", `${Math.round(spaceBelow)}px`);
-
-      const panelBox = panel.getBoundingClientRect();
-      const cardBottoms = grid
-        ? [...grid.querySelectorAll(".treatment-option")].map((card) => card.getBoundingClientRect().bottom)
-        : [];
-      const gridContentBottom = cardBottoms.length ? Math.max(...cardBottoms) : wrapBox.bottom;
-      const overflowBottom = panelBox.bottom - gridContentBottom + 8;
-      grid?.style.setProperty("--open-pad", `${Math.max(0, Math.ceil(overflowBottom))}px`);
-    };
-
-    place();
-    const observer = new ResizeObserver(place);
-    observer.observe(panel);
-    window.addEventListener("resize", place);
-    window.addEventListener("scroll", place, true);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", place);
-      window.removeEventListener("scroll", place, true);
-      if (grid?.querySelector(".treatment-option-wrap.is-open") === wrap) {
-        grid.style.removeProperty("--open-pad");
-      }
-    };
-  }, [selected, service.id, selectedOptionId]);
-
   return (
-    <div
-      ref={wrapRef}
-      className={`treatment-option-wrap ${selected ? "is-open" : ""}`}
-    >
+    <div className={`treatment-option-wrap ${selected ? "is-open" : ""}`}>
       <button
         type="button"
         role="radio"
         aria-checked={selected}
         aria-expanded={selected}
-        aria-label={selected ? `${service.name}, ${price.priceLabel}` : service.name}
+        aria-label={`${service.name}, ${price.priceLabel}`}
         className={`treatment-option ${selected ? "is-selected" : ""}`}
         onClick={onSelect}
       >
@@ -290,11 +228,11 @@ function TreatmentServiceOption({ service, selected, onSelect, selectedOptionId,
           </span>
         ) : null}
         <strong>{service.name}</strong>
+        <small className="treatment-option__price">{price.priceLabel}</small>
       </button>
       <ServicePriceDetails
         price={price}
         open={selected}
-        panelRef={panelRef}
         selectedOptionId={selectedOptionId}
         onSelectOption={onSelectOption}
       />
