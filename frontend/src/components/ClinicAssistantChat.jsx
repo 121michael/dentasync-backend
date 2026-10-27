@@ -428,7 +428,7 @@ export function ClinicAssistantChat({ compact = false, onMinimize, visible = tru
             {menuOpen ? <X size={18} /> : <Menu size={18} />}
           </button>
           <span className="assistant-chatbar__mark" aria-hidden="true">
-            <Bot size={18} />
+            {compact ? <Sparkles size={18} /> : <Bot size={18} />}
           </span>
           <div className="assistant-chatbar__title">
             <p>AI Clinic Assistant</p>
