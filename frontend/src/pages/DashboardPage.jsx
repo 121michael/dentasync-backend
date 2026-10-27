@@ -15,6 +15,7 @@ import { api } from "../api";
 import { DetailLink, ErrorState, LoadingState } from "../components/UI";
 import { PatientQrCheckInScanner } from "../components/PatientQrCheckInScanner";
 import { getPatientNotificationTarget } from "../patientNotificationNav";
+import { usePatientAssistant } from "../patientAssistant";
 
 function greeting() {
   const hour = new Date().getHours();
@@ -77,6 +78,7 @@ function MetricCard({ icon: Icon, label, value, tone, detail }) {
 
 export function DashboardPage() {
   const navigate = useNavigate();
+  const { openAssistant } = usePatientAssistant();
   const [dashboard, setDashboard] = useState(null);
   const [error, setError] = useState("");
 
@@ -227,10 +229,14 @@ export function DashboardPage() {
             {[
               { label: "Book appointment", detail: "Choose a service and time", icon: CalendarDays, to: "/appointments/book" },
               { label: "Track live queue", detail: "See your place in line", icon: UsersRound, to: "/queue" },
-              { label: "AI Assistant", detail: "Ask about teeth or the clinic · Magtanong sa English o Tagalog", icon: Sparkles, to: "/assistant" },
+              { label: "AI Assistant", detail: "Ask about teeth or the clinic · Magtanong sa English o Tagalog", icon: Sparkles, action: "assistant" },
               { label: "Contact clinic", detail: "Get help from our care team", icon: ClipboardList, to: "/support" },
-            ].map(({ label, detail, icon: Icon, to }) => (
-              <button key={label} className="quick-action" onClick={() => navigate(to)}>
+            ].map(({ label, detail, icon: Icon, to, action }) => (
+              <button
+                key={label}
+                className="quick-action"
+                onClick={() => (action === "assistant" ? openAssistant() : navigate(to))}
+              >
                 <span>
                   <Icon size={19} />
                 </span>
