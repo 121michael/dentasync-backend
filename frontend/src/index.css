@@ -1923,6 +1923,7 @@ strong {
   align-items: start;
   gap: 0.58rem;
   margin-top: 0.7rem;
+  padding-bottom: var(--open-pad, 0px);
   overflow: visible;
   isolation: isolate;
 }
@@ -2034,8 +2035,7 @@ strong {
   left: var(--float-left, 0px);
   z-index: 6;
   width: var(--float-width, 100%);
-  min-width: 100%;
-  max-width: min(20rem, calc(100vw - 1.5rem));
+  max-width: min(var(--float-width, 100%), calc(100vw - 1.5rem));
   opacity: 0;
   visibility: hidden;
   pointer-events: none;

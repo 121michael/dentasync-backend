@@ -176,22 +176,25 @@ function TreatmentServiceOption({ service, selected, onSelect }) {
   const price = getApprovedClinicPrice(service);
 
   useLayoutEffect(() => {
-    if (!selected) return undefined;
+    const wrap = wrapRef.current;
+    const panel = panelRef.current;
+    const grid = wrap?.closest(".treatment-grid");
+    if (!selected) {
+      grid?.style.removeProperty("--open-pad");
+      return undefined;
+    }
+    if (!wrap || !panel) return undefined;
 
     const place = () => {
-      const wrap = wrapRef.current;
-      const panel = panelRef.current;
-      if (!wrap || !panel) return;
-
       const wrapBox = wrap.getBoundingClientRect();
-      const grid = wrap.closest(".treatment-grid");
       const gridBox = grid?.getBoundingClientRect();
       const navClearance = window.matchMedia("(max-width: 720px)").matches ? 104 : 28;
       const spaceBelow = Math.max(132, window.innerHeight - wrapBox.bottom - navClearance);
-      const maxWidth = gridBox ? Math.max(wrapBox.width, Math.min(gridBox.right - wrapBox.left - 6, gridBox.width)) : wrapBox.width;
-      const width = Math.min(Math.max(wrapBox.width, Math.min(248, maxWidth)), maxWidth);
+      let width = wrapBox.width;
       let left = 0;
       if (gridBox) {
+        const maxWidth = Math.max(120, gridBox.right - wrapBox.left - 6);
+        width = Math.min(width, maxWidth);
         const overflowRight = wrapBox.left + left + width - (gridBox.right - 4);
         if (overflowRight > 0) left -= overflowRight;
         const overflowLeft = gridBox.left + 4 - (wrapBox.left + left);
@@ -201,14 +204,28 @@ function TreatmentServiceOption({ service, selected, onSelect }) {
       panel.style.setProperty("--float-left", `${Math.round(left)}px`);
       panel.style.setProperty("--float-width", `${Math.round(width)}px`);
       panel.style.setProperty("--float-max-height", `${Math.round(spaceBelow)}px`);
+
+      const panelBox = panel.getBoundingClientRect();
+      const cardBottoms = grid
+        ? [...grid.querySelectorAll(".treatment-option")].map((card) => card.getBoundingClientRect().bottom)
+        : [];
+      const gridContentBottom = cardBottoms.length ? Math.max(...cardBottoms) : wrapBox.bottom;
+      const overflowBottom = panelBox.bottom - gridContentBottom + 8;
+      grid?.style.setProperty("--open-pad", `${Math.max(0, Math.ceil(overflowBottom))}px`);
     };
 
     place();
+    const observer = new ResizeObserver(place);
+    observer.observe(panel);
     window.addEventListener("resize", place);
     window.addEventListener("scroll", place, true);
     return () => {
+      observer.disconnect();
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", place, true);
+      if (grid?.querySelector(".treatment-option-wrap.is-open") === wrap) {
+        grid.style.removeProperty("--open-pad");
+      }
     };
   }, [selected, service.id]);
 
