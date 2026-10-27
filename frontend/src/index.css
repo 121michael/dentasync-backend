@@ -3039,8 +3039,8 @@ strong {
     max-width: 100%;
   }
   .landing .landing-hero .auth-showcase__tagline-accent {
-    margin: 0 0 -0.12em 0.18em;
-    transform: rotate(-7deg);
+    margin: 0;
+    transform: rotate(-4deg);
   }
   .landing .landing-hero .auth-showcase__tagline-foot {
     width: auto;
@@ -3080,9 +3080,9 @@ strong {
   }
 
   .landing .landing-hero .auth-showcase__tagline-accent {
-    margin: 0 0 -0.12em 0.12em;
-    font-size: clamp(1.55rem, 0.84em, 2.1rem);
-    transform: rotate(-7deg);
+    margin: 0;
+    font-size: clamp(1.35rem, 0.56em, 1.75rem);
+    transform: rotate(-4deg);
   }
 
   .landing .landing-hero .auth-showcase__tagline-foot {
@@ -11183,36 +11183,31 @@ body.is-queue-display .fab-menu {
 }
 
 .landing .landing-hero::before {
-  inset: -20% 48% -20% -20%;
+  inset: 0;
   z-index: 0;
-  background:
-    radial-gradient(38% 32% at 30% 30%, rgba(196, 150, 245, 0.28), transparent 70%),
-    radial-gradient(30% 26% at 70% 75%, rgba(242, 167, 124, 0.12), transparent 70%),
-    radial-gradient(24% 20% at 55% 40%, rgba(220, 192, 143, 0.1), transparent 70%);
-  filter: blur(8px);
-  animation: hero-ambient 22s ease-in-out infinite alternate;
+  background-color: #2a1545;
+  background-image: url("/landing/clinic-reception.jpg");
+  background-size: cover;
+  background-position: 68% 46%;
+  background-repeat: no-repeat;
+  filter: brightness(1.16) contrast(1.1) saturate(1.06);
+  animation: hero-scene 1100ms var(--lp-ease) 80ms both;
 }
 
 .landing .landing-hero::after {
   inset: 0;
   z-index: 0;
-  background-color: #24103d;
-  background-image:
+  background:
+    radial-gradient(38% 32% at 18% 28%, rgba(196, 150, 245, 0.16), transparent 70%),
     linear-gradient(
       90deg,
-      #24103d 0%,
-      rgba(36, 16, 61, 0.98) 14%,
-      rgba(47, 21, 80, 0.92) 24%,
-      rgba(47, 21, 80, 0.62) 42%,
-      rgba(47, 21, 80, 0.28) 60%,
-      rgba(47, 21, 80, 0.1) 78%,
-      rgba(47, 21, 80, 0.16) 100%
-    ),
-    url("/landing/clinic-reception.jpg");
-  background-size: cover, cover;
-  background-position: center, 68% 48%;
-  background-repeat: no-repeat;
-  animation: hero-scene 1100ms var(--lp-ease) 80ms both;
+      rgba(36, 16, 61, 0.9) 0%,
+      rgba(36, 16, 61, 0.72) 14%,
+      rgba(47, 21, 80, 0.4) 30%,
+      rgba(47, 21, 80, 0.16) 48%,
+      rgba(47, 21, 80, 0.05) 68%,
+      transparent 100%
+    );
 }
 
 .landing .landing-hero .auth-page__glow {
@@ -11255,7 +11250,7 @@ body.is-queue-display .fab-menu {
 
 .landing .landing-hero .auth-showcase__copy {
   gap: 1.6rem;
-  max-width: 34rem;
+  max-width: 38rem;
 }
 
 .landing .landing-hero .auth-showcase__copy .eyebrow {
@@ -11308,17 +11303,29 @@ body.is-queue-display .fab-menu {
   animation-delay: 260ms;
 }
 
+.landing .landing-hero .auth-showcase__tagline-main {
+  grid-template-columns: max-content auto;
+  align-items: center;
+  column-gap: 0.32em;
+}
+
 .landing .landing-hero .auth-showcase__tagline-accent {
-  margin: 0 0 -0.12em 0.18em;
-  padding: 0 0.12em 0.1em 0;
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  justify-self: start;
+  margin: 0;
+  padding: 0 0.08em 0 0;
   color: var(--hero-peach);
   background: linear-gradient(100deg, #f6b08a 0%, var(--hero-peach) 45%, var(--hero-gold) 100%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
-  font-size: clamp(2.3rem, 0.9em, 3.9rem);
+  font-size: clamp(2rem, 0.66em, 3.05rem);
+  line-height: 0.9;
   filter: drop-shadow(0 6px 18px rgba(242, 167, 124, 0.22));
-  transform: rotate(-7deg);
+  transform: rotate(-5deg);
+  transform-origin: left center;
   animation: hero-script 1100ms var(--lp-ease) 620ms both;
 }
 
@@ -11355,8 +11362,8 @@ body.is-queue-display .fab-menu {
 }
 
 @keyframes hero-script {
-  from { opacity: 0; transform: translate3d(-0.25em, 0.2em, 0) rotate(-12deg); }
-  to { opacity: 1; transform: rotate(-7deg); }
+  from { opacity: 0; transform: translate3d(-0.18em, 0.12em, 0) rotate(-10deg); }
+  to { opacity: 1; transform: rotate(-5deg); }
 }
 
 .landing .landing-hero .auth-showcase__lede {
@@ -11432,10 +11439,10 @@ body.is-queue-display .fab-menu {
   content: "";
   position: absolute;
   z-index: -1;
-  inset: -12% 8% -18% -18%;
+  inset: -10% 14% -14% -12%;
   max-width: 42rem;
   pointer-events: none;
-  background: radial-gradient(ellipse at 18% 42%, rgba(20, 8, 34, 0.42) 0%, rgba(20, 8, 34, 0.12) 48%, transparent 74%);
+  background: radial-gradient(ellipse at 16% 42%, rgba(20, 8, 34, 0.28) 0%, rgba(20, 8, 34, 0.08) 50%, transparent 76%);
 }
 
 @keyframes hero-scene {
@@ -11444,42 +11451,44 @@ body.is-queue-display .fab-menu {
 }
 
 @media (max-width: 1100px) {
+  .landing .landing-hero::before {
+    background-position: 64% 46%;
+  }
   .landing .landing-hero::after {
-    background-position: center, 62% 48%;
-    background-image:
+    background:
+      radial-gradient(38% 32% at 16% 28%, rgba(196, 150, 245, 0.14), transparent 70%),
       linear-gradient(
         90deg,
-        #24103d 0%,
-        rgba(36, 16, 61, 0.98) 20%,
-        rgba(47, 21, 80, 0.92) 34%,
-        rgba(47, 21, 80, 0.58) 52%,
-        rgba(47, 21, 80, 0.22) 70%,
-        rgba(47, 21, 80, 0.12) 100%
-      ),
-      url("/landing/clinic-reception.jpg");
+        rgba(36, 16, 61, 0.9) 0%,
+        rgba(36, 16, 61, 0.7) 16%,
+        rgba(47, 21, 80, 0.38) 34%,
+        rgba(47, 21, 80, 0.14) 52%,
+        rgba(47, 21, 80, 0.04) 72%,
+        transparent 100%
+      );
   }
 }
 
 @media (max-width: 950px) {
+  .landing .landing-hero::before {
+    background-position: 74% 44%;
+  }
   .landing .landing-hero::after {
-    background-position: center, 72% 46%;
-    background-image:
+    background:
+      radial-gradient(42% 36% at 14% 30%, rgba(196, 150, 245, 0.12), transparent 70%),
       linear-gradient(
         90deg,
-        #24103d 0%,
-        rgba(36, 16, 61, 0.98) 18%,
-        rgba(47, 21, 80, 0.9) 32%,
-        rgba(47, 21, 80, 0.55) 50%,
-        rgba(47, 21, 80, 0.22) 68%,
-        rgba(47, 21, 80, 0.12) 100%
-      ),
-      url("/landing/clinic-reception.jpg");
-    background-size: cover, cover;
+        rgba(36, 16, 61, 0.88) 0%,
+        rgba(36, 16, 61, 0.68) 18%,
+        rgba(47, 21, 80, 0.34) 38%,
+        rgba(47, 21, 80, 0.12) 58%,
+        transparent 82%
+      );
   }
   .landing .landing-hero .auth-showcase__copy::before {
-    inset: -10% 12% -16% -14%;
+    inset: -8% 10% -12% -10%;
     margin-inline: 0;
-    background: radial-gradient(ellipse at 16% 42%, rgba(20, 8, 34, 0.46) 0%, rgba(20, 8, 34, 0.14) 50%, transparent 74%);
+    background: radial-gradient(ellipse at 14% 40%, rgba(20, 8, 34, 0.3) 0%, rgba(20, 8, 34, 0.08) 52%, transparent 76%);
   }
 }
 
@@ -11489,20 +11498,24 @@ body.is-queue-display .fab-menu {
     padding-top: 2.25rem;
     padding-bottom: 4rem;
   }
+  .landing .landing-hero::before {
+    background-position: 80% 42%;
+  }
   .landing .landing-hero::after {
-    background-position: center, 78% 44%;
-    background-image:
+    background:
+      radial-gradient(48% 40% at 12% 32%, rgba(196, 150, 245, 0.1), transparent 72%),
       linear-gradient(
         90deg,
-        #24103d 0%,
-        rgba(36, 16, 61, 0.98) 22%,
-        rgba(47, 21, 80, 0.88) 38%,
-        rgba(47, 21, 80, 0.48) 56%,
-        rgba(47, 21, 80, 0.18) 74%,
-        rgba(47, 21, 80, 0.12) 100%
-      ),
-      url("/landing/clinic-reception.jpg");
-    background-size: cover, cover;
+        rgba(36, 16, 61, 0.86) 0%,
+        rgba(36, 16, 61, 0.64) 20%,
+        rgba(47, 21, 80, 0.3) 42%,
+        rgba(47, 21, 80, 0.1) 62%,
+        transparent 86%
+      );
+  }
+  .landing .landing-hero .auth-showcase__tagline-accent {
+    font-size: clamp(1.45rem, 0.58em, 1.95rem);
+    transform: rotate(-4deg);
   }
 }
 
