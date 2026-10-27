@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
   CalendarDays,
@@ -99,103 +100,125 @@ function servicePhotoUrl(service) {
   return service?.imageUrl || service?.image || service?.photoUrl || "";
 }
 
-function ServicePriceDetails({ price, open, selectedOptionId, onSelectOption }) {
+function ServicePriceDetails({ price, open, selectedOptionId, onSelectOption, onClose }) {
   const [more, setMore] = useState(false);
+  const closeRef = useRef(null);
 
   useEffect(() => {
     if (!open) setMore(false);
-  }, [open]);
+  }, [open, price?.id]);
 
-  if (!price) return null;
+  useEffect(() => {
+    if (!open) return undefined;
+    closeRef.current?.focus();
+    function onKey(event) {
+      if (event.key === "Escape") onClose?.();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  if (!open || !price || typeof document === "undefined") return null;
 
   const extraNotes = price.extraNotes || [];
   const options = price.options || [];
   const hasMore = Boolean(price.lines?.length || extraNotes.length);
 
-  return (
-    <div
-      className="treatment-option__details"
-      aria-hidden={!open}
-      inert={open ? undefined : true}
-    >
-      <div className="treatment-option__details-inner">
-        <aside className="treatment-price-panel" aria-live={open ? "polite" : "off"}>
-          <h3>{price.title}</h3>
-          {price.description ? (
-            <p className="treatment-price-panel__description">{price.description}</p>
-          ) : null}
-          <p className="treatment-price-panel__price">{price.priceLabel}</p>
-          {price.compactNote ? (
-            <p className="treatment-price-panel__note">{price.compactNote}</p>
-          ) : null}
-          {options.length ? (
-            <div className="treatment-price-panel__options" role="radiogroup" aria-label="Braces option">
-              {options.map((option) => (
-                <button
-                  key={option.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={selectedOptionId === option.id}
-                  className={`treatment-price-panel__option ${selectedOptionId === option.id ? "is-selected" : ""}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onSelectOption?.(option.id);
-                  }}
-                >
-                  <strong>{option.title}</strong>
-                  {option.description ? <p>{option.description}</p> : null}
-                  <span>{option.priceLabel}</span>
-                  {option.lines?.map((line) => (
-                    <small key={line.label}>
-                      {line.label}: {line.value}
-                    </small>
-                  ))}
-                </button>
-              ))}
-            </div>
-          ) : null}
-          {hasMore ? (
-            <>
+  return createPortal(
+    <div className="treatment-details-layer is-open">
+      <button
+        type="button"
+        className="treatment-details-layer__backdrop"
+        tabIndex={-1}
+        aria-label="Close service details"
+        onClick={onClose}
+      />
+      <aside
+        className="treatment-price-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="selected-service-title"
+        aria-live="polite"
+      >
+        <button
+          ref={closeRef}
+          type="button"
+          className="treatment-price-panel__close"
+          aria-label="Close service details"
+          onClick={onClose}
+        >
+          <X size={16} />
+        </button>
+        <h3 id="selected-service-title">{price.title}</h3>
+        {price.description ? (
+          <p className="treatment-price-panel__description">{price.description}</p>
+        ) : null}
+        <p className="treatment-price-panel__price">{price.priceLabel}</p>
+        {price.compactNote ? (
+          <p className="treatment-price-panel__note">{price.compactNote}</p>
+        ) : null}
+        {options.length ? (
+          <div className="treatment-price-panel__options" role="radiogroup" aria-label="Braces option">
+            {options.map((option) => (
               <button
+                key={option.id}
                 type="button"
-                className="treatment-price-panel__more"
-                aria-expanded={more}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setMore((current) => !current);
-                }}
+                role="radio"
+                aria-checked={selectedOptionId === option.id}
+                className={`treatment-price-panel__option ${selectedOptionId === option.id ? "is-selected" : ""}`}
+                onClick={() => onSelectOption?.(option.id)}
               >
-                {more ? "Less details" : "More details"}
-                <ChevronDown size={14} aria-hidden="true" />
+                <strong>{option.title}</strong>
+                {option.description ? <p>{option.description}</p> : null}
+                <span>{option.priceLabel}</span>
+                {option.lines?.map((line) => (
+                  <small key={line.label}>
+                    {line.label}: {line.value}
+                  </small>
+                ))}
               </button>
-              <div className={`treatment-price-panel__extra ${more ? "is-open" : ""}`}>
-                <div className="treatment-price-panel__extra-inner">
-                  {price.lines?.length ? (
-                    <dl className="treatment-price-panel__lines">
-                      {price.lines.map((line) => (
-                        <div key={line.label}>
-                          <dt>{line.label}</dt>
-                          <dd>{line.value}</dd>
-                        </div>
-                      ))}
-                    </dl>
-                  ) : null}
-                  {extraNotes.map((note) => (
-                    <p key={note} className="treatment-price-panel__note">
-                      {note}
-                    </p>
-                  ))}
-                </div>
+            ))}
+          </div>
+        ) : null}
+        {hasMore ? (
+          <>
+            <button
+              type="button"
+              className="treatment-price-panel__more"
+              aria-expanded={more}
+              onClick={() => setMore((current) => !current)}
+            >
+              {more ? "Less details" : "More details"}
+              <ChevronDown size={14} aria-hidden="true" />
+            </button>
+            <div className={`treatment-price-panel__extra ${more ? "is-open" : ""}`}>
+              <div className="treatment-price-panel__extra-inner">
+                {price.lines?.length ? (
+                  <dl className="treatment-price-panel__lines">
+                    {price.lines.map((line) => (
+                      <div key={line.label}>
+                        <dt>{line.label}</dt>
+                        <dd>{line.value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                ) : null}
+                {extraNotes.map((note) => (
+                  <p key={note} className="treatment-price-panel__note">
+                    {note}
+                  </p>
+                ))}
               </div>
-            </>
-          ) : null}
-        </aside>
-      </div>
-    </div>
+            </div>
+          </>
+        ) : null}
+      </aside>
+    </div>,
+    document.body
   );
 }
 
-function TreatmentServiceOption({ service, selected, onSelect, selectedOptionId, onSelectOption }) {
+function TreatmentServiceOption({ service, selected, onSelect }) {
   const visual = attachServiceVisual(service);
   const photoUrl = servicePhotoUrl(visual);
   const price = getApprovedClinicPrice(visual);
@@ -206,6 +229,7 @@ function TreatmentServiceOption({ service, selected, onSelect, selectedOptionId,
         type="button"
         role="radio"
         aria-checked={selected}
+        aria-haspopup="dialog"
         aria-expanded={selected}
         aria-label={`${service.name}, ${price.priceLabel}`}
         className={`treatment-option ${selected ? "is-selected" : ""}`}
@@ -230,12 +254,6 @@ function TreatmentServiceOption({ service, selected, onSelect, selectedOptionId,
         <strong>{service.name}</strong>
         <small className="treatment-option__price">{price.priceLabel}</small>
       </button>
-      <ServicePriceDetails
-        price={price}
-        open={selected}
-        selectedOptionId={selectedOptionId}
-        onSelectOption={onSelectOption}
-      />
     </div>
   );
 }
@@ -275,6 +293,7 @@ export function AppointmentsPage() {
   });
   const [authorizationFile, setAuthorizationFile] = useState(null);
   const [visitSummaryOpen, setVisitSummaryOpen] = useState(false);
+  const [detailsDismissed, setDetailsDismissed] = useState(false);
   const [focusKey, setFocusKey] = useState(() => searchParams.get("focus") || "");
   const focusedCardRef = useRef(null);
 
@@ -373,6 +392,8 @@ export function AppointmentsPage() {
     [selectedService]
   );
   const selectedBracesOption = selectedServicePrice?.options?.find((option) => option.id === form.bracesOption);
+  const detailsOpen = Boolean(selectedServicePrice && !detailsDismissed);
+  const closeServiceDetails = useCallback(() => setDetailsDismissed(true), []);
   const hmoProviders = catalog?.hmoProviders?.length ? catalog.hmoProviders : APPROVED_HMO_PROVIDERS;
   const selectedHmo = hmoProviders.find((provider) => provider.name === form.hmoProvider);
 
@@ -418,6 +439,7 @@ export function AppointmentsPage() {
         hmoBirthDate: "",
         notes: "",
       }));
+      setDetailsDismissed(false);
       setAuthorizationFile(null);
       await load();
       navigate("/appointments");
@@ -577,20 +599,27 @@ export function AppointmentsPage() {
                   key={service.id}
                   service={service}
                   selected={form.serviceId === service.id}
-                  selectedOptionId={form.serviceId === service.id ? form.bracesOption : ""}
-                  onSelectOption={(optionId) =>
-                    setForm((current) => ({ ...current, bracesOption: optionId }))
-                  }
-                  onSelect={() =>
-                    setForm((current) => ({
-                      ...current,
-                      serviceId: current.serviceId === service.id ? "" : service.id,
-                      bracesOption: "",
-                    }))
-                  }
+                  onSelect={() => {
+                    setForm((current) => {
+                      if (current.serviceId === service.id && !detailsDismissed) {
+                        return { ...current, serviceId: "", bracesOption: "" };
+                      }
+                      return { ...current, serviceId: service.id, bracesOption: current.serviceId === service.id ? current.bracesOption : "" };
+                    });
+                    setDetailsDismissed(false);
+                  }}
                 />
               ))}
             </div>
+            <ServicePriceDetails
+              price={selectedServicePrice}
+              open={detailsOpen}
+              selectedOptionId={form.bracesOption}
+              onSelectOption={(optionId) =>
+                setForm((current) => ({ ...current, bracesOption: optionId }))
+              }
+              onClose={closeServiceDetails}
+            />
           </section>
 
           <section className="glass-card booking-section">
