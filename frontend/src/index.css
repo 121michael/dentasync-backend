@@ -3039,8 +3039,8 @@ strong {
     max-width: 100%;
   }
   .landing .landing-hero .auth-showcase__tagline-accent {
-    margin: 0 0 -0.12em 0.18em;
-    padding: 0.16em 0.24em 0.18em 0.2em;
+    margin: 0.04em 0 -0.18em -0.7em;
+    padding: 0.16em 0.4em 0.18em 0.12em;
     transform: rotate(-7deg);
   }
   .landing .landing-hero .auth-showcase__tagline-foot {
@@ -3081,8 +3081,8 @@ strong {
   }
 
   .landing .landing-hero .auth-showcase__tagline-accent {
-    margin: 0 0 -0.12em 0.12em;
-    padding: 0.14em 0.2em 0.16em 0.18em;
+    margin: 0.04em 0 -0.16em -0.62em;
+    padding: 0.14em 0.38em 0.16em 0.1em;
     font-size: clamp(1.55rem, 0.84em, 2.1rem);
     transform: rotate(-7deg);
   }
@@ -11319,7 +11319,7 @@ body.is-queue-display .fab-menu {
   z-index: 2;
   min-width: max-content;
   max-width: none;
-  margin: 0 0 -0.12em 0.18em;
+  margin: 0.04em 0 -0.18em -0.78em;
   padding: 0.12em 0.55em 0.22em 0.12em;
   overflow: visible;
   color: var(--hero-peach);
