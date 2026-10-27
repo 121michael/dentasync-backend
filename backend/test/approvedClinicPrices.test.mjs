@@ -18,6 +18,17 @@ test("split denture bridge and crown services keep distinct verified prices", ()
   assert.match(crowns.details, /₱15,000/);
 });
 
+test("orthodontics shows metal braces prices and not retainer fees for invisible braces", () => {
+  const price = getApprovedClinicPrice({ id: "orthodontic-consultation", name: "Orthodontics / Braces" });
+  const metal = price.options.find((option) => option.id === "metal-braces");
+  const invisible = price.options.find((option) => option.id === "invisible-braces");
+  assert.match(metal.priceLabel, /₱5,000/);
+  assert.match(metal.details, /₱1,250/);
+  assert.equal(invisible.priceLabel, "Price available upon consultation");
+  assert.doesNotMatch(invisible.priceLabel, /₱5,000 for upper or lower/);
+  assert.doesNotMatch(invisible.details, /₱15,000/);
+});
+
 test("veneers implants and gum contouring do not invent peso prices", () => {
   for (const service of [
     { id: "veneers", name: "Veneers" },

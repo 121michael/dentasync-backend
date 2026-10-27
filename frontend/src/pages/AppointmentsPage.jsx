@@ -16,6 +16,7 @@ import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../compone
 import { useAuth } from "../useAuth";
 import { matchesNotificationFocus } from "../notificationFocus";
 import { getApprovedClinicPrice } from "../clinic/approvedClinicPrices";
+import { attachServiceVisual } from "../clinic/serviceVisuals";
 
 const PERIOD_ORDER = ["Morning", "Afternoon", "Evening"];
 
@@ -36,6 +37,7 @@ const LEGACY_SERVICE_NAMES = {
   "Dental Filling": "Permanent Filling / Restoration",
   "Root Canal": "Root Canal Treatment",
   "General Consultation": "Oral Examination / Consultation",
+  "Orthodontic Consultation": "Orthodontics / Braces",
 };
 
 function tomorrow() {
@@ -97,7 +99,7 @@ function servicePhotoUrl(service) {
   return service?.imageUrl || service?.image || service?.photoUrl || "";
 }
 
-function ServicePriceDetails({ price, open, panelRef }) {
+function ServicePriceDetails({ price, open, panelRef, selectedOptionId, onSelectOption }) {
   const [more, setMore] = useState(false);
 
   useEffect(() => {
@@ -107,6 +109,7 @@ function ServicePriceDetails({ price, open, panelRef }) {
   if (!price) return null;
 
   const extraNotes = price.extraNotes || [];
+  const options = price.options || [];
   const hasMore = Boolean(price.lines?.length || extraNotes.length);
 
   return (
@@ -125,6 +128,32 @@ function ServicePriceDetails({ price, open, panelRef }) {
           <p className="treatment-price-panel__price">{price.priceLabel}</p>
           {price.compactNote ? (
             <p className="treatment-price-panel__note">{price.compactNote}</p>
+          ) : null}
+          {options.length ? (
+            <div className="treatment-price-panel__options" role="radiogroup" aria-label="Braces option">
+              {options.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={selectedOptionId === option.id}
+                  className={`treatment-price-panel__option ${selectedOptionId === option.id ? "is-selected" : ""}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onSelectOption?.(option.id);
+                  }}
+                >
+                  <strong>{option.title}</strong>
+                  {option.description ? <p>{option.description}</p> : null}
+                  <span>{option.priceLabel}</span>
+                  {option.lines?.map((line) => (
+                    <small key={line.label}>
+                      {line.label}: {line.value}
+                    </small>
+                  ))}
+                </button>
+              ))}
+            </div>
           ) : null}
           {hasMore ? (
             <>
@@ -167,11 +196,12 @@ function ServicePriceDetails({ price, open, panelRef }) {
   );
 }
 
-function TreatmentServiceOption({ service, selected, onSelect }) {
+function TreatmentServiceOption({ service, selected, onSelect, selectedOptionId, onSelectOption }) {
   const wrapRef = useRef(null);
   const panelRef = useRef(null);
-  const photoUrl = servicePhotoUrl(service);
-  const price = getApprovedClinicPrice(service);
+  const visual = attachServiceVisual(service);
+  const photoUrl = servicePhotoUrl(visual);
+  const price = getApprovedClinicPrice(visual);
 
   useLayoutEffect(() => {
     const wrap = wrapRef.current;
@@ -227,7 +257,7 @@ function TreatmentServiceOption({ service, selected, onSelect }) {
         grid.style.removeProperty("--open-pad");
       }
     };
-  }, [selected, service.id]);
+  }, [selected, service.id, selectedOptionId]);
 
   return (
     <div
@@ -245,7 +275,11 @@ function TreatmentServiceOption({ service, selected, onSelect }) {
       >
         <span className="treatment-option__media" aria-hidden="true">
           {photoUrl ? (
-            <img src={photoUrl} alt="" className="treatment-option__photo" />
+            <img
+              src={photoUrl}
+              alt=""
+              className={`treatment-option__photo${visual.imageFit === "contain" ? " is-contain" : ""}`}
+            />
           ) : (
             <span className="treatment-option__placeholder" />
           )}
@@ -257,7 +291,13 @@ function TreatmentServiceOption({ service, selected, onSelect }) {
         ) : null}
         <strong>{service.name}</strong>
       </button>
-      <ServicePriceDetails price={price} open={selected} panelRef={panelRef} />
+      <ServicePriceDetails
+        price={price}
+        open={selected}
+        panelRef={panelRef}
+        selectedOptionId={selectedOptionId}
+        onSelectOption={onSelectOption}
+      />
     </div>
   );
 }
@@ -284,6 +324,7 @@ export function AppointmentsPage() {
   const [availability, setAvailability] = useState(null);
   const [form, setForm] = useState({
     serviceId: "",
+    bracesOption: "",
     appointmentDate: tomorrow(),
     appointmentTime: "",
     coverageType: "self_pay",
@@ -385,13 +426,15 @@ export function AppointmentsPage() {
   }, [focusKey, appointments, searchParams, setSearchParams]);
 
   const selectedService = useMemo(
-    () => catalog?.services.find((service) => service.id === form.serviceId),
+    () =>
+      attachServiceVisual((catalog?.services || []).find((service) => service.id === form.serviceId)),
     [catalog, form.serviceId]
   );
   const selectedServicePrice = useMemo(
     () => getApprovedClinicPrice(selectedService),
     [selectedService]
   );
+  const selectedBracesOption = selectedServicePrice?.options?.find((option) => option.id === form.bracesOption);
   const hmoProviders = catalog?.hmoProviders?.length ? catalog.hmoProviders : APPROVED_HMO_PROVIDERS;
   const selectedHmo = hmoProviders.find((provider) => provider.name === form.hmoProvider);
 
@@ -405,13 +448,21 @@ export function AppointmentsPage() {
     setSuccess("");
     setIsBusy(true);
     try {
+      if (selectedServicePrice?.options?.length && !form.bracesOption) {
+        setError("Choose Standard Metal Braces or Invisible Braces before requesting an appointment.");
+        setIsBusy(false);
+        return;
+      }
       let authorizationDocumentId;
       if (form.coverageType === "hmo" && authorizationFile) {
         const upload = await api.uploadHmoAuthorization(authorizationFile);
         authorizationDocumentId = upload.document.id;
       }
+      const optionNote = selectedBracesOption ? `Orthodontic option: ${selectedBracesOption.title}` : "";
+      const { bracesOption: _bracesOption, ...appointmentFields } = form;
       const response = await api.createAppointment({
-        ...form,
+        ...appointmentFields,
+        notes: [form.notes, optionNote].filter(Boolean).join("\n"),
         forPatientUserId: form.forPatientUserId || undefined,
         authorizationDocumentId,
       });
@@ -421,6 +472,7 @@ export function AppointmentsPage() {
       setForm((current) => ({
         ...current,
         serviceId: "",
+        bracesOption: "",
         appointmentTime: "",
         hmoProvider: "",
         hmoMemberNumber: "",
@@ -587,10 +639,15 @@ export function AppointmentsPage() {
                   key={service.id}
                   service={service}
                   selected={form.serviceId === service.id}
+                  selectedOptionId={form.serviceId === service.id ? form.bracesOption : ""}
+                  onSelectOption={(optionId) =>
+                    setForm((current) => ({ ...current, bracesOption: optionId }))
+                  }
                   onSelect={() =>
                     setForm((current) => ({
                       ...current,
                       serviceId: current.serviceId === service.id ? "" : service.id,
+                      bracesOption: "",
                     }))
                   }
                 />
@@ -816,7 +873,7 @@ export function AppointmentsPage() {
               <strong>Visit Summary</strong>
               <small>
                 {selectedService
-                  ? `${selectedService.name} · ${selectedServicePrice?.priceLabel || "Price to confirm"}`
+                  ? `${selectedService.name}${selectedBracesOption ? ` · ${selectedBracesOption.title}` : ""} · ${selectedBracesOption?.priceLabel || selectedServicePrice?.priceLabel || "Price to confirm"}`
                   : "Select a service to review your visit"}
               </small>
             </span>
@@ -834,12 +891,16 @@ export function AppointmentsPage() {
           <div className="booking-summary__body">
             <div className="booking-summary__line">
               <span>Service</span>
-              <strong>{selectedService?.name || "Select a service"}</strong>
+              <strong>
+                {selectedService
+                  ? `${selectedService.name}${selectedBracesOption ? ` — ${selectedBracesOption.title}` : ""}`
+                  : "Select a service"}
+              </strong>
             </div>
-            {selectedServicePrice ? (
+            {selectedBracesOption || selectedServicePrice ? (
               <div className="booking-summary__line">
                 <span>Price</span>
-                <strong>{selectedServicePrice.details}</strong>
+                <strong>{selectedBracesOption?.details || selectedServicePrice?.details}</strong>
               </div>
             ) : null}
             <div className="booking-summary__line">
@@ -857,7 +918,12 @@ export function AppointmentsPage() {
           </div>
           <button
             className="button button--primary button--wide"
-            disabled={isBusy || !form.serviceId || !form.appointmentTime}
+            disabled={
+              isBusy ||
+              !form.serviceId ||
+              !form.appointmentTime ||
+              (Boolean(selectedServicePrice?.options?.length) && !form.bracesOption)
+            }
           >
             {isBusy ? "Submitting your request…" : "Request appointment"} <ChevronRight size={18} />
           </button>

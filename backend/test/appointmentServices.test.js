@@ -11,7 +11,7 @@ test("patient bookable services use the updated clinic names", () => {
   assert.ok(names.includes("Tooth Extraction"));
   assert.ok(names.includes("Permanent Filling / Restoration"));
   assert.ok(names.includes("Root Canal Treatment"));
-  assert.ok(names.includes("Orthodontic Consultation"));
+  assert.ok(names.includes("Orthodontics / Braces"));
   assert.ok(names.includes("Teeth Whitening"));
   assert.ok(names.includes("Oral Examination / Consultation"));
   assert.ok(names.includes("Emergency Dental Care"));

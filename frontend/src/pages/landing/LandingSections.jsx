@@ -19,6 +19,8 @@ import {
 import { Link } from "react-router-dom";
 import { api } from "../../api";
 import { BrandMark } from "../../components/BrandMark";
+import { getApprovedClinicPrice } from "../../clinic/approvedClinicPrices";
+import { attachServiceVisual } from "../../clinic/serviceVisuals";
 
 // Covers a Render cold start or a backend that is still redeploying after the static site went live.
 const CLINIC_INFO_RETRY_DELAYS_MS = [2000, 5000];
@@ -453,7 +455,10 @@ function LoadState({ status, onRetry, tone = "light", label, lines = 3 }) {
 
 export function ServicesSection({ services, status, onRetry }) {
   const [activeIndex, setActiveIndex] = useState(0);
-  const active = services[activeIndex] || services[0];
+  const catalog = (services || []).map(attachServiceVisual);
+  const active = catalog[activeIndex] || catalog[0];
+  const price = active ? getApprovedClinicPrice(active) : null;
+  const photoUrl = active?.imageUrl || active?.image || active?.photoUrl || "";
 
   return (
     <section id="services" className="landing-section landing-section--plum" tabIndex={-1} aria-labelledby="services-title">
@@ -469,22 +474,24 @@ export function ServicesSection({ services, status, onRetry }) {
           </div>
         ) : status === "error" ? (
           <LoadState status={status} onRetry={onRetry} tone="dark" label="Clinic services" />
-        ) : services.length ? (
+        ) : catalog.length ? (
           <div className="landing-services" data-reveal>
             <SwipeCarousel
               label="Services"
-              items={services}
+              items={catalog}
               getKey={(service) => service.id}
               activeIndex={activeIndex}
               onSelect={setActiveIndex}
-              renderItem={(service, index) => (
+              renderItem={(service, index) => {
+                const cardPhoto = service.imageUrl || service.image || service.photoUrl;
+                return (
                 <>
                   <span className="landing-service-card__media" aria-hidden="true">
-                    {service.imageUrl || service.image || service.photoUrl ? (
+                    {cardPhoto ? (
                       <img
-                        src={service.imageUrl || service.image || service.photoUrl}
+                        src={cardPhoto}
                         alt=""
-                        className="landing-service-card__photo"
+                        className={`landing-service-card__photo${service.imageFit === "contain" ? " is-contain" : ""}`}
                       />
                     ) : (
                       <span className="landing-service-card__placeholder" />
@@ -498,18 +505,57 @@ export function ServicesSection({ services, status, onRetry }) {
                   </span>
                   <strong>{service.name}</strong>
                 </>
-              )}
+                );
+              }}
             />
             <article className="landing-service-detail" aria-live="polite" key={active.id}>
               <span className="landing-eyebrow">Service {String(activeIndex + 1).padStart(2, "0")}</span>
               <h3>{active.name}</h3>
+              {photoUrl ? (
+                <figure className="landing-service-detail__figure">
+                  <img
+                    src={photoUrl}
+                    alt={active.imageAlt || `${active.name} example`}
+                    className={`landing-service-detail__photo${active.imageFit === "contain" ? " is-contain" : ""}`}
+                  />
+                </figure>
+              ) : null}
               {active.description ? <p>{active.description}</p> : null}
+              {price?.options?.length ? (
+                <ul className="landing-service-detail__options">
+                  {price.options.map((option) => (
+                    <li key={option.id}>
+                      <strong>{option.title}</strong>
+                      {option.description ? <p>{option.description}</p> : null}
+                      <p className="landing-service-detail__price">{option.priceLabel}</p>
+                      {option.lines?.map((line) => (
+                        <p key={line.label} className="landing-service-detail__line">
+                          {line.label}: {line.value}
+                        </p>
+                      ))}
+                      {option.notes?.[0] ? <small>{option.notes[0]}</small> : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {price?.options?.length
+                ? price.extraNotes?.map((note) => (
+                    <p key={note} className="landing-service-detail__how">{note}</p>
+                  ))
+                : null}
               <p className="landing-service-detail__how">
-                Create your patient account to request this service once the clinic approves your registration.
+                {price?.options?.length
+                  ? "Review this information first. You can create an account or sign in when you are ready to book."
+                  : "Create your patient account to request this service once the clinic approves your registration."}
               </p>
               <Link to="/register" className="landing-button landing-button--gold">
-                Create Account <ArrowRight size={17} aria-hidden="true" />
+                {price?.options?.length ? "Create Account to Book" : "Create Account"} <ArrowRight size={17} aria-hidden="true" />
               </Link>
+              {price?.options?.length ? (
+                <p className="landing-service-detail__how">
+                  Already have an account? <Link to="/login">Sign in</Link> to continue. Both options use the same Sign In / Create Account page.
+                </p>
+              ) : null}
             </article>
           </div>
         ) : (

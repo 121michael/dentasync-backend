@@ -2072,6 +2072,12 @@ strong {
   object-position: center;
 }
 
+.treatment-option__photo.is-contain {
+  object-fit: contain;
+  background:
+    linear-gradient(165deg, #f7f2fc 0%, #eee4f8 52%, #fbf8fe 100%);
+}
+
 .treatment-option__placeholder {
   display: block;
   width: 100%;
@@ -2274,6 +2280,49 @@ strong {
 .treatment-price-panel__lines > div {
   display: grid;
   gap: 0.04rem;
+}
+
+.treatment-price-panel__options {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0 0 0.45rem;
+}
+
+.treatment-price-panel__option {
+  display: grid;
+  gap: 0.18rem;
+  width: 100%;
+  padding: 0.55rem 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--amethyst-500) 22%, var(--border));
+  border-radius: 12px;
+  color: inherit;
+  text-align: left;
+  background: color-mix(in srgb, #fff 82%, var(--amethyst-100));
+  cursor: pointer;
+}
+
+.treatment-price-panel__option.is-selected {
+  border-color: var(--amethyst-600);
+  background: color-mix(in srgb, var(--amethyst-100) 70%, #fff);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--amethyst-500) 28%, transparent);
+}
+
+.treatment-price-panel__option strong {
+  font-size: 0.74rem;
+}
+
+.treatment-price-panel__option p,
+.treatment-price-panel__option small {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.66rem;
+  line-height: 1.4;
+}
+
+.treatment-price-panel__option span {
+  color: var(--amethyst-800);
+  font-size: 0.72rem;
+  font-weight: 750;
 }
 
 .treatment-price-panel__lines dt {
@@ -10890,6 +10939,11 @@ body.is-queue-display .fab-menu {
   object-position: center;
 }
 
+.landing-service-card__photo.is-contain {
+  object-fit: contain;
+  background: rgba(247, 242, 252, 0.18);
+}
+
 .landing-service-card__placeholder {
   display: block;
   width: 100%;
@@ -10955,6 +11009,68 @@ body.is-queue-display .fab-menu {
   font-size: clamp(1.45rem, 2.4vw, 1.85rem);
   font-weight: 500;
   line-height: 1.15;
+}
+
+.landing-service-detail__figure {
+  margin: 0;
+  overflow: hidden;
+  border-radius: 16px;
+  background: #efe7f8;
+}
+
+.landing-service-detail__photo {
+  display: block;
+  width: 100%;
+  max-height: 280px;
+  object-fit: cover;
+  object-position: center;
+}
+
+.landing-service-detail__photo.is-contain {
+  object-fit: contain;
+  background: #f7f2fc;
+}
+
+.landing-service-detail__options {
+  display: grid;
+  gap: 0.7rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.landing-service-detail__options li {
+  display: grid;
+  gap: 0.28rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--lp-plum-700) 16%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, #fff 88%, var(--lp-lavender));
+}
+
+.landing-service-detail__options strong {
+  font-family: var(--lp-serif);
+  font-size: 1.02rem;
+  font-weight: 600;
+}
+
+.landing-service-detail__options p,
+.landing-service-detail__line,
+.landing-service-detail__options small {
+  margin: 0;
+  color: var(--lp-muted);
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+.landing-service-detail__price {
+  color: var(--lp-plum-700) !important;
+  font-weight: 700;
+}
+
+.landing-service-detail a:not(.landing-button) {
+  color: var(--lp-plum-700);
+  font-weight: 700;
 }
 
 .landing-service-detail p {

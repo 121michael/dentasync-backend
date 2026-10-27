@@ -89,12 +89,19 @@ const APPROVED_CLINIC_PRICES = [
     matchIds: ["metal-braces"],
     matchNames: ["standard metal braces"],
     title: "Standard Metal Braces",
-    description: "Standard metal braces treatment plan.",
+    description:
+      "Standard metal braces use brackets and wires to help gradually align teeth and improve the bite. Treatment duration and suitability depend on the dentist's assessment.",
     priceLabel: "₱5,000 down payment",
     details: "₱5,000 down payment + ₱1,250 monthly adjustment",
+    lines: [
+      { label: "Down payment", value: "₱5,000" },
+      { label: "Monthly adjustment", value: "₱1,250" },
+      { label: "Monthly cleaning", value: "Free cleaning during each adjustment visit" },
+    ],
     notes: [
-      "The monthly adjustment is not the total cost of treatment.",
+      "The down payment and monthly adjustment are not the total cost of treatment.",
       "Free cleaning is included every month during the adjustment visit.",
+      FREE_CONSULTATION_NOTE,
     ],
   },
   {
@@ -146,6 +153,21 @@ const APPROVED_CLINIC_PRICES = [
     priceLabel: "₱5,000 for upper or lower",
     details: "₱5,000 for upper or lower",
     notes: ["The listed price is for the upper or lower retainer, not automatically both."],
+  },
+  {
+    id: "orthodontic-consultation",
+    matchIds: ["orthodontic-consultation"],
+    matchNames: ["orthodontics / braces", "orthodontic consultation"],
+    title: "Orthodontics / Braces",
+    description:
+      "Orthodontic treatment helps improve the alignment of teeth and the bite. Our clinic offers orthodontic options to discuss with a dentist, based on your dental needs and treatment goals.",
+    priceLabel: "See braces options",
+    details: "Standard metal braces: ₱5,000 down payment + ₱1,250 monthly adjustment. Invisible braces: price available upon consultation.",
+    notes: [
+      "The before-and-after photo is an example of orthodontic treatment. It does not guarantee the same outcome for every patient.",
+      "The down payment and monthly adjustment for metal braces are not the total cost of treatment.",
+      FREE_CONSULTATION_NOTE,
+    ],
   },
   {
     id: "dentures",
@@ -268,15 +290,97 @@ function normalizeName(value) {
     .replace(/\s+/g, " ");
 }
 
-export function getApprovedClinicPrice(service) {
+function findCatalogEntry(service) {
   if (!service) return null;
   const serviceId = String(service.id || "").trim();
   const serviceName = normalizeName(service.name);
-
-  const match = APPROVED_CLINIC_PRICES.find(
+  return APPROVED_CLINIC_PRICES.find(
     (entry) =>
       entry.matchIds.includes(serviceId) || entry.matchNames.includes(serviceName)
   );
+}
+
+function formatPrice(entry, service, verified) {
+  const compactNote = entry.dependsOnCase
+    ? COMPACT_CASE_NOTE
+    : entry.notes?.includes(PER_UNIT_NOTE)
+      ? PER_UNIT_NOTE
+      : entry.notes?.[0] || "";
+  const extraNotes = (entry.notes || []).filter((note) => {
+    if (entry.dependsOnCase && note === CASE_ASSESSMENT_NOTE) return false;
+    if (note === compactNote) return false;
+    return true;
+  });
+
+  return {
+    ...entry,
+    title: service?.name || entry.title,
+    description: service?.description || entry.description,
+    verified,
+    compactNote,
+    extraNotes,
+  };
+}
+
+function getInvisibleBracesOption() {
+  const confirmed = APPROVED_CLINIC_PRICES.find((entry) => {
+    const names = (entry.matchNames || []).concat(entry.title || "").map(normalizeName);
+    return (
+      entry.id === "invisible-braces" ||
+      names.includes("invisible braces") ||
+      names.includes("clear aligners") ||
+      names.includes("clear aligner")
+    );
+  });
+  if (confirmed) {
+    return {
+      id: confirmed.id,
+      title: "Invisible Braces",
+      description:
+        confirmed.description ||
+        "Invisible braces are a less visible orthodontic option. Suitability depends on the dentist's assessment.",
+      priceLabel: confirmed.priceLabel,
+      details: confirmed.details,
+      lines: confirmed.lines || [],
+      notes: confirmed.notes || [FREE_CONSULTATION_NOTE],
+      verified: true,
+    };
+  }
+  return {
+    id: "invisible-braces",
+    title: "Invisible Braces",
+    description:
+      "Invisible braces are a less visible orthodontic option. Suitability depends on the dentist's assessment. Retainer fees are a separate service and are not the price of invisible braces.",
+    priceLabel: "Price available upon consultation",
+    details: "Price available upon consultation",
+    lines: [],
+    notes: [FREE_CONSULTATION_NOTE],
+    verified: false,
+  };
+}
+
+export function getOrthodonticBracesOptions() {
+  const metal = findCatalogEntry({ id: "metal-braces", name: "Standard Metal Braces" });
+  return [
+    {
+      id: "metal-braces",
+      title: "Standard Metal Braces",
+      description:
+        metal?.description ||
+        "Standard metal braces use brackets and wires to help gradually align teeth and improve the bite. Treatment duration and suitability depend on the dentist's assessment.",
+      priceLabel: metal?.priceLabel || "₱5,000 down payment",
+      details: metal?.details || "₱5,000 down payment + ₱1,250 monthly adjustment",
+      lines: metal?.lines || [],
+      notes: metal?.notes || [],
+      verified: true,
+    },
+    getInvisibleBracesOption(),
+  ];
+}
+
+export function getApprovedClinicPrice(service) {
+  if (!service) return null;
+  const match = findCatalogEntry(service);
 
   if (!match) {
     return {
@@ -285,28 +389,18 @@ export function getApprovedClinicPrice(service) {
       description: service.description || "",
       compactNote: UNAVAILABLE_PRICE.notes[0] || "",
       extraNotes: [],
+      options: [],
     };
   }
 
-  const compactNote = match.dependsOnCase
-    ? COMPACT_CASE_NOTE
-    : match.notes?.includes(PER_UNIT_NOTE)
-      ? PER_UNIT_NOTE
-      : match.notes?.[0] || "";
-  const extraNotes = (match.notes || []).filter((note) => {
-    if (match.dependsOnCase && note === CASE_ASSESSMENT_NOTE) return false;
-    if (note === compactNote) return false;
-    return true;
-  });
-
-  return {
-    ...match,
-    title: service.name || match.title,
-    description: service.description || match.description,
-    verified: true,
-    compactNote,
-    extraNotes,
-  };
+  const priced = formatPrice(match, service, true);
+  if (match.id === "orthodontic-consultation") {
+    return {
+      ...priced,
+      options: getOrthodonticBracesOptions(),
+    };
+  }
+  return { ...priced, options: [] };
 }
 
 export { APPROVED_CLINIC_PRICES };

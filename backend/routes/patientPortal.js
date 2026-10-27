@@ -66,10 +66,11 @@ const SERVICES = [
   },
   {
     id: "orthodontic-consultation",
-    name: "Orthodontic Consultation",
-    description: "Orthodontic consultation.",
+    name: "Orthodontics / Braces",
+    description:
+      "Orthodontic treatment helps improve the alignment of teeth and the bite. Our clinic offers orthodontic options to discuss with a dentist, based on your dental needs and treatment goals.",
     durationMinutes: 30,
-    estimatedCost: 1000,
+    estimatedCost: 5000,
   },
   {
     id: "whitening",
