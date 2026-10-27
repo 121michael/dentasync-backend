@@ -1874,8 +1874,14 @@ strong {
 }
 
 .booking-section {
+  position: relative;
+  z-index: 1;
   padding: 1rem 1.05rem 1.05rem;
   overflow: visible;
+}
+
+.booking-section:has(.treatment-option-wrap.is-open) {
+  z-index: 4;
 }
 
 .booking-select-field {
@@ -1910,17 +1916,27 @@ strong {
 }
 
 .treatment-grid {
+  position: relative;
+  z-index: 1;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
   align-items: start;
   gap: 0.58rem;
   margin-top: 0.7rem;
+  overflow: visible;
+  isolation: isolate;
 }
 
 .treatment-option-wrap {
+  position: relative;
+  z-index: 1;
   display: grid;
   align-content: start;
   min-width: 0;
+}
+
+.treatment-option-wrap.is-open {
+  z-index: 5;
 }
 
 .treatment-option {
@@ -2013,58 +2029,59 @@ strong {
 .treatment-option small { color: var(--text-muted); font-size: 0.67rem; line-height: 1.45; }
 
 .treatment-option__details {
-  display: grid;
-  grid-template-rows: 0fr;
+  position: absolute;
+  top: calc(100% + 0.38rem);
+  left: var(--float-left, 0px);
+  z-index: 6;
+  width: var(--float-width, 100%);
+  min-width: 100%;
+  max-width: min(20rem, calc(100vw - 1.5rem));
   opacity: 0;
+  visibility: hidden;
   pointer-events: none;
-  transition: grid-template-rows 280ms ease, opacity 200ms ease;
+  transform: translate3d(0, 8px, 0);
+  transition: opacity 180ms ease, transform 180ms ease, visibility 180ms ease;
 }
 
 .treatment-option-wrap.is-open .treatment-option__details {
-  grid-template-rows: 1fr;
   opacity: 1;
+  visibility: visible;
   pointer-events: auto;
+  transform: none;
 }
 
 .treatment-option__details-inner {
   min-height: 0;
-  overflow: hidden;
 }
 
 .treatment-price-panel {
   display: grid;
   gap: 0.18rem;
   min-width: 0;
-  margin-top: 0.4rem;
+  max-height: var(--float-max-height, min(22rem, calc(100dvh - 9.5rem)));
   padding: 0.55rem 0.62rem 0.58rem;
+  overflow: auto;
   overflow-wrap: anywhere;
+  overscroll-behavior: contain;
   border: 1px solid color-mix(in srgb, var(--amethyst-600) 42%, var(--border));
   border-radius: 12px;
-  background: #fff;
-  box-shadow: 0 1px 0 color-mix(in srgb, var(--amethyst-500) 16%, transparent);
-}
-
-.treatment-option-wrap.is-open .treatment-price-panel {
-  animation: treatment-details-in 280ms ease both;
-}
-
-@keyframes treatment-details-in {
-  from {
-    opacity: 0;
-    transform: translate3d(0, 6px, 0);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
+  background: color-mix(in srgb, var(--amethyst-100) 58%, #fff);
+  box-shadow:
+    0 12px 28px rgba(74, 32, 112, 0.16),
+    0 1px 0 color-mix(in srgb, var(--amethyst-500) 16%, transparent);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .treatment-option__details,
   .treatment-option,
-  .treatment-option-wrap.is-open .treatment-price-panel {
+  .treatment-price-panel__extra,
+  .treatment-price-panel__more svg {
     transition: none !important;
     animation: none !important;
+  }
+
+  .treatment-option-wrap.is-open .treatment-option__details {
+    transform: none;
   }
 }
 
@@ -2124,8 +2141,22 @@ strong {
 
 .treatment-price-panel__extra {
   display: grid;
-  gap: 0.22rem;
+  grid-template-rows: 0fr;
   min-width: 0;
+  opacity: 0;
+  transition: grid-template-rows 220ms ease, opacity 180ms ease;
+}
+
+.treatment-price-panel__extra.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.treatment-price-panel__extra-inner {
+  display: grid;
+  gap: 0.22rem;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .treatment-price-panel__extra .treatment-price-panel__note {
@@ -2887,11 +2918,8 @@ strong {
 }
 
 @media (max-width: 820px) {
-  .treatment-option-wrap.is-open {
-    grid-column: 1 / -1;
-  }
-  .treatment-option-wrap.is-open .treatment-option {
-    width: min(100%, 230px);
+  .treatment-option__details {
+    max-width: min(20rem, calc(100vw - 1.25rem));
   }
 }
 
@@ -3042,12 +3070,11 @@ strong {
   .wellness-card, .quick-actions-card { padding: 1.05rem; }
   .time-slots { grid-template-columns: repeat(3, 1fr); }
   .treatment-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; margin-top: 0.55rem; }
-  .treatment-option-wrap.is-open {
-    grid-column: 1 / -1;
+  .treatment-option__details {
+    max-width: min(20rem, calc(100vw - 1rem));
   }
-  .treatment-option-wrap.is-open .treatment-option {
-    width: min(100%, calc((100% - 0.5rem) / 2));
-    max-width: 230px;
+  .treatment-price-panel {
+    max-height: var(--float-max-height, min(18rem, calc(100dvh - 10.5rem)));
   }
   .appointments-page { gap: 0.85rem; }
   .booking-form { gap: 0.65rem; }

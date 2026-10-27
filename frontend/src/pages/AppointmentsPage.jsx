@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
   CalendarDays,
@@ -97,7 +97,7 @@ function servicePhotoUrl(service) {
   return service?.imageUrl || service?.image || service?.photoUrl || "";
 }
 
-function ServicePriceDetails({ price, open }) {
+function ServicePriceDetails({ price, open, panelRef }) {
   const [more, setMore] = useState(false);
 
   useEffect(() => {
@@ -110,7 +110,12 @@ function ServicePriceDetails({ price, open }) {
   const hasMore = Boolean(price.lines?.length || extraNotes.length);
 
   return (
-    <div className="treatment-option__details" aria-hidden={!open}>
+    <div
+      ref={panelRef}
+      className="treatment-option__details"
+      aria-hidden={!open}
+      inert={open ? undefined : true}
+    >
       <div className="treatment-option__details-inner">
         <aside className="treatment-price-panel" aria-live={open ? "polite" : "off"}>
           <h3>{price.title}</h3>
@@ -137,8 +142,8 @@ function ServicePriceDetails({ price, open }) {
                 {more ? "Less details" : "More details"}
                 <ChevronDown size={14} aria-hidden="true" />
               </button>
-              {more ? (
-                <div className="treatment-price-panel__extra">
+              <div className={`treatment-price-panel__extra ${more ? "is-open" : ""}`}>
+                <div className="treatment-price-panel__extra-inner">
                   {price.lines?.length ? (
                     <dl className="treatment-price-panel__lines">
                       {price.lines.map((line) => (
@@ -155,11 +160,87 @@ function ServicePriceDetails({ price, open }) {
                     </p>
                   ))}
                 </div>
-              ) : null}
+              </div>
             </>
           ) : null}
         </aside>
       </div>
+    </div>
+  );
+}
+
+function TreatmentServiceOption({ service, selected, onSelect }) {
+  const wrapRef = useRef(null);
+  const panelRef = useRef(null);
+  const photoUrl = servicePhotoUrl(service);
+  const price = getApprovedClinicPrice(service);
+
+  useLayoutEffect(() => {
+    if (!selected) return undefined;
+
+    const place = () => {
+      const wrap = wrapRef.current;
+      const panel = panelRef.current;
+      if (!wrap || !panel) return;
+
+      const wrapBox = wrap.getBoundingClientRect();
+      const grid = wrap.closest(".treatment-grid");
+      const gridBox = grid?.getBoundingClientRect();
+      const navClearance = window.matchMedia("(max-width: 720px)").matches ? 104 : 28;
+      const spaceBelow = Math.max(132, window.innerHeight - wrapBox.bottom - navClearance);
+      const maxWidth = gridBox ? Math.max(wrapBox.width, Math.min(gridBox.right - wrapBox.left - 6, gridBox.width)) : wrapBox.width;
+      const width = Math.min(Math.max(wrapBox.width, Math.min(248, maxWidth)), maxWidth);
+      let left = 0;
+      if (gridBox) {
+        const overflowRight = wrapBox.left + left + width - (gridBox.right - 4);
+        if (overflowRight > 0) left -= overflowRight;
+        const overflowLeft = gridBox.left + 4 - (wrapBox.left + left);
+        if (overflowLeft > 0) left += overflowLeft;
+      }
+
+      panel.style.setProperty("--float-left", `${Math.round(left)}px`);
+      panel.style.setProperty("--float-width", `${Math.round(width)}px`);
+      panel.style.setProperty("--float-max-height", `${Math.round(spaceBelow)}px`);
+    };
+
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [selected, service.id]);
+
+  return (
+    <div
+      ref={wrapRef}
+      className={`treatment-option-wrap ${selected ? "is-open" : ""}`}
+    >
+      <button
+        type="button"
+        role="radio"
+        aria-checked={selected}
+        aria-expanded={selected}
+        aria-label={selected ? `${service.name}, ${price.priceLabel}` : service.name}
+        className={`treatment-option ${selected ? "is-selected" : ""}`}
+        onClick={onSelect}
+      >
+        <span className="treatment-option__media" aria-hidden="true">
+          {photoUrl ? (
+            <img src={photoUrl} alt="" className="treatment-option__photo" />
+          ) : (
+            <span className="treatment-option__placeholder" />
+          )}
+        </span>
+        {selected ? (
+          <span className="treatment-option__check">
+            <Check size={12} aria-hidden="true" />
+          </span>
+        ) : null}
+        <strong>{service.name}</strong>
+      </button>
+      <ServicePriceDetails price={price} open={selected} panelRef={panelRef} />
     </div>
   );
 }
@@ -484,55 +565,19 @@ export function AppointmentsPage() {
               </div>
             </div>
             <div className="treatment-grid" role="radiogroup" aria-label="Select a service">
-              {(catalog.services || []).map((service) => {
-                const selected = form.serviceId === service.id;
-                const photoUrl = servicePhotoUrl(service);
-                const price = getApprovedClinicPrice(service);
-                return (
-                  <div
-                    key={service.id}
-                    className={`treatment-option-wrap ${selected ? "is-open" : ""}`}
-                  >
-                    <button
-                      type="button"
-                      role="radio"
-                      aria-checked={selected}
-                      aria-expanded={selected}
-                      aria-label={
-                        selected
-                          ? `${service.name}, ${price.priceLabel}`
-                          : service.name
-                      }
-                      className={`treatment-option ${selected ? "is-selected" : ""}`}
-                      onClick={() =>
-                        setForm((current) => ({
-                          ...current,
-                          serviceId: current.serviceId === service.id ? "" : service.id,
-                        }))
-                      }
-                    >
-                      <span className="treatment-option__media" aria-hidden="true">
-                        {photoUrl ? (
-                          <img
-                            src={photoUrl}
-                            alt=""
-                            className="treatment-option__photo"
-                          />
-                        ) : (
-                          <span className="treatment-option__placeholder" />
-                        )}
-                      </span>
-                      {selected ? (
-                        <span className="treatment-option__check">
-                          <Check size={12} aria-hidden="true" />
-                        </span>
-                      ) : null}
-                      <strong>{service.name}</strong>
-                    </button>
-                    <ServicePriceDetails price={price} open={selected} />
-                  </div>
-                );
-              })}
+              {(catalog.services || []).map((service) => (
+                <TreatmentServiceOption
+                  key={service.id}
+                  service={service}
+                  selected={form.serviceId === service.id}
+                  onSelect={() =>
+                    setForm((current) => ({
+                      ...current,
+                      serviceId: current.serviceId === service.id ? "" : service.id,
+                    }))
+                  }
+                />
+              ))}
             </div>
           </section>
 
