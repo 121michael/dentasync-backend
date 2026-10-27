@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Sparkles } from "lucide-react";
+import { Bot } from "lucide-react";
 import { ClinicAssistantChat } from "./ClinicAssistantChat";
 import { usePatientAssistant } from "../patientAssistant";
 
 const STORAGE_KEY = "dentasync.patientAssistant.bubblePos";
-const BUBBLE_SIZE = 58;
+const BUBBLE_SIZE = 48;
 const DRAG_THRESHOLD = 8;
 const EDGE_PAD = 10;
 
@@ -243,9 +243,7 @@ export function PatientAssistantWidget() {
 
       <button
         type="button"
-        className={`patient-assistant__bubble${open ? " is-open" : ""}${dragging ? " is-dragging" : ""}${
-          position.x < 180 ? " is-flush-left" : ""
-        }`}
+        className={`patient-assistant__bubble${open ? " is-open" : ""}${dragging ? " is-dragging" : ""}`}
         style={{ left: `${position.x}px`, top: `${position.y}px` }}
         aria-label={open ? "Close AI Assistant" : "Open AI Assistant"}
         aria-expanded={open}
@@ -256,12 +254,9 @@ export function PatientAssistantWidget() {
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
       >
-        <span className="patient-assistant__bubble-glow" aria-hidden="true" />
         <span className="patient-assistant__bubble-core" aria-hidden="true">
-          <Sparkles size={22} />
+          <Bot size={22} strokeWidth={2} />
         </span>
-        <span className="patient-assistant__spark" aria-hidden="true" />
-        {!open ? <span className="patient-assistant__tip">Chat with AI Assistant</span> : null}
       </button>
     </>
   );

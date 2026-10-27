@@ -7265,115 +7265,64 @@ body.is-queue-display .staff-mobile-nav {
 }
 
 .patient-assistant__bubble {
+  box-sizing: border-box;
   position: fixed;
   z-index: 24;
   display: grid;
-  width: 58px;
-  height: 58px;
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
+  min-height: 48px;
+  max-width: 48px;
+  max-height: 48px;
   place-items: center;
+  flex-shrink: 0;
   padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.28);
-  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, #fff 22%, var(--amethyst-600));
+  border-radius: 50%;
   color: #fff;
-  background:
-    radial-gradient(circle at 30% 22%, rgba(255, 255, 255, 0.32), transparent 42%),
-    linear-gradient(145deg, #b57ae8 0%, var(--amethyst-600) 48%, #2f1148 100%);
-  box-shadow:
-    0 0 0 4px color-mix(in srgb, var(--amethyst-100) 72%, transparent),
-    0 10px 26px rgba(62, 24, 98, 0.34),
-    0 0 28px rgba(138, 74, 196, 0.28);
+  background: linear-gradient(180deg, #8b5cc8 0%, var(--amethyst-600) 55%, #5a2d8c 100%);
+  box-shadow: 0 6px 14px rgba(62, 24, 98, 0.28);
   cursor: grab;
   touch-action: none;
   user-select: none;
-  transition: transform 180ms ease, box-shadow 180ms ease, filter 180ms ease;
-  animation: patient-assistant-idle 3.6s ease-in-out infinite;
-}
-
-.patient-assistant__bubble-glow {
-  position: absolute;
-  inset: -7px;
-  border-radius: inherit;
-  background: radial-gradient(circle, rgba(186, 132, 232, 0.32), transparent 68%);
-  pointer-events: none;
+  transition: background 180ms ease, box-shadow 180ms ease, filter 180ms ease;
 }
 
 .patient-assistant__bubble-core {
-  position: relative;
-  z-index: 1;
   display: grid;
+  width: 22px;
+  height: 22px;
   place-items: center;
-}
-
-.patient-assistant__spark {
-  position: absolute;
-  top: 7px;
-  right: 8px;
-  z-index: 2;
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: #fff;
-  box-shadow: 0 0 10px rgba(255, 255, 255, 0.9);
   pointer-events: none;
 }
 
-.patient-assistant__tip {
-  position: absolute;
-  right: calc(100% + 0.65rem);
-  top: 50%;
-  z-index: 3;
-  padding: 0.32rem 0.58rem;
-  border-radius: 999px;
-  color: var(--text-strong);
-  background: #fff;
-  box-shadow: 0 8px 18px rgba(62, 24, 98, 0.16);
-  font-size: 0.68rem;
-  font-weight: 700;
-  white-space: nowrap;
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(-50%) translateX(4px);
-  transition: opacity 160ms ease, transform 160ms ease;
-}
-
-.patient-assistant__bubble:hover .patient-assistant__tip,
-.patient-assistant__bubble:focus-visible .patient-assistant__tip {
-  opacity: 1;
-  transform: translateY(-50%);
-}
-
-.patient-assistant__bubble.is-flush-left .patient-assistant__tip {
-  right: auto;
-  left: calc(100% + 0.65rem);
+.patient-assistant__bubble-core svg {
+  display: block;
+  width: 22px;
+  height: 22px;
 }
 
 .patient-assistant__bubble:hover,
 .patient-assistant__bubble:focus-visible {
-  transform: translateY(-2px) scale(1.05);
-  filter: brightness(1.08);
-  box-shadow:
-    0 0 0 5px color-mix(in srgb, var(--amethyst-100) 82%, transparent),
-    0 14px 30px rgba(62, 24, 98, 0.38),
-    0 0 34px rgba(154, 86, 214, 0.36);
+  filter: brightness(1.06);
+  box-shadow: 0 8px 16px rgba(62, 24, 98, 0.32);
 }
 
 .patient-assistant__bubble:focus-visible {
   outline: 2px solid #fff;
-  outline-offset: 3px;
+  outline-offset: 2px;
 }
 
 .patient-assistant__bubble:active,
 .patient-assistant__bubble.is-dragging {
-  transform: scale(0.96);
   cursor: grabbing;
-  animation: none;
+  filter: brightness(0.96);
+  box-shadow: 0 4px 10px rgba(62, 24, 98, 0.26);
 }
 
 .patient-assistant__bubble.is-open {
-  animation: none;
-  background:
-    radial-gradient(circle at 30% 22%, rgba(255, 255, 255, 0.22), transparent 42%),
-    linear-gradient(145deg, var(--amethyst-700), #2a0d42);
+  background: linear-gradient(180deg, var(--amethyst-700) 0%, #43196a 100%);
 }
 
 .patient-assistant__panel {
@@ -7400,21 +7349,6 @@ body.is-queue-display .staff-mobile-nav {
   visibility: visible;
   pointer-events: auto;
   transform: none;
-}
-
-@keyframes patient-assistant-idle {
-  0%, 100% {
-    box-shadow:
-      0 0 0 4px color-mix(in srgb, var(--amethyst-100) 72%, transparent),
-      0 10px 26px rgba(62, 24, 98, 0.34),
-      0 0 22px rgba(138, 74, 196, 0.22);
-  }
-  50% {
-    box-shadow:
-      0 0 0 6px color-mix(in srgb, var(--amethyst-100) 58%, transparent),
-      0 12px 28px rgba(62, 24, 98, 0.3),
-      0 0 34px rgba(154, 86, 214, 0.4);
-  }
 }
 
 .assistant-panel--widget {
@@ -7605,12 +7539,6 @@ body.is-queue-display .staff-mobile-nav {
   display: grid;
 }
 
-@media (max-width: 980px) {
-  .patient-assistant__tip {
-    display: none;
-  }
-}
-
 @media (max-width: 520px) {
   .assistant-panel--widget .assistant-composer .button--primary {
     min-width: 3.1rem;
@@ -7634,7 +7562,6 @@ body.is-queue-display .staff-mobile-nav {
 
   .patient-assistant__bubble:hover,
   .patient-assistant__bubble:focus-visible {
-    transform: none;
     filter: none;
   }
 }
