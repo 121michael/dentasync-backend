@@ -11047,7 +11047,11 @@ body.is-queue-display .fab-menu {
     --lp-section-y: 3.25rem;
   }
   .landing-header__bar {
-    gap: 0.6rem;
+    gap: 0.45rem;
+  }
+  .landing-header__actions {
+    gap: 0.28rem;
+    min-width: 0;
   }
   .landing-header__brand .brand-mark__gem {
     width: 36px;
@@ -11058,17 +11062,17 @@ body.is-queue-display .fab-menu {
     display: none;
   }
   .landing-header__cta {
-    min-height: 38px;
-    padding: 0 0.9rem;
-    font-size: 0.78rem;
+    min-height: 36px;
+    padding: 0 0.7rem;
+    font-size: 0.72rem;
   }
   .landing-header__signin {
-    padding: 0.45rem 0.5rem;
-    font-size: 0.8rem;
+    padding: 0.4rem 0.35rem;
+    font-size: 0.74rem;
   }
   .landing-header__toggle {
-    width: 38px;
-    height: 38px;
+    width: 36px;
+    height: 36px;
   }
   .landing .landing-hero .auth-showcase {
     padding-top: 2.25rem;
@@ -11108,8 +11112,40 @@ body.is-queue-display .fab-menu {
 }
 
 @media (max-width: 460px) {
+  .landing-header__bar {
+    padding-inline: 0.75rem;
+    gap: 0.35rem;
+  }
   .landing-header__brand .brand-mark__text strong {
-    font-size: 0.82rem;
+    font-size: 0.78rem;
+  }
+  .landing-header__cta {
+    min-height: 34px;
+    padding: 0 0.58rem;
+    font-size: 0.68rem;
+  }
+  .landing-header__signin {
+    padding: 0.32rem 0.28rem;
+    font-size: 0.7rem;
+  }
+  .landing-header__toggle {
+    width: 34px;
+    height: 34px;
+  }
+}
+
+@media (max-width: 360px) {
+  .landing-header__bar {
+    padding-inline: 0.6rem;
+  }
+  .landing-header__cta {
+    padding: 0 0.48rem;
+  }
+}
+
+@media (max-width: 340px) {
+  .landing-header__brand .brand-mark__text {
+    display: none;
   }
 }
 
