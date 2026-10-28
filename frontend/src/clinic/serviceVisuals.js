@@ -23,6 +23,11 @@ export const CLEANING_IMAGE_URL = "/services/dental-cleaning.jpg";
 export const CLEANING_IMAGE_ALT =
   "Three-part example of dental cleaning, from stained teeth to cleaned teeth. Individual results vary and are not guaranteed.";
 
+export const EXTRACTION_SERVICE_ID = "extraction";
+export const EXTRACTION_IMAGE_URL = "/services/tooth-extraction.jpg";
+export const EXTRACTION_IMAGE_ALT =
+  "Illustration of a tooth being removed from the gum with dental forceps. Individual treatment needs vary.";
+
 const SERVICE_VISUALS = {
   [ORTHODONTICS_SERVICE_ID]: {
     imageUrl: ORTHODONTICS_IMAGE_URL,
@@ -48,6 +53,11 @@ const SERVICE_VISUALS = {
     imageUrl: CLEANING_IMAGE_URL,
     imageFit: "contain",
     imageAlt: CLEANING_IMAGE_ALT,
+  },
+  [EXTRACTION_SERVICE_ID]: {
+    imageUrl: EXTRACTION_IMAGE_URL,
+    imageFit: "contain",
+    imageAlt: EXTRACTION_IMAGE_ALT,
   },
 };
 

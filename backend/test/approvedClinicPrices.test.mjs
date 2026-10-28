@@ -8,6 +8,7 @@ import {
   CLEANING_IMAGE_URL,
   DENTAL_IMPLANTS_IMAGE_URL,
   DENTURES_IMAGE_URL,
+  EXTRACTION_IMAGE_URL,
   ORTHODONTICS_IMAGE_URL,
   VENEERS_IMAGE_URL,
   attachServiceVisual,
@@ -63,6 +64,7 @@ test("dentures orthodontics implants veneers and cleaning reuse one public image
   const implants = attachServiceVisual({ id: "dental-implants", name: "Dental Implants" });
   const veneers = attachServiceVisual({ id: "veneers", name: "Veneers" });
   const cleaning = attachServiceVisual({ id: "cleaning", name: "Dental Cleaning / Oral Prophylaxis" });
+  const extraction = attachServiceVisual({ id: "extraction", name: "Tooth Extraction" });
   assert.equal(dentures.imageUrl, DENTURES_IMAGE_URL);
   assert.equal(dentures.imageFit, "contain");
   assert.equal(braces.imageUrl, ORTHODONTICS_IMAGE_URL);
@@ -72,13 +74,17 @@ test("dentures orthodontics implants veneers and cleaning reuse one public image
   assert.equal(veneers.imageFit, "cover");
   assert.equal(cleaning.imageUrl, CLEANING_IMAGE_URL);
   assert.equal(cleaning.imageFit, "contain");
+  assert.equal(extraction.imageUrl, EXTRACTION_IMAGE_URL);
+  assert.equal(extraction.imageFit, "contain");
   assert.notEqual(cleaning.imageUrl, veneers.imageUrl);
   assert.notEqual(cleaning.imageUrl, dentures.imageUrl);
+  assert.notEqual(extraction.imageUrl, cleaning.imageUrl);
   assert.equal(existsSync(join(frontendRoot, "public", dentures.imageUrl.replace(/^\//, ""))), true);
   assert.equal(existsSync(join(frontendRoot, "public", braces.imageUrl.replace(/^\//, ""))), true);
   assert.equal(existsSync(join(frontendRoot, "public", implants.imageUrl.replace(/^\//, ""))), true);
   assert.equal(existsSync(join(frontendRoot, "public", veneers.imageUrl.replace(/^\//, ""))), true);
   assert.equal(existsSync(join(frontendRoot, "public", cleaning.imageUrl.replace(/^\//, ""))), true);
+  assert.equal(existsSync(join(frontendRoot, "public", extraction.imageUrl.replace(/^\//, ""))), true);
 });
 
 test("dental cleaning shows the verified starting price with a case qualification", () => {
