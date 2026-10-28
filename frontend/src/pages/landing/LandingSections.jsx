@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   AlertCircle,
   ArrowRight,
@@ -20,7 +21,10 @@ import { Link } from "react-router-dom";
 import { api } from "../../api";
 import { BrandMark } from "../../components/BrandMark";
 import { getApprovedClinicPrice } from "../../clinic/approvedClinicPrices";
-import { attachServiceVisual } from "../../clinic/serviceVisuals";
+import {
+  isCombinedBridgeCrownService,
+  presentPublicLandingServices,
+} from "../../clinic/publicLandingServices";
 
 // Covers a Render cold start or a backend that is still redeploying after the static site went live.
 const CLINIC_INFO_RETRY_DELAYS_MS = [2000, 5000];
@@ -278,16 +282,17 @@ function SwipeCarousel({ label, items, getKey, activeIndex, onSelect, renderItem
     }
   }
 
-  function select(index) {
-    onSelect(index);
+  function select(index, event) {
+    onSelect(index, event);
     revealItem(index);
   }
 
   function handleKeyDown(event) {
     if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
     event.preventDefault();
-    const next = Math.min(items.length - 1, Math.max(0, activeIndex + (event.key === "ArrowRight" ? 1 : -1)));
-    select(next);
+    const current = Math.max(0, activeIndex);
+    const next = Math.min(items.length - 1, Math.max(0, current + (event.key === "ArrowRight" ? 1 : -1)));
+    revealItem(next);
     trackRef.current?.children[next]?.querySelector("button")?.focus({ preventScroll: true });
   }
 
@@ -314,7 +319,8 @@ function SwipeCarousel({ label, items, getKey, activeIndex, onSelect, renderItem
               type="button"
               className={`landing-carousel__card ${index === activeIndex ? "is-active" : ""}`}
               aria-pressed={index === activeIndex}
-              onClick={() => select(index)}
+              aria-haspopup="dialog"
+              onClick={(event) => select(index, event)}
             >
               {renderItem(item, index)}
             </button>
@@ -463,12 +469,163 @@ function LoadState({ status, onRetry, tone = "light", label, lines = 3 }) {
   );
 }
 
+function LandingServicePanel({ service, open, onClose }) {
+  const closeRef = useRef(null);
+  const panelRef = useRef(null);
+  const leaveTimerRef = useRef(0);
+  const [leaving, setLeaving] = useState(false);
+  const price = service && !isCombinedBridgeCrownService(service) ? getApprovedClinicPrice(service) : null;
+  const photoUrl = service?.imageUrl || service?.image || service?.photoUrl || "";
+
+  const requestClose = useCallback(() => {
+    if (!open || leaving) return;
+    if (prefersReducedMotion()) {
+      onClose?.();
+      return;
+    }
+    setLeaving(true);
+    window.clearTimeout(leaveTimerRef.current);
+    leaveTimerRef.current = window.setTimeout(() => onClose?.(), 240);
+  }, [open, leaving, onClose]);
+
+  useEffect(() => {
+    setLeaving(false);
+    window.clearTimeout(leaveTimerRef.current);
+    return () => window.clearTimeout(leaveTimerRef.current);
+  }, [service?.id, open]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeRef.current?.focus();
+    function onKey(event) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        requestClose();
+        return;
+      }
+      if (event.key !== "Tab" || !panelRef.current) return;
+      const focusable = [...panelRef.current.querySelectorAll("a, button")].filter((node) => !node.disabled);
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open, service?.id, requestClose]);
+
+  if (!open || !service || typeof document === "undefined") return null;
+
+  const optionNotes = (price?.options || []).flatMap((option) => publicTreatmentNotes(option.notes));
+
+  return createPortal(
+    <div className={`landing-service-layer ${leaving ? "is-closing" : "is-open"}`}>
+      <button
+        type="button"
+        className="landing-service-layer__backdrop"
+        tabIndex={-1}
+        aria-label="Close service details"
+        onClick={requestClose}
+      />
+      <aside
+        ref={panelRef}
+        className="landing-service-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="landing-service-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <button
+          ref={closeRef}
+          type="button"
+          className="landing-service-panel__close"
+          aria-label="Close service details"
+          onClick={requestClose}
+        >
+          <X size={16} />
+        </button>
+        <div className="landing-service-detail">
+          {photoUrl ? (
+            <figure className="landing-service-detail__figure">
+              <img
+                src={photoUrl}
+                alt={service.imageAlt || `${service.name} example`}
+                className={`landing-service-detail__photo${service.imageFit === "contain" ? " is-contain" : ""}`}
+              />
+            </figure>
+          ) : null}
+          <h3 id="landing-service-title">{service.name}</h3>
+          {service.description ? <p>{service.description}</p> : null}
+          {price?.options?.length ? (
+            <ul className="landing-service-detail__options">
+              {price.options.map((option) => (
+                <li key={option.id}>
+                  <strong>{option.title}</strong>
+                  {option.description ? <p>{option.description}</p> : null}
+                  {publicTreatmentNotes(option.notes).map((note) => (
+                    <small key={note}>{note}</small>
+                  ))}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {publicTreatmentNotes(price?.extraNotes)
+            .filter((note) => !optionNotes.includes(note))
+            .map((note) => (
+              <p key={note} className="landing-service-detail__how">
+                {note}
+              </p>
+            ))}
+          <p className="landing-service-detail__how">
+            Review this information first. Book a consultation when you are ready — existing patients can sign in, and new patients can create an account on the same page.
+          </p>
+          <Link to="/register" className="landing-button landing-button--gold" onClick={requestClose}>
+            Book a Consultation <ArrowRight size={17} aria-hidden="true" />
+          </Link>
+          <p className="landing-service-detail__how">
+            Already have an account?{" "}
+            <Link to="/login" onClick={requestClose}>
+              Sign in
+            </Link>{" "}
+            to continue. Sign in and Create Account share the same page.
+          </p>
+        </div>
+      </aside>
+    </div>,
+    document.body
+  );
+}
+
 export function ServicesSection({ services, status, onRetry }) {
   const [activeIndex, setActiveIndex] = useState(0);
-  const catalog = (services || []).map(attachServiceVisual);
-  const active = catalog[activeIndex] || catalog[0];
-  const price = active ? getApprovedClinicPrice(active) : null;
-  const photoUrl = active?.imageUrl || active?.image || active?.photoUrl || "";
+  const [panelOpen, setPanelOpen] = useState(false);
+  const openerRef = useRef(null);
+  const catalog = presentPublicLandingServices(services);
+  const openService = panelOpen ? catalog[activeIndex] : null;
+
+  function openAt(index, event) {
+    openerRef.current = event?.currentTarget || document.activeElement;
+    setActiveIndex(index);
+    setPanelOpen(true);
+  }
+
+  function closePanel() {
+    setPanelOpen(false);
+    window.requestAnimationFrame(() => {
+      openerRef.current?.focus?.({ preventScroll: true });
+    });
+  }
 
   return (
     <section id="services" className="landing-section landing-section--plum" tabIndex={-1} aria-labelledby="services-title">
@@ -491,7 +648,7 @@ export function ServicesSection({ services, status, onRetry }) {
               items={catalog}
               getKey={(service) => service.id}
               activeIndex={activeIndex}
-              onSelect={setActiveIndex}
+              onSelect={openAt}
               renderItem={(service, index) => {
                 const cardPhoto = service.imageUrl || service.image || service.photoUrl;
                 return (
@@ -518,47 +675,7 @@ export function ServicesSection({ services, status, onRetry }) {
                 );
               }}
             />
-            <article className="landing-service-detail" aria-live="polite" key={active.id}>
-              <span className="landing-eyebrow">Service {String(activeIndex + 1).padStart(2, "0")}</span>
-              <h3>{active.name}</h3>
-              {photoUrl ? (
-                <figure className="landing-service-detail__figure">
-                  <img
-                    src={photoUrl}
-                    alt={active.imageAlt || `${active.name} example`}
-                    className={`landing-service-detail__photo${active.imageFit === "contain" ? " is-contain" : ""}`}
-                  />
-                </figure>
-              ) : null}
-              {active.description ? <p>{active.description}</p> : null}
-              {price?.options?.length ? (
-                <ul className="landing-service-detail__options">
-                  {price.options.map((option) => (
-                    <li key={option.id}>
-                      <strong>{option.title}</strong>
-                      {option.description ? <p>{option.description}</p> : null}
-                      {publicTreatmentNotes(option.notes).map((note) => (
-                        <small key={note}>{note}</small>
-                      ))}
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-              {publicTreatmentNotes(price?.extraNotes)
-                .filter((note) => !(price?.options || []).some((option) => publicTreatmentNotes(option.notes).includes(note)))
-                .map((note) => (
-                  <p key={note} className="landing-service-detail__how">{note}</p>
-                ))}
-              <p className="landing-service-detail__how">
-                Review this information first. Book a consultation when you are ready — existing patients can sign in, and new patients can create an account on the same page.
-              </p>
-              <Link to="/register" className="landing-button landing-button--gold">
-                Book a Consultation <ArrowRight size={17} aria-hidden="true" />
-              </Link>
-              <p className="landing-service-detail__how">
-                Already have an account? <Link to="/login">Sign in</Link> to continue. Sign in and Create Account share the same page.
-              </p>
-            </article>
+            <LandingServicePanel service={openService} open={panelOpen} onClose={closePanel} />
           </div>
         ) : (
           <p className="landing-status landing-status--dark" role="status">
