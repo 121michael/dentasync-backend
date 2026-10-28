@@ -132,7 +132,8 @@ const SERVICES = [
   {
     id: "dental-implants",
     name: "Dental Implants",
-    description: "A dental implant to replace a missing tooth. Suitability and treatment steps are confirmed after an exam.",
+    description:
+      "Dental implants are dental restorations that replace missing teeth using an implant placed in the jawbone to support a replacement tooth or prosthesis. Suitability depends on your oral health, bone condition, and the dentist's assessment.",
     durationMinutes: 90,
     estimatedCost: 0,
   },

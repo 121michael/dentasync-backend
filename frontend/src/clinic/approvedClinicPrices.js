@@ -237,10 +237,16 @@ const APPROVED_CLINIC_PRICES = [
     matchIds: ["dental-implants"],
     matchNames: ["dental implants"],
     title: "Dental Implants",
-    description: "A dental implant to replace a missing tooth. Suitability and treatment steps are confirmed after an exam.",
-    priceLabel: "Available upon consultation",
-    details: "Pricing is available upon consultation or confirmation by the clinic",
-    notes: [FREE_CONSULTATION_NOTE],
+    description:
+      "Dental implants are dental restorations that replace missing teeth using an implant placed in the jawbone to support a replacement tooth or prosthesis. Suitability depends on your oral health, bone condition, and the dentist's assessment.",
+    priceLabel: "Price available upon consultation",
+    details: "Price available upon consultation",
+    compactNote: "Final cost depends on the dentist's assessment and the patient's treatment needs.",
+    notes: [
+      "Final cost depends on the dentist's assessment and the patient's treatment needs.",
+      "Not every patient is eligible for implants. Suitability is confirmed after an exam.",
+      FREE_CONSULTATION_NOTE,
+    ],
   },
   {
     id: "gum-contouring",

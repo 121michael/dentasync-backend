@@ -8,6 +8,11 @@ export const DENTURES_IMAGE_URL = "/services/dentures.jpg";
 export const DENTURES_IMAGE_ALT =
   "Complete upper and lower denture model on a dental cast. The photo shows the full appliance, not a cropped close-up.";
 
+export const DENTAL_IMPLANTS_SERVICE_ID = "dental-implants";
+export const DENTAL_IMPLANTS_IMAGE_URL = "/services/dental-implants.jpg";
+export const DENTAL_IMPLANTS_IMAGE_ALT =
+  "Illustration of a dental implant in the jawbone supporting a replacement tooth beside natural teeth.";
+
 const SERVICE_VISUALS = {
   [ORTHODONTICS_SERVICE_ID]: {
     imageUrl: ORTHODONTICS_IMAGE_URL,
@@ -18,6 +23,11 @@ const SERVICE_VISUALS = {
     imageUrl: DENTURES_IMAGE_URL,
     imageFit: "contain",
     imageAlt: DENTURES_IMAGE_ALT,
+  },
+  [DENTAL_IMPLANTS_SERVICE_ID]: {
+    imageUrl: DENTAL_IMPLANTS_IMAGE_URL,
+    imageFit: "contain",
+    imageAlt: DENTAL_IMPLANTS_IMAGE_ALT,
   },
 };
 

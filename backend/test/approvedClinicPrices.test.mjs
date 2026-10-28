@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getApprovedClinicPrice } from "../../frontend/src/clinic/approvedClinicPrices.js";
 import {
+  DENTAL_IMPLANTS_IMAGE_URL,
   DENTURES_IMAGE_URL,
   ORTHODONTICS_IMAGE_URL,
   attachServiceVisual,
@@ -54,26 +55,35 @@ test("orthodontics shows metal braces prices and not retainer fees for invisible
   assert.doesNotMatch(invisible.description, /retainer/i);
 });
 
-test("dentures and orthodontics reuse one public image asset each", () => {
+test("dentures orthodontics and implants reuse one public image asset each", () => {
   const dentures = attachServiceVisual({ id: "dentures", name: "Dentures" });
   const braces = attachServiceVisual({ id: "orthodontic-consultation", name: "Orthodontics / Braces" });
+  const implants = attachServiceVisual({ id: "dental-implants", name: "Dental Implants" });
   assert.equal(dentures.imageUrl, DENTURES_IMAGE_URL);
   assert.equal(dentures.imageFit, "contain");
   assert.equal(braces.imageUrl, ORTHODONTICS_IMAGE_URL);
-  assert.notEqual(dentures.imageUrl, braces.imageUrl);
+  assert.equal(implants.imageUrl, DENTAL_IMPLANTS_IMAGE_URL);
+  assert.equal(implants.imageFit, "contain");
+  assert.notEqual(implants.imageUrl, dentures.imageUrl);
+  assert.notEqual(implants.imageUrl, braces.imageUrl);
   assert.equal(existsSync(join(frontendRoot, "public", dentures.imageUrl.replace(/^\//, ""))), true);
   assert.equal(existsSync(join(frontendRoot, "public", braces.imageUrl.replace(/^\//, ""))), true);
+  assert.equal(existsSync(join(frontendRoot, "public", implants.imageUrl.replace(/^\//, ""))), true);
 });
 
 test("veneers implants and gum contouring do not invent peso prices", () => {
-  for (const service of [
-    { id: "veneers", name: "Veneers" },
-    { id: "dental-implants", name: "Dental Implants" },
-    { id: "gum-contouring", name: "Gum Contouring" },
-  ]) {
-    const price = getApprovedClinicPrice(service);
-    assert.equal(price.priceLabel, "Available upon consultation");
+  const veneers = getApprovedClinicPrice({ id: "veneers", name: "Veneers" });
+  const implants = getApprovedClinicPrice({ id: "dental-implants", name: "Dental Implants" });
+  const gums = getApprovedClinicPrice({ id: "gum-contouring", name: "Gum Contouring" });
+  assert.equal(veneers.priceLabel, "Available upon consultation");
+  assert.equal(implants.priceLabel, "Price available upon consultation");
+  assert.match(implants.description, /implant placed in the jawbone/);
+  assert.match(implants.compactNote, /dentist's assessment/);
+  assert.equal(gums.priceLabel, "Available upon consultation");
+  for (const price of [veneers, implants, gums]) {
     assert.doesNotMatch(price.priceLabel, /₱\d/);
     assert.doesNotMatch(price.details, /₱\d/);
   }
+  assert.doesNotMatch(implants.priceLabel, /₱7,500/);
+  assert.doesNotMatch(implants.priceLabel, /₱7,000/);
 });
