@@ -42,6 +42,7 @@ export const SPA_ROUTES = [
   "/admin/ai-settings",
   "/admin/settings",
   "/admin/sync-data",
+  "/admin/backup",
   "/admin/audit-logs",
   "/admin/notifications",
   "/dentist",

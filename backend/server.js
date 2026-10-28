@@ -96,6 +96,7 @@ app.use((req, res, next) => {
 const { createClinicSmsService } = require("./services/clinicSms");
 const { createCleaningReminderJob } = require("./services/cleaningReminders");
 const { createDocumentSyncCleanupJob } = require("./services/documentSyncCleanupJob");
+const { createBackupScheduleJob } = require("./services/backupRecovery");
 const path = require("path");
 
 const clinicSms = createClinicSmsService({
@@ -418,6 +419,7 @@ const documentSyncCleanupJob = createDocumentSyncCleanupJob({
   db,
   uploadDirectory: path.join(process.cwd(), "uploads", "admin-document-sync"),
 });
+const backupScheduleJob = createBackupScheduleJob({ db });
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`✅ DentaSync server running on http://localhost:${PORT}`);
@@ -458,8 +460,10 @@ if (require.main === module) {
     }
     cleaningReminderJob.start();
     documentSyncCleanupJob.start();
+    backupScheduleJob.start();
     console.log("Cleaning reminder SMS job scheduled (every 4–6 months based on last visit).");
     console.log("Document sync temporary scans expire after 24 hours (server clock).");
+    console.log("Backup scheduler checks daily/weekly settings while this API process is running.");
   });
 }
 

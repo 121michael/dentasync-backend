@@ -7,6 +7,7 @@ import {
   CalendarDays,
   Cloud,
   CreditCard,
+  DatabaseBackup,
   FolderOpen,
   LayoutDashboard,
   LogOut,
@@ -45,6 +46,7 @@ const navigation = [
   { to: "/admin/analytics", label: "General Analytics", icon: BarChart3 },
   { to: "/admin/ai-settings", label: "Manage AI Settings", icon: Bot },
   { to: "/admin/sync-data", label: "Sync Data", icon: Cloud },
+  { to: "/admin/backup", label: "Backup & Recovery", icon: DatabaseBackup },
   { to: "/admin/archived-records", label: "Archive", icon: Archive },
 ];
 
@@ -61,6 +63,7 @@ const PAGE_TITLES = {
   "/admin/ai-settings": "Amethyst AI Core Settings",
   "/admin/settings": "System Settings",
   "/admin/sync-data": "Document Data Extraction",
+  "/admin/backup": "Backup & Recovery",
   "/admin/audit-logs": "Security Audit",
 };
 
@@ -276,6 +279,7 @@ export function AdminLayout() {
                   { to: "/admin/analytics", label: "General Analytics", icon: BarChart3 },
                   { to: "/admin/ai-settings", label: "Manage AI Settings", icon: Bot },
                   { to: "/admin/sync-data", label: "Sync Data", icon: Cloud },
+                  { to: "/admin/backup", label: "Backup & Recovery", icon: DatabaseBackup },
                   { to: "/admin/archived-records", label: "Archive", icon: Archive },
                 ],
               },

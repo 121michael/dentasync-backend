@@ -451,6 +451,20 @@ export const api = {
   updateAdminPassword: (body) => request("/admin/password", { method: "PUT", body }),
   downloadAdminExport: (report) =>
     download(`/admin/export/${encodeURIComponent(report)}`, `${report}-export.csv`),
+  getAdminBackups: () => request("/admin/backups"),
+  getAdminBackup: (id) => request(`/admin/backups/${encodeURIComponent(id)}`),
+  createAdminBackup: () => request("/admin/backups", { method: "POST" }),
+  updateAdminBackupSettings: (body) => request("/admin/backups/settings", { method: "PUT", body }),
+  restoreAdminBackup: (id, body) =>
+    request(`/admin/backups/${encodeURIComponent(id)}/restore`, { method: "POST", body }),
+  deleteAdminBackup: (id) => request(`/admin/backups/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  downloadAdminBackup: (id, filename) =>
+    download(`/admin/backups/${encodeURIComponent(id)}/download`, filename || "dentasync-backup.dsb"),
+  uploadAdminBackup: (file) => {
+    const data = new FormData();
+    data.append("backup", file);
+    return request("/admin/backups/upload", { method: "POST", body: data });
+  },
   downloadAdminAnalyticsExport: (format, range = "month", extras = {}) => {
     const search = new URLSearchParams({
       format,
