@@ -33,6 +33,11 @@ export const FILLING_IMAGE_URL = "/services/dental-filling.jpg";
 export const FILLING_IMAGE_ALT =
   "Before-and-after example of a permanent filling restoring a damaged tooth. Individual results vary and are not guaranteed.";
 
+export const ROOT_CANAL_SERVICE_ID = "root-canal";
+export const ROOT_CANAL_IMAGE_URL = "/services/root-canal.jpg";
+export const ROOT_CANAL_IMAGE_ALT =
+  "Illustration of a root canal file treating the inside of a tooth. Individual treatment needs vary.";
+
 const SERVICE_VISUALS = {
   [ORTHODONTICS_SERVICE_ID]: {
     imageUrl: ORTHODONTICS_IMAGE_URL,
@@ -68,6 +73,11 @@ const SERVICE_VISUALS = {
     imageUrl: FILLING_IMAGE_URL,
     imageFit: "contain",
     imageAlt: FILLING_IMAGE_ALT,
+  },
+  [ROOT_CANAL_SERVICE_ID]: {
+    imageUrl: ROOT_CANAL_IMAGE_URL,
+    imageFit: "contain",
+    imageAlt: ROOT_CANAL_IMAGE_ALT,
   },
 };
 
