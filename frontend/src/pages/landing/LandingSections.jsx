@@ -473,22 +473,25 @@ function LandingServicePanel({ service, open, onClose }) {
   const closeRef = useRef(null);
   const panelRef = useRef(null);
   const leaveTimerRef = useRef(0);
+  const leavingRef = useRef(false);
   const [leaving, setLeaving] = useState(false);
   const price = service && !isCombinedBridgeCrownService(service) ? getApprovedClinicPrice(service) : null;
   const photoUrl = service?.imageUrl || service?.image || service?.photoUrl || "";
 
   const requestClose = useCallback(() => {
-    if (!open || leaving) return;
+    if (!open || leavingRef.current) return;
     if (prefersReducedMotion()) {
       onClose?.();
       return;
     }
+    leavingRef.current = true;
     setLeaving(true);
     window.clearTimeout(leaveTimerRef.current);
     leaveTimerRef.current = window.setTimeout(() => onClose?.(), 240);
-  }, [open, leaving, onClose]);
+  }, [open, onClose]);
 
   useEffect(() => {
+    leavingRef.current = false;
     setLeaving(false);
     window.clearTimeout(leaveTimerRef.current);
     return () => window.clearTimeout(leaveTimerRef.current);
@@ -546,15 +549,6 @@ function LandingServicePanel({ service, open, onClose }) {
         aria-labelledby="landing-service-title"
         onClick={(event) => event.stopPropagation()}
       >
-        <button
-          ref={closeRef}
-          type="button"
-          className="landing-service-panel__close"
-          aria-label="Close service details"
-          onClick={requestClose}
-        >
-          <X size={16} />
-        </button>
         <div className="landing-service-detail">
           {photoUrl ? (
             <figure className="landing-service-detail__figure">
@@ -565,7 +559,18 @@ function LandingServicePanel({ service, open, onClose }) {
               />
             </figure>
           ) : null}
-          <h3 id="landing-service-title">{service.name}</h3>
+          <div className="landing-service-panel__title">
+            <h3 id="landing-service-title">{service.name}</h3>
+            <button
+              ref={closeRef}
+              type="button"
+              className="landing-service-panel__close"
+              aria-label="Close service details"
+              onClick={requestClose}
+            >
+              <X size={16} />
+            </button>
+          </div>
           {service.description ? <p>{service.description}</p> : null}
           {price?.options?.length ? (
             <ul className="landing-service-detail__options">

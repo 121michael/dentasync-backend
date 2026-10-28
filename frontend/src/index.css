@@ -11175,7 +11175,7 @@ body.is-queue-display .fab-menu {
   position: absolute;
   inset: 0;
   border: 0;
-  background: rgba(36, 14, 58, 0.52);
+  background: rgba(28, 10, 48, 0.62);
   cursor: pointer;
   animation: landing-service-overlay-in 240ms ease both;
 }
@@ -11191,27 +11191,32 @@ body.is-queue-display .fab-menu {
   padding: 24px;
   overflow: auto;
   overscroll-behavior: contain;
+  isolation: isolate;
   border: 1px solid color-mix(in srgb, var(--lp-gold) 38%, transparent);
   border-radius: 20px;
   color: var(--lp-ink);
-  background: var(--lp-ivory);
+  background: #fffdf9;
   box-shadow: 0 28px 64px rgba(18, 6, 32, 0.38);
   animation: landing-service-panel-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.landing-service-panel__close {
-  position: absolute;
-  top: 0.85rem;
-  right: 0.85rem;
-  z-index: 2;
+.landing-service-panel__title {
   display: grid;
-  width: 2rem;
-  height: 2rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.landing-service-panel__close {
+  display: grid;
+  flex: none;
+  width: 2.15rem;
+  height: 2.15rem;
   place-items: center;
   border: 0;
   border-radius: 999px;
   color: var(--lp-plum-700);
-  background: color-mix(in srgb, var(--lp-lavender) 72%, #fff);
+  background: color-mix(in srgb, var(--lp-lavender) 78%, #fff);
   cursor: pointer;
 }
 
@@ -11279,7 +11284,6 @@ body.is-queue-display .fab-menu {
 
 .landing-service-detail h3 {
   margin: 0;
-  padding-right: 2.4rem;
   color: inherit;
   font-family: var(--lp-serif);
   font-size: clamp(1.45rem, 2.4vw, 1.85rem);
@@ -12199,13 +12203,13 @@ body.is-queue-display .fab-menu {
     grid-template-columns: minmax(0, 1fr);
     align-items: start;
   }
+}
+
+@media (max-width: 950px) {
   .landing-service-panel {
     width: min(70vw, 480px);
     max-height: 85dvh;
   }
-}
-
-@media (max-width: 950px) {
   .landing .auth-page {
     grid-template-columns: minmax(0, 1fr);
     min-height: 0;
