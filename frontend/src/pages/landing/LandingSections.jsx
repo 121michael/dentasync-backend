@@ -544,9 +544,11 @@ export function ServicesSection({ services, status, onRetry }) {
                   ))}
                 </ul>
               ) : null}
-              {publicTreatmentNotes(price?.extraNotes).map((note) => (
-                <p key={note} className="landing-service-detail__how">{note}</p>
-              ))}
+              {publicTreatmentNotes(price?.extraNotes)
+                .filter((note) => !(price?.options || []).some((option) => publicTreatmentNotes(option.notes).includes(note)))
+                .map((note) => (
+                  <p key={note} className="landing-service-detail__how">{note}</p>
+                ))}
               <p className="landing-service-detail__how">
                 Review this information first. Book a consultation when you are ready — existing patients can sign in, and new patients can create an account on the same page.
               </p>
