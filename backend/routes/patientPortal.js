@@ -34,6 +34,7 @@ const clinicSchedule = require("../services/clinicSchedule");
 const accountDependents = require("../services/accountDependents");
 const patientAiConversations = require("../services/patientAiConversations");
 const { resolveAppSecrets } = require("../lib/securityConfig");
+const { attachDentalAuthorizationRoutes } = require("./dentalAuthorization");
 
 const SERVICES = [
   {
@@ -494,6 +495,7 @@ function createPatientPortalRouter({
   });
 
   router.use(authenticateToken, requirePatient);
+  attachDentalAuthorizationRoutes(router, { db, role: "patient" });
 
   router.get("/catalog", (_req, res) => {
     res.json({

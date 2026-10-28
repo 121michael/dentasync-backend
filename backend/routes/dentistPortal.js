@@ -8,6 +8,7 @@ const dentalWellness = require("../services/dentalWellness");
 const dentalChartSync = require("../services/dentalChartSync");
 const patientData = require("../services/patientData");
 const { writeAdminAudit } = require("../services/adminAudit");
+const { attachDentalAuthorizationRoutes } = require("./dentalAuthorization");
 const { insertPatientNotification } = require("../services/patientPortalNotifications");
 const {
   getServiceDurationMinutes,
@@ -491,6 +492,7 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
   const router = express.Router();
   router.use(authenticateToken, requireDentistAccount(db));
   void notifyDentist;
+  attachDentalAuthorizationRoutes(router, { db, role: "dentist" });
 
   router.get("/dashboard", async (req, res) => {
     const scope = dentistScopeClause("appointment", req.dentist);

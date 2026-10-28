@@ -303,6 +303,42 @@ export const api = {
     return request(`/admin/clinical-records${search.size ? `?${search}` : ""}`);
   },
   getAdminClinicalRecord: (id) => request(`/admin/clinical-records/${id}`),
+  authorizationPath(portal, patientId) {
+    if (portal === "patient") return "/patient/authorizations";
+    if (portal === "admin") return `/admin/clinical-records/${patientId}/authorizations`;
+    if (portal === "dentist") return `/dentist/patients/${patientId}/authorizations`;
+    return `/staff/patients/${patientId}/authorizations`;
+  },
+  authorizationDocPath(portal, id, suffix = "") {
+    const root =
+      portal === "admin" ? "/admin" : portal === "dentist" ? "/dentist" : portal === "staff" ? "/staff" : "/patient";
+    return `${root}/authorizations/${id}${suffix}`;
+  },
+  listAuthorizations: (portal, patientId) => request(api.authorizationPath(portal, patientId)),
+  createAuthorization: (portal, patientId, body) =>
+    request(api.authorizationPath(portal, patientId), { method: "POST", body }),
+  getAuthorization: (portal, id) => request(api.authorizationDocPath(portal, id)),
+  issueAuthorization: (portal, id) =>
+    request(api.authorizationDocPath(portal, id, "/issue"), { method: "POST", body: {} }),
+  signAuthorization: (portal, id, body) =>
+    request(api.authorizationDocPath(portal, id, "/sign"), { method: "POST", body }),
+  voidAuthorization: (portal, id, body) =>
+    request(api.authorizationDocPath(portal, id, "/void"), { method: "POST", body }),
+  replaceAuthorization: (portal, id, body) =>
+    request(api.authorizationDocPath(portal, id, "/replace"), { method: "POST", body }),
+  uploadAuthorization: (portal, id, file, signedCopyConfirmed = false) => {
+    const data = new FormData();
+    data.append("file", file);
+    data.append("signedCopyConfirmed", signedCopyConfirmed ? "true" : "false");
+    return request(api.authorizationDocPath(portal, id, "/upload"), { method: "POST", body: data });
+  },
+  downloadAuthorizationPdf: (portal, document) =>
+    download(
+      api.authorizationDocPath(portal, document.id, "/pdf"),
+      `${document.documentNumber || "authorization"}.pdf`
+    ),
+  downloadAuthorizationFile: (portal, document) =>
+    download(api.authorizationDocPath(portal, document.id, "/file"), document.originalName || "authorization"),
   createAdminPatient: () =>
     Promise.reject(new ApiError("Administrators cannot create patient accounts.", 403)),
   updateAdminPatient: (id, body) => request(`/admin/patients/${id}`, { method: "PATCH", body }),

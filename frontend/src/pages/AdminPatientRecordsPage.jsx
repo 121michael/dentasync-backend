@@ -7,6 +7,7 @@ import { AdminModal, AdminStatusBadge } from "../components/AdminUI";
 import { useAdminUi } from "../components/AdminLayout";
 import { formatAdminDate } from "../adminUtils";
 import { matchesNotificationFocus } from "../notificationFocus";
+import { ProcedureAuthorizationPanel } from "../components/ProcedureAuthorizationPanel";
 
 function formatMoney(value) {
   return `₱${Number(value || 0).toFixed(2)}`;
@@ -312,6 +313,15 @@ export function AdminPatientRecordsPage() {
               )}
             </div>
           </section>
+
+          <ProcedureAuthorizationPanel
+            portal="admin"
+            patientId={record.id}
+            patient={record}
+            treatments={treatments}
+            appointments={appointments}
+            onToast={pushToast}
+          />
         </AdminModal>
       ) : null}
     </div>

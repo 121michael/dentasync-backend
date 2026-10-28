@@ -12,6 +12,7 @@ import {
   UsersRound,
 } from "lucide-react";
 import { api } from "../api";
+import { DentalAuthorizationDocument, statusLabel } from "../components/DentalAuthorizationDocument";
 import { DetailLink, ErrorState, LoadingState } from "../components/UI";
 import { PatientQrCheckInScanner } from "../components/PatientQrCheckInScanner";
 import { getPatientNotificationTarget } from "../patientNotificationNav";
@@ -79,11 +80,21 @@ export function DashboardPage() {
   const navigate = useNavigate();
   const [dashboard, setDashboard] = useState(null);
   const [error, setError] = useState("");
+  const [authorizations, setAuthorizations] = useState([]);
+  const [previewAuth, setPreviewAuth] = useState(null);
+  const [clinic, setClinic] = useState(null);
 
   const loadDashboard = useCallback(async () => {
     setError("");
     try {
       setDashboard(await api.getDashboard());
+      try {
+        const auth = await api.listAuthorizations("patient");
+        setAuthorizations(auth.documents || []);
+      } catch {
+        setAuthorizations([]);
+      }
+      api.getPublicClinicInfo().then((info) => setClinic(info?.clinic || null)).catch(() => {});
     } catch (loadError) {
       setError(loadError.message);
     }
@@ -307,6 +318,78 @@ export function DashboardPage() {
           </div>
         </article>
       </section>
+
+      <section className="glass-card procedure-auth-panel">
+        <div className="card-heading">
+          <div>
+            <span className="eyebrow">Your records</span>
+            <h2>Procedure authorizations</h2>
+            <p className="muted-copy">
+              View or download consent documents the clinic prepared for your care. Unsigned forms are
+              drafts until a signature is recorded.
+            </p>
+          </div>
+        </div>
+        {authorizations.length ? (
+          <div className="procedure-auth-list">
+            {authorizations.map((document) => (
+              <article key={document.id} className="procedure-auth-item">
+                <div>
+                  <strong>{document.documentNumber}</strong>
+                  <small>{document.procedureName}</small>
+                </div>
+                <span className={`procedure-auth-status procedure-auth-status--${document.status}`}>
+                  {statusLabel(document.status)}
+                </span>
+                <div className="procedure-auth-item__actions">
+                  <button
+                    type="button"
+                    className="button button--secondary button--compact"
+                    onClick={() => setPreviewAuth(document)}
+                  >
+                    Preview
+                  </button>
+                  <button
+                    type="button"
+                    className="button button--secondary button--compact"
+                    onClick={() => api.downloadAuthorizationPdf("patient", document)}
+                  >
+                    Download PDF
+                  </button>
+                  {document.hasUpload ? (
+                    <button
+                      type="button"
+                      className="button button--secondary button--compact"
+                      onClick={() => api.downloadAuthorizationFile("patient", document)}
+                    >
+                      Download signed copy
+                    </button>
+                  ) : null}
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="muted-copy">No procedure authorization documents are on file for your account yet.</p>
+        )}
+      </section>
+
+      {previewAuth ? (
+        <div className="dental-auth-preview" role="dialog" aria-modal="true">
+          <div className="dental-auth-preview__toolbar no-print">
+            <strong>{previewAuth.documentNumber}</strong>
+            <div>
+              <button type="button" className="button button--secondary button--compact" onClick={() => window.print()}>
+                Print
+              </button>
+              <button type="button" className="button button--primary button--compact" onClick={() => setPreviewAuth(null)}>
+                Close
+              </button>
+            </div>
+          </div>
+          <DentalAuthorizationDocument document={previewAuth} clinic={clinic} />
+        </div>
+      ) : null}
 
       <section className="dashboard-footnote">
         <div>

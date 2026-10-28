@@ -16,6 +16,7 @@ const {
   waitEstimateFromRow,
 } = require("../services/queueWaitPrediction");
 const { markQueueServingStarted, recordTreatmentComplete } = require("../services/treatmentDuration");
+const { attachDentalAuthorizationRoutes } = require("./dentalAuthorization");
 
 const QUEUE_STATUS_MAP = {
   checked_in: "checked_in",
@@ -291,6 +292,7 @@ function createStaffPortalRouter({
   const router = express.Router();
 
   router.use(authenticateToken, requireStaffAccount(db));
+  attachDentalAuthorizationRoutes(router, { db, role: "staff" });
 
   router.get("/dashboard", async (req, res) => {
     try {

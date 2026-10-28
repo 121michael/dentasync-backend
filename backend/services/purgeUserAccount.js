@@ -18,6 +18,7 @@ async function purgeUserAccount(client, userId) {
     "DELETE FROM patient_portal_login_activity WHERE user_id = $1",
     "DELETE FROM patient_portal_notifications WHERE user_id = $1",
     "DELETE FROM patient_portal_documents WHERE user_id = $1",
+    "UPDATE dental_procedure_authorizations SET linked_user_id = NULL WHERE linked_user_id = $1",
     "DELETE FROM patient_portal_treatment_records WHERE user_id = $1",
     "DELETE FROM patient_portal_queue_entries WHERE user_id = $1",
     "DELETE FROM patient_portal_appointments WHERE user_id = $1",

@@ -8,6 +8,7 @@ import { StaffModal, StaffStatusBadge } from "../components/StaffUI";
 import { useStaffUi } from "../components/StaffLayout";
 import { formatStaffDate } from "../staffUtils";
 import { formatDentistDate } from "../dentistUtils";
+import { ProcedureAuthorizationPanel } from "../components/ProcedureAuthorizationPanel";
 
 const emptyForm = {
   firstName: "",
@@ -708,9 +709,19 @@ export function StaffPatientsPage() {
             </form>
           </section>
 
+          <ProcedureAuthorizationPanel
+            portal="staff"
+            patientId={detail.id}
+            patient={detail}
+            treatments={treatments}
+            appointments={detail.appointments || []}
+            onToast={pushToast}
+          />
+
           <div className="staff-record-footer">
             <p className="muted-copy">
-              Clinical data is read-only. Staff controls are limited to appointment and payment.
+              Clinical data is read-only. Staff controls are limited to appointment, payment, and
+              authorization document handling. Dentists or administrators record signatures.
             </p>
           </div>
         </StaffModal>

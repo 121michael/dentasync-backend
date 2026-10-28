@@ -6,6 +6,7 @@ const bcrypt = require("bcrypt");
 const express = require("express");
 const { attachAdminDocumentSyncRoutes } = require("./adminDocumentSync");
 const { attachAdminBackupRoutes } = require("./adminBackup");
+const { attachDentalAuthorizationRoutes } = require("./dentalAuthorization");
 const { attachAdminCommandCenterRoutes } = require("./adminCommandCenter");
 const { attachClinicScheduleRoutes } = require("./clinicSchedule");
 const { attachAdminDependentRoutes } = require("./adminDependents");
@@ -430,6 +431,7 @@ function createAdminPortalRouter({
   attachClinicScheduleRoutes(router, { db });
   attachAdminDependentRoutes(router, { db });
   attachAdminBackupRoutes(router, { db });
+  attachDentalAuthorizationRoutes(router, { db, role: "admin" });
 
   router.get("/dashboard", async (req, res) => {
     try {

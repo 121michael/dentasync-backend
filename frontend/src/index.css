@@ -12863,3 +12863,276 @@ body.is-queue-display .fab-menu {
     animation: none !important;
   }
 }
+
+.procedure-auth-panel {
+  margin-top: 1.25rem;
+  padding-top: 0.35rem;
+}
+
+.procedure-auth-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin: 0.85rem 0 1.1rem;
+}
+
+.procedure-auth-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.45rem 0.85rem;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 10px;
+}
+
+.procedure-auth-item strong {
+  display: block;
+  color: var(--text-strong);
+}
+
+.procedure-auth-item small {
+  display: block;
+  color: var(--text-muted);
+}
+
+.procedure-auth-item__actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.procedure-auth-status {
+  justify-self: end;
+  align-self: start;
+  font-size: 0.75rem;
+  font-weight: 650;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--amethyst-800);
+}
+
+.procedure-auth-status--signed {
+  background: var(--emerald-wash);
+  color: var(--emerald);
+}
+
+.procedure-auth-status--voided,
+.procedure-auth-status--superseded {
+  background: var(--danger-wash);
+  color: var(--danger);
+}
+
+.procedure-auth-status--awaiting_signature {
+  background: var(--amber-wash);
+  color: var(--amber);
+}
+
+.procedure-auth-upload {
+  margin-top: 1rem;
+  padding: 0.95rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.procedure-auth-upload .field.field--checkbox {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0.55rem;
+}
+
+.procedure-auth-upload .field--checkbox span {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.dental-auth-preview {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  overflow: auto;
+  background: #ece8f1;
+  padding: 1.25rem 1rem 3rem;
+}
+
+.dental-auth-preview__toolbar {
+  max-width: 210mm;
+  margin: 0 auto 0.85rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.dental-auth-page {
+  width: 210mm;
+  min-height: 297mm;
+  margin: 0 auto;
+  padding: 18mm 16mm 20mm;
+  background: #fff;
+  color: #2a2433;
+  box-shadow: 0 12px 40px rgba(42, 24, 61, 0.12);
+  font-family: "Times New Roman", Times, serif;
+  font-size: 11pt;
+  line-height: 1.45;
+}
+
+.dental-auth-page__header {
+  text-align: center;
+  border-bottom: 2px solid #5b2a86;
+  padding-bottom: 0.7rem;
+  margin-bottom: 1rem;
+}
+
+.dental-auth-page__clinic {
+  margin: 0;
+  color: #5b2a86;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+  font-size: 13pt;
+  text-transform: uppercase;
+}
+
+.dental-auth-page__contact {
+  margin: 0.15rem 0 0;
+  color: #5d5668;
+  font-size: 9pt;
+}
+
+.dental-auth-page h1 {
+  margin: 0.7rem 0 0.25rem;
+  font-size: 13.5pt;
+  color: #2a2433;
+  letter-spacing: 0.01em;
+}
+
+.dental-auth-page h2 {
+  margin: 1.1rem 0 0.45rem;
+  font-size: 10.5pt;
+  color: #5b2a86;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid #cfc3dd;
+  padding-bottom: 0.2rem;
+}
+
+.dental-auth-page p {
+  margin: 0 0 0.55rem;
+}
+
+.dental-auth-page__meta,
+.dental-auth-page__label {
+  color: #5d5668;
+  font-size: 9pt;
+  font-weight: 700;
+  margin-bottom: 0.2rem;
+}
+
+.dental-auth-page__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.45rem 1rem;
+  margin: 0 0 0.65rem;
+}
+
+.dental-auth-page__grid dt {
+  font-size: 8.5pt;
+  color: #5d5668;
+  font-weight: 700;
+}
+
+.dental-auth-page__grid dd {
+  margin: 0;
+}
+
+.dental-auth-page__signs {
+  break-inside: avoid;
+}
+
+.dental-auth-sign {
+  margin: 0.85rem 0 1.1rem;
+  break-inside: avoid;
+}
+
+.dental-auth-sign__line {
+  display: block;
+  height: 42px;
+  border-bottom: 1px solid #2a2433;
+  margin: 0.2rem 0 0.25rem;
+}
+
+.dental-auth-page__notice {
+  font-size: 8.5pt;
+  font-style: italic;
+  color: #5d5668;
+}
+
+@media (max-width: 820px) {
+  .dental-auth-page {
+    width: 100%;
+    min-height: 0;
+    padding: 1.1rem 0.95rem 1.4rem;
+  }
+
+  .dental-auth-page__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .procedure-auth-item {
+    grid-template-columns: 1fr;
+  }
+
+  .procedure-auth-status {
+    justify-self: start;
+  }
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  .dental-auth-preview,
+  .dental-auth-preview *,
+  .dental-auth-page,
+  .dental-auth-page * {
+    visibility: visible;
+  }
+
+  .no-print,
+  .portal-shell nav,
+  .portal-shell aside,
+  .button,
+  .procedure-auth-panel,
+  .admin-page,
+  .floating-menu,
+  [class*="sidebar"],
+  [class*="fab"] {
+    display: none !important;
+  }
+
+  .dental-auth-preview {
+    position: static;
+    inset: auto;
+    background: #fff;
+    padding: 0;
+    overflow: visible;
+  }
+
+  .dental-auth-page {
+    box-shadow: none;
+    width: auto;
+    min-height: auto;
+    margin: 0;
+    padding: 12mm;
+  }
+
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+}
