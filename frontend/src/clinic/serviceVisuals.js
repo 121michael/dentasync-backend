@@ -43,6 +43,11 @@ export const WHITENING_IMAGE_URL = "/services/teeth-whitening.jpg";
 export const WHITENING_IMAGE_ALT =
   "Patient receiving in-office teeth whitening with protective glasses and a bleaching light. Individual results vary.";
 
+export const CONSULTATION_SERVICE_ID = "general-consultation";
+export const CONSULTATION_IMAGE_URL = "/services/oral-examination.jpg";
+export const CONSULTATION_IMAGE_ALT =
+  "Dentist examining a patient's teeth with a dental mirror during an oral consultation.";
+
 const SERVICE_VISUALS = {
   [ORTHODONTICS_SERVICE_ID]: {
     imageUrl: ORTHODONTICS_IMAGE_URL,
@@ -88,6 +93,11 @@ const SERVICE_VISUALS = {
     imageUrl: WHITENING_IMAGE_URL,
     imageFit: "cover",
     imageAlt: WHITENING_IMAGE_ALT,
+  },
+  [CONSULTATION_SERVICE_ID]: {
+    imageUrl: CONSULTATION_IMAGE_URL,
+    imageFit: "cover",
+    imageAlt: CONSULTATION_IMAGE_ALT,
   },
 };
 
