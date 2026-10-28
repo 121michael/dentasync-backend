@@ -28,6 +28,11 @@ export const EXTRACTION_IMAGE_URL = "/services/tooth-extraction.jpg";
 export const EXTRACTION_IMAGE_ALT =
   "Illustration of a tooth being removed from the gum with dental forceps. Individual treatment needs vary.";
 
+export const FILLING_SERVICE_ID = "filling";
+export const FILLING_IMAGE_URL = "/services/dental-filling.jpg";
+export const FILLING_IMAGE_ALT =
+  "Before-and-after example of a permanent filling restoring a damaged tooth. Individual results vary and are not guaranteed.";
+
 const SERVICE_VISUALS = {
   [ORTHODONTICS_SERVICE_ID]: {
     imageUrl: ORTHODONTICS_IMAGE_URL,
@@ -58,6 +63,11 @@ const SERVICE_VISUALS = {
     imageUrl: EXTRACTION_IMAGE_URL,
     imageFit: "contain",
     imageAlt: EXTRACTION_IMAGE_ALT,
+  },
+  [FILLING_SERVICE_ID]: {
+    imageUrl: FILLING_IMAGE_URL,
+    imageFit: "contain",
+    imageAlt: FILLING_IMAGE_ALT,
   },
 };
 
