@@ -13,6 +13,7 @@ import {
   ORTHODONTICS_IMAGE_URL,
   ROOT_CANAL_IMAGE_URL,
   VENEERS_IMAGE_URL,
+  WHITENING_IMAGE_URL,
   attachServiceVisual,
 } from "../../frontend/src/clinic/serviceVisuals.js";
 
@@ -69,6 +70,7 @@ test("dentures orthodontics implants veneers and cleaning reuse one public image
   const extraction = attachServiceVisual({ id: "extraction", name: "Tooth Extraction" });
   const filling = attachServiceVisual({ id: "filling", name: "Permanent Filling / Restoration" });
   const rootCanal = attachServiceVisual({ id: "root-canal", name: "Root Canal Treatment" });
+  const whitening = attachServiceVisual({ id: "whitening", name: "Teeth Whitening" });
   assert.equal(dentures.imageUrl, DENTURES_IMAGE_URL);
   assert.equal(dentures.imageFit, "contain");
   assert.equal(braces.imageUrl, ORTHODONTICS_IMAGE_URL);
@@ -89,6 +91,9 @@ test("dentures orthodontics implants veneers and cleaning reuse one public image
   assert.equal(rootCanal.imageUrl, ROOT_CANAL_IMAGE_URL);
   assert.equal(rootCanal.imageFit, "contain");
   assert.notEqual(rootCanal.imageUrl, filling.imageUrl);
+  assert.equal(whitening.imageUrl, WHITENING_IMAGE_URL);
+  assert.equal(whitening.imageFit, "cover");
+  assert.notEqual(whitening.imageUrl, rootCanal.imageUrl);
   assert.equal(existsSync(join(frontendRoot, "public", dentures.imageUrl.replace(/^\//, ""))), true);
   assert.equal(existsSync(join(frontendRoot, "public", braces.imageUrl.replace(/^\//, ""))), true);
   assert.equal(existsSync(join(frontendRoot, "public", implants.imageUrl.replace(/^\//, ""))), true);
@@ -97,6 +102,7 @@ test("dentures orthodontics implants veneers and cleaning reuse one public image
   assert.equal(existsSync(join(frontendRoot, "public", extraction.imageUrl.replace(/^\//, ""))), true);
   assert.equal(existsSync(join(frontendRoot, "public", filling.imageUrl.replace(/^\//, ""))), true);
   assert.equal(existsSync(join(frontendRoot, "public", rootCanal.imageUrl.replace(/^\//, ""))), true);
+  assert.equal(existsSync(join(frontendRoot, "public", whitening.imageUrl.replace(/^\//, ""))), true);
 });
 
 test("dental cleaning shows the verified starting price with a case qualification", () => {

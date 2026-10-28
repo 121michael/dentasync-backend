@@ -38,6 +38,11 @@ export const ROOT_CANAL_IMAGE_URL = "/services/root-canal.jpg";
 export const ROOT_CANAL_IMAGE_ALT =
   "Illustration of a root canal file treating the inside of a tooth. Individual treatment needs vary.";
 
+export const WHITENING_SERVICE_ID = "whitening";
+export const WHITENING_IMAGE_URL = "/services/teeth-whitening.jpg";
+export const WHITENING_IMAGE_ALT =
+  "Patient receiving in-office teeth whitening with protective glasses and a bleaching light. Individual results vary.";
+
 const SERVICE_VISUALS = {
   [ORTHODONTICS_SERVICE_ID]: {
     imageUrl: ORTHODONTICS_IMAGE_URL,
@@ -78,6 +83,11 @@ const SERVICE_VISUALS = {
     imageUrl: ROOT_CANAL_IMAGE_URL,
     imageFit: "contain",
     imageAlt: ROOT_CANAL_IMAGE_ALT,
+  },
+  [WHITENING_SERVICE_ID]: {
+    imageUrl: WHITENING_IMAGE_URL,
+    imageFit: "cover",
+    imageAlt: WHITENING_IMAGE_ALT,
   },
 };
 
