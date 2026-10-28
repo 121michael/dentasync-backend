@@ -11565,6 +11565,8 @@ body.is-queue-display .fab-menu {
 
 /* Dedicated registration page */
 .auth-screen {
+  display: flex;
+  flex-direction: column;
   min-height: 100vh;
   min-height: 100dvh;
   background:
@@ -11597,20 +11599,17 @@ body.is-queue-display .fab-menu {
 
 .auth-screen__body {
   display: grid;
-  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1fr);
-  gap: clamp(2rem, 5vw, 4.5rem);
-  align-items: start;
-  max-width: var(--lp-max);
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  align-content: center;
+  width: 100%;
   margin: 0 auto;
   padding: clamp(1rem, 4vw, 3rem) max(1.25rem, env(safe-area-inset-right, 0px)) 4rem max(1.25rem, env(safe-area-inset-left, 0px));
 }
 
 .auth-screen__intro {
-  display: grid;
-  gap: 1.2rem;
-  position: sticky;
-  top: 2rem;
-  padding-top: 1rem;
+  display: none;
 }
 
 .auth-screen__intro .landing-eyebrow {
@@ -11667,6 +11666,7 @@ body.is-queue-display .fab-menu {
 
 .landing .auth-screen__panel {
   justify-items: stretch;
+  width: min(100%, 28.5rem);
   padding: clamp(1.5rem, 4vw, 2.5rem);
   border: 1px solid rgba(215, 184, 137, 0.28);
   border-left: 1px solid rgba(215, 184, 137, 0.28);
@@ -11768,21 +11768,11 @@ body.is-queue-display .fab-menu {
 @media (max-width: 860px) {
   .auth-screen__body {
     grid-template-columns: minmax(0, 1fr);
-    gap: 1.5rem;
-  }
-  .auth-screen__intro {
-    display: contents;
-  }
-  .auth-screen__intro h1 {
-    margin-top: -0.75rem;
+    align-content: start;
+    padding-top: 1.5rem;
   }
   .auth-screen__panel {
     order: 1;
-  }
-  .auth-screen__steps,
-  .auth-screen__features {
-    order: 2;
-    margin-top: 0.5rem;
   }
 }
 
