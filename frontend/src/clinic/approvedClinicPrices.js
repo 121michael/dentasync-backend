@@ -227,10 +227,16 @@ const APPROVED_CLINIC_PRICES = [
     matchIds: ["veneers"],
     matchNames: ["veneers"],
     title: "Veneers",
-    description: "Thin coverings placed on the front of teeth to improve appearance. The dentist confirms whether veneers are appropriate after an exam.",
-    priceLabel: "Available upon consultation",
-    details: "Pricing is available upon consultation or confirmation by the clinic",
-    notes: [FREE_CONSULTATION_NOTE],
+    description:
+      "Dental veneers are thin restorations placed over the front surfaces of teeth to improve their appearance, shape, or color. The appropriate treatment depends on your teeth, oral health, and the dentist's assessment.",
+    priceLabel: "Price available upon consultation",
+    details: "Price available upon consultation",
+    compactNote: "Final price depends on the patient's dental needs, the treatment plan, and the dentist's assessment.",
+    notes: [
+      "Final price depends on the patient's dental needs, the treatment plan, and the dentist's assessment.",
+      "Veneers are not suitable for every patient, and results vary.",
+      FREE_CONSULTATION_NOTE,
+    ],
   },
   {
     id: "dental-implants",

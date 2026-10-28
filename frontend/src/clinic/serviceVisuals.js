@@ -13,6 +13,11 @@ export const DENTAL_IMPLANTS_IMAGE_URL = "/services/dental-implants.jpg";
 export const DENTAL_IMPLANTS_IMAGE_ALT =
   "Illustration of a dental implant in the jawbone supporting a replacement tooth beside natural teeth.";
 
+export const VENEERS_SERVICE_ID = "veneers";
+export const VENEERS_IMAGE_URL = "/services/veneers.jpg";
+export const VENEERS_IMAGE_ALT =
+  "Close-up of a smile showing the front surfaces of the teeth, used to illustrate dental veneers. Individual results vary.";
+
 const SERVICE_VISUALS = {
   [ORTHODONTICS_SERVICE_ID]: {
     imageUrl: ORTHODONTICS_IMAGE_URL,
@@ -28,6 +33,11 @@ const SERVICE_VISUALS = {
     imageUrl: DENTAL_IMPLANTS_IMAGE_URL,
     imageFit: "contain",
     imageAlt: DENTAL_IMPLANTS_IMAGE_ALT,
+  },
+  [VENEERS_SERVICE_ID]: {
+    imageUrl: VENEERS_IMAGE_URL,
+    imageFit: "cover",
+    imageAlt: VENEERS_IMAGE_ALT,
   },
 };
 

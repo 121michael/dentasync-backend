@@ -125,7 +125,8 @@ const SERVICES = [
   {
     id: "veneers",
     name: "Veneers",
-    description: "Thin coverings placed on the front of teeth to improve appearance. The dentist confirms whether veneers are appropriate after an exam.",
+    description:
+      "Dental veneers are thin restorations placed over the front surfaces of teeth to improve their appearance, shape, or color. The appropriate treatment depends on your teeth, oral health, and the dentist's assessment.",
     durationMinutes: 60,
     estimatedCost: 0,
   },
