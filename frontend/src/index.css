@@ -2300,7 +2300,7 @@ strong {
 }
 
 .treatment-price-panel__photo.is-contain {
-  max-height: min(36vh, 260px);
+  max-height: min(48vh, 360px);
   object-fit: contain;
   background: transparent;
 }
@@ -11199,7 +11199,7 @@ body.is-queue-display .fab-menu {
 }
 
 .landing-service-detail__photo.is-contain {
-  max-height: min(52vh, 420px);
+  max-height: min(62vh, 520px);
   object-fit: contain;
   background: transparent;
 }

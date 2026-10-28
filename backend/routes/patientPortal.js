@@ -39,7 +39,8 @@ const SERVICES = [
   {
     id: "cleaning",
     name: "Dental Cleaning / Oral Prophylaxis",
-    description: "Professional cleaning and oral prophylaxis.",
+    description:
+      "Professional dental cleaning helps remove plaque and hardened deposits from the teeth. The recommended cleaning approach depends on your oral health and the dentist's assessment.",
     durationMinutes: 45,
     estimatedCost: 1500,
   },

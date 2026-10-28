@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getApprovedClinicPrice } from "../../frontend/src/clinic/approvedClinicPrices.js";
 import {
+  CLEANING_IMAGE_URL,
   DENTAL_IMPLANTS_IMAGE_URL,
   DENTURES_IMAGE_URL,
   ORTHODONTICS_IMAGE_URL,
@@ -56,11 +57,12 @@ test("orthodontics shows metal braces prices and not retainer fees for invisible
   assert.doesNotMatch(invisible.description, /retainer/i);
 });
 
-test("dentures orthodontics implants and veneers reuse one public image asset each", () => {
+test("dentures orthodontics implants veneers and cleaning reuse one public image asset each", () => {
   const dentures = attachServiceVisual({ id: "dentures", name: "Dentures" });
   const braces = attachServiceVisual({ id: "orthodontic-consultation", name: "Orthodontics / Braces" });
   const implants = attachServiceVisual({ id: "dental-implants", name: "Dental Implants" });
   const veneers = attachServiceVisual({ id: "veneers", name: "Veneers" });
+  const cleaning = attachServiceVisual({ id: "cleaning", name: "Dental Cleaning / Oral Prophylaxis" });
   assert.equal(dentures.imageUrl, DENTURES_IMAGE_URL);
   assert.equal(dentures.imageFit, "contain");
   assert.equal(braces.imageUrl, ORTHODONTICS_IMAGE_URL);
@@ -68,12 +70,29 @@ test("dentures orthodontics implants and veneers reuse one public image asset ea
   assert.equal(implants.imageFit, "contain");
   assert.equal(veneers.imageUrl, VENEERS_IMAGE_URL);
   assert.equal(veneers.imageFit, "cover");
-  assert.notEqual(veneers.imageUrl, dentures.imageUrl);
-  assert.notEqual(veneers.imageUrl, implants.imageUrl);
+  assert.equal(cleaning.imageUrl, CLEANING_IMAGE_URL);
+  assert.equal(cleaning.imageFit, "contain");
+  assert.notEqual(cleaning.imageUrl, veneers.imageUrl);
+  assert.notEqual(cleaning.imageUrl, dentures.imageUrl);
   assert.equal(existsSync(join(frontendRoot, "public", dentures.imageUrl.replace(/^\//, ""))), true);
   assert.equal(existsSync(join(frontendRoot, "public", braces.imageUrl.replace(/^\//, ""))), true);
   assert.equal(existsSync(join(frontendRoot, "public", implants.imageUrl.replace(/^\//, ""))), true);
   assert.equal(existsSync(join(frontendRoot, "public", veneers.imageUrl.replace(/^\//, ""))), true);
+  assert.equal(existsSync(join(frontendRoot, "public", cleaning.imageUrl.replace(/^\//, ""))), true);
+});
+
+test("dental cleaning shows the verified starting price with a case qualification", () => {
+  const cleaning = getApprovedClinicPrice({
+    id: "cleaning",
+    name: "Dental Cleaning / Oral Prophylaxis",
+    description:
+      "Professional dental cleaning helps remove plaque and hardened deposits from the teeth. The recommended cleaning approach depends on your oral health and the dentist's assessment.",
+  });
+  assert.equal(cleaning.verified, true);
+  assert.equal(cleaning.priceLabel, "Starting at ₱1,000; depends on the case");
+  assert.match(cleaning.description, /plaque and hardened deposits/);
+  assert.match(cleaning.compactNote, /Final pricing depends on your dental needs/);
+  assert.match(cleaning.extraNotes.join(" "), /does not guarantee the same result/);
 });
 
 test("veneers implants and gum contouring do not invent peso prices", () => {

@@ -18,6 +18,11 @@ export const VENEERS_IMAGE_URL = "/services/veneers.jpg";
 export const VENEERS_IMAGE_ALT =
   "Close-up of a smile showing the front surfaces of the teeth, used to illustrate dental veneers. Individual results vary.";
 
+export const CLEANING_SERVICE_ID = "cleaning";
+export const CLEANING_IMAGE_URL = "/services/dental-cleaning.jpg";
+export const CLEANING_IMAGE_ALT =
+  "Three-part example of dental cleaning, from stained teeth to cleaned teeth. Individual results vary and are not guaranteed.";
+
 const SERVICE_VISUALS = {
   [ORTHODONTICS_SERVICE_ID]: {
     imageUrl: ORTHODONTICS_IMAGE_URL,
@@ -38,6 +43,11 @@ const SERVICE_VISUALS = {
     imageUrl: VENEERS_IMAGE_URL,
     imageFit: "cover",
     imageAlt: VENEERS_IMAGE_ALT,
+  },
+  [CLEANING_SERVICE_ID]: {
+    imageUrl: CLEANING_IMAGE_URL,
+    imageFit: "contain",
+    imageAlt: CLEANING_IMAGE_ALT,
   },
 };
 

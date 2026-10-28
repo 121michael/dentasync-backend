@@ -25,11 +25,17 @@ const APPROVED_CLINIC_PRICES = [
     matchIds: ["cleaning"],
     matchNames: ["dental cleaning / oral prophylaxis", "oral prophylaxis"],
     title: "Oral Prophylaxis",
-    description: "Professional cleaning and oral prophylaxis.",
-    priceLabel: "Starting at ₱1,000",
+    description:
+      "Professional dental cleaning helps remove plaque and hardened deposits from the teeth. The recommended cleaning approach depends on your oral health and the dentist's assessment.",
+    priceLabel: "Starting at ₱1,000; depends on the case",
     details: "Starting at ₱1,000; depends on the case",
     dependsOnCase: true,
-    notes: [CASE_ASSESSMENT_NOTE, FREE_CONSULTATION_NOTE],
+    compactNote: "Final pricing depends on your dental needs and the dentist's assessment.",
+    notes: [
+      "Final pricing depends on your dental needs and the dentist's assessment.",
+      "The comparison photo is an example. It does not guarantee the same result for every patient.",
+      FREE_CONSULTATION_NOTE,
+    ],
   },
   {
     id: "filling",
