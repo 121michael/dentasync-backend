@@ -100,7 +100,7 @@ function servicePhotoUrl(service) {
   return service?.imageUrl || service?.image || service?.photoUrl || "";
 }
 
-function ServicePriceDetails({ price, open, selectedOptionId, onSelectOption, onClose }) {
+function ServicePriceDetails({ price, open, selectedOptionId, onSelectOption, onClose, photoUrl, imageFit, imageAlt }) {
   const [more, setMore] = useState(false);
   const closeRef = useRef(null);
 
@@ -120,9 +120,11 @@ function ServicePriceDetails({ price, open, selectedOptionId, onSelectOption, on
 
   if (!open || !price || typeof document === "undefined") return null;
 
-  const extraNotes = price.extraNotes || [];
   const options = price.options || [];
-  const hasMore = Boolean(price.lines?.length || extraNotes.length);
+  const selectedOption = options.find((option) => option.id === selectedOptionId);
+  const extraNotes = selectedOption?.notes?.length ? selectedOption.notes : price.extraNotes || [];
+  const detailLines = selectedOption?.lines?.length ? selectedOption.lines : price.lines || [];
+  const hasMore = Boolean(detailLines.length || extraNotes.length);
 
   return createPortal(
     <div className="treatment-details-layer is-open">
@@ -150,11 +152,23 @@ function ServicePriceDetails({ price, open, selectedOptionId, onSelectOption, on
           <X size={16} />
         </button>
         <h3 id="selected-service-title">{price.title}</h3>
+        {photoUrl ? (
+          <figure className="treatment-price-panel__figure">
+            <img
+              src={photoUrl}
+              alt={imageAlt || `${price.title} example`}
+              className={`treatment-price-panel__photo${imageFit === "contain" ? " is-contain" : ""}`}
+            />
+          </figure>
+        ) : null}
         {price.description ? (
           <p className="treatment-price-panel__description">{price.description}</p>
         ) : null}
-        <p className="treatment-price-panel__price">{price.priceLabel}</p>
-        {price.compactNote ? (
+        <p className="treatment-price-panel__price">{selectedOption?.priceLabel || price.priceLabel}</p>
+        {selectedOption ? (
+          <p className="treatment-price-panel__note">{selectedOption.title}</p>
+        ) : null}
+        {price.compactNote && !selectedOption ? (
           <p className="treatment-price-panel__note">{price.compactNote}</p>
         ) : null}
         {options.length ? (
@@ -193,9 +207,9 @@ function ServicePriceDetails({ price, open, selectedOptionId, onSelectOption, on
             </button>
             <div className={`treatment-price-panel__extra ${more ? "is-open" : ""}`}>
               <div className="treatment-price-panel__extra-inner">
-                {price.lines?.length ? (
+                {detailLines.length ? (
                   <dl className="treatment-price-panel__lines">
-                    {price.lines.map((line) => (
+                    {detailLines.map((line) => (
                       <div key={line.label}>
                         <dt>{line.label}</dt>
                         <dd>{line.value}</dd>
@@ -615,6 +629,9 @@ export function AppointmentsPage() {
               price={selectedServicePrice}
               open={detailsOpen}
               selectedOptionId={form.bracesOption}
+              photoUrl={servicePhotoUrl(selectedService)}
+              imageFit={selectedService?.imageFit}
+              imageAlt={selectedService?.imageAlt}
               onSelectOption={(optionId) =>
                 setForm((current) => ({ ...current, bracesOption: optionId }))
               }

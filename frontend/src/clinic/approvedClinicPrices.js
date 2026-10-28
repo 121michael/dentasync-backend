@@ -90,7 +90,7 @@ const APPROVED_CLINIC_PRICES = [
     matchNames: ["standard metal braces"],
     title: "Standard Metal Braces",
     description:
-      "Standard metal braces use brackets and wires to help gradually align teeth and improve the bite. Treatment duration and suitability depend on the dentist's assessment.",
+      "Standard metal braces use brackets and wires to gradually align teeth and improve the bite. Treatment suitability and duration depend on the dentist's assessment.",
     priceLabel: "₱5,000 down payment",
     details: "₱5,000 down payment + ₱1,250 monthly adjustment",
     lines: [
@@ -160,7 +160,7 @@ const APPROVED_CLINIC_PRICES = [
     matchNames: ["orthodontics / braces", "orthodontic consultation"],
     title: "Orthodontics / Braces",
     description:
-      "Orthodontic treatment helps improve the alignment of teeth and the bite. Our clinic offers orthodontic options to discuss with a dentist, based on your dental needs and treatment goals.",
+      "Orthodontic treatment helps improve the alignment of teeth and the bite. Standard metal braces and invisible braces are discussed with a dentist based on your dental needs and treatment goals.",
     priceLabel: "See braces options",
     details: "Standard metal braces: ₱5,000 down payment + ₱1,250 monthly adjustment. Invisible braces: price available upon consultation.",
     notes: [
@@ -174,11 +174,17 @@ const APPROVED_CLINIC_PRICES = [
     matchIds: ["dentures"],
     matchNames: ["dentures"],
     title: "Dentures",
-    description: "Removable dentures to replace missing teeth. The dentist confirms the type and materials after an exam.",
+    description:
+      "Dentures are removable dental appliances designed to replace missing teeth and help restore everyday oral function and appearance. The suitable denture type and materials depend on the patient's needs and the dentist's assessment.",
     priceLabel: "Starting at ₱7,500",
-    details: "Starting at ₱7,500; depends on type and materials",
+    details: "Starting at ₱7,500; final pricing depends on denture type, materials, and individual dental needs",
     dependsOnCase: true,
-    notes: [CASE_ASSESSMENT_NOTE, DENTURE_ADVICE_NOTE],
+    compactNote: "Final pricing depends on the denture type, materials, and individual dental needs.",
+    notes: [
+      "Final pricing depends on the denture type, materials, and individual dental needs.",
+      "This starting amount is not a guaranteed final cost.",
+      DENTURE_ADVICE_NOTE,
+    ],
   },
   {
     id: "fixed-bridge",
@@ -301,11 +307,12 @@ function findCatalogEntry(service) {
 }
 
 function formatPrice(entry, service, verified) {
-  const compactNote = entry.dependsOnCase
-    ? COMPACT_CASE_NOTE
-    : entry.notes?.includes(PER_UNIT_NOTE)
-      ? PER_UNIT_NOTE
-      : entry.notes?.[0] || "";
+  const compactNote = entry.compactNote
+    || (entry.dependsOnCase
+      ? COMPACT_CASE_NOTE
+      : entry.notes?.includes(PER_UNIT_NOTE)
+        ? PER_UNIT_NOTE
+        : entry.notes?.[0] || "");
   const extraNotes = (entry.notes || []).filter((note) => {
     if (entry.dependsOnCase && note === CASE_ASSESSMENT_NOTE) return false;
     if (note === compactNote) return false;
@@ -338,7 +345,7 @@ function getInvisibleBracesOption() {
       title: "Invisible Braces",
       description:
         confirmed.description ||
-        "Invisible braces are a less visible orthodontic option. Suitability depends on the dentist's assessment.",
+        "Invisible braces or clear aligner treatment may help improve the alignment of teeth using a less noticeable orthodontic approach. Suitability, treatment duration, and cost depend on the patient's needs and the dentist's assessment.",
       priceLabel: confirmed.priceLabel,
       details: confirmed.details,
       lines: confirmed.lines || [],
@@ -350,7 +357,7 @@ function getInvisibleBracesOption() {
     id: "invisible-braces",
     title: "Invisible Braces",
     description:
-      "Invisible braces are a less visible orthodontic option. Suitability depends on the dentist's assessment. Retainer fees are a separate service and are not the price of invisible braces.",
+      "Invisible braces or clear aligner treatment may help improve the alignment of teeth using a less noticeable orthodontic approach. Suitability, treatment duration, and cost depend on the patient's needs and the dentist's assessment.",
     priceLabel: "Price available upon consultation",
     details: "Price available upon consultation",
     lines: [],
@@ -367,7 +374,7 @@ export function getOrthodonticBracesOptions() {
       title: "Standard Metal Braces",
       description:
         metal?.description ||
-        "Standard metal braces use brackets and wires to help gradually align teeth and improve the bite. Treatment duration and suitability depend on the dentist's assessment.",
+        "Standard metal braces use brackets and wires to gradually align teeth and improve the bite. Treatment suitability and duration depend on the dentist's assessment.",
       priceLabel: metal?.priceLabel || "₱5,000 down payment",
       details: metal?.details || "₱5,000 down payment + ₱1,250 monthly adjustment",
       lines: metal?.lines || [],

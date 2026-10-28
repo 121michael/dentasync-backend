@@ -68,7 +68,7 @@ const SERVICES = [
     id: "orthodontic-consultation",
     name: "Orthodontics / Braces",
     description:
-      "Orthodontic treatment helps improve the alignment of teeth and the bite. Our clinic offers orthodontic options to discuss with a dentist, based on your dental needs and treatment goals.",
+      "Orthodontic treatment helps improve the alignment of teeth and the bite. Standard metal braces and invisible braces are discussed with a dentist based on your dental needs and treatment goals.",
     durationMinutes: 30,
     estimatedCost: 5000,
   },
@@ -103,7 +103,8 @@ const SERVICES = [
   {
     id: "dentures",
     name: "Dentures",
-    description: "Removable dentures to replace missing teeth. The dentist confirms the type and materials after an exam.",
+    description:
+      "Dentures are removable dental appliances designed to replace missing teeth and help restore everyday oral function and appearance. The suitable denture type and materials depend on the patient's needs and the dentist's assessment.",
     durationMinutes: 60,
     estimatedCost: 7500,
   },

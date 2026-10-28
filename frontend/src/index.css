@@ -2088,11 +2088,20 @@ strong {
   border-radius: 10px;
   background:
     linear-gradient(160deg, rgba(240, 233, 251, 0.95) 0%, rgba(217, 196, 241, 0.55) 48%, rgba(255, 255, 255, 0.7) 100%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #c9a36a 22%, transparent);
   transition: aspect-ratio var(--service-duration) var(--service-ease);
 }
 
 .treatment-option.is-selected .treatment-option__media {
   aspect-ratio: 16 / 11;
+}
+
+.treatment-option__media:has(.is-contain),
+.treatment-option.is-selected .treatment-option__media:has(.is-contain) {
+  aspect-ratio: 4 / 5;
+  background:
+    radial-gradient(120% 80% at 88% 0%, rgba(201, 163, 106, 0.22), transparent 56%),
+    linear-gradient(165deg, #fbf8fe 0%, #eee4f8 52%, #f7f2fc 100%);
 }
 
 .treatment-option__photo {
@@ -2270,6 +2279,30 @@ strong {
   font-weight: 750;
   letter-spacing: -0.02em;
   line-height: 1.3;
+}
+
+.treatment-price-panel__figure {
+  margin: 0.15rem 0 0.1rem;
+  overflow: hidden;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, #c9a36a 36%, var(--border));
+  background:
+    radial-gradient(120% 80% at 88% 0%, rgba(201, 163, 106, 0.2), transparent 56%),
+    linear-gradient(165deg, #fbf8fe 0%, #eee4f8 52%, #f7f2fc 100%);
+}
+
+.treatment-price-panel__photo {
+  display: block;
+  width: 100%;
+  max-height: 220px;
+  object-fit: cover;
+  object-position: center;
+}
+
+.treatment-price-panel__photo.is-contain {
+  max-height: min(36vh, 260px);
+  object-fit: contain;
+  background: transparent;
 }
 
 .treatment-price-panel__description {
@@ -11057,6 +11090,14 @@ body.is-queue-display .fab-menu {
   border-radius: 12px;
   background:
     linear-gradient(160deg, rgba(240, 233, 251, 0.95) 0%, rgba(217, 196, 241, 0.42) 48%, rgba(255, 255, 255, 0.18) 100%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lp-gold) 28%, transparent);
+}
+
+.landing-service-card__media:has(.is-contain) {
+  aspect-ratio: 4 / 5;
+  background:
+    radial-gradient(120% 80% at 88% 0%, rgba(215, 184, 137, 0.28), transparent 56%),
+    linear-gradient(165deg, #fbf8fe 0%, #efe6f8 48%, #f4eefb 100%);
 }
 
 .landing-service-card__photo {
@@ -11143,7 +11184,10 @@ body.is-queue-display .fab-menu {
   margin: 0;
   overflow: hidden;
   border-radius: 16px;
-  background: #efe7f8;
+  border: 1px solid color-mix(in srgb, var(--lp-gold) 42%, transparent);
+  background:
+    radial-gradient(120% 80% at 88% 0%, rgba(215, 184, 137, 0.24), transparent 58%),
+    linear-gradient(165deg, #fbf8fe 0%, #efe6f8 48%, #f7f2fc 100%);
 }
 
 .landing-service-detail__photo {
@@ -11155,8 +11199,9 @@ body.is-queue-display .fab-menu {
 }
 
 .landing-service-detail__photo.is-contain {
+  max-height: min(52vh, 420px);
   object-fit: contain;
-  background: #f7f2fc;
+  background: transparent;
 }
 
 .landing-service-detail__options {

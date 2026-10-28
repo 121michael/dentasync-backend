@@ -521,6 +521,15 @@ export function ServicesSection({ services, status, onRetry }) {
                 </figure>
               ) : null}
               {active.description ? <p>{active.description}</p> : null}
+              {price && !price.options?.length ? (
+                <>
+                  <p className="landing-service-detail__price">{price.priceLabel}</p>
+                  {price.compactNote ? <p>{price.compactNote}</p> : null}
+                  {price.extraNotes?.map((note) => (
+                    <p key={note}>{note}</p>
+                  ))}
+                </>
+              ) : null}
               {price?.options?.length ? (
                 <ul className="landing-service-detail__options">
                   {price.options.map((option) => (
@@ -533,7 +542,9 @@ export function ServicesSection({ services, status, onRetry }) {
                           {line.label}: {line.value}
                         </p>
                       ))}
-                      {option.notes?.[0] ? <small>{option.notes[0]}</small> : null}
+                      {option.notes?.map((note) => (
+                        <small key={note}>{note}</small>
+                      ))}
                     </li>
                   ))}
                 </ul>
@@ -544,18 +555,14 @@ export function ServicesSection({ services, status, onRetry }) {
                   ))
                 : null}
               <p className="landing-service-detail__how">
-                {price?.options?.length
-                  ? "Review this information first. You can create an account or sign in when you are ready to book."
-                  : "Create your patient account to request this service once the clinic approves your registration."}
+                Review this information first. Book a consultation when you are ready — existing patients can sign in, and new patients can create an account on the same page.
               </p>
               <Link to="/register" className="landing-button landing-button--gold">
-                {price?.options?.length ? "Create Account to Book" : "Create Account"} <ArrowRight size={17} aria-hidden="true" />
+                Book a Consultation <ArrowRight size={17} aria-hidden="true" />
               </Link>
-              {price?.options?.length ? (
-                <p className="landing-service-detail__how">
-                  Already have an account? <Link to="/login">Sign in</Link> to continue. Both options use the same Sign In / Create Account page.
-                </p>
-              ) : null}
+              <p className="landing-service-detail__how">
+                Already have an account? <Link to="/login">Sign in</Link> to continue. Sign in and Create Account share the same page.
+              </p>
             </article>
           </div>
         ) : (
