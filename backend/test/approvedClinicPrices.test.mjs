@@ -12,6 +12,7 @@ import {
   EXTRACTION_IMAGE_URL,
   FIXED_BRIDGE_IMAGE_URL,
   FILLING_IMAGE_URL,
+  GUM_CONTOURING_IMAGE_URL,
   ORTHODONTICS_IMAGE_URL,
   ROOT_CANAL_IMAGE_URL,
   VENEERS_IMAGE_URL,
@@ -75,6 +76,7 @@ test("dentures orthodontics implants veneers and cleaning reuse one public image
   const whitening = attachServiceVisual({ id: "whitening", name: "Teeth Whitening" });
   const consultation = attachServiceVisual({ id: "general-consultation", name: "Oral Examination / Consultation" });
   const bridgeVisual = attachServiceVisual({ id: "fixed-bridge", name: "Fixed Bridge" });
+  const gumContouring = attachServiceVisual({ id: "gum-contouring", name: "Gum Contouring" });
   assert.equal(dentures.imageUrl, DENTURES_IMAGE_URL);
   assert.equal(dentures.imageFit, "contain");
   assert.equal(braces.imageUrl, ORTHODONTICS_IMAGE_URL);
@@ -104,6 +106,9 @@ test("dentures orthodontics implants veneers and cleaning reuse one public image
   assert.equal(bridgeVisual.imageUrl, FIXED_BRIDGE_IMAGE_URL);
   assert.equal(bridgeVisual.imageFit, "contain");
   assert.notEqual(bridgeVisual.imageUrl, dentures.imageUrl);
+  assert.equal(gumContouring.imageUrl, GUM_CONTOURING_IMAGE_URL);
+  assert.equal(gumContouring.imageFit, "contain");
+  assert.notEqual(gumContouring.imageUrl, bridgeVisual.imageUrl);
   assert.equal(existsSync(join(frontendRoot, "public", dentures.imageUrl.replace(/^\//, ""))), true);
   assert.equal(existsSync(join(frontendRoot, "public", braces.imageUrl.replace(/^\//, ""))), true);
   assert.equal(existsSync(join(frontendRoot, "public", implants.imageUrl.replace(/^\//, ""))), true);
@@ -115,6 +120,7 @@ test("dentures orthodontics implants veneers and cleaning reuse one public image
   assert.equal(existsSync(join(frontendRoot, "public", whitening.imageUrl.replace(/^\//, ""))), true);
   assert.equal(existsSync(join(frontendRoot, "public", consultation.imageUrl.replace(/^\//, ""))), true);
   assert.equal(existsSync(join(frontendRoot, "public", bridgeVisual.imageUrl.replace(/^\//, ""))), true);
+  assert.equal(existsSync(join(frontendRoot, "public", gumContouring.imageUrl.replace(/^\//, ""))), true);
 });
 
 test("dental cleaning shows the verified starting price with a case qualification", () => {

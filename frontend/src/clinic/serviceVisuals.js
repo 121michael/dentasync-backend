@@ -53,6 +53,11 @@ export const FIXED_BRIDGE_IMAGE_URL = "/services/fixed-bridge.jpg";
 export const FIXED_BRIDGE_IMAGE_ALT =
   "Before-and-after example of a fixed dental bridge restoring a smile. Individual results vary and are not guaranteed.";
 
+export const GUM_CONTOURING_SERVICE_ID = "gum-contouring";
+export const GUM_CONTOURING_IMAGE_URL = "/services/gum-contouring.jpg";
+export const GUM_CONTOURING_IMAGE_ALT =
+  "Split illustration of gum contouring, comparing uneven gum height with a more even gum line. Individual results vary.";
+
 const SERVICE_VISUALS = {
   [ORTHODONTICS_SERVICE_ID]: {
     imageUrl: ORTHODONTICS_IMAGE_URL,
@@ -108,6 +113,11 @@ const SERVICE_VISUALS = {
     imageUrl: FIXED_BRIDGE_IMAGE_URL,
     imageFit: "contain",
     imageAlt: FIXED_BRIDGE_IMAGE_ALT,
+  },
+  [GUM_CONTOURING_SERVICE_ID]: {
+    imageUrl: GUM_CONTOURING_IMAGE_URL,
+    imageFit: "contain",
+    imageAlt: GUM_CONTOURING_IMAGE_ALT,
   },
 };
 
