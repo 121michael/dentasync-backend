@@ -11580,8 +11580,9 @@ body.is-queue-display .fab-menu {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  max-width: var(--lp-max);
-  margin: 0 auto;
+  width: 100%;
+  max-width: none;
+  margin: 0;
   padding: 1.1rem max(1.25rem, env(safe-area-inset-right, 0px)) 1.1rem max(1.25rem, env(safe-area-inset-left, 0px));
 }
 
