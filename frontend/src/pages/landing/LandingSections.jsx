@@ -25,6 +25,16 @@ import { attachServiceVisual } from "../../clinic/serviceVisuals";
 // Covers a Render cold start or a backend that is still redeploying after the static site went live.
 const CLINIC_INFO_RETRY_DELAYS_MS = [2000, 5000];
 
+function publicTreatmentNotes(notes) {
+  return (notes || []).filter((note) => {
+    const text = String(note || "");
+    if (/book a free consultation/i.test(text)) return true;
+    return !/₱|starting at|per session|per unit|down payment|monthly adjustment|price unavailable|available upon consultation|price available|final price|final cost|not a guaranteed|listed amount|payment/i.test(
+      text
+    );
+  });
+}
+
 function isClinicInfo(value) {
   return Boolean(
     value &&
@@ -521,39 +531,22 @@ export function ServicesSection({ services, status, onRetry }) {
                 </figure>
               ) : null}
               {active.description ? <p>{active.description}</p> : null}
-              {price && !price.options?.length ? (
-                <>
-                  <p className="landing-service-detail__price">{price.priceLabel}</p>
-                  {price.compactNote ? <p>{price.compactNote}</p> : null}
-                  {price.extraNotes?.map((note) => (
-                    <p key={note}>{note}</p>
-                  ))}
-                </>
-              ) : null}
               {price?.options?.length ? (
                 <ul className="landing-service-detail__options">
                   {price.options.map((option) => (
                     <li key={option.id}>
                       <strong>{option.title}</strong>
                       {option.description ? <p>{option.description}</p> : null}
-                      <p className="landing-service-detail__price">{option.priceLabel}</p>
-                      {option.lines?.map((line) => (
-                        <p key={line.label} className="landing-service-detail__line">
-                          {line.label}: {line.value}
-                        </p>
-                      ))}
-                      {option.notes?.map((note) => (
+                      {publicTreatmentNotes(option.notes).map((note) => (
                         <small key={note}>{note}</small>
                       ))}
                     </li>
                   ))}
                 </ul>
               ) : null}
-              {price?.options?.length
-                ? price.extraNotes?.map((note) => (
-                    <p key={note} className="landing-service-detail__how">{note}</p>
-                  ))
-                : null}
+              {publicTreatmentNotes(price?.extraNotes).map((note) => (
+                <p key={note} className="landing-service-detail__how">{note}</p>
+              ))}
               <p className="landing-service-detail__how">
                 Review this information first. Book a consultation when you are ready — existing patients can sign in, and new patients can create an account on the same page.
               </p>
