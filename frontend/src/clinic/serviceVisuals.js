@@ -58,6 +58,10 @@ export const GUM_CONTOURING_IMAGE_URL = "/services/gum-contouring.jpg";
 export const GUM_CONTOURING_IMAGE_ALT =
   "Split illustration of gum contouring, comparing uneven gum height with a more even gum line. Individual results vary.";
 
+export const ODONTECTOMY_SERVICE_ID = "odontectomy";
+export const FRENECTOMY_SERVICE_ID = "frenectomy";
+export const ORTHO_ADJUSTMENT_SERVICE_ID = "ortho-adjustment";
+
 const SERVICE_VISUALS = {
   [ORTHODONTICS_SERVICE_ID]: {
     imageUrl: ORTHODONTICS_IMAGE_URL,
@@ -118,6 +122,26 @@ const SERVICE_VISUALS = {
     imageUrl: GUM_CONTOURING_IMAGE_URL,
     imageFit: "contain",
     imageAlt: GUM_CONTOURING_IMAGE_ALT,
+  },
+  [ODONTECTOMY_SERVICE_ID]: {
+    imageUrl: EXTRACTION_IMAGE_URL,
+    imageFit: "contain",
+    imageAlt: EXTRACTION_IMAGE_ALT,
+  },
+  [FRENECTOMY_SERVICE_ID]: {
+    imageUrl: EXTRACTION_IMAGE_URL,
+    imageFit: "contain",
+    imageAlt: EXTRACTION_IMAGE_ALT,
+  },
+  [ORTHO_ADJUSTMENT_SERVICE_ID]: {
+    imageUrl: ORTHODONTICS_IMAGE_URL,
+    imageFit: "contain",
+    imageAlt: ORTHODONTICS_IMAGE_ALT,
+  },
+  "dental-crowns": {
+    imageUrl: FIXED_BRIDGE_IMAGE_URL,
+    imageFit: "contain",
+    imageAlt: FIXED_BRIDGE_IMAGE_ALT,
   },
 };
 

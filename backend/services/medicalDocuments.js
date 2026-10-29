@@ -6,6 +6,56 @@ const path = require("path");
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const DOCUMENT_TYPE = "medical_document";
 const ALLOWED_MIME = new Set(["application/pdf", "image/jpeg", "image/png"]);
+const UNCATEGORIZED_LABEL = "Uncategorized";
+const LEGACY_GENERIC_CATEGORY = "Medical clearance / supporting document";
+
+const MEDICAL_DOCUMENT_TYPES = [
+  {
+    id: "medical_clearance",
+    label: "Medical Clearance / Authorization",
+    description:
+      "A physician's certificate or authorization related to whether the patient may undergo a dental procedure.",
+  },
+  {
+    id: "dental_xray",
+    label: "Dental X-ray / Radiograph",
+    description: "An existing dental X-ray or radiographic image.",
+  },
+  {
+    id: "referral",
+    label: "Referral / Treatment Recommendation",
+    description:
+      "A referral or recommendation from another dentist, such as a recommendation to perform a restoration.",
+  },
+  {
+    id: "procedure_request",
+    label: "Procedure Request / Supporting Paperwork",
+    description: "Other documents requesting or supporting a particular dental procedure.",
+  },
+  {
+    id: "other",
+    label: "Other Medical Document",
+    description: "Another relevant medical document not covered by the options above.",
+  },
+];
+
+function resolveDocumentType(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return null;
+  return (
+    MEDICAL_DOCUMENT_TYPES.find(
+      (item) => item.id === raw || item.label.toLowerCase() === raw
+    ) || null
+  );
+}
+
+function displayDocumentCategory(value) {
+  const matched = resolveDocumentType(value);
+  if (matched) return matched.label;
+  const raw = String(value || "").trim();
+  if (!raw || raw === LEGACY_GENERIC_CATEGORY) return UNCATEGORIZED_LABEL;
+  return raw;
+}
 
 function looksLikePdf(buffer) {
   return Buffer.isBuffer(buffer) && buffer.length >= 5 && buffer.subarray(0, 5).toString("ascii") === "%PDF-";
@@ -103,7 +153,8 @@ function mapMedicalDocument(row, appointment = null) {
   return {
     id: row.id,
     name: row.original_name,
-    category: row.category || "Medical clearance / supporting document",
+    category: displayDocumentCategory(row.category),
+    documentType: resolveDocumentType(row.category)?.id || null,
     mimeType: row.mime_type,
     size: Number(row.byte_size) || 0,
     status: row.status || "uploaded",
@@ -130,6 +181,11 @@ module.exports = {
   DOCUMENT_TYPE,
   MAX_UPLOAD_BYTES,
   ALLOWED_MIME,
+  MEDICAL_DOCUMENT_TYPES,
+  UNCATEGORIZED_LABEL,
+  LEGACY_GENERIC_CATEGORY,
+  resolveDocumentType,
+  displayDocumentCategory,
   validateMedicalUpload,
   resolveStoredPath,
   mapMedicalDocument,

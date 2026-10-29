@@ -196,8 +196,9 @@ const SERVICE_ALIASES = [
       "konsulta",
     ],
   },
-  { id: "emergency-care", terms: ["emergency", "urgent pain", "emergency care"] },
-  { id: "oral-surgery", terms: ["oral surgery", "surgical"] },
+  { id: "odontectomy", terms: ["odontectomy", "wisdom tooth removal"] },
+  { id: "frenectomy", terms: ["frenectomy"] },
+  { id: "ortho-adjustment", terms: ["ortho adjustment", "orthodontic adjustment"] },
   {
     id: "dentures",
     terms: ["denture", "dentures", "pustiso"],
@@ -478,8 +479,8 @@ const CLINIC_TOPICS = [
     build: (clinic, _dentists, _services, lang) =>
       pick(
         lang,
-        `For urgent dental pain or swelling, book Emergency Dental Care if a slot is available, or call ${clinic.name} at ${clinic.phone}. This assistant cannot diagnose emergencies — seek in-person care for severe symptoms.`,
-        `Kung matindi ang sakit ng ngipin o may pamamaga, mag-book ng Emergency Dental Care kung may slot, o tumawag sa ${clinic.name} sa ${clinic.phone}. Hindi makakapag-diagnose ang assistant na ito — magpatingin mismo kung malala ang sintomas.`
+        `For urgent dental pain or swelling during clinic hours, call ${clinic.name} at ${clinic.phone}. The clinic does not offer Emergency Dental Care as a bookable service. This assistant cannot diagnose emergencies — seek in-person care for severe symptoms.`,
+        `Kung matindi ang sakit ng ngipin o may pamamaga habang bukas ang klinika, tumawag sa ${clinic.name} sa ${clinic.phone}. Hindi nag-aalok ang klinika ng Emergency Dental Care bilang bookable na serbisyo. Hindi makakapag-diagnose ang assistant na ito — magpatingin mismo kung malala ang sintomas.`
       ),
   },
   {
@@ -668,8 +669,8 @@ const ORAL_HEALTH_TOPICS = [
       "masakit ngipin",
       "sumasakit ang ngipin",
     ],
-    en: "Toothache can come from decay, a cracked tooth, gum infection, or sinus pressure — only an exam can tell. Rinse gently with water and avoid placing aspirin on the gum. For severe, spreading, or night-time pain, book Emergency Dental Care or call the clinic. This assistant cannot diagnose the cause of your pain.",
-    tl: "Puwedeng galing ang sakit ng ngipin sa decay, basag na ngipin, impeksyon sa gilagid, o sinus — exam lang ang makapagsasabi. Banlawan ng tubig at huwag maglagay ng aspirin sa gilagid. Kung malala, kumakalat, o sa gabi sumasakit, mag-book ng Emergency Dental Care o tawagan ang klinika. Hindi makakapag-diagnose ng dahilan ng sakit ang assistant na ito.",
+    en: "Toothache can come from decay, a cracked tooth, gum infection, or sinus pressure — only an exam can tell. Rinse gently with water and avoid placing aspirin on the gum. For severe, spreading, or night-time pain, call the clinic during hours. The clinic does not offer Emergency Dental Care as a bookable service. This assistant cannot diagnose the cause of your pain.",
+    tl: "Puwedeng galing ang sakit ng ngipin sa decay, basag na ngipin, impeksyon sa gilagid, o sinus — exam lang ang makapagsasabi. Banlawan ng tubig at huwag maglagay ng aspirin sa gilagid. Kung malala, kumakalat, o sa gabi sumasakit, tawagan ang klinika habang bukas. Hindi nag-aalok ang klinika ng Emergency Dental Care bilang bookable na serbisyo. Hindi makakapag-diagnose ng dahilan ng sakit ang assistant na ito.",
   },
 ];
 
@@ -774,7 +775,7 @@ function matchApprovedClinicService(normalized, options = {}) {
 }
 
 function looksLikePersonalizedAdvice(normalized) {
-  return /\b(best for me|best denture|what type|which type|what material|which material|ano ang best|anong type|anong material|anong klaseng|suitable|right for me|recommend|para sa akin)\b/.test(
+  return /\b(best for me|best denture|what type|which type|what material|which material|ano ang best|anong type|anong material|anong klaseng|suitable|right for me|recommend|para sa akin|what(?:'s| is)? included|what does (?:it|the price) include|ano ang kasama)\b/.test(
     normalized
   );
 }
@@ -1050,6 +1051,7 @@ function matchService(normalized, services) {
   let best = null;
   let bestScore = 0;
   for (const service of services) {
+    if (service?.bookable === false) continue;
     let score = 0;
     const name = String(service.name || "").toLowerCase();
     if (name && normalized.includes(name)) score += 5;
@@ -1103,6 +1105,10 @@ function describeService(service, lang, approvedCatalog = APPROVED_CLINIC_SERVIC
     whitening: "whitening",
     "general-consultation": "consultation",
     "orthodontic-consultation": "consultation",
+    "ortho-adjustment": "ortho-adjustment",
+    "root-canal": "root-canal",
+    odontectomy: "odontectomy",
+    frenectomy: "frenectomy",
     dentures: "dentures",
     "fixed-bridge": "crown-bridge",
     "dental-crowns": "crown-bridge",
@@ -1330,8 +1336,8 @@ function answerFromCatalog(question, servicesOrOptions) {
     return {
       answer: pick(
         lang,
-        "If this could be a medical emergency (for example chest pain, trouble breathing, or loss of consciousness), seek emergency medical assistance immediately. For urgent dental pain during clinic hours, call the clinic or book Emergency Dental Care.",
-        "Kung posibleng emergency medikal (halimbawa pananakit ng dibdib, hirap huminga, o nawalan ng malay), humingi agad ng emergency medical assistance. Para sa malubhang sakit ng ngipin habang bukas ang klinika, tumawag sa clinic o mag-book ng Emergency Dental Care."
+        "If this could be a medical emergency (for example chest pain, trouble breathing, or loss of consciousness), seek emergency medical assistance immediately. For urgent dental pain during clinic hours, call the clinic. The clinic does not offer Emergency Dental Care as a bookable service.",
+        "Kung posibleng emergency medikal (halimbawa pananakit ng dibdib, hirap huminga, o nawalan ng malay), humingi agad ng emergency medical assistance. Para sa malubhang sakit ng ngipin habang bukas ang klinika, tumawag sa clinic. Hindi nag-aalok ang klinika ng Emergency Dental Care bilang bookable na serbisyo."
       ),
       source: "safety",
       language: lang,

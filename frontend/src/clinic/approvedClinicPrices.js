@@ -133,6 +133,7 @@ function getInvisibleBracesOption() {
 
 export function getOrthodonticBracesOptions() {
   const metal = findCatalogEntry({ id: "metal-braces", name: "Standard Metal Braces" });
+  const adjustment = findCatalogEntry({ id: "ortho-adjustment", name: "Ortho Adjustment" });
   return [
     {
       id: "metal-braces",
@@ -147,6 +148,18 @@ export function getOrthodonticBracesOptions() {
       verified: true,
     },
     getInvisibleBracesOption(),
+    {
+      id: "ortho-adjustment",
+      title: adjustment?.title || "Ortho Adjustment",
+      description:
+        adjustment?.description ||
+        "An orthodontic adjustment visit. This is a separate procedure from braces payment plans and from retainer products.",
+      priceLabel: adjustment?.priceLabel || "Price available upon consultation",
+      details: adjustment?.details || "Price available upon consultation",
+      lines: adjustment?.lines || [],
+      notes: adjustment?.notes || [],
+      verified: Boolean(adjustment),
+    },
   ];
 }
 

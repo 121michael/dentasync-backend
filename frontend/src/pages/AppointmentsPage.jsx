@@ -44,6 +44,36 @@ const LEGACY_SERVICE_NAMES = {
   "Orthodontic Consultation": "Orthodontics / Braces",
 };
 
+const DEFAULT_MEDICAL_DOCUMENT_TYPES = [
+  {
+    id: "medical_clearance",
+    label: "Medical Clearance / Authorization",
+    description:
+      "A physician's certificate or authorization related to whether the patient may undergo a dental procedure.",
+  },
+  {
+    id: "dental_xray",
+    label: "Dental X-ray / Radiograph",
+    description: "An existing dental X-ray or radiographic image.",
+  },
+  {
+    id: "referral",
+    label: "Referral / Treatment Recommendation",
+    description:
+      "A referral or recommendation from another dentist, such as a recommendation to perform a restoration.",
+  },
+  {
+    id: "procedure_request",
+    label: "Procedure Request / Supporting Paperwork",
+    description: "Other documents requesting or supporting a particular dental procedure.",
+  },
+  {
+    id: "other",
+    label: "Other Medical Document",
+    description: "Another relevant medical document not covered by the options above.",
+  },
+];
+
 function tomorrow() {
   const date = new Date();
   date.setDate(date.getDate() + 1);
@@ -175,7 +205,7 @@ function ServicePriceDetails({ price, open, selectedOptionId, onSelectOption, on
           <p className="treatment-price-panel__note">{price.compactNote}</p>
         ) : null}
         {options.length ? (
-          <div className="treatment-price-panel__options" role="radiogroup" aria-label="Braces option">
+          <div className="treatment-price-panel__options" role="radiogroup" aria-label="Orthodontic option">
             {options.map((option) => (
               <button
                 key={option.id}
@@ -301,7 +331,10 @@ function validateBooking(form, { selectedServicePrice, availability, throughStep
       return { step: 1, message: "Select a dental service before continuing." };
     }
     if (selectedServicePrice?.options?.length && !form.bracesOption) {
-      return { step: 1, message: "Choose Standard Metal Braces or Invisible Braces before continuing." };
+      return {
+        step: 1,
+        message: "Choose Standard Metal Braces, Invisible Braces, or Ortho Adjustment before continuing.",
+      };
     }
   }
   if (throughStep >= 2) {
@@ -372,6 +405,7 @@ export function AppointmentsPage() {
   });
   const [authorizationFile, setAuthorizationFile] = useState(null);
   const [medicalDocument, setMedicalDocument] = useState(null);
+  const [medicalDocumentType, setMedicalDocumentType] = useState("");
   const [medicalUploadError, setMedicalUploadError] = useState("");
   const [medicalUploadSuccess, setMedicalUploadSuccess] = useState("");
   const [medicalUploading, setMedicalUploading] = useState(false);
@@ -501,6 +535,17 @@ export function AppointmentsPage() {
   const closeServiceDetails = useCallback(() => setDetailsDismissed(true), []);
   const hmoProviders = catalog?.hmoProviders?.length ? catalog.hmoProviders : APPROVED_HMO_PROVIDERS;
   const selectedHmo = hmoProviders.find((provider) => provider.name === form.hmoProvider);
+  const medicalDocumentTypes = catalog?.medicalDocumentTypes?.length
+    ? catalog.medicalDocumentTypes
+    : DEFAULT_MEDICAL_DOCUMENT_TYPES;
+  const selectedMedicalType = medicalDocumentTypes.find((item) => item.id === medicalDocumentType);
+  const bookableServices = (catalog?.services || []).filter(
+    (service) =>
+      service?.id &&
+      service.id !== "emergency-care" &&
+      service.id !== "dental-crowns" &&
+      service.id !== "oral-surgery"
+  );
 
   function updateForm(event) {
     setError("");
@@ -570,17 +615,24 @@ export function AppointmentsPage() {
     if (!file) return;
     setMedicalUploadError("");
     setMedicalUploadSuccess("");
+    if (!medicalDocumentType) {
+      setMedicalUploadError("Select a document type before uploading.");
+      if (medicalFileInputRef.current) medicalFileInputRef.current.value = "";
+      return;
+    }
     if (medicalDocument?.id) {
       await api.removeMedicalDocument(medicalDocument.id).catch(() => {});
     }
     setMedicalUploading(true);
     try {
-      const response = await api.uploadMedicalDocument(file);
+      const response = await api.uploadMedicalDocument(file, medicalDocumentType);
       setMedicalDocument({
         ...response.document,
         name: response.document?.name || file.name,
         mimeType: response.document?.mimeType || file.type,
         size: response.document?.size || file.size,
+        category: response.document?.category || selectedMedicalType?.label,
+        documentType: response.document?.documentType || medicalDocumentType,
       });
       setMedicalUploadSuccess(response.message || "Medical document saved for your dentist to review.");
     } catch (uploadError) {
@@ -650,6 +702,7 @@ export function AppointmentsPage() {
       setDetailsDismissed(false);
       setAuthorizationFile(null);
       setMedicalDocument(null);
+      setMedicalDocumentType("");
       setMedicalUploadError("");
       setMedicalUploadSuccess("");
       setVisitSummaryOpen(false);
@@ -901,7 +954,7 @@ export function AppointmentsPage() {
               </div>
             </div>
             <div className="treatment-grid" role="radiogroup" aria-label="Select a service">
-              {(catalog.services || []).map((service) => (
+              {bookableServices.map((service) => (
                 <TreatmentServiceOption
                   key={service.id}
                   service={service}
@@ -1162,6 +1215,28 @@ export function AppointmentsPage() {
                 documentation if clinically necessary.
               </p>
               <p className="muted">Accepted files: PDF, JPG, or PNG — up to 5 MB.</p>
+              <label className="field booking-medical-docs__type">
+                <span>Document Type</span>
+                <select
+                  value={medicalDocumentType}
+                  onChange={(event) => {
+                    setMedicalUploadError("");
+                    setMedicalDocumentType(event.target.value);
+                  }}
+                  required
+                >
+                  <option value="">Select a document type</option>
+                  {medicalDocumentTypes.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+                <small>
+                  {selectedMedicalType?.description ||
+                    "Choose the option that best describes the file. Uploading remains optional."}
+                </small>
+              </label>
               <input
                 ref={medicalFileInputRef}
                 className="booking-medical-docs__input"
@@ -1188,6 +1263,7 @@ export function AppointmentsPage() {
                 <p className="booking-medical-docs__file" role="status">
                   <strong>{medicalDocument.name}</strong>
                   <small>
+                    {medicalDocument.category || selectedMedicalType?.label || "Uncategorized"} ·{" "}
                     {fileKindLabel(medicalDocument.name, medicalDocument.mimeType)} ·{" "}
                     {formatFileSize(medicalDocument.size)}
                   </small>
@@ -1287,7 +1363,11 @@ export function AppointmentsPage() {
                       <span>Document</span>
                       <strong>
                         {medicalDocument
-                          ? `Attached · ${medicalDocument.name}`
+                          ? `Attached · ${medicalDocument.name}${
+                              medicalDocument.category || selectedMedicalType?.label
+                                ? ` · ${medicalDocument.category || selectedMedicalType.label}`
+                                : ""
+                            }`
                           : "None attached"}
                       </strong>
                     </div>

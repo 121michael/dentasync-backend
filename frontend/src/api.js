@@ -185,9 +185,10 @@ export const api = {
     data.append("file", file);
     return request("/patient/uploads/hmo-authorization", { method: "POST", body: data });
   },
-  uploadMedicalDocument: (file) => {
+  uploadMedicalDocument: (file, category) => {
     const data = new FormData();
     data.append("file", file);
+    if (category) data.append("category", category);
     return request("/patient/uploads/medical-document", { method: "POST", body: data, silent: true });
   },
   removeMedicalDocument: (documentId) =>

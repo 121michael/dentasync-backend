@@ -660,7 +660,7 @@ test("approved price catalog answers skip Gemini so knowledge updates apply imme
   }
 });
 
-test("veneers and implants do not invent peso amounts", () => {
+test("veneers do not invent peso amounts and implants quote the approved amount", () => {
   const veneers = answerFromCatalog("How much are veneers?", options);
   assert.equal(veneers.source, "catalog");
   assert.match(veneers.answer, /Veneers/i);
@@ -668,9 +668,23 @@ test("veneers and implants do not invent peso amounts", () => {
   assert.doesNotMatch(veneers.answer, /₱\d/);
 
   const implants = answerFromCatalog("How much are dental implants?", options);
-  assert.match(implants.answer, /Dental Implants/i);
-  assert.match(implants.answer, /consultation/i);
-  assert.doesNotMatch(implants.answer, /₱\d/);
+  assert.match(implants.answer, /Dental Implant/i);
+  assert.match(implants.answer, /₱100,000/);
+  assert.doesNotMatch(implants.answer, /abutment/i);
+});
+
+test("root canal quotes the per-canal price, not a complete-procedure total", () => {
+  const result = answerFromCatalog("How much is a root canal?", options);
+  assert.match(result.answer, /₱5,000 per canal/);
+  assert.match(result.answer, /not a guaranteed total/i);
+});
+
+test("assistant does not offer Emergency Dental Care as a bookable service", () => {
+  const result = answerFromCatalog("I have severe swelling and urgent pain", options);
+  assert.doesNotMatch(result.answer, /book Emergency Dental Care/i);
+  assert.match(result.answer, /does not offer Emergency Dental Care/i);
+  const named = answerFromCatalog("Do you offer Emergency Dental Care?", options);
+  assert.doesNotMatch(named.answer, /Book it from Appointments/i);
 });
 
 test("gum contouring uses the approved per-tooth price", () => {

@@ -1,7 +1,8 @@
 {
   "groups": [
     { "id": "preventive", "title": "Consultation and preventive care" },
-    { "id": "surgery", "title": "Extraction and oral surgery" },
+    { "id": "surgery", "title": "Extraction" },
+    { "id": "oral-surgery", "title": "Oral Surgery" },
     { "id": "cosmetic", "title": "Cosmetic dentistry" },
     { "id": "orthodontics", "title": "Orthodontics and retainers" },
     { "id": "crowns", "title": "Fixed bridge and crowns" },
@@ -111,6 +112,30 @@
       "factLineTl": "Restoration / Permanent Filling: ₱1,000 per surface."
     },
     {
+      "id": "root-canal",
+      "group": "preventive",
+      "adminVisible": true,
+      "title": "Root Canal Treatment",
+      "description": "Root canal treatment is priced per canal after the dentist assesses the tooth.",
+      "priceLabel": "₱5,000 per canal",
+      "details": "₱5,000 per canal",
+      "dependsOnCase": true,
+      "compactNote": "This listed amount is per canal, not a guaranteed total for a complete root canal procedure.",
+      "lines": [{ "label": "Price unit", "value": "₱5,000 per canal" }],
+      "notes": [
+        "₱5,000 is the approved price per canal, not a guaranteed total for a complete root canal procedure.",
+        "Final treatment recommendations and applicable costs may depend on your dental condition and the dentist's assessment.",
+        "Book a FREE consultation / oral examination so our dentist can assess your needs."
+      ],
+      "matchIds": ["root-canal"],
+      "matchNames": ["root canal treatment", "root canal"],
+      "terms": ["root canal", "endodontic", "endo", "root canal treatment"],
+      "chatbotEn": "Root Canal Treatment is ₱5,000 per canal. That listed amount is per canal, not a guaranteed total for a complete root canal procedure. Book a FREE consultation so our dentist can assess the tooth. Mag-book sa Appointments.",
+      "chatbotTl": "Ang Root Canal Treatment ay ₱5,000 per canal. Per canal ang listed amount, hindi guaranteed total para sa buong root canal procedure. Mag-book ng FREE consultation para ma-assess ng dentista ang ngipin. Mag-book sa Appointments.",
+      "factLineEn": "Root Canal Treatment: ₱5,000 per canal. Per canal, not a guaranteed total for a complete root canal procedure.",
+      "factLineTl": "Root Canal Treatment: ₱5,000 per canal. Per canal, hindi guaranteed total para sa buong procedure."
+    },
+    {
       "id": "fluoride",
       "group": "preventive",
       "adminVisible": true,
@@ -153,7 +178,7 @@
     },
     {
       "id": "odontectomy",
-      "group": "surgery",
+      "group": "oral-surgery",
       "adminVisible": true,
       "title": "Odontectomy",
       "description": "Surgical removal of an impacted or wisdom tooth.",
@@ -176,7 +201,7 @@
     },
     {
       "id": "frenectomy",
-      "group": "surgery",
+      "group": "oral-surgery",
       "adminVisible": true,
       "title": "Frenectomy",
       "description": "Frenectomy procedure.",
@@ -193,6 +218,29 @@
       "chatbotTl": "Ang Frenectomy ay ₱5,000. Depende sa dental condition at assessment ng dentista ang final treatment.",
       "factLineEn": "Frenectomy: ₱5,000.",
       "factLineTl": "Frenectomy: ₱5,000."
+    },
+    {
+      "id": "oral-surgery",
+      "group": "oral-surgery",
+      "adminVisible": false,
+      "title": "Oral Surgery",
+      "description": "Oral surgery at the clinic is Odontectomy or Frenectomy.",
+      "priceLabel": "See oral surgery procedures",
+      "details": "Odontectomy ₱5,000–₱15,000. Frenectomy ₱5,000.",
+      "lines": [
+        { "label": "Odontectomy", "value": "₱5,000–₱15,000" },
+        { "label": "Frenectomy", "value": "₱5,000" }
+      ],
+      "notes": [
+        "The clinic does not offer a generic oral surgery package beyond these two procedures."
+      ],
+      "matchIds": [],
+      "matchNames": ["oral surgery"],
+      "terms": ["oral surgery"],
+      "chatbotEn": "Oral Surgery at Amethyst Dental Clinic includes Odontectomy at ₱5,000–₱15,000, depending on the case, and Frenectomy at ₱5,000. Book a FREE consultation so the dentist can assess which procedure applies. Mag-book sa Appointments.",
+      "chatbotTl": "Ang Oral Surgery sa Amethyst Dental Clinic ay Odontectomy na ₱5,000–₱15,000, depending on the case, at Frenectomy na ₱5,000. Mag-book ng FREE consultation para ma-assess kung alin ang applicable. Mag-book sa Appointments.",
+      "factLineEn": "Oral Surgery: Odontectomy ₱5,000–₱15,000, depending on the case; Frenectomy ₱5,000.",
+      "factLineTl": "Oral Surgery: Odontectomy ₱5,000–₱15,000, depending on the case; Frenectomy ₱5,000."
     },
     {
       "id": "whitening",
@@ -261,6 +309,30 @@
       "chatbotTl": "Ang standard metal braces ay ₱5,000 down payment, followed by ₱1,250 monthly adjustments. Kasama ang free cleaning every month during the monthly adjustment. Hindi overall cost ng treatment ang monthly adjustment, at hindi kami gumagawa ng invented na total.",
       "factLineEn": "Standard Metal Braces: ₱5,000 down payment; ₱1,250 monthly adjustment. Free cleaning every month during the monthly adjustment. Do not treat the monthly fee as the total cost of treatment.",
       "factLineTl": "Standard Metal Braces: ₱5,000 down payment; ₱1,250 monthly adjustment. Free cleaning every month during the monthly adjustment."
+    },
+    {
+      "id": "ortho-adjustment",
+      "group": "orthodontics",
+      "adminVisible": true,
+      "title": "Ortho Adjustment",
+      "description": "An orthodontic adjustment visit. This is a separate procedure from braces payment plans and from retainer products.",
+      "priceLabel": "Price available upon consultation",
+      "details": "Price available upon consultation",
+      "compactNote": "The clinic has not published a separate peso amount for Ortho Adjustment.",
+      "lines": [],
+      "notes": [
+        "Ortho Adjustment is not automatically billed as the metal braces or clear retainer monthly arrangement.",
+        "Standard metal braces remain ₱5,000 down payment and ₱1,250 monthly adjustment, including free cleaning every month during the monthly adjustment.",
+        "The clear/invisible retainer arrangement remains ₱15,000 down payment and ₱1,500 monthly adjustment.",
+        "Book a FREE consultation / oral examination so our dentist can assess your needs."
+      ],
+      "matchIds": ["ortho-adjustment"],
+      "matchNames": ["ortho adjustment"],
+      "terms": ["ortho adjustment", "orthodontic adjustment"],
+      "chatbotEn": "Ortho Adjustment is available at Amethyst Dental Clinic. The clinic has not published a separate peso amount for this visit. It is not automatically the metal braces monthly arrangement (₱5,000 down payment; ₱1,250 monthly adjustment with free cleaning) or the clear/invisible retainer arrangement (₱15,000 down payment; ₱1,500 monthly adjustment). Book a FREE consultation so our dentist can advise you. Mag-book sa Appointments.",
+      "chatbotTl": "Available ang Ortho Adjustment sa Amethyst Dental Clinic. Walang hiwalay na naka-publish na peso amount para sa visit na ito. Hindi automatic na metal braces monthly arrangement (₱5,000 down payment; ₱1,250 monthly adjustment with free cleaning) o clear/invisible retainer arrangement (₱15,000 down payment; ₱1,500 monthly adjustment). Mag-book ng FREE consultation. Mag-book sa Appointments.",
+      "factLineEn": "Ortho Adjustment: available; no separate published peso amount. Do not treat it as a braces or retainer payment plan.",
+      "factLineTl": "Ortho Adjustment: available; walang hiwalay na naka-publish na peso amount."
     },
     {
       "id": "clear-retainer-plan",
@@ -418,7 +490,7 @@
       "id": "crown-bridge",
       "group": "crowns",
       "adminVisible": false,
-      "title": "Fixed Bridge / Crown",
+      "title": "Fixed Bridge / Dental Crowns",
       "description": "Fixed bridge and dental crown materials.",
       "priceLabel": "PFM ₱7,000 per unit/tooth; Pure Porcelain / Zirconia ₱15,000 per unit",
       "details": "Porcelain-Fused-to-Metal (PFM) ₱7,000 per unit/tooth. Pure Porcelain / Zirconia ₱15,000 per unit.",
@@ -430,8 +502,8 @@
       "matchIds": [],
       "matchNames": [],
       "terms": ["crown", "bridge", "fixed bridge", "dental crown", "korona"],
-      "chatbotEn": "Fixed Bridge / Dental Crown prices are per unit: Porcelain-Fused-to-Metal (PFM) is ₱7,000 per unit/tooth, and Pure Porcelain / Zirconia is ₱15,000 per unit. Per-unit fees are not automatically the total for an entire bridge or multiple teeth. For which material is appropriate, book a FREE consultation — we will not guess without an exam.",
-      "chatbotTl": "Per unit ang Fixed Bridge / Dental Crown: Porcelain-Fused-to-Metal (PFM) ₱7,000 per unit/tooth, at Pure Porcelain / Zirconia ₱15,000 per unit. Hindi automatic na total ng buong bridge o maraming ngipin ang per-unit fee. Para sa tamang material, mag-book ng FREE consultation — hindi kami huhula nang walang exam.",
+      "chatbotEn": "Fixed Bridge / Dental Crowns prices are per unit: Porcelain-Fused-to-Metal (PFM) is ₱7,000 per unit/tooth, and Pure Porcelain / Zirconia is ₱15,000 per unit. Per-unit fees are not automatically the total for an entire bridge or multiple teeth. For which material is appropriate, book a FREE consultation — we will not guess without an exam.",
+      "chatbotTl": "Per unit ang Fixed Bridge / Dental Crowns: Porcelain-Fused-to-Metal (PFM) ₱7,000 per unit/tooth, at Pure Porcelain / Zirconia ₱15,000 per unit. Hindi automatic na total ng buong bridge o maraming ngipin ang per-unit fee. Para sa tamang material, mag-book ng FREE consultation — hindi kami huhula nang walang exam.",
       "factLineEn": "",
       "factLineTl": ""
     },
@@ -439,9 +511,9 @@
       "id": "fixed-bridge",
       "group": "crowns",
       "adminVisible": true,
-      "title": "Fixed Bridge / Crown",
-      "description": "A fixed bridge to replace missing teeth, priced per unit after the dentist assesses the case.",
-      "priceLabel": "₱7,000 per unit/tooth",
+      "title": "Fixed Bridge / Dental Crowns",
+      "description": "A fixed bridge replaces one or more missing teeth by joining replacement teeth to neighboring teeth. A crown restores or covers an individual tooth. Material and unit count are confirmed after an exam.",
+      "priceLabel": "PFM ₱7,000 per unit/tooth; Pure Porcelain / Zirconia ₱15,000 per unit",
       "details": "Porcelain-Fused-to-Metal (PFM) ₱7,000 per unit/tooth. Pure Porcelain / Zirconia ₱15,000 per unit.",
       "lines": [
         { "label": "Porcelain-Fused-to-Metal (PFM)", "value": "₱7,000 per unit/tooth" },
@@ -451,8 +523,8 @@
         "Per-unit crown and bridge fees are not automatically the total for an entire bridge or multiple teeth.",
         "Book a FREE consultation / oral examination so our dentist can assess your needs."
       ],
-      "matchIds": ["fixed-bridge"],
-      "matchNames": ["fixed bridge"],
+      "matchIds": ["fixed-bridge", "dental-crowns"],
+      "matchNames": ["fixed bridge", "dental crowns", "fixed bridge / dental crowns"],
       "terms": [],
       "chatbotEn": "",
       "chatbotTl": "",
@@ -462,7 +534,7 @@
     {
       "id": "dental-crowns",
       "group": "crowns",
-      "adminVisible": true,
+      "adminVisible": false,
       "title": "Dental Crowns",
       "description": "A dental crown to restore a tooth. Porcelain-fused-to-metal and zirconia options are confirmed after an exam.",
       "priceLabel": "From ₱7,000 per unit/tooth",
@@ -563,24 +635,25 @@
       "id": "dental-implants",
       "group": "other",
       "adminVisible": true,
-      "title": "Dental Implants",
+      "title": "Dental Implant",
       "description": "Dental implants are dental restorations that replace missing teeth using an implant placed in the jawbone to support a replacement tooth or prosthesis. Suitability depends on your oral health, bone condition, and the dentist's assessment.",
-      "priceLabel": "Price available upon consultation",
-      "details": "Price available upon consultation",
-      "compactNote": "Final cost depends on the dentist's assessment and the patient's treatment needs.",
-      "lines": [],
+      "priceLabel": "₱100,000",
+      "details": "₱100,000",
+      "lines": [{ "label": "Listed amount", "value": "₱100,000" }],
       "notes": [
-        "Final cost depends on the dentist's assessment and the patient's treatment needs.",
-        "Not every patient is eligible for implants. Suitability is confirmed after an exam.",
-        "Book a FREE consultation / oral examination so our dentist can assess your needs."
+        "This is the approved listed amount. The clinic has not specified additional included components, materials, consultations, or fees.",
+        "If you need to know what the amount includes or want a personalized estimate, book a FREE consultation / oral examination.",
+        "Not every patient is eligible for implants. Suitability is confirmed after an exam."
       ],
       "matchIds": ["dental-implants"],
-      "matchNames": ["dental implants"],
+      "matchNames": ["dental implants", "dental implant"],
       "terms": ["implant", "implants", "dental implant", "dental implants"],
-      "chatbotEn": "Dental Implants are available at Amethyst Dental Clinic. Pricing is available upon consultation or confirmation by the clinic. We do not quote an implant fee before the dentist examines your case. Book a FREE consultation / oral examination. Mag-book sa Appointments.",
-      "chatbotTl": "Available ang Dental Implants sa Amethyst Dental Clinic. Available upon consultation o confirmation ng klinika ang presyo. Hindi kami magku-quote ng implant fee bago i-exam ng dentista ang kaso. Mag-book ng FREE consultation / oral examination. Mag-book sa Appointments.",
-      "factLineEn": "Dental Implants: Available; pricing is available upon consultation or confirmation by the clinic. Do not invent a peso amount.",
-      "factLineTl": "Dental Implants: Available; pricing is available upon consultation."
+      "chatbotEn": "Dental Implant is ₱100,000. We do not add claims about included components, materials, consultations, or extra fees beyond this approved amount. If you need to know what the price includes or want a personalized estimate, book a FREE consultation / oral examination. Mag-book sa Appointments.",
+      "chatbotTl": "Ang Dental Implant ay ₱100,000. Hindi kami nagdadagdag ng claims tungkol sa included components, materials, consultations, o extra fees lampas sa approved amount na ito. Kung kailangan ninyong malaman kung ano ang kasama o gusto ng personalized estimate, mag-book ng FREE consultation / oral examination. Mag-book sa Appointments.",
+      "chatbotAdviceEn": "Dental Implant is listed at ₱100,000. I will not guess which components or extra fees apply to your case. Book a FREE consultation / oral examination so our dentist can give a personalized estimate.",
+      "chatbotAdviceTl": "Naka-list ang Dental Implant sa ₱100,000. Hindi ako huhula kung anong components o extra fees ang applicable sa inyo. Mag-book ng FREE consultation / oral examination para sa personalized estimate.",
+      "factLineEn": "Dental Implant: ₱100,000. Do not invent included components or extra fees. Invite a FREE consultation for a personalized estimate.",
+      "factLineTl": "Dental Implant: ₱100,000. Huwag mag-imbento ng included components o extra fees."
     }
   ]
 }

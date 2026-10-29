@@ -1418,7 +1418,7 @@ export function DentistRecordsPage() {
                   <thead>
                     <tr>
                       <th>Filename</th>
-                      <th>Category</th>
+                      <th>Document type</th>
                       <th>Uploaded</th>
                       <th>Related visit</th>
                       <th>Status</th>
@@ -1429,7 +1429,7 @@ export function DentistRecordsPage() {
                     {medicalDocuments.map((document) => (
                       <tr key={document.id}>
                         <td data-label="Filename">{document.name}</td>
-                        <td data-label="Category">{document.category || "Medical document"}</td>
+                        <td data-label="Document type">{document.category || "Uncategorized"}</td>
                         <td data-label="Uploaded">
                           {document.uploadedAt
                             ? new Intl.DateTimeFormat("en-US", {

@@ -2663,6 +2663,14 @@ strong {
   line-height: 1.5;
 }
 
+.booking-medical-docs__type small {
+  display: block;
+  margin-top: 0.35rem;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
 .booking-medical-docs__input {
   position: absolute;
   width: 1px;

@@ -65,9 +65,9 @@ const SERVICES = [
   {
     id: "root-canal",
     name: "Root Canal Treatment",
-    description: "Root canal treatment.",
+    description: "Root canal treatment is priced per canal after the dentist assesses the tooth.",
     durationMinutes: 90,
-    estimatedCost: 12000,
+    estimatedCost: 5000,
   },
   {
     id: "orthodontic-consultation",
@@ -97,6 +97,7 @@ const SERVICES = [
     description: "Emergency dental care.",
     durationMinutes: 45,
     estimatedCost: 2000,
+    bookable: false,
   },
   {
     id: "oral-surgery",
@@ -104,6 +105,29 @@ const SERVICES = [
     description: "Oral surgery procedures.",
     durationMinutes: 90,
     estimatedCost: 15000,
+    bookable: false,
+  },
+  {
+    id: "odontectomy",
+    name: "Odontectomy",
+    description: "Surgical removal of an impacted or wisdom tooth.",
+    durationMinutes: 90,
+    estimatedCost: 5000,
+  },
+  {
+    id: "frenectomy",
+    name: "Frenectomy",
+    description: "Frenectomy procedure.",
+    durationMinutes: 45,
+    estimatedCost: 5000,
+  },
+  {
+    id: "ortho-adjustment",
+    name: "Ortho Adjustment",
+    description:
+      "An orthodontic adjustment visit. This is a separate procedure from braces payment plans and from retainer products.",
+    durationMinutes: 30,
+    estimatedCost: 0,
   },
   {
     id: "dentures",
@@ -115,8 +139,9 @@ const SERVICES = [
   },
   {
     id: "fixed-bridge",
-    name: "Fixed Bridge",
-    description: "A fixed bridge to replace missing teeth, priced per unit after the dentist assesses the case.",
+    name: "Fixed Bridge / Dental Crowns",
+    description:
+      "A fixed bridge replaces one or more missing teeth by joining replacement teeth to neighboring teeth. A crown restores or covers an individual tooth. Material and unit count are confirmed after an exam.",
     durationMinutes: 60,
     estimatedCost: 7000,
   },
@@ -126,6 +151,7 @@ const SERVICES = [
     description: "A dental crown to restore a tooth. Porcelain-fused-to-metal and zirconia options are confirmed after an exam.",
     durationMinutes: 60,
     estimatedCost: 7000,
+    bookable: false,
   },
   {
     id: "veneers",
@@ -137,11 +163,11 @@ const SERVICES = [
   },
   {
     id: "dental-implants",
-    name: "Dental Implants",
+    name: "Dental Implant",
     description:
       "Dental implants are dental restorations that replace missing teeth using an implant placed in the jawbone to support a replacement tooth or prosthesis. Suitability depends on your oral health, bone condition, and the dentist's assessment.",
     durationMinutes: 90,
-    estimatedCost: 0,
+    estimatedCost: 100000,
   },
   {
     id: "gum-contouring",
@@ -152,7 +178,11 @@ const SERVICES = [
   },
 ];
 
-/** Patient catalog omits marketing copy and duration display fields. */
+function isPublicBookableService(service) {
+  return Boolean(service) && service.bookable !== false;
+}
+
+/** Patient catalog omits marketing copy, duration display fields, and inactive services. */
 function mapCatalogService(service) {
   return {
     id: service.id,
@@ -160,6 +190,10 @@ function mapCatalogService(service) {
     description: service.description || "",
     estimatedCost: service.estimatedCost,
   };
+}
+
+function publicCatalogServices() {
+  return SERVICES.filter(isPublicBookableService).map(mapCatalogService);
 }
 
 const DENTISTS = [
@@ -533,7 +567,8 @@ function createPatientPortalRouter({
       clinicServices = resolveCatalog(null).publicServices;
     }
     res.json({
-      services: SERVICES.map(mapCatalogService),
+      services: publicCatalogServices(),
+      medicalDocumentTypes: medicalDocuments.MEDICAL_DOCUMENT_TYPES,
       dentists: DENTISTS,
       hmoProviders: APPROVED_HMO_PROVIDERS.map((provider) => ({
         id: provider.id,
@@ -990,7 +1025,7 @@ function createPatientPortalRouter({
     const normalizedCoverage = coverageType === "hmo" ? "hmo" : coverageType === "self_pay" ? "self_pay" : null;
     const normalizedAppointmentTime = normalizeTime(appointmentTime);
 
-    if (!service) {
+    if (!isPublicBookableService(service)) {
       return res.status(400).json({ message: "Please select a treatment." });
     }
     if (!isIsoDate(appointmentDate)) {
@@ -2048,6 +2083,16 @@ function createPatientPortalRouter({
       return res.status(validationError.status || 400).json({ message: validationError.message });
     }
 
+    const documentType = medicalDocuments.resolveDocumentType(
+      req.body?.category || req.body?.documentType || req.body?.document_type
+    );
+    if (!documentType) {
+      if (req.file?.path) fs.unlink(req.file.path, () => {});
+      return res.status(400).json({
+        message: "Select a document type before uploading.",
+      });
+    }
+
     const documentId = crypto.randomUUID();
     const userId = userIdFor(req);
     const values = [
@@ -2058,7 +2103,7 @@ function createPatientPortalRouter({
       req.file.filename,
       req.file.mimetype,
       req.file.size,
-      "Medical clearance / supporting document",
+      documentType.label,
       "uploaded",
     ];
 
@@ -2096,7 +2141,8 @@ function createPatientPortalRouter({
           name: req.file.originalname,
           mimeType: req.file.mimetype,
           size: req.file.size,
-          category: "Medical clearance / supporting document",
+          category: documentType.label,
+          documentType: documentType.id,
           status: "uploaded",
         },
       });
@@ -2279,7 +2325,7 @@ function createPatientPortalRouter({
         approvedCatalog = resolveCatalog(null);
       }
       const assistantOptions = {
-        services: SERVICES,
+        services: SERVICES.filter(isPublicBookableService),
         dentists: DENTISTS,
         clinic,
         knowledgeMode: settings.chatbotKnowledgeMode,

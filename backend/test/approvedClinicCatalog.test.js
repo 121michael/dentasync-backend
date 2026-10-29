@@ -26,6 +26,15 @@ test("default catalog includes official clinic prices and keeps retainer plans d
   assert.equal(byId["invisible-retainer"].priceLabel, "₱5,000 per upper or lower retainer");
   assert.notEqual(byId["clear-retainer-plan"].id, byId["invisible-retainer"].id);
   assert.ok(APPROVED_CLINIC_SERVICES.some((item) => item.id === "frenectomy"));
+  assert.equal(byId["root-canal"].priceLabel, "₱5,000 per canal");
+  assert.equal(byId["dental-implants"].priceLabel, "₱100,000");
+  assert.equal(byId["ortho-adjustment"].title, "Ortho Adjustment");
+  assert.doesNotMatch(byId["ortho-adjustment"].priceLabel, /₱\d/);
+  assert.equal(byId["fixed-bridge"].title, "Fixed Bridge / Dental Crowns");
+  assert.equal(byId["dental-crowns"].adminVisible, false);
+  assert.equal(byId.odontectomy.group, "oral-surgery");
+  assert.equal(byId.frenectomy.group, "oral-surgery");
+  assert.equal(byId.extraction.group, "surgery");
 });
 
 test("unknown service ids and html are ignored when applying admin edits", () => {

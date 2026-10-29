@@ -264,9 +264,10 @@ async function startDentistPortal({
   };
 }
 
-async function postFile(url, { name, type, bytes }) {
+async function postFile(url, { name, type, bytes, category = "medical_clearance" }) {
   const form = new FormData();
   form.append("file", new Blob([bytes], { type }), name);
+  if (category) form.append("category", category);
   return fetch(url, { method: "POST", body: form });
 }
 
@@ -345,6 +346,7 @@ test("patient medical upload stores the file under a generated name", async () =
     assert.match(body.message, /saved for your dentist/i);
     assert.equal(body.document.name, "physician-clearance.pdf");
     assert.equal(body.document.status, "uploaded");
+    assert.equal(body.document.category, "Medical Clearance / Authorization");
     assert.equal(portal.store.documents.length, 1);
     assert.equal(portal.store.documents[0].user_id, "patient-1");
     assert.equal(portal.store.documents[0].document_type, "medical_document");
@@ -352,6 +354,23 @@ test("patient medical upload stores the file under a generated name", async () =
     const storedPath = path.join(portal.uploadDirectory, portal.store.documents[0].stored_name);
     assert.equal(fs.existsSync(storedPath), true);
     assert.equal(fs.readFileSync(storedPath).subarray(0, 5).toString(), "%PDF-");
+  } finally {
+    await portal.close();
+  }
+});
+
+test("patient medical upload requires a document type", async () => {
+  const portal = await startPatientPortal();
+  try {
+    const response = await postFile(`${portal.url}/uploads/medical-document`, {
+      name: "physician-clearance.pdf",
+      type: "application/pdf",
+      bytes: PDF_BYTES,
+      category: "",
+    });
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).message, /document type/i);
+    assert.equal(portal.store.documents.length, 0);
   } finally {
     await portal.close();
   }
@@ -530,6 +549,7 @@ test("dentist can list and download a linked patient's medical document", async 
     const body = await list.json();
     assert.equal(body.documents.length, 1);
     assert.equal(body.documents[0].name, "physician-clearance.pdf");
+    assert.equal(body.documents[0].category, "Uncategorized");
     assert.match(body.disclaimer, /does not automatically grant medical clearance/i);
 
     const download = await fetch(`${portal.url}/patients/11/medical-documents/doc-1/download`);
@@ -551,6 +571,33 @@ test("dentist can list and download a linked patient's medical document", async 
     await portal.close();
     fs.rmSync(uploadDirectory, { recursive: true, force: true });
   }
+});
+
+test("mapMedicalDocument keeps known types and falls back to Uncategorized", () => {
+  assert.equal(
+    medicalDocuments.mapMedicalDocument({
+      id: "a",
+      original_name: "xray.png",
+      category: "dental_xray",
+      mime_type: "image/png",
+      byte_size: 12,
+      status: "uploaded",
+      created_at: "2026-10-29T02:00:00.000Z",
+    }).category,
+    "Dental X-ray / Radiograph"
+  );
+  assert.equal(
+    medicalDocuments.mapMedicalDocument({
+      id: "b",
+      original_name: "old.pdf",
+      category: "Medical clearance / supporting document",
+      mime_type: "application/pdf",
+      byte_size: 12,
+      status: "uploaded",
+      created_at: "2026-10-29T02:00:00.000Z",
+    }).category,
+    "Uncategorized"
+  );
 });
 
 test("dentist cannot download another patient's medical document by swapping ids", async () => {

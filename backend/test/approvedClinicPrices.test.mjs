@@ -50,6 +50,7 @@ test("orthodontics shows metal braces prices and not retainer fees for invisible
   const price = getApprovedClinicPrice({ id: "orthodontic-consultation", name: "Orthodontics / Braces" });
   const metal = price.options.find((option) => option.id === "metal-braces");
   const invisible = price.options.find((option) => option.id === "invisible-braces");
+  const adjustment = price.options.find((option) => option.id === "ortho-adjustment");
   assert.match(metal.description, /brackets and wires/);
   assert.match(metal.priceLabel, /₱5,000/);
   assert.match(metal.details, /₱1,250/);
@@ -62,6 +63,8 @@ test("orthodontics shows metal braces prices and not retainer fees for invisible
   assert.doesNotMatch(invisible.priceLabel, /₱5,000 for upper or lower/);
   assert.doesNotMatch(invisible.details, /₱15,000/);
   assert.doesNotMatch(invisible.description, /retainer/i);
+  assert.equal(adjustment.title, "Ortho Adjustment");
+  assert.doesNotMatch(adjustment.priceLabel, /₱\d/);
 });
 
 test("dentures orthodontics implants veneers and cleaning reuse one public image asset each", () => {
@@ -141,19 +144,25 @@ test("dental cleaning shows three severity-based price ranges", () => {
   assert.match(cleaning.extraNotes.join(" "), /does not guarantee the same result/);
 });
 
-test("veneers and implants do not invent peso prices", () => {
+test("veneers keep consultation pricing and implants quote the approved amount", () => {
   const veneers = getApprovedClinicPrice({ id: "veneers", name: "Veneers" });
-  const implants = getApprovedClinicPrice({ id: "dental-implants", name: "Dental Implants" });
+  const implants = getApprovedClinicPrice({ id: "dental-implants", name: "Dental Implant" });
   assert.equal(veneers.priceLabel, "Price available upon consultation");
   assert.match(veneers.description, /thin restorations placed over the front surfaces/);
   assert.match(veneers.compactNote, /treatment plan/);
-  assert.equal(implants.priceLabel, "Price available upon consultation");
+  assert.doesNotMatch(veneers.priceLabel, /₱\d/);
+  assert.equal(implants.priceLabel, "₱100,000");
   assert.match(implants.description, /implant placed in the jawbone/);
-  assert.match(implants.compactNote, /dentist's assessment/);
-  for (const price of [veneers, implants]) {
-    assert.doesNotMatch(price.priceLabel, /₱\d/);
-    assert.doesNotMatch(price.details, /₱\d/);
-  }
+});
+
+test("root canal and oral surgery keep approved units", () => {
+  const rootCanal = getApprovedClinicPrice({ id: "root-canal", name: "Root Canal Treatment" });
+  const odontectomy = getApprovedClinicPrice({ id: "odontectomy", name: "Odontectomy" });
+  const frenectomy = getApprovedClinicPrice({ id: "frenectomy", name: "Frenectomy" });
+  assert.equal(rootCanal.priceLabel, "₱5,000 per canal");
+  assert.match(rootCanal.compactNote, /per canal/);
+  assert.equal(odontectomy.priceLabel, "₱5,000–₱15,000");
+  assert.equal(frenectomy.priceLabel, "₱5,000");
 });
 
 test("gum contouring filling and dentures keep unit and range wording", () => {

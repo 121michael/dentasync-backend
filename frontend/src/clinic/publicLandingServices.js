@@ -3,7 +3,7 @@ import { attachServiceVisual } from "./serviceVisuals.js";
 export const LANDING_HIDDEN_SERVICE_IDS = new Set(["emergency-care"]);
 export const LANDING_MERGED_INTO_BRIDGE_IDS = new Set(["dental-crowns"]);
 
-export const BRIDGE_CROWN_PUBLIC_NAME = "Fixed Bridge / Crown";
+export const BRIDGE_CROWN_PUBLIC_NAME = "Fixed Bridge / Dental Crowns";
 export const BRIDGE_CROWN_PUBLIC_DESCRIPTION =
   "A fixed bridge replaces one or more missing teeth by joining replacement teeth to neighboring teeth. A crown restores or covers an individual tooth. These are different treatments; the dentist recommends the right option after examining your smile.";
 

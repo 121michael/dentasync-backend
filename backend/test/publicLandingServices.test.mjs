@@ -7,7 +7,7 @@ import {
   presentPublicLandingServices,
 } from "../../frontend/src/clinic/publicLandingServices.js";
 
-test("public landing combines Fixed Bridge / Crown and omits Emergency Dental Care", () => {
+test("public landing combines Fixed Bridge / Dental Crowns and omits Emergency Dental Care", () => {
   const presented = presentPublicLandingServices([
     { id: "cleaning", name: "Dental Cleaning / Oral Prophylaxis", description: "Professional dental cleaning." },
     { id: "emergency-care", name: "Emergency Dental Care", description: "Emergency dental care." },
