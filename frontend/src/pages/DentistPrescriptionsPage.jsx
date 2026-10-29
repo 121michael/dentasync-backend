@@ -7,14 +7,9 @@ import { DentalDocumentPreview } from "../components/DentalDocumentPreview";
 
 const emptyItem = {
   medicationName: "",
-  strength: "",
   dosage: "",
   quantity: "",
-  frequency: "",
-  duration: "",
-  route: "",
   sig: "",
-  additionalInstructions: "",
 };
 
 function statusLabel(status) {
@@ -38,10 +33,12 @@ export function DentistPrescriptionsPage() {
   const [detail, setDetail] = useState(null);
   const [form, setForm] = useState({
     clinicalRecordId: searchParams.get("patientId") || "",
+    treatmentId: searchParams.get("treatmentId") || "",
     clinicalNotes: "",
     includeExtractionAftercare: false,
     items: [{ ...emptyItem }],
   });
+  const [patientTreatments, setPatientTreatments] = useState([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const [preview, setPreview] = useState(null);
@@ -71,6 +68,7 @@ export function DentistPrescriptionsPage() {
     setDetail(prescription);
     setForm({
       clinicalRecordId: String(prescription.clinicalRecordId),
+      treatmentId: prescription.treatmentId ? String(prescription.treatmentId) : "",
       clinicalNotes: prescription.clinicalNotes || "",
       includeExtractionAftercare: Boolean(prescription.includeExtractionAftercare),
       items: prescription.items?.length
@@ -84,6 +82,7 @@ export function DentistPrescriptionsPage() {
     setDetail(null);
     setForm({
       clinicalRecordId: searchParams.get("patientId") || "",
+      treatmentId: searchParams.get("treatmentId") || "",
       clinicalNotes: "",
       includeExtractionAftercare: false,
       items: [{ ...emptyItem }],
@@ -96,9 +95,15 @@ export function DentistPrescriptionsPage() {
     try {
       const body = {
         clinicalRecordId: form.clinicalRecordId,
+        treatmentId: form.treatmentId || undefined,
         clinicalNotes: form.clinicalNotes,
         includeExtractionAftercare: form.includeExtractionAftercare,
-        items: form.items,
+        items: form.items.map((item) => ({
+          medicationName: item.medicationName,
+          dosage: item.dosage,
+          quantity: item.quantity,
+          sig: item.sig,
+        })),
       };
       const data = selectedId
         ? await api.updateDentistPrescription(selectedId, body)
@@ -157,6 +162,26 @@ export function DentistPrescriptionsPage() {
   const selectedPatient = patientOptions.find(
     (patient) => String(patient.id) === String(form.clinicalRecordId)
   );
+
+  useEffect(() => {
+    if (!form.clinicalRecordId) {
+      setPatientTreatments([]);
+      return undefined;
+    }
+    let cancelled = false;
+    api
+      .getDentistPatient(form.clinicalRecordId, { silent: true })
+      .then((data) => {
+        if (cancelled) return;
+        setPatientTreatments(data.treatments || data.patient?.treatments || []);
+      })
+      .catch(() => {
+        if (!cancelled) setPatientTreatments([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [form.clinicalRecordId]);
 
   function updateItem(index, field, value) {
     setForm((current) => {
@@ -279,8 +304,25 @@ export function DentistPrescriptionsPage() {
                   Selected patient: <strong>{selectedPatient.label}</strong>
                 </p>
               ) : (
-                <p className="prescription-patient__selected is-empty">Choose an existing clinical patient record.</p>
+                <p className="prescription-patient__selected is-empty">Choose an existing clinical patient record. Name, age, sex, and address are filled from that record on the pad.</p>
               )}
+              {patientTreatments.length ? (
+                <label className="field">
+                  <span>Linked procedure (required only for extraction aftercare)</span>
+                  <select
+                    disabled={!editable}
+                    value={form.treatmentId}
+                    onChange={(event) => setForm((current) => ({ ...current, treatmentId: event.target.value }))}
+                  >
+                    <option value="">No linked procedure</option>
+                    {patientTreatments.map((treatment) => (
+                      <option key={treatment.id} value={treatment.id}>
+                        {treatment.treatment || treatment.name || `Treatment ${treatment.id}`}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
             </div>
             {form.items.map((item, index) => (
               <fieldset key={index} className="prescription-item">
@@ -303,29 +345,13 @@ export function DentistPrescriptionsPage() {
                 </legend>
                 <div className="field-grid field-grid--two">
                   <label className="field">
-                    <span>Medication name</span>
+                    <span>Type of medicine / Medication name</span>
                     <input
                       required
                       disabled={!editable}
+                      placeholder="Include strength here if needed"
                       value={item.medicationName}
                       onChange={(event) => updateItem(index, "medicationName", event.target.value)}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Strength</span>
-                    <input
-                      disabled={!editable}
-                      value={item.strength}
-                      onChange={(event) => updateItem(index, "strength", event.target.value)}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Dosage</span>
-                    <input
-                      required
-                      disabled={!editable}
-                      value={item.dosage}
-                      onChange={(event) => updateItem(index, "dosage", event.target.value)}
                     />
                   </label>
                   <label className="field">
@@ -338,37 +364,21 @@ export function DentistPrescriptionsPage() {
                     />
                   </label>
                   <label className="field">
-                    <span>Frequency</span>
+                    <span>Dosage</span>
                     <input
                       required
                       disabled={!editable}
-                      value={item.frequency}
-                      onChange={(event) => updateItem(index, "frequency", event.target.value)}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Duration</span>
-                    <input
-                      required
-                      disabled={!editable}
-                      value={item.duration}
-                      onChange={(event) => updateItem(index, "duration", event.target.value)}
+                      value={item.dosage}
+                      onChange={(event) => updateItem(index, "dosage", event.target.value)}
                     />
                   </label>
                   <label className="field field--full">
-                    <span>Route</span>
-                    <input
-                      disabled={!editable}
-                      value={item.route}
-                      onChange={(event) => updateItem(index, "route", event.target.value)}
-                    />
-                  </label>
-                  <label className="field field--full">
-                    <span>Sig / patient-use instructions</span>
+                    <span>Sig / Instructions for the patient</span>
                     <textarea
                       required
                       rows="3"
                       disabled={!editable}
+                      placeholder="How the patient should take this medicine. Include frequency, duration, or route here if needed."
                       value={item.sig}
                       onChange={(event) => updateItem(index, "sig", event.target.value)}
                     />
@@ -404,8 +414,8 @@ export function DentistPrescriptionsPage() {
                 }
               />
               <span>
-                <strong>Flag extraction aftercare</strong>
-                Printed only when clinic-approved wording exists and an extraction procedure is linked.
+                <strong>Print tooth-extraction aftercare from the clinic Rx pad</strong>
+                Uses the official Do’s and Don’ts wording only when a confirmed extraction procedure is linked. It does not add any medicine.
               </span>
             </label>
             {detail ? (

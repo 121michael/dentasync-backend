@@ -187,12 +187,12 @@ export function StaffPrescriptionsPage() {
                 {(detail.items || []).map((item, index) => (
                   <article key={item.id || index}>
                     <strong>
-                      {index + 1}. {item.medicationName} {item.strength}
+                      {index + 1}. {item.medicationName}
                     </strong>
                     <p>
-                      {item.dosage} · {item.quantity} · {item.frequency} · {item.duration}
+                      Qty {item.quantity} · Dosage {item.dosage}
                     </p>
-                    <p>{item.sig}</p>
+                    <p>Sig: {item.sig}</p>
                   </article>
                 ))}
               </div>
@@ -204,7 +204,24 @@ export function StaffPrescriptionsPage() {
                 {detail.workflowStatus === "authorized" ? (
                   <>
                     <button type="button" className="button button--secondary" onClick={openPdf}>
-                      View PDF
+                      Preview PDF
+                    </button>
+                    <button
+                      type="button"
+                      className="button button--secondary"
+                      onClick={async () => {
+                        try {
+                          const blob = await api.viewStaffPrescriptionJpeg(detail.id);
+                          setPreview({
+                            document: { name: `${detail.prescriptionNumber}.jpg`, mimeType: "image/jpeg" },
+                            objectUrl: URL.createObjectURL(blob),
+                          });
+                        } catch (jpegError) {
+                          pushToast(jpegError.message, "error");
+                        }
+                      }}
+                    >
+                      Export JPEG
                     </button>
                     <button type="button" className="button button--primary" onClick={prepareSend}>
                       Prepare email

@@ -611,6 +611,10 @@ export const api = {
   viewStaffPrescriptionPdf: (id) => fetchAuthorizedBlob(`/staff/prescriptions/${id}/pdf?inline=1`),
   downloadStaffPrescriptionPdf: (id, filename) =>
     download(`/staff/prescriptions/${id}/pdf`, filename || "prescription.pdf"),
+  viewStaffPrescriptionJpeg: (id, page = 1) =>
+    fetchAuthorizedBlob(`/staff/prescriptions/${id}/jpeg?page=${page}`),
+  viewDentistPrescriptionJpeg: (id, page = 1) =>
+    fetchAuthorizedBlob(`/dentist/prescriptions/${id}/jpeg?page=${page}`),
   downloadAdminAnalyticsExport: (format, range = "month", extras = {}) => {
     const search = new URLSearchParams({
       format,

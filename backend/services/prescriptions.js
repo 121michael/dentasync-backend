@@ -3,7 +3,7 @@
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
-const { generatePrescriptionPdf } = require("./prescriptionPdf");
+const { generatePrescriptionPdf, rasterizePrescriptionPdf } = require("./prescriptionPdf");
 const { sendMailMessage, emailDeliveryIsConfigured } = require("./emailDelivery");
 const { withPrescriptionSchema } = require("./prescriptionSchema");
 
@@ -61,13 +61,11 @@ function normalizeItem(raw, index) {
   const medicationName = stringValue(raw?.medicationName || raw?.medication_name, 160);
   const dosage = stringValue(raw?.dosage, 120);
   const quantity = stringValue(raw?.quantity, 80);
-  const frequency = stringValue(raw?.frequency, 120);
-  const duration = stringValue(raw?.duration, 120);
   const sig = stringValue(raw?.sig || raw?.instructions, 1000);
-  if (!medicationName || !dosage || !quantity || !frequency || !duration || !sig) {
+  if (!medicationName || !dosage || !quantity || !sig) {
     throw httpError(
       400,
-      `Medication ${index + 1} needs a name, dosage, quantity, frequency, duration, and patient-use instructions.`
+      `Medication ${index + 1} needs a medicine name, quantity, dosage, and Sig / patient instructions.`
     );
   }
   return {
@@ -76,8 +74,8 @@ function normalizeItem(raw, index) {
     strength: stringValue(raw?.strength, 80),
     dosage,
     quantity,
-    frequency,
-    duration,
+    frequency: stringValue(raw?.frequency, 120) || "",
+    duration: stringValue(raw?.duration, 120) || "",
     route: stringValue(raw?.route, 80),
     sig,
     additionalInstructions: stringValue(raw?.additionalInstructions || raw?.additional_instructions, 1000),
@@ -498,7 +496,7 @@ async function createPrescription(db, { dentist, body }) {
   if (includeAftercare && !(await treatmentSupportsAftercare(db, treatmentId))) {
     throw httpError(
       400,
-      "Extraction aftercare can be flagged only when this prescription is linked to a confirmed extraction procedure. Approved aftercare wording is not on file, so it will not be printed."
+      "Extraction aftercare can be printed only when this prescription is linked to a confirmed extraction procedure. The clinic pad wording is used; medication is never suggested from the procedure."
     );
   }
   const client = await db.connect();
@@ -566,6 +564,13 @@ async function updateDraft(db, { dentist, prescriptionId, body }) {
   const items = normalizeItems(body?.items);
   const clinicalNotes = stringValue(body?.clinicalNotes, 2000);
   const includeAftercare = Boolean(body?.includeExtractionAftercare);
+  const treatmentId = numericId(body?.treatmentId) || numericId(row.treatment_id);
+  if (includeAftercare && !(await treatmentSupportsAftercare(db, treatmentId))) {
+    throw httpError(
+      400,
+      "Extraction aftercare can be printed only when this prescription is linked to a confirmed extraction procedure. The clinic pad wording is used; medication is never suggested from the procedure."
+    );
+  }
   const patient = await loadPatientRecord(db, row.clinical_record_id);
   const clinic = await loadClinic(db);
   const client = await db.connect();
@@ -581,6 +586,18 @@ async function updateDraft(db, { dentist, prescriptionId, body }) {
     const nextHash = contentHash(nextPayload);
     if (versionRow.authorized_at) {
       throw httpError(409, "This version is authorized and cannot be changed. Create a new version instead.");
+    }
+    if (treatmentId) {
+      await client.query(`UPDATE prescriptions SET treatment_id = $1, include_extraction_aftercare = $2 WHERE id = $3`, [
+        treatmentId,
+        includeAftercare,
+        prescriptionId,
+      ]);
+    } else {
+      await client.query(`UPDATE prescriptions SET include_extraction_aftercare = $1 WHERE id = $2`, [
+        includeAftercare,
+        prescriptionId,
+      ]);
     }
     if (row.workflow_status === WORKFLOW.RETURNED || versionRow.content_hash !== nextHash) {
       const nextVersion = row.current_version + (row.workflow_status === WORKFLOW.RETURNED ? 1 : 0);
@@ -884,6 +901,24 @@ async function generateOrRetrievePdf(db, { actorId, actorRole, prescriptionId, u
   return { filePath, buffer, prescription: row, storedName };
 }
 
+async function generateOrRetrieveJpeg(db, options) {
+  const pdf = await generateOrRetrievePdf(db, options);
+  const source = pdf.buffer || fs.readFileSync(pdf.filePath);
+  const pages = await rasterizePrescriptionPdf(source);
+  if (!pages.length) {
+    throw httpError(501, "JPEG export is unavailable for this document. Download the PDF instead.");
+  }
+  await audit(db, {
+    prescriptionId: options.prescriptionId,
+    version: pdf.prescription.version,
+    actorId: options.actorId,
+    actorRole: options.actorRole,
+    action: "jpeg_generated",
+    detail: `${pages.length} page(s)`,
+  });
+  return { ...pdf, pages };
+}
+
 function sendConfirmation(detail) {
   const snapshot = detail.patient ? detail : {};
   void snapshot;
@@ -1138,6 +1173,7 @@ module.exports = {
   returnToDentist: withSchema(returnToDentist),
   prepareSend: withSchema(prepareSend),
   generateOrRetrievePdf: withSchema(generateOrRetrievePdf),
+  generateOrRetrieveJpeg: withSchema(generateOrRetrieveJpeg),
   sendAuthorizedEmail: withSchema(sendAuthorizedEmail),
   retrySend: withSchema(retrySend),
   sendConfirmation,

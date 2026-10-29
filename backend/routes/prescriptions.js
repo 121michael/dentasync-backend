@@ -75,6 +75,29 @@ function attachPrescriptionRoutes(router, { db, role, uploadDirectory }) {
     }
   });
 
+  router.get("/prescriptions/:id/jpeg", async (req, res) => {
+    try {
+      const actor = role === "dentist" ? req.dentist : req.staff;
+      const { pages, prescription } = await prescriptions.generateOrRetrieveJpeg(db, {
+        actorId: String(actor.id),
+        actorRole: role,
+        prescriptionId: req.params.id,
+        uploadDirectory: directory,
+      });
+      const pageIndex = Math.max(0, Number.parseInt(req.query.page, 10) || 1) - 1;
+      const image = pages[pageIndex] || pages[0];
+      res.setHeader("Content-Type", "image/jpeg");
+      res.setHeader("X-Prescription-Pages", String(pages.length));
+      res.setHeader(
+        "Content-Disposition",
+        `inline; filename="prescription-v${prescription.version}-p${pageIndex + 1}.jpg"`
+      );
+      return res.send(image);
+    } catch (error) {
+      return sendError(res, error);
+    }
+  });
+
   if (role === "dentist") {
     router.post("/prescriptions", async (req, res) => {
       try {

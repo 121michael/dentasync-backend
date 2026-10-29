@@ -26,15 +26,14 @@ test("medication items require explicit clinical fields and are hashed", () => {
   assert.throws(() => normalizeItems([]), /at least one medication/);
   const items = normalizeItems([
     {
-      medicationName: "Amoxicillin",
-      dosage: "500 mg",
+      medicationName: "Amoxicillin 500 mg",
+      dosage: "1 capsule",
       quantity: "21 capsules",
-      frequency: "every 8 hours",
-      duration: "7 days",
-      sig: "Take after meals",
+      sig: "Take after meals every 8 hours for 7 days",
     },
   ]);
-  assert.equal(items[0].medicationName, "Amoxicillin");
+  assert.equal(items[0].medicationName, "Amoxicillin 500 mg");
+  assert.equal(items[0].frequency, "");
   const hash = contentHash(clinicalPayload(items, "note", false));
   assert.match(hash, /^[a-f0-9]{64}$/);
   assert.equal(maskEmail("patient@amethyst.com"), "pa***@amethyst.com");
@@ -65,21 +64,15 @@ test("PDF lists multiple medications from the supplied snapshot only", async () 
     },
     items: [
       {
-        medicationName: "Amoxicillin",
-        strength: "500 mg",
+        medicationName: "Amoxicillin 500 mg",
         dosage: "1 capsule",
         quantity: "21",
-        frequency: "every 8 hours",
-        duration: "7 days",
         sig: "Take after meals",
       },
       {
-        medicationName: "Mefenamic acid",
-        strength: "500 mg",
+        medicationName: "Mefenamic acid 500 mg",
         dosage: "1 tablet",
         quantity: "10",
-        frequency: "every 8 hours as needed",
-        duration: "3 days",
         sig: longSig,
       },
     ],
@@ -91,15 +84,50 @@ test("PDF lists multiple medications from the supplied snapshot only", async () 
   const parsed = await parser.getText();
   await parser.destroy();
   const text = parsed.text;
-  assert.match(text, /Amoxicillin/);
-  assert.match(text, /Mefenamic acid/);
+  assert.match(text, /Amoxicillin 500 mg/);
+  assert.match(text, /Mefenamic acid 500 mg/);
   assert.match(text, /Synthetic Test Patient/);
-  assert.match(text, /Dr\. Sarah Cruz/);
+  assert.match(text, /Sarah Cruz/i);
+  assert.match(text, /Rx/);
   assert.match(text, /authenticated[\s\S]*dentist account/i);
-  assert.doesNotMatch(text, /Rinse with warm salt water/i);
+  assert.doesNotMatch(text, /EVIE SUNGA/i);
+  assert.doesNotMatch(text, /DO'S AND DONT'S AFTER A TOOTH EXTRACTION/);
   const outDir = path.join(__dirname, "..", "..", "screenshots", "prescription-management");
   fs.mkdirSync(outDir, { recursive: true });
   fs.writeFileSync(path.join(outDir, "generated-prescription.pdf"), buffer);
+  const { rasterizePrescriptionPdf } = require("../services/prescriptionPdf");
+  const pages = await rasterizePrescriptionPdf(buffer);
+  assert.ok(pages.length >= 1);
+  assert.equal(pages[0][0], 0xff);
+  assert.equal(pages[0][1], 0xd8);
+  fs.writeFileSync(path.join(outDir, "generated-prescription-page-1.jpg"), pages[0]);
+});
+
+test("extraction aftercare prints clinic pad wording only when flagged", async () => {
+  const buffer = await generatePrescriptionPdf({
+    prescriptionNumber: "RX-TEST-EXO",
+    version: 1,
+    contentHash: "hash",
+    authorizedAt: "2026-10-30T04:00:00.000Z",
+    snapshot: {
+      patient: { fullName: "Synthetic Extraction Patient", age: 40, sex: "Male", address: "Test Street" },
+      dentist: { fullName: "Dr. Sarah Cruz" },
+      includeExtractionAftercare: true,
+    },
+    items: [{ medicationName: "Mefenamic acid", dosage: "1 tablet", quantity: "10", sig: "After meals" }],
+  });
+  const { PDFParse } = require("pdf-parse");
+  const parser = new PDFParse({ data: buffer });
+  const parsed = await parser.getText();
+  await parser.destroy();
+  assert.match(parsed.text, /DO'S AND DONT'S AFTER A TOOTH EXTRACTION/);
+  assert.match(parsed.text, /Bite firmly on gauze/);
+  const { rasterizePrescriptionPdf } = require("../services/prescriptionPdf");
+  const pages = await rasterizePrescriptionPdf(buffer);
+  assert.equal(pages.length, 1, "short extraction Rx should stay on one page");
+  const outDir = path.join(__dirname, "..", "..", "screenshots", "prescription-management");
+  fs.mkdirSync(outDir, { recursive: true });
+  fs.writeFileSync(path.join(outDir, "generated-rx-pad.jpg"), pages[0]);
 });
 
 async function ensureSchema() {
@@ -196,13 +224,10 @@ test("dentist-staff workflow authorizes a version and blocks staff clinical edit
         clinicalRecordId,
         items: [
           {
-            medicationName: "Amoxicillin",
-            strength: "500 mg",
+            medicationName: "Amoxicillin 500 mg",
             dosage: "1 capsule",
             quantity: "21",
-            frequency: "every 8 hours",
-            duration: "7 days",
-            sig: "Take after meals",
+            sig: "Take after meals every 8 hours for 7 days",
           },
         ],
       }),
