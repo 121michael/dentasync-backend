@@ -19,6 +19,13 @@ function createMemoryDb() {
   const tables = {
     users: [{ id: "p1", email: "patient@example.test", role: "patient" }],
     appointments: [{ id: "a1", user_id: "p1", status: "confirmed", created_at: "2026-10-01T00:00:00.000Z" }],
+    clinic_sms_logs: [
+      {
+        id: 1,
+        delivery_status: "failed",
+        error_detail: "Semaphore is not configured. Set SEMAPHORE_API_KEY in the server environment.",
+      },
+    ],
   };
   const backups = [];
   const operations = [];
@@ -226,8 +233,36 @@ test("backup payload helper round-trips without environment secrets", () => {
   });
   const parsed = gunzipJson(packed);
   assert.equal(parsed.magic, BACKUP_MAGIC);
-  assert.equal(payloadContainsSecrets(parsed), false);
-  assert.equal(payloadContainsSecrets({ JWT_SECRET: "abc" }), true);
+  assert.equal(payloadContainsSecrets(parsed, {}), false);
+  assert.equal(
+    payloadContainsSecrets(
+      {
+        tables: {
+          clinic_sms_logs: {
+            rows: [
+              {
+                error_detail:
+                  "Semaphore is not configured. Set SEMAPHORE_API_KEY in the server environment.",
+              },
+            ],
+          },
+        },
+      },
+      { SEMAPHORE_API_KEY: "live-semaphore-key-value" }
+    ),
+    false
+  );
+  assert.equal(
+    payloadContainsSecrets(
+      { notes: "copied live-semaphore-key-value into a table" },
+      { SEMAPHORE_API_KEY: "live-semaphore-key-value" }
+    ),
+    true
+  );
+  assert.equal(
+    payloadContainsSecrets({ JWT_SECRET: "abc" }, { JWT_SECRET: "abc" }),
+    false
+  );
   assert.equal(normalizeSettings({ schedule: "daily", retentionCount: 3 }).schedule, "daily");
 });
 
@@ -250,7 +285,8 @@ test("create backup stores metadata and excludes env secrets", async () => {
   const parsed = gunzipJson(packed);
   assert.equal(parsed.magic, BACKUP_MAGIC);
   assert.deepEqual(parsed.tables.users.rows[0].id, "p1");
-  assert.equal(payloadContainsSecrets(parsed), false);
+  assert.match(parsed.tables.clinic_sms_logs.rows[0].error_detail, /SEMAPHORE_API_KEY/);
+  assert.equal(payloadContainsSecrets(parsed, { SEMAPHORE_API_KEY: "not-in-this-dump" }), false);
 });
 
 test("restore requires RESTORE confirmation and preserves records", async () => {

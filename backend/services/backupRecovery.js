@@ -80,11 +80,40 @@ function publicBackup(row) {
   };
 }
 
-function payloadContainsSecrets(payload) {
+const SECRET_ENV_KEYS = [
+  "JWT_SECRET",
+  "OTP_SECRET",
+  "PASSWORD_RESET_SECRET",
+  "DB_PASSWORD",
+  "EMAIL_PASS",
+  "EMAIL_PASSWORD",
+  "SEMAPHORE_API_KEY",
+  "GMAIL_APPS_SCRIPT_SECRET",
+  "GEMINI_API_KEY",
+  "GOOGLE_CLOUD_API_KEY",
+  "GOOGLE_VISION_API_KEY",
+];
+
+function isPlaceholderSecret(value) {
+  const normalized = String(value || "").trim();
+  if (normalized.length < 8) return true;
+  return /^(your[_-]|replace-with|changeme|example|placeholder|dummy)/i.test(normalized);
+}
+
+function collectEnvSecretValues(env = process.env) {
+  const values = [];
+  for (const key of SECRET_ENV_KEYS) {
+    const value = String(env?.[key] || "").trim();
+    if (!value || isPlaceholderSecret(value)) continue;
+    values.push(value);
+  }
+  return values;
+}
+
+function payloadContainsSecrets(payload, env = process.env) {
   const text = JSON.stringify(payload);
-  return /JWT_SECRET|OTP_SECRET|PASSWORD_RESET_SECRET|DB_PASSWORD|EMAIL_PASS|SEMAPHORE_API_KEY|GMAIL_APPS_SCRIPT_SECRET/i.test(
-    text
-  );
+  if (!text) return false;
+  return collectEnvSecretValues(env).some((value) => text.includes(value));
 }
 
 function createBackupRecoveryService({ db } = {}) {
@@ -245,7 +274,9 @@ function createBackupRecoveryService({ db } = {}) {
           tables: dump.tables,
         };
         if (payloadContainsSecrets(payloadObject)) {
-          throw new Error("Backup aborted because environment secrets were detected in table data.");
+          throw new Error(
+            "Backup aborted because a configured environment secret value was found in table data."
+          );
         }
         const packed = gzipJson(payloadObject);
         if (packed.length > MAX_BACKUP_BYTES) {
@@ -700,6 +731,8 @@ module.exports = {
   gunzipJson,
   sha256,
   normalizeSettings,
+  SECRET_ENV_KEYS,
+  collectEnvSecretValues,
   payloadContainsSecrets,
   createBackupRecoveryService,
   createBackupScheduleJob,
