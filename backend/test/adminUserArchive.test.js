@@ -179,6 +179,7 @@ async function startPortal(seedUsers, { missingPatientColumns = false } = {}) {
     if (
       /^\s*DELETE FROM /i.test(sql) ||
       /UPDATE clinic_patient_records SET linked_user_id/i.test(sql) ||
+      /UPDATE dental_procedure_authorizations SET linked_user_id/i.test(sql) ||
       /UPDATE staff_portal_invoices SET patient_user_id/i.test(sql) ||
       /UPDATE users SET managed_by_user_id/i.test(sql)
     ) {

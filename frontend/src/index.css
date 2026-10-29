@@ -3263,13 +3263,20 @@ strong {
   .booking-summary {
     position: fixed;
     z-index: 22;
+    top: auto;
     left: 0.75rem;
     right: 5.15rem;
     bottom: calc(1.2rem + env(safe-area-inset-bottom, 0px));
+    height: auto;
     max-width: 22.5rem;
     max-height: min(70dvh, calc(100dvh - 7rem));
     overflow: auto;
     overscroll-behavior: contain;
+    align-content: start;
+  }
+  .booking-summary:not(.is-open) {
+    max-height: none;
+    overflow: hidden;
   }
   .treatment-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -3539,8 +3546,16 @@ strong {
   .booking-summary.is-open .booking-summary__body {
     display: grid;
   }
-  .booking-summary .button--wide {
+  .booking-summary > .button--wide,
+  .booking-summary > p {
+    display: none;
+  }
+  .booking-summary.is-open > .button--wide {
+    display: inline-flex;
     margin-top: 0.1rem;
+  }
+  .booking-summary.is-open > p {
+    display: block;
   }
   .schedule-fields, .field-row, .field-grid--two, .field-grid--three { grid-template-columns: 1fr; }
   .field--full { grid-column: auto; }
@@ -10316,8 +10331,10 @@ body.is-queue-display .fab-menu {
   }
 
   .booking-summary {
+    top: auto;
     right: 5.15rem;
     bottom: calc(6.45rem + env(safe-area-inset-bottom, 0px));
+    height: auto;
   }
 }
 
