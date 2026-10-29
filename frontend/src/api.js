@@ -262,6 +262,23 @@ export const api = {
   updateStaffNotificationAction: (notificationId, body) =>
     request(`/staff/notifications/${notificationId}/action`, { method: "PATCH", body }),
   sendStaffSms: (body) => request("/staff/notifications/sms", { method: "POST", body }),
+  previewStaffSms: (body) => request("/staff/notifications/sms/preview", { method: "POST", body }),
+  getStaffSmsLogs: (query = {}) => {
+    const params = new URLSearchParams();
+    if (query.limit) params.set("limit", String(query.limit));
+    if (query.appointmentId) params.set("appointmentId", String(query.appointmentId));
+    if (query.patientUserId) params.set("patientUserId", String(query.patientUserId));
+    const suffix = params.toString() ? `?${params.toString()}` : "";
+    return request(`/staff/sms-logs${suffix}`);
+  },
+  getAdminSmsLogs: (query = {}) => {
+    const params = new URLSearchParams();
+    if (query.limit) params.set("limit", String(query.limit));
+    if (query.appointmentId) params.set("appointmentId", String(query.appointmentId));
+    if (query.patientUserId) params.set("patientUserId", String(query.patientUserId));
+    const suffix = params.toString() ? `?${params.toString()}` : "";
+    return request(`/admin/sms-logs${suffix}`);
+  },
   verifyStaffAppointmentHmo: (appointmentId, body) =>
     request(`/staff/appointments/${appointmentId}/hmo-verification`, { method: "PATCH", body }),
   getStaffProfile: () => request("/staff/profile"),

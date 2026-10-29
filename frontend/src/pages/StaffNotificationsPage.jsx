@@ -3,7 +3,8 @@ import { CheckCheck, ExternalLink, MessageSquare, RefreshCw } from "lucide-react
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
-import { StaffModal, StaffStatusBadge } from "../components/StaffUI";
+import { StaffStatusBadge } from "../components/StaffUI";
+import { SendSmsModal } from "../components/SendSmsModal";
 import { useStaffUi } from "../components/StaffLayout";
 import { formatStaffDateTime } from "../staffUtils";
 import { notifyNotificationsChanged } from "../notificationEvents";
@@ -16,18 +17,21 @@ export function StaffNotificationsPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const [smsOpen, setSmsOpen] = useState(false);
-  const [smsForm, setSmsForm] = useState({
-    phone: "",
-    message: "",
-    messageType: "manual",
-    patientUserId: "",
-  });
+  const [smsLogs, setSmsLogs] = useState([]);
+  const [appointments, setAppointments] = useState([]);
 
   const load = useCallback(async ({ markSeen = false } = {}) => {
     try {
-      const response = await api.getStaffNotifications();
+      const [response, logsResponse, today, confirmed] = await Promise.all([
+        api.getStaffNotifications(),
+        api.getStaffSmsLogs({ limit: 20 }).catch(() => ({ logs: [] })),
+        api.getStaffAppointments("today").catch(() => ({ appointments: [] })),
+        api.getStaffAppointments("confirmed").catch(() => ({ appointments: [] })),
+      ]);
       const items = response.notifications || [];
       setNotifications(items);
+      setSmsLogs(logsResponse.logs || []);
+      setAppointments([...(today.appointments || []), ...(confirmed.appointments || [])]);
       setError("");
       if (markSeen) {
         const unread = items.filter((item) => !item.read);
@@ -100,26 +104,6 @@ export function StaffNotificationsPage() {
       notifyNotificationsChanged({ source: "staff", unread: 0 });
     } catch (markError) {
       pushToast(markError.message, "error");
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function sendSms(event) {
-    event.preventDefault();
-    setBusy("sms");
-    try {
-      const response = await api.sendStaffSms(smsForm);
-      const status = response.sms?.status;
-      if (status === "failed" || status === "pending") {
-        pushToast(response.message || "SMS was not delivered.", "error");
-        return;
-      }
-      pushToast(response.message || "Notification sent successfully.");
-      setSmsOpen(false);
-      setSmsForm({ phone: "", message: "", messageType: "manual", patientUserId: "" });
-    } catch (smsError) {
-      pushToast(smsError.message, "error");
     } finally {
       setBusy("");
     }
@@ -218,46 +202,42 @@ export function StaffNotificationsPage() {
         )}
       </section>
 
+      <section className="staff-panel">
+        <div className="staff-panel__heading">
+          <div>
+            <span className="eyebrow">SMS audit</span>
+            <h2>SMS history</h2>
+            <p>Statuses reflect provider results. Sent means accepted by Semaphore, not a delivery receipt.</p>
+          </div>
+        </div>
+        {smsLogs.length ? (
+          <div className="sms-history">
+            {smsLogs.map((log) => (
+              <article key={log.id} className="sms-history-row">
+                <div className="sms-history-row__meta">
+                  <StaffStatusBadge status={log.status} />
+                  <small>{formatStaffDateTime(log.createdAt)}</small>
+                  <small>{log.origin || "automatic"}</small>
+                  <small>{log.recipientMasked || "••••"}</small>
+                </div>
+                <strong>{String(log.messageType || "sms").replaceAll("_", " ")}</strong>
+                <p>{log.messageBody}</p>
+                {log.errorDetail ? <small>{log.errorDetail}</small> : null}
+              </article>
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No SMS logs yet" detail="Manual and automatic patient SMS will appear here after they are attempted." />
+        )}
+      </section>
+
       {smsOpen ? (
-        <StaffModal title="Send / override SMS notification" onClose={() => setSmsOpen(false)}>
-          <form className="admin-form" onSubmit={sendSms}>
-            <label className="field">
-              <span>Patient phone</span>
-              <input
-                required
-                value={smsForm.phone}
-                onChange={(event) => setSmsForm((current) => ({ ...current, phone: event.target.value }))}
-                placeholder="09xxxxxxxxx"
-              />
-            </label>
-            <label className="field">
-              <span>Message type</span>
-              <select
-                value={smsForm.messageType}
-                onChange={(event) => setSmsForm((current) => ({ ...current, messageType: event.target.value }))}
-              >
-                <option value="manual">Manual override</option>
-                <option value="appointment_confirmed">Appointment Confirmed</option>
-                <option value="appointment_rescheduled">Appointment Rescheduled</option>
-                <option value="appointment_cancelled">Appointment Cancelled</option>
-                <option value="queue_updated">Queue Updated</option>
-              </select>
-            </label>
-            <label className="field">
-              <span>Message</span>
-              <textarea
-                required
-                rows="4"
-                value={smsForm.message}
-                onChange={(event) => setSmsForm((current) => ({ ...current, message: event.target.value }))}
-                placeholder="Queue Updated – Your Current Position: #3"
-              />
-            </label>
-            <button className="button button--primary" disabled={Boolean(busy)}>
-              {busy === "sms" ? "Sending…" : "Send notification"}
-            </button>
-          </form>
-        </StaffModal>
+        <SendSmsModal
+          appointments={appointments}
+          onClose={() => setSmsOpen(false)}
+          onSent={() => load({ markSeen: false })}
+          pushToast={pushToast}
+        />
       ) : null}
     </div>
   );

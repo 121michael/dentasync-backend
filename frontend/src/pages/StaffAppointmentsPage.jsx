@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Eye, Nfc, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
+import { Eye, MessageSquare, Nfc, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { StaffModal, StaffStatusBadge } from "../components/StaffUI";
+import { SendSmsModal } from "../components/SendSmsModal";
 import { useStaffUi } from "../components/StaffLayout";
-import { formatStaffDate, formatStaffTime } from "../staffUtils";
+import { formatStaffDate, formatStaffDateTime, formatStaffTime } from "../staffUtils";
 
 const TABS = [
   { id: "pending", label: "Pending" },
@@ -28,6 +29,7 @@ export function StaffAppointmentsPage() {
   const [busy, setBusy] = useState("");
   const [rfidCode, setRfidCode] = useState("");
   const [rfidBusy, setRfidBusy] = useState(false);
+  const [smsTarget, setSmsTarget] = useState(null);
   const focusHandledRef = useRef("");
   const rfidInputRef = useRef(null);
 
@@ -385,6 +387,13 @@ export function StaffAppointmentsPage() {
                             >
                               <Trash2 size={14} /> Cancel
                             </button>
+                            <button
+                              className="button button--secondary button--compact"
+                              onClick={() => setSmsTarget(appointment)}
+                              disabled={Boolean(busy)}
+                            >
+                              <MessageSquare size={14} /> Send SMS
+                            </button>
                           </>
                         ) : null}
                       </div>
@@ -435,6 +444,36 @@ export function StaffAppointmentsPage() {
             </p>
           </div>
           {detail.notes ? <p className="staff-detail-copy">{detail.notes}</p> : null}
+          {detail.smsReminders?.length ? (
+            <div className="sms-history">
+              <h3>Appointment reminders</h3>
+              {detail.smsReminders.map((reminder) => (
+                <article key={reminder.id} className="sms-history-row">
+                  <div className="sms-history-row__meta">
+                    <StaffStatusBadge status={reminder.status} />
+                    <small>{reminder.kind} reminder</small>
+                    <small>v{reminder.version}</small>
+                  </div>
+                  <p>Scheduled for {formatStaffDateTime(reminder.scheduledFor)}</p>
+                </article>
+              ))}
+            </div>
+          ) : null}
+          {detail.smsLogs?.length ? (
+            <div className="sms-history">
+              <h3>SMS log</h3>
+              {detail.smsLogs.map((log) => (
+                <article key={log.id} className="sms-history-row">
+                  <div className="sms-history-row__meta">
+                    <StaffStatusBadge status={log.status} />
+                    <small>{log.recipientMasked}</small>
+                    <small>{formatStaffDateTime(log.createdAt)}</small>
+                  </div>
+                  <p>{log.messageBody}</p>
+                </article>
+              ))}
+            </div>
+          ) : null}
           <div className="staff-heading-actions">
             {detail.coverageType === "hmo" ? (
               <>
@@ -469,8 +508,28 @@ export function StaffAppointmentsPage() {
                 </button>
               </>
             ) : null}
+            <button className="button button--secondary" onClick={() => setSmsTarget(detail)} disabled={Boolean(busy)}>
+              <MessageSquare size={16} /> Send SMS
+            </button>
           </div>
         </StaffModal>
+      ) : null}
+
+      {smsTarget ? (
+        <SendSmsModal
+          appointments={smsTarget ? [smsTarget, ...rows.filter((item) => item.id !== smsTarget.id)] : rows}
+          initial={{
+            phone: smsTarget.patientPhone || "",
+            patientUserId: smsTarget.patientId || "",
+            appointmentId: smsTarget.id,
+          }}
+          onClose={() => setSmsTarget(null)}
+          onSent={() => {
+            setSmsTarget(null);
+            if (detail?.id) openDetails(detail.id);
+          }}
+          pushToast={pushToast}
+        />
       ) : null}
 
       {rescheduleTarget ? (

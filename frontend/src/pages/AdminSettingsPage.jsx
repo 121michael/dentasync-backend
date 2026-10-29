@@ -13,6 +13,7 @@ const defaults = {
     appointmentSms: true,
     queueSms: true,
     cleaningReminderSms: true,
+    appointmentReminderSms: true,
     cleaningReminderMonths: 5,
     clinicName: "Amethyst Dental Clinic",
   },
@@ -134,6 +135,19 @@ export function AdminSettingsPage() {
               }
             />{" "}
             Appointment confirm / reschedule / cancel SMS
+          </label>
+          <label className="admin-check">
+            <input
+              type="checkbox"
+              checked={Boolean(settings.sms.appointmentReminderSms !== false)}
+              onChange={(event) =>
+                setSettings((current) => ({
+                  ...current,
+                  sms: { ...current.sms, appointmentReminderSms: event.target.checked },
+                }))
+              }
+            />{" "}
+            Automatic 24-hour and 10-hour appointment reminders
           </label>
           <label className="admin-check">
             <input

@@ -22,6 +22,9 @@ const statusLabelFallback = {
   linked_account: "Linked Account",
   sent: "Sent",
   failed: "Failed",
+  processing: "Processing",
+  delivered: "Delivered",
+  queued: "Queued",
 };
 
 export function statusLabel(value) {

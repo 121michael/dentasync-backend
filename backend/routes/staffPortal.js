@@ -116,6 +116,7 @@ function mapCheckIn(row) {
     patientId: row.clinic_patient_id || row.patient_id,
     clinicPatientId: row.clinic_patient_id || null,
     patientName: row.patient_name || "Patient",
+    patientPhone: row.patient_phone || null,
     appointment: {
       id: row.appointment_id,
       treatment: row.service_name || "Dental visit",
@@ -526,6 +527,7 @@ function createStaffPortalRouter({
            appointment.appointment_date,
            appointment.appointment_time,
            patient.id AS patient_id,
+           patient.phone AS patient_phone,
            CONCAT_WS(' ', patient.first_name, patient.last_name) AS patient_name
          FROM patient_portal_queue_entries AS queue
          JOIN users AS patient ON patient.id::text = queue.user_id
@@ -562,6 +564,7 @@ function createStaffPortalRouter({
                appointment.appointment_date,
                appointment.appointment_time,
                patient.id AS patient_id,
+               patient.phone AS patient_phone,
                CONCAT_WS(' ', patient.first_name, patient.last_name) AS patient_name
              FROM patient_portal_queue_entries AS queue
              JOIN users AS patient ON patient.id::text = queue.user_id
@@ -650,6 +653,24 @@ function createStaffPortalRouter({
            WHERE id = $2`,
           [appointmentStatus, current.appointment_id]
         );
+        if (
+          clinicSms?.handleAppointmentEvent &&
+          (appointmentStatus === "completed" || appointmentStatus === "no_show")
+        ) {
+          clinicSms
+            .handleAppointmentEvent({
+              appointment: {
+                id: current.appointment_id,
+                user_id: current.user_id,
+                status: appointmentStatus,
+              },
+              action: "complete",
+              actorRole: "staff",
+              actorId: req.staff?.id,
+              sendImmediate: false,
+            })
+            .catch((smsError) => console.warn("Appointment reminder cancel failed:", smsError.message));
+        }
       }
 
       const patientMessage =
@@ -855,11 +876,19 @@ function createStaffPortalRouter({
         return res.status(404).json({ message: "Appointment not found." });
       }
       const row = result.rows[0];
+      const reminders = clinicSms?.listReminders
+        ? await clinicSms.listReminders(appointmentId).catch(() => [])
+        : [];
+      const smsLogs = clinicSms?.listSmsLogs
+        ? await clinicSms.listSmsLogs({ appointmentId, limit: 20 }).catch(() => [])
+        : [];
       return res.json({
         appointment: {
           ...mapAppointment(row),
           companyName: row.company_name || null,
           birthDate: row.birth_date || row.patient_dob || null,
+          smsReminders: reminders,
+          smsLogs,
         },
       });
     } catch (error) {
@@ -880,7 +909,19 @@ function createStaffPortalRouter({
           if (!fallback.rows.length) {
             return res.status(404).json({ message: "Appointment not found." });
           }
-          return res.json({ appointment: mapAppointment(fallback.rows[0]) });
+          const reminders = clinicSms?.listReminders
+            ? await clinicSms.listReminders(appointmentId).catch(() => [])
+            : [];
+          const smsLogs = clinicSms?.listSmsLogs
+            ? await clinicSms.listSmsLogs({ appointmentId, limit: 20 }).catch(() => [])
+            : [];
+          return res.json({
+            appointment: {
+              ...mapAppointment(fallback.rows[0]),
+              smsReminders: reminders,
+              smsLogs,
+            },
+          });
         } catch (fallbackError) {
           console.error("Staff appointment detail fallback error:", fallbackError.message);
         }
@@ -2016,6 +2057,17 @@ function createStaffPortalRouter({
       await client.query("COMMIT");
       transactionOpen = false;
 
+      if (walkInCreated && clinicSms?.handleAppointmentEvent) {
+        clinicSms
+          .handleAppointmentEvent({
+            appointment,
+            action: "created",
+            actorRole: "staff",
+            actorId: req.staff?.id,
+          })
+          .catch((smsError) => console.warn("Walk-in appointment SMS failed:", smsError.message));
+      }
+
       if (!checkIn.alreadyCheckedIn && clinicSms?.notifyQueueSms) {
         clinicSms
           .notifyQueueSms({
@@ -2428,42 +2480,143 @@ function createStaffPortalRouter({
     }
   });
 
+  router.get("/sms-logs", async (req, res) => {
+    const smsHelper = clinicSms || req.app?.locals?.clinicSms || null;
+    if (!smsHelper?.listSmsLogs) {
+      return res.json({ logs: [] });
+    }
+    try {
+      const logs = await smsHelper.listSmsLogs({
+        limit: Number(req.query.limit) || 50,
+        appointmentId: numericId(req.query.appointmentId),
+        patientUserId: stringValue(req.query.patientUserId, 120),
+      });
+      return res.json({ logs });
+    } catch (error) {
+      console.error("Staff SMS logs error:", error.message);
+      return res.status(500).json({ message: "Unable to load SMS history." });
+    }
+  });
+
+  router.post("/notifications/sms/preview", async (req, res) => {
+    const patientPhone = stringValue(req.body?.phone, 40);
+    const messageType = stringValue(req.body?.messageType, 60) || "manual";
+    const customMessage = stringValue(req.body?.message, 480);
+    const appointmentId = numericId(req.body?.appointmentId);
+    const queueEntryId = numericId(req.body?.queueEntryId);
+    const smsHelper = clinicSms || req.app?.locals?.clinicSms || null;
+    if (!smsHelper?.isValidPhMobile?.(patientPhone) && !smsHelper?.formatPhoneSemaphore?.(patientPhone)) {
+      return res.status(400).json({ message: "Enter a valid Philippine mobile number." });
+    }
+    if (!smsHelper?.isValidPhMobile(patientPhone)) {
+      return res.status(400).json({ message: "Enter a valid Philippine mobile number." });
+    }
+
+    let appointment = null;
+    let queueEntry = null;
+    if (appointmentId) {
+      const result = await db.query(`SELECT * FROM patient_portal_appointments WHERE id = $1 LIMIT 1`, [
+        appointmentId,
+      ]);
+      appointment = result.rows[0] || null;
+    }
+    if (queueEntryId) {
+      const result = await db.query(`SELECT * FROM patient_portal_queue_entries WHERE id = $1 LIMIT 1`, [
+        queueEntryId,
+      ]);
+      queueEntry = result.rows[0] || null;
+    }
+    const settings = smsHelper.getSmsSettings ? await smsHelper.getSmsSettings() : {};
+    const message =
+      smsHelper.previewMessage?.({
+        messageType,
+        appointment,
+        queueEntry,
+        customMessage,
+        clinicName: settings.clinicName,
+      }) || customMessage;
+    if (!message) {
+      return res.status(400).json({ message: "A message is required to preview." });
+    }
+    return res.json({
+      recipientMasked: smsHelper.maskPhone(patientPhone),
+      phone: smsHelper.formatPhoneSemaphore(patientPhone),
+      message,
+      messageType,
+      appointmentId,
+      queueEntryId,
+    });
+  });
+
   router.post("/notifications/sms", async (req, res) => {
     const patientPhone = stringValue(req.body?.phone, 40);
     const messageBody = stringValue(req.body?.message, 480);
     const messageType = stringValue(req.body?.messageType, 60) || "manual";
     const patientUserId = stringValue(req.body?.patientUserId, 120);
     const appointmentId = numericId(req.body?.appointmentId);
+    const queueEntryId = numericId(req.body?.queueEntryId);
+    const confirmed = req.body?.confirm === true || req.body?.confirmed === true;
 
     if (!patientPhone || !messageBody) {
       return res.status(400).json({ message: "Phone number and message are required." });
     }
+    if (!confirmed) {
+      return res.status(400).json({ message: "Confirm Send SMS before the message is submitted." });
+    }
 
     const smsHelper = clinicSms || req.app?.locals?.clinicSms || null;
+    if (!smsHelper?.isValidPhMobile?.(patientPhone)) {
+      return res.status(400).json({ message: "Enter a valid Philippine mobile number." });
+    }
+
     let deliveryStatus = "failed";
     let errorDetail = null;
     let clinicLogId = null;
+    let providerMessageId = null;
+    let recipientMasked = smsHelper?.maskPhone?.(patientPhone) || null;
 
     if (!smsHelper?.sendClinicSms) {
       errorDetail = "Clinic SMS service is unavailable.";
     } else {
+      const category = String(messageType || "").startsWith("queue")
+        ? "queue"
+        : String(messageType || "").startsWith("appointment")
+          ? "appointment"
+          : "general";
       const result = await smsHelper.sendClinicSms({
         userId: patientUserId,
         phone: patientPhone,
         message: messageBody,
         messageType,
         appointmentId,
-        category: "general",
-        respectPreferences: false,
+        queueEntryId,
+        category,
+        respectPreferences: true,
         actorRole: "staff",
         actorId: req.staff.id,
+        origin: "manual",
       });
-      deliveryStatus = result.status === "sent" ? "sent" : result.status === "skipped" ? "pending" : "failed";
+      deliveryStatus =
+        result.status === "delivered"
+          ? "delivered"
+          : result.status === "sent"
+            ? "sent"
+            : result.status === "skipped"
+              ? "skipped"
+              : "failed";
       errorDetail = result.reason || null;
       clinicLogId = result.logId || null;
+      providerMessageId = result.providerMessageId || null;
+      recipientMasked = result.recipientMasked || recipientMasked;
     }
 
     try {
+      const staffLogStatus =
+        deliveryStatus === "sent" || deliveryStatus === "delivered"
+          ? "sent"
+          : deliveryStatus === "skipped"
+            ? "pending"
+            : "failed";
       const result = await db.query(
         `INSERT INTO staff_portal_sms_logs (
            staff_user_id, patient_user_id, patient_phone, appointment_id,
@@ -2477,37 +2630,44 @@ function createStaffPortalRouter({
           appointmentId,
           messageType,
           messageBody,
-          deliveryStatus,
+          staffLogStatus,
           errorDetail,
         ]
       );
       const failedMessage = errorDetail
         ? `SMS could not be sent. ${errorDetail}`
         : "SMS could not be sent. Delivery was logged as failed.";
-      return res.status(deliveryStatus === "failed" ? 502 : deliveryStatus === "sent" ? 201 : 202).json({
+      const httpStatus =
+        deliveryStatus === "failed" ? 502 : deliveryStatus === "sent" || deliveryStatus === "delivered" ? 201 : 202;
+      return res.status(httpStatus).json({
         message:
-          deliveryStatus === "sent"
-            ? "Notification sent successfully."
-            : deliveryStatus === "pending"
-              ? "SMS notification logged as pending."
-              : failedMessage,
+          deliveryStatus === "delivered"
+            ? "Notification delivered."
+            : deliveryStatus === "sent"
+              ? "Notification accepted by the SMS provider."
+              : deliveryStatus === "skipped"
+                ? errorDetail || "SMS was skipped by clinic or patient settings."
+                : failedMessage,
         sms: {
           id: result.rows[0].id,
           clinicLogId,
-          status: result.rows[0].delivery_status,
-          phone: result.rows[0].patient_phone,
+          status: deliveryStatus,
+          recipientMasked,
+          providerMessageId,
           createdAt: result.rows[0].created_at,
           errorDetail: result.rows[0].error_detail,
         },
       });
     } catch (error) {
       if (isMissingRelation(error)) {
-        return res.status(deliveryStatus === "sent" ? 201 : deliveryStatus === "failed" ? 502 : 202).json({
+        const httpStatus =
+          deliveryStatus === "failed" ? 502 : deliveryStatus === "sent" || deliveryStatus === "delivered" ? 201 : 202;
+        return res.status(httpStatus).json({
           message:
-            deliveryStatus === "sent"
-              ? "Notification sent successfully."
+            deliveryStatus === "sent" || deliveryStatus === "delivered"
+              ? "Notification accepted by the SMS provider."
               : errorDetail || "SMS could not be fully logged.",
-          sms: { status: deliveryStatus, phone: patientPhone, errorDetail, clinicLogId },
+          sms: { status: deliveryStatus, recipientMasked, errorDetail, clinicLogId, providerMessageId },
         });
       }
       console.error("Staff SMS log error:", error.message);

@@ -2140,6 +2140,23 @@ function createAdminPortalRouter({
     }
   });
 
+  router.get("/sms-logs", async (req, res) => {
+    if (!clinicSms?.listSmsLogs) {
+      return res.json({ logs: [] });
+    }
+    try {
+      const logs = await clinicSms.listSmsLogs({
+        limit: Number(req.query.limit) || 50,
+        appointmentId: numericId(req.query.appointmentId),
+        patientUserId: stringValue(req.query.patientUserId, 120),
+      });
+      return res.json({ logs });
+    } catch (error) {
+      console.error("Admin SMS logs error:", error.message);
+      return res.status(500).json({ message: "Unable to load SMS history." });
+    }
+  });
+
   router.get("/security", async (_req, res) => {
     let loginActivity = [];
     let failedAttempts = 0;

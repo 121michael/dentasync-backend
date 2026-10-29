@@ -1,5 +1,7 @@
 "use strict";
 
+const { createAppointmentSms, queueUpdateMessage } = require("./appointmentSms");
+
 function formatPhoneE164(phone) {
   if (phone == null) return null;
   let formatted = String(phone).trim();
@@ -25,16 +27,61 @@ function formatPhoneSemaphore(phone) {
   return digits || null;
 }
 
+function isValidPhMobile(phone) {
+  const formatted = formatPhoneSemaphore(phone);
+  return Boolean(formatted && /^63\d{10}$/.test(formatted));
+}
+
+function maskPhone(phone) {
+  const digits = String(phone || "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.length < 7) return "••••";
+  return `${digits.slice(0, 4)}****${digits.slice(-3)}`;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isTransientProviderError(error) {
+  const code = error?.code || "";
+  const status = Number(error?.httpStatus || 0);
+  if (code === "SEMAPHORE_TIMEOUT" || code === "SEMAPHORE_NETWORK") return true;
+  if (status === 429 || status >= 500) return true;
+  return false;
+}
+
+function parseSemaphoreResult(data) {
+  const row = Array.isArray(data) ? data[0] : data;
+  const providerMessageId =
+    row?.message_id != null
+      ? String(row.message_id)
+      : row?.messageId != null
+        ? String(row.messageId)
+        : null;
+  const rawStatus = String(row?.status || "").toLowerCase();
+  if (rawStatus === "delivered") {
+    return { providerMessageId, deliveryStatus: "delivered", accepted: true };
+  }
+  if (["failed", "refunded", "rejected"].includes(rawStatus)) {
+    return { providerMessageId, deliveryStatus: "failed", accepted: false, reason: row?.status };
+  }
+  return { providerMessageId, deliveryStatus: "sent", accepted: true };
+}
+
 function createClinicSmsService({
   db,
   semaphoreApiKey = null,
   semaphoreSenderName = null,
   clinicName = "Amethyst Dental Clinic",
+  fetchImpl = fetch,
+  sleepImpl = sleep,
 }) {
   async function getSmsSettings() {
     const defaults = {
       smsEnabled: true,
       appointmentSms: true,
+      appointmentReminderSms: true,
       queueSms: true,
       cleaningReminderSms: true,
       cleaningReminderMonths: 5,
@@ -102,6 +149,29 @@ function createClinicSmsService({
     return result.rows[0] || null;
   }
 
+  function mapSmsLog(row) {
+    if (!row) return null;
+    return {
+      id: row.id,
+      patientUserId: row.patient_user_id,
+      appointmentId: row.appointment_id,
+      queueEntryId: row.queue_entry_id,
+      messageType: row.message_type,
+      messageBody: row.message_body,
+      status: row.delivery_status,
+      errorDetail: row.error_detail,
+      origin: row.origin || null,
+      actorRole: row.actor_role,
+      actorId: row.actor_id,
+      providerMessageId: row.provider_message_id || null,
+      retryCount: Number(row.retry_count || 0),
+      scheduledAt: row.scheduled_at || null,
+      sentAt: row.sent_at || null,
+      createdAt: row.created_at,
+      recipientMasked: maskPhone(row.patient_phone),
+    };
+  }
+
   async function writeLog({
     patientUserId = null,
     patientPhone = null,
@@ -113,14 +183,21 @@ function createClinicSmsService({
     errorDetail = null,
     actorRole = null,
     actorId = null,
+    origin = "automatic",
+    providerMessageId = null,
+    retryCount = 0,
+    scheduledAt = null,
+    sentAt = null,
+    idempotencyKey = null,
   }) {
     try {
       const result = await db.query(
         `INSERT INTO clinic_sms_logs (
            patient_user_id, patient_phone, appointment_id, queue_entry_id,
-           message_type, message_body, delivery_status, error_detail, actor_role, actor_id
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-         RETURNING id`,
+           message_type, message_body, delivery_status, error_detail, actor_role, actor_id,
+           origin, provider_message_id, retry_count, scheduled_at, sent_at, idempotency_key
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+         RETURNING *`,
         [
           patientUserId ? String(patientUserId) : null,
           patientPhone,
@@ -132,30 +209,103 @@ function createClinicSmsService({
           errorDetail,
           actorRole,
           actorId ? String(actorId) : null,
+          origin,
+          providerMessageId,
+          retryCount,
+          scheduledAt,
+          sentAt,
+          idempotencyKey,
         ]
       );
-      return result.rows[0]?.id || null;
+      return result.rows[0] || null;
     } catch (error) {
+      if (error?.code === "42703") {
+        try {
+          const fallback = await db.query(
+            `INSERT INTO clinic_sms_logs (
+               patient_user_id, patient_phone, appointment_id, queue_entry_id,
+               message_type, message_body, delivery_status, error_detail, actor_role, actor_id
+             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+             RETURNING *`,
+            [
+              patientUserId ? String(patientUserId) : null,
+              patientPhone,
+              appointmentId,
+              queueEntryId,
+              messageType,
+              messageBody,
+              deliveryStatus,
+              errorDetail,
+              actorRole,
+              actorId ? String(actorId) : null,
+            ]
+          );
+          return fallback.rows[0] || null;
+        } catch (fallbackError) {
+          if (fallbackError?.code === "42P01") {
+            console.warn("clinic_sms_logs missing; run npm run migrate:patient-sms");
+            return null;
+          }
+          console.warn("Unable to write clinic SMS log:", fallbackError.message);
+          return null;
+        }
+      }
       if (error?.code === "42P01") {
         console.warn("clinic_sms_logs missing; run npm run migrate:patient-sms");
         return null;
+      }
+      if (error?.code === "23505") {
+        return { id: null, duplicate: true, delivery_status: deliveryStatus };
       }
       console.warn("Unable to write clinic SMS log:", error.message);
       return null;
     }
   }
 
+  async function readIdempotency(key) {
+    if (!key) return null;
+    try {
+      const result = await db.query(
+        `SELECT * FROM clinic_sms_idempotency WHERE idempotency_key = $1 LIMIT 1`,
+        [key]
+      );
+      return result.rows[0] || null;
+    } catch (error) {
+      if (error?.code === "42P01") return null;
+      throw error;
+    }
+  }
+
+  async function writeIdempotency(key, smsLogId, deliveryStatus) {
+    if (!key) return;
+    try {
+      await db.query(
+        `INSERT INTO clinic_sms_idempotency (idempotency_key, sms_log_id, delivery_status)
+         VALUES ($1,$2,$3)
+         ON CONFLICT (idempotency_key) DO UPDATE
+           SET sms_log_id = COALESCE(EXCLUDED.sms_log_id, clinic_sms_idempotency.sms_log_id),
+               delivery_status = EXCLUDED.delivery_status,
+               updated_at = CURRENT_TIMESTAMP`,
+        [key, smsLogId || null, deliveryStatus]
+      );
+    } catch (error) {
+      if (error?.code !== "42P01") {
+        console.warn("Unable to store SMS idempotency key:", error.message);
+      }
+    }
+  }
+
   async function dispatchSms(toPhone, body) {
     if (!semaphoreApiKey) {
       const error = new Error(
-        "Semaphore is not configured. Set SEMAPHORE_API_KEY in .env (optional SEMAPHORE_SENDER_NAME)."
+        "Semaphore is not configured. Set SEMAPHORE_API_KEY in the server environment (optional SEMAPHORE_SENDER_NAME)."
       );
       error.code = "SEMAPHORE_NOT_CONFIGURED";
       throw error;
     }
 
     const number = formatPhoneSemaphore(toPhone);
-    if (!number) {
+    if (!number || !isValidPhMobile(number)) {
       const error = new Error("Patient phone number is missing or invalid.");
       error.code = "INVALID_PHONE";
       throw error;
@@ -172,35 +322,62 @@ function createClinicSmsService({
       payload.set("sendername", semaphoreSenderName);
     }
 
-    const response = await fetch("https://api.semaphore.co/api/v4/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: payload.toString(),
-    });
+    let lastError = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15000);
+        let response;
+        try {
+          response = await fetchImpl("https://api.semaphore.co/api/v4/messages", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: payload.toString(),
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timeout);
+        }
 
-    const text = await response.text();
-    let data = null;
-    try {
-      data = text ? JSON.parse(text) : null;
-    } catch {
-      data = { raw: text };
+        const text = await response.text();
+        let data = null;
+        try {
+          data = text ? JSON.parse(text) : null;
+        } catch {
+          data = { raw: text };
+        }
+
+        if (!response.ok) {
+          const detail =
+            (Array.isArray(data) && data[0]?.message) ||
+            data?.message ||
+            data?.raw ||
+            `Semaphore HTTP ${response.status}`;
+          const error = new Error(String(detail));
+          error.code = "SEMAPHORE_HTTP_ERROR";
+          error.httpStatus = response.status;
+          error.details = data;
+          throw error;
+        }
+
+        return parseSemaphoreResult(data);
+      } catch (error) {
+        lastError = error;
+        if (error?.name === "AbortError") {
+          const timeoutError = new Error("Semaphore request timed out.");
+          timeoutError.code = "SEMAPHORE_TIMEOUT";
+          timeoutError.uncertain = true;
+          throw timeoutError;
+        }
+        if (!isTransientProviderError(error) || attempt === 2) {
+          throw error;
+        }
+        await sleepImpl(250 * 2 ** attempt);
+      }
     }
-
-    if (!response.ok) {
-      const detail =
-        (Array.isArray(data) && data[0]?.message) ||
-        data?.message ||
-        data?.raw ||
-        `Semaphore HTTP ${response.status}`;
-      const error = new Error(String(detail));
-      error.code = "SEMAPHORE_HTTP_ERROR";
-      error.details = data;
-      throw error;
-    }
-
-    return data;
+    throw lastError;
   }
 
   async function sendClinicSms({
@@ -214,6 +391,8 @@ function createClinicSmsService({
     actorId = null,
     category = "general",
     respectPreferences = true,
+    origin = actorRole === "staff" || actorRole === "admin" ? "manual" : "automatic",
+    idempotencyKey = null,
   }) {
     const settings = await getSmsSettings();
     const body = String(message || "").trim().slice(0, 480);
@@ -221,8 +400,15 @@ function createClinicSmsService({
       return { status: "skipped", reason: "Empty message body." };
     }
 
+    if (idempotencyKey) {
+      const existing = await readIdempotency(idempotencyKey);
+      if (existing && ["sent", "delivered"].includes(String(existing.delivery_status || ""))) {
+        return { status: existing.delivery_status, logId: existing.sms_log_id, duplicate: true };
+      }
+    }
+
     if (!settings.smsEnabled && category !== "otp") {
-      const logId = await writeLog({
+      const log = await writeLog({
         patientUserId: userId,
         patientPhone: phone,
         appointmentId,
@@ -233,8 +419,10 @@ function createClinicSmsService({
         errorDetail: "Clinic SMS is disabled in admin settings.",
         actorRole,
         actorId,
+        origin,
+        idempotencyKey,
       });
-      return { status: "skipped", reason: "Clinic SMS disabled.", logId };
+      return { status: "skipped", reason: "Clinic SMS disabled.", logId: log?.id };
     }
 
     if (category === "appointment" && !settings.appointmentSms) {
@@ -269,22 +457,47 @@ function createClinicSmsService({
       }
     }
 
+    if (appointmentId && userId) {
+      try {
+        const owned = await db.query(
+          `SELECT id FROM patient_portal_appointments WHERE id = $1 AND user_id = $2 LIMIT 1`,
+          [appointmentId, String(userId)]
+        );
+        if (!owned.rows.length) {
+          return { status: "failed", reason: "Patient and appointment do not match." };
+        }
+      } catch (error) {
+        if (error?.code !== "42P01") throw error;
+      }
+    }
+
     try {
-      await dispatchSms(targetPhone, body);
-      const logId = await writeLog({
+      const dispatched = await dispatchSms(targetPhone, body);
+      const log = await writeLog({
         patientUserId: userId || patient?.id,
         patientPhone: formatPhoneSemaphore(targetPhone),
         appointmentId,
         queueEntryId,
         messageType,
         messageBody: body,
-        deliveryStatus: "sent",
+        deliveryStatus: dispatched.deliveryStatus,
         actorRole,
         actorId,
+        origin,
+        providerMessageId: dispatched.providerMessageId,
+        sentAt: new Date().toISOString(),
+        idempotencyKey,
       });
-      return { status: "sent", logId, phone: formatPhoneSemaphore(targetPhone) };
+      await writeIdempotency(idempotencyKey, log?.id, dispatched.deliveryStatus);
+      return {
+        status: dispatched.deliveryStatus,
+        logId: log?.id,
+        phone: formatPhoneSemaphore(targetPhone),
+        recipientMasked: maskPhone(targetPhone),
+        providerMessageId: dispatched.providerMessageId,
+      };
     } catch (error) {
-      const logId = await writeLog({
+      const log = await writeLog({
         patientUserId: userId || patient?.id,
         patientPhone: formatPhoneSemaphore(targetPhone),
         appointmentId,
@@ -295,42 +508,50 @@ function createClinicSmsService({
         errorDetail: error.message,
         actorRole,
         actorId,
+        origin,
+        idempotencyKey,
+        retryCount: error.uncertain ? 0 : 1,
       });
-      return { status: "failed", reason: error.message, logId };
+      if (!error.uncertain) {
+        await writeIdempotency(idempotencyKey, log?.id, "failed");
+      }
+      return {
+        status: "failed",
+        reason: error.message,
+        logId: log?.id,
+        uncertain: Boolean(error.uncertain),
+        recipientMasked: maskPhone(targetPhone),
+      };
     }
   }
 
   function appointmentMessage(type, { serviceName, date, time, clinic }) {
-    const when = `${date} at ${String(time || "").slice(0, 5)}`;
-    const place = clinic || clinicName;
+    const { confirmationMessage, rescheduleMessage, cancelMessage, reminderMessage, updateMessage } =
+      require("./appointmentSms");
     if (type === "confirmed") {
-      return `${place}: Your ${serviceName} appointment is confirmed for ${when}.`;
+      return confirmationMessage({ serviceName, date, time });
     }
     if (type === "rescheduled") {
-      return `${place}: Your ${serviceName} appointment was rescheduled to ${when}.`;
+      return rescheduleMessage({ serviceName, date, time });
     }
     if (type === "cancelled") {
-      return `${place}: Your ${serviceName} appointment on ${when} was cancelled. Please contact the clinic if needed.`;
+      return cancelMessage({ serviceName, date, time });
+    }
+    if (type === "reminder") {
+      return reminderMessage({ serviceName, date, time, clinicName: clinic });
     }
     if (type === "denied") {
-      return `${place}: Your ${serviceName} appointment request for ${when} could not be approved. Please choose another time.`;
+      return `${clinic || clinicName}: Your ${serviceName} appointment request for ${date} at ${String(time || "").slice(0, 5)} could not be approved. Please choose another time.`;
     }
-    return `${place}: Your appointment was updated (${when}).`;
+    return updateMessage({ serviceName, date, time });
   }
 
   function queueMessage({ token, position, status, waitMinutes, clinic }) {
-    const place = clinic || clinicName;
-    const label = String(status || "updated").replaceAll("_", " ");
-    if (status === "dentist" || status === "in_chair" || status === "called" || status === "preparing") {
-      return `${place}: You are next / being called. Queue ${token || `#${position}`}. Please proceed to the waiting area.`;
-    }
-    if (status === "completed") {
-      return `${place}: Your visit is marked completed. Thank you for choosing ${place}.`;
-    }
-    if (status === "checked_in" || status === "waiting") {
-      return `${place}: Checked in. Queue ${token || `#${position}`}. Est. wait ~${waitMinutes ?? 0} min.`;
-    }
-    return `${place}: Queue update – ${token || `#${position}`} is now ${label}.`;
+    return queueUpdateMessage({
+      waitMinutes,
+      status,
+      clinicName: clinic || clinicName,
+    });
   }
 
   async function notifyAppointmentSms({
@@ -340,6 +561,26 @@ function createClinicSmsService({
     actorRole = "staff",
     actorId = null,
   }) {
+    if (["complete", "completed", "no_show"].includes(String(action || "").toLowerCase())) {
+      if (service.handleAppointmentEvent) {
+        return service.handleAppointmentEvent({
+          appointment: { ...appointment, user_id: userId || appointment.user_id },
+          action: "complete",
+          actorRole,
+          actorId,
+          sendImmediate: false,
+        });
+      }
+      return { status: "skipped", reason: "completed" };
+    }
+    if (service.handleAppointmentEvent) {
+      return service.handleAppointmentEvent({
+        appointment: { ...appointment, user_id: userId || appointment.user_id },
+        action,
+        actorRole,
+        actorId,
+      });
+    }
     const settings = await getSmsSettings();
     const type =
       action === "approve" || action === "confirm"
@@ -366,11 +607,33 @@ function createClinicSmsService({
     });
   }
 
+  async function recentQueueFingerprint(queueEntryId, fingerprint) {
+    if (!queueEntryId) return false;
+    try {
+      const result = await db.query(
+        `SELECT message_body
+         FROM clinic_sms_logs
+         WHERE queue_entry_id = $1
+           AND message_type LIKE 'queue%'
+           AND delivery_status IN ('sent', 'delivered')
+           AND created_at > NOW() - INTERVAL '6 hours'
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [queueEntryId]
+      );
+      return result.rows[0]?.message_body === fingerprint;
+    } catch (error) {
+      if (error?.code === "42P01") return false;
+      throw error;
+    }
+  }
+
   async function notifyQueueSms({
     userId,
     queueEntry,
     actorRole = "staff",
     actorId = null,
+    force = false,
   }) {
     const settings = await getSmsSettings();
     const message = queueMessage({
@@ -380,6 +643,9 @@ function createClinicSmsService({
       waitMinutes: queueEntry.estimated_wait_minutes ?? queueEntry.waitMinutes,
       clinic: settings.clinicName,
     });
+    if (!force && (await recentQueueFingerprint(queueEntry.id, message))) {
+      return { status: "skipped", reason: "unchanged-queue-status" };
+    }
     return sendClinicSms({
       userId,
       message,
@@ -392,7 +658,36 @@ function createClinicSmsService({
     });
   }
 
-  return {
+  async function listSmsLogs({ limit = 50, appointmentId = null, patientUserId = null } = {}) {
+    const clauses = [];
+    const params = [];
+    if (appointmentId) {
+      params.push(appointmentId);
+      clauses.push(`appointment_id = $${params.length}`);
+    }
+    if (patientUserId) {
+      params.push(String(patientUserId));
+      clauses.push(`patient_user_id = $${params.length}`);
+    }
+    params.push(Math.max(1, Math.min(200, Number(limit) || 50)));
+    const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+    try {
+      const result = await db.query(
+        `SELECT *
+         FROM clinic_sms_logs
+         ${where}
+         ORDER BY created_at DESC
+         LIMIT $${params.length}`,
+        params
+      );
+      return result.rows.map(mapSmsLog);
+    } catch (error) {
+      if (error?.code === "42P01") return [];
+      throw error;
+    }
+  }
+
+  const service = {
     getSmsSettings,
     getPatientSmsPrefs,
     sendClinicSms,
@@ -400,13 +695,22 @@ function createClinicSmsService({
     notifyQueueSms,
     formatPhoneE164,
     formatPhoneSemaphore,
+    isValidPhMobile,
+    maskPhone,
     appointmentMessage,
     queueMessage,
+    listSmsLogs,
+    mapSmsLog,
   };
+
+  Object.assign(service, createAppointmentSms({ db, clinicSms: service }));
+  return service;
 }
 
 module.exports = {
   createClinicSmsService,
   formatPhoneE164,
   formatPhoneSemaphore,
+  isValidPhMobile,
+  maskPhone,
 };

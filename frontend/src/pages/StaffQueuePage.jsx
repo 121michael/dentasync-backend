@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Maximize2, RefreshCw, RotateCcw } from "lucide-react";
+import { Maximize2, MessageSquare, RefreshCw, RotateCcw } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { StaffStatusBadge, StaffSummaryCard } from "../components/StaffUI";
 import { useStaffUi } from "../components/StaffLayout";
 import { StaffQueueDisplay } from "../components/StaffQueueDisplay";
+import { SendSmsModal } from "../components/SendSmsModal";
 import { formatStaffDateTime, formatStaffTime } from "../staffUtils";
 import {
   callRangeFromEntry,
@@ -56,6 +57,7 @@ export function StaffQueuePage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const [displayOpen, setDisplayOpen] = useState(false);
+  const [smsTarget, setSmsTarget] = useState(null);
   const [focusKey, setFocusKey] = useState(() => searchParams.get("focus") || "");
   const focusedRowRef = useRef(null);
 
@@ -328,6 +330,14 @@ export function StaffQueuePage() {
                             ))}
                           </select>
                         </label>
+                        <button
+                          type="button"
+                          className="button button--secondary button--compact"
+                          onClick={() => setSmsTarget(entry)}
+                          disabled={Boolean(busy)}
+                        >
+                          <MessageSquare size={14} /> Send SMS
+                        </button>
                       </td>
                     </tr>
                   );
@@ -342,6 +352,21 @@ export function StaffQueuePage() {
 
       {displayOpen ? (
         <StaffQueueDisplay queue={queue} onExit={() => setDisplayOpen(false)} />
+      ) : null}
+
+      {smsTarget ? (
+        <SendSmsModal
+          initial={{
+            phone: smsTarget.patientPhone || "",
+            patientUserId: smsTarget.patientUserId || smsTarget.patientId || "",
+            appointmentId: smsTarget.appointment?.id,
+            queueEntryId: smsTarget.id,
+            messageType: "queue_updated",
+          }}
+          onClose={() => setSmsTarget(null)}
+          onSent={() => setSmsTarget(null)}
+          pushToast={pushToast}
+        />
       ) : null}
     </div>
   );

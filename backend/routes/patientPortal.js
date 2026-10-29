@@ -1381,6 +1381,16 @@ function createPatientPortalRouter({
         dentistId: result.rows[0].dentist_id,
         dentistName: result.rows[0].dentist_name,
       });
+      if (clinicSms?.handleAppointmentEvent) {
+        clinicSms
+          .handleAppointmentEvent({
+            appointment: result.rows[0],
+            action: "cancel",
+            actorRole: "patient",
+            actorId: actorUserId,
+          })
+          .catch((smsError) => console.warn("Patient cancel SMS failed:", smsError.message));
+      }
       return res.json({
         message: "Your appointment has been cancelled.",
         appointment: mapAppointment(result.rows[0]),
@@ -1549,6 +1559,18 @@ function createPatientPortalRouter({
       await client.query("COMMIT");
       transactionOpen = false;
       await appointmentLifecycle.closeQueueForAppointment(db, current.id, "no_show");
+
+      if (clinicSms?.handleAppointmentEvent) {
+        clinicSms
+          .handleAppointmentEvent({
+            appointment: inserted.rows[0],
+            previous: original.rows[0],
+            action: "reschedule",
+            actorRole: "patient",
+            actorId: actorUserId,
+          })
+          .catch((smsError) => console.warn("Patient reschedule SMS failed:", smsError.message));
+      }
 
       const nextAppointment = mapAppointment(inserted.rows[0]);
       await notifyClinicStaff({

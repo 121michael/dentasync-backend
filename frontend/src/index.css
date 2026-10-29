@@ -4663,6 +4663,25 @@ body.is-queue-display .staff-mobile-nav {
 .staff-modal__form,
 .staff-register-form { display: grid; gap: .9rem; }
 .staff-modal__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .5rem; margin-top: .15rem; }
+.sms-preview {
+  display: grid;
+  gap: .65rem;
+  padding: .9rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface-solid) 88%, var(--accent) 12%);
+}
+.sms-preview p { display: grid; gap: .2rem; margin: 0; }
+.sms-preview small { color: var(--text-muted); text-transform: uppercase; letter-spacing: .06em; font-size: .62rem; }
+.sms-history { display: grid; gap: .65rem; margin-top: .85rem; }
+.sms-history-row {
+  display: grid;
+  gap: .2rem;
+  padding: .75rem .85rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.sms-history-row__meta { display: flex; flex-wrap: wrap; gap: .45rem; align-items: center; }
 .staff-patient-detail { display: grid; gap: 1rem; }
 .staff-detail-section { display: grid; gap: .65rem; }
 .staff-detail-section h3 { font-size: .86rem; }

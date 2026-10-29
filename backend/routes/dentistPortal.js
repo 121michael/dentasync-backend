@@ -1340,6 +1340,24 @@ function createDentistPortalRouter({
            WHERE id = $2`,
           [appointmentStatus, current.appointment_id]
         );
+        if (
+          clinicSms?.handleAppointmentEvent &&
+          (appointmentStatus === "completed" || appointmentStatus === "no_show")
+        ) {
+          clinicSms
+            .handleAppointmentEvent({
+              appointment: {
+                id: current.appointment_id,
+                user_id: current.user_id,
+                status: appointmentStatus,
+              },
+              action: "complete",
+              actorRole: "dentist",
+              actorId: req.dentist?.id,
+              sendImmediate: false,
+            })
+            .catch((smsError) => console.warn("Appointment reminder cancel failed:", smsError.message));
+        }
       }
 
       if (databaseStatus === "dentist") {

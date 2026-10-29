@@ -95,6 +95,7 @@ app.use((req, res, next) => {
 
 const { createClinicSmsService } = require("./services/clinicSms");
 const { createCleaningReminderJob } = require("./services/cleaningReminders");
+const { createAppointmentReminderJob } = require("./services/appointmentReminderJob");
 const { createUnproceededAppointmentCancelJob } = require("./services/unproceededAppointmentCancelJob");
 const { createDocumentSyncCleanupJob } = require("./services/documentSyncCleanupJob");
 const { createBackupScheduleJob } = require("./services/backupRecovery");
@@ -416,6 +417,7 @@ app.use(
 // ==========================================
 const PORT = process.env.PORT || 5000;
 const cleaningReminderJob = createCleaningReminderJob({ db, clinicSms });
+const appointmentReminderJob = createAppointmentReminderJob({ db, clinicSms });
 const documentSyncCleanupJob = createDocumentSyncCleanupJob({
   db,
   uploadDirectory: path.join(process.cwd(), "uploads", "admin-document-sync"),
@@ -461,10 +463,12 @@ if (require.main === module) {
       );
     }
     cleaningReminderJob.start();
+    appointmentReminderJob.start();
     documentSyncCleanupJob.start();
     backupScheduleJob.start();
     unproceededAppointmentJob.start();
     console.log("Cleaning reminder SMS job scheduled (every 4–6 months based on last visit).");
+    console.log("Appointment reminder SMS job scheduled (24h and 10h before confirmed visits).");
     console.log("Document sync temporary scans expire after 24 hours (server clock).");
     console.log("Backup scheduler checks daily/weekly settings while this API process is running.");
     console.log("Unproceeded same-day appointments are cancelled after 6:00 PM clinic time.");

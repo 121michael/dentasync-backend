@@ -14,12 +14,17 @@ export function AdminNotificationsPage() {
   const [notifications, setNotifications] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [smsLogs, setSmsLogs] = useState([]);
 
   const load = useCallback(async ({ markSeen = false } = {}) => {
     try {
-      const response = await api.getAdminNotifications();
+      const [response, logsResponse] = await Promise.all([
+        api.getAdminNotifications(),
+        api.getAdminSmsLogs({ limit: 20 }).catch(() => ({ logs: [] })),
+      ]);
       const items = response.notifications || [];
       setNotifications(items);
+      setSmsLogs(logsResponse.logs || []);
       setError("");
 
       if (markSeen) {
@@ -180,6 +185,26 @@ export function AdminNotificationsPage() {
           action={<span className="empty-state__icon"><Bell size={22} /></span>}
         />
       )}
+
+      <section className="admin-panel" style={{ marginTop: "1.25rem" }}>
+        <SectionHeading eyebrow="SMS audit" title="SMS history" />
+        <p className="muted-copy">Sent means the provider accepted the message. Delivered is shown only when Semaphore returns a delivery receipt.</p>
+        {smsLogs.length ? (
+          <div className="sms-history">
+            {smsLogs.map((log) => (
+              <article key={log.id} className="sms-history-row">
+                <strong>{String(log.status || "").toUpperCase()}</strong>
+                <small>
+                  {formatAdminDateTime(log.createdAt)} · {log.recipientMasked} · {log.origin || "automatic"}
+                </small>
+                <p>{log.messageBody}</p>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No SMS logs yet" detail="Automatic reminders and staff messages will appear here." />
+        )}
+      </section>
     </div>
   );
 }
