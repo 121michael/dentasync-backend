@@ -5,6 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const { generatePrescriptionPdf } = require("./prescriptionPdf");
 const { sendMailMessage, emailDeliveryIsConfigured } = require("./emailDelivery");
+const { withPrescriptionSchema } = require("./prescriptionSchema");
 
 const DEFAULT_UPLOAD_DIR = path.join(process.cwd(), "uploads", "prescriptions");
 const WORKFLOW = {
@@ -1114,6 +1115,10 @@ async function retrySend(db, options) {
   return sendAuthorizedEmail(db, options);
 }
 
+function withSchema(operation) {
+  return (database, ...args) => withPrescriptionSchema(database, () => operation(database, ...args));
+}
+
 module.exports = {
   WORKFLOW,
   EMAIL_STATUS,
@@ -1122,19 +1127,19 @@ module.exports = {
   contentHash,
   clinicalPayload,
   maskEmail,
-  listPrescriptions,
-  loadDetail,
-  createPrescription,
-  updateDraft,
-  submitToStaff,
-  authorize,
-  cancelPrescription,
-  markProcessing,
-  returnToDentist,
-  prepareSend,
-  generateOrRetrievePdf,
-  sendAuthorizedEmail,
-  retrySend,
+  listPrescriptions: withSchema(listPrescriptions),
+  loadDetail: withSchema(loadDetail),
+  createPrescription: withSchema(createPrescription),
+  updateDraft: withSchema(updateDraft),
+  submitToStaff: withSchema(submitToStaff),
+  authorize: withSchema(authorize),
+  cancelPrescription: withSchema(cancelPrescription),
+  markProcessing: withSchema(markProcessing),
+  returnToDentist: withSchema(returnToDentist),
+  prepareSend: withSchema(prepareSend),
+  generateOrRetrievePdf: withSchema(generateOrRetrievePdf),
+  sendAuthorizedEmail: withSchema(sendAuthorizedEmail),
+  retrySend: withSchema(retrySend),
   sendConfirmation,
   httpError,
 };

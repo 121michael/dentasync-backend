@@ -285,3 +285,47 @@ test("dentist-staff workflow authorizes a version and blocks staff clinical edit
     await staff.close();
   }
 });
+
+test("missing prescription tables are created on first list request", async () => {
+  await db.query(`
+    DROP TABLE IF EXISTS
+      prescription_audit_events,
+      prescription_email_attempts,
+      prescription_pdfs,
+      prescription_items,
+      prescription_versions,
+      prescriptions
+    CASCADE
+  `);
+  const dentistRow = await db.query(
+    `SELECT id FROM users WHERE LOWER(role) = 'dentist' AND is_verified = TRUE LIMIT 1`
+  );
+  assert.ok(dentistRow.rows[0]?.id, "Need a dentist user to list prescriptions");
+  const dentistApp = express();
+  dentistApp.use(express.json());
+  dentistApp.use(
+    "/api/dentist",
+    createDentistPortalRouter({
+      db,
+      authenticateToken(req, _res, next) {
+        req.user = { id: String(dentistRow.rows[0].id), role: "dentist" };
+        next();
+      },
+    })
+  );
+  const dentist = await listen(dentistApp);
+  try {
+    const listed = await fetch(`${dentist.url}/api/dentist/prescriptions`);
+    const body = await listed.json();
+    assert.equal(listed.status, 200, body.message || JSON.stringify(body));
+    assert.ok(Array.isArray(body.prescriptions));
+    const tables = await db.query(
+      `SELECT COUNT(*)::int AS count
+       FROM information_schema.tables
+       WHERE table_schema = 'public' AND table_name = 'prescriptions'`
+    );
+    assert.equal(tables.rows[0].count, 1);
+  } finally {
+    await dentist.close();
+  }
+});

@@ -66,6 +66,7 @@ const {
   sendPasswordResetEmail,
 } = require("./services/emailDelivery");
 const { authenticateToken } = require("./middleware/authMiddleware");
+const { applyPrescriptionSchema } = require("./services/prescriptionSchema");
 
 const app = express();
 const { jwtSecret: JWT_SECRET, otpSecret: OTP_SECRET, passwordResetSecret: PASSWORD_RESET_SECRET } =
@@ -467,6 +468,11 @@ if (require.main === module) {
     documentSyncCleanupJob.start();
     backupScheduleJob.start();
     unproceededAppointmentJob.start();
+    applyPrescriptionSchema(db)
+      .then(() => console.log("Prescription tables ready (CREATE IF NOT EXISTS)."))
+      .catch((error) => {
+        console.error("Prescription schema apply failed:", error.message);
+      });
     console.log("Cleaning reminder SMS job scheduled (every 4–6 months based on last visit).");
     console.log("Appointment reminder SMS job scheduled (24h and 10h before confirmed visits).");
     console.log("Document sync temporary scans expire after 24 hours (server clock).");

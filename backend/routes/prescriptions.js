@@ -4,13 +4,13 @@ const fs = require("fs");
 const prescriptions = require("../services/prescriptions");
 
 function sendError(res, error) {
-  const status = Number(error.status) || (error.code === "42P01" ? 503 : 500);
+  const status = Number(error.status) || (error.code === "42P01" || error.code === "42703" ? 503 : 500);
   if (status >= 500 && status !== 503) {
     console.error("Prescription error:", error.message);
   }
   const message =
     status === 503
-      ? "Prescription tables are not available. Run npm run migrate:prescriptions."
+      ? "Prescription tables could not be created. Check the database connection, then restart the API so it can apply migrations/045_prescriptions.sql."
       : error.message || "Unable to process this prescription.";
   return res.status(status).json({ message });
 }

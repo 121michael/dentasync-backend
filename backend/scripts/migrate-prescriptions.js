@@ -1,19 +1,20 @@
 "use strict";
 
-const fs = require("fs");
-const path = require("path");
 const db = require("../db");
+const { applyPrescriptionSchema } = require("../services/prescriptionSchema");
 
 async function migrate() {
-  const sqlPath = path.join(__dirname, "..", "migrations", "045_prescriptions.sql");
-  const sql = fs.readFileSync(sqlPath, "utf8");
-  await db.query(sql);
+  await applyPrescriptionSchema(db);
   console.log("Applied migrations/045_prescriptions.sql");
 }
 
-migrate()
-  .then(() => process.exit(0))
-  .catch((error) => {
-    console.error("Prescription migration failed:", error.message);
-    process.exit(1);
-  });
+if (require.main === module) {
+  migrate()
+    .then(() => process.exit(0))
+    .catch((error) => {
+      console.error("Prescription migration failed:", error.message);
+      process.exit(1);
+    });
+}
+
+module.exports = { migrate };
