@@ -2711,15 +2711,43 @@ strong {
 
 .dentist-patient-record-page {
   padding-bottom: max(1.5rem, env(safe-area-inset-bottom, 0px));
+  width: 100%;
   min-width: 0;
   max-width: 100%;
   overflow-x: hidden;
 }
 
+.dentist-patient-record-page .dentist-detail-grid p {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 0.45rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.dentist-patient-record-page .dentist-detail-grid p strong {
+  flex: 0 0 auto;
+}
+
+.dentist-patient-record-page .dentist-detail-grid p span {
+  min-width: 0;
+  flex: 1 1 8rem;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .dentist-patient-record {
   display: grid;
   gap: 1.15rem;
+  width: 100%;
   min-width: 0;
+  max-width: 100%;
+}
+
+.dentist-patient-record > * {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .dentist-record-heading-actions {
@@ -2781,6 +2809,170 @@ strong {
   .uploaded-files-folder__heading {
     flex-direction: row;
     align-items: center;
+  }
+}
+
+@media (max-width: 760px) {
+  .dentist-content:has(.dentist-patient-record-page) {
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: hidden;
+    padding: 0.75rem 0.75rem calc(1.1rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .dentist-patient-record-page {
+    gap: 0.75rem;
+    padding-bottom: calc(6.5rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .dentist-patient-record-page .section-heading {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.65rem;
+    margin-bottom: 0.55rem;
+  }
+
+  .dentist-patient-record-page .section-heading > div {
+    gap: 0.2rem;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .dentist-patient-record-page .section-heading .eyebrow {
+    font-size: 0.62rem;
+  }
+
+  .dentist-patient-record-page .section-heading h1 {
+    margin-top: 0.08rem;
+    font-size: 1.22rem;
+    line-height: 1.22;
+    letter-spacing: -0.04em;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .dentist-patient-record-page .section-heading p {
+    max-width: 100%;
+    margin: 0;
+    font-size: 0.72rem;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .dentist-patient-record-page .dentist-record-heading-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .dentist-patient-record-page .dentist-record-heading-actions .button {
+    flex: 1 1 calc(50% - 0.3rem);
+    min-width: 0;
+    min-height: 36px;
+    padding: 0.38rem 0.55rem;
+    font-size: 0.72rem;
+    white-space: nowrap;
+  }
+
+  .dentist-patient-record {
+    gap: 0.8rem;
+  }
+
+  .dentist-patient-record-page .dentist-patient-info {
+    margin-bottom: 0.35rem;
+  }
+
+  .dentist-patient-record-page .treatment-record__table-wrap {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .dentist-patient-record-page .dentist-panel__heading {
+    gap: 0.55rem;
+  }
+
+  .dentist-patient-record-page .dentist-patient-info .dentist-panel__heading {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .dentist-patient-record-page .dentist-patient-info .treatment-record__actions .button {
+    flex: 1 1 auto;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .dentist-patient-record-page .dentist-panel__heading h2 {
+    margin-top: 0.12rem;
+    font-size: 1.02rem;
+  }
+
+  .dentist-patient-record-page .dentist-detail-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.4rem;
+    margin-bottom: 0.35rem;
+  }
+
+  .dentist-patient-record-page .dentist-detail-grid p {
+    padding: 0.5rem 0.65rem;
+    font-size: 0.72rem;
+    line-height: 1.4;
+  }
+
+  .dentist-patient-record-page .dentist-wellness-assessment {
+    margin-top: 0.65rem;
+    padding: 0.8rem 0.75rem 0.95rem;
+  }
+
+  .dentist-patient-record-page .dentist-wellness-assessment .treatment-record__header h2 {
+    font-size: 1.02rem;
+  }
+
+  .dentist-patient-record-page .dentist-wellness-assessment .muted-copy {
+    margin: 0.35rem 0 0.2rem;
+    font-size: 0.74rem;
+    line-height: 1.4;
+  }
+
+  .dentist-patient-record-page .dentist-wellness-assessment .dentist-form {
+    gap: 0.65rem;
+  }
+
+  .dentist-patient-record-page .dentist-wellness-assessment .field-grid--two {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.55rem;
+  }
+
+  .dentist-patient-record-page .dentist-wellness-assessment .field {
+    gap: 0.28rem;
+    font-size: 0.72rem;
+  }
+
+  .dentist-patient-record-page .dentist-wellness-assessment .field input,
+  .dentist-patient-record-page .dentist-wellness-assessment .field textarea {
+    min-height: 38px;
+    padding: 0.5rem 0.65rem;
+    font-size: 0.8rem;
+  }
+
+  .dentist-patient-record-page .dentist-wellness-assessment .dentist-form__actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    position: relative;
+    z-index: 1;
+    margin-top: 0.15rem;
+    padding-bottom: 0.35rem;
+  }
+
+  .dentist-patient-record-page .dentist-wellness-assessment .dentist-form__actions .button {
+    width: 100%;
+    min-width: 0;
+    min-height: 38px;
+    padding: 0.4rem 0.45rem;
+    font-size: 0.7rem;
+    justify-content: center;
+    white-space: nowrap;
   }
 }
 

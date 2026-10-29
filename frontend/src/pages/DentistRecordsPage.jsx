@@ -996,17 +996,6 @@ export function DentistRecordsPage() {
                 <h2>Patient Information</h2>
               </div>
               <div className="treatment-record__actions">
-                <button
-                  type="button"
-                  className={`button ${filesOpen ? "button--primary" : "button--secondary"} button--compact`}
-                  aria-expanded={filesOpen}
-                  onClick={toggleUploadedFiles}
-                >
-                  <FolderOpen size={16} /> Dental Documents
-                  {medicalDocuments.length ? (
-                    <span className="uploaded-files-count">{medicalDocuments.length}</span>
-                  ) : null}
-                </button>
                 {!isProfileLocked(detail.patient) ? (
                   <button
                     type="button"
@@ -1042,67 +1031,76 @@ export function DentistRecordsPage() {
             <div className="dentist-detail-grid">
               <p>
                 <strong>Patient ID:</strong>{" "}
-                {detail.patient.patientId || detail.patient.recordCode || detail.patient.id}
+                <span>
+                  {detail.patient.patientId || detail.patient.recordCode || detail.patient.id}
+                </span>
               </p>
               <p>
-                <strong>Name:</strong> {detail.patient.fullName || detail.patient.patientName}
+                <strong>Name:</strong>{" "}
+                <span>{detail.patient.fullName || detail.patient.patientName}</span>
               </p>
               <p>
                 <strong>Age:</strong>{" "}
-                {detail.patient.age != null && detail.patient.age !== "" ? detail.patient.age : "—"}
+                <span>
+                  {detail.patient.age != null && detail.patient.age !== "" ? detail.patient.age : "—"}
+                </span>
               </p>
               <p>
-                <strong>Sex:</strong> {detail.patient.gender || "—"}
+                <strong>Sex:</strong> <span>{detail.patient.gender || "—"}</span>
               </p>
               <p>
                 <strong>Birthdate:</strong>{" "}
-                {detail.patient.dateOfBirth ? formatDentistDate(detail.patient.dateOfBirth) : "—"}
+                <span>
+                  {detail.patient.dateOfBirth ? formatDentistDate(detail.patient.dateOfBirth) : "—"}
+                </span>
               </p>
               <p>
-                <strong>Phone Number:</strong> {detail.patient.phone || "—"}
+                <strong>Phone Number:</strong> <span>{detail.patient.phone || "—"}</span>
               </p>
               <p>
-                <strong>Email:</strong> {detail.patient.email || "—"}
+                <strong>Email:</strong> <span>{detail.patient.email || "—"}</span>
               </p>
               <p>
-                <strong>Category:</strong> {detail.patient.patientCategory || "—"}
+                <strong>Category:</strong> <span>{detail.patient.patientCategory || "—"}</span>
               </p>
               <p>
                 <strong>Emergency Contact Name:</strong>{" "}
-                {detail.patient.emergencyContactName?.trim() || "—"}
+                <span>{detail.patient.emergencyContactName?.trim() || "—"}</span>
               </p>
               <p>
                 <strong>Relationship:</strong>{" "}
-                {detail.patient.emergencyContactRelationship?.trim() || "—"}
+                <span>{detail.patient.emergencyContactRelationship?.trim() || "—"}</span>
               </p>
               <p>
                 <strong>Emergency Mobile Number:</strong>{" "}
-                {detail.patient.emergencyContactPhone?.trim() || "—"}
+                <span>{detail.patient.emergencyContactPhone?.trim() || "—"}</span>
               </p>
               <p>
-                <strong>Allergies:</strong> {detail.patient.allergies?.trim() || "—"}
+                <strong>Allergies:</strong> <span>{detail.patient.allergies?.trim() || "—"}</span>
               </p>
               <p>
                 <strong>Existing Conditions:</strong>{" "}
-                {detail.patient.existingConditions?.trim() || "—"}
+                <span>{detail.patient.existingConditions?.trim() || "—"}</span>
               </p>
               <p>
                 <strong>Current Medications:</strong>{" "}
-                {detail.patient.currentMedications?.trim() || "—"}
+                <span>{detail.patient.currentMedications?.trim() || "—"}</span>
               </p>
               <p>
                 <strong>Dental Concerns:</strong>{" "}
-                {detail.patient.dentalConcerns?.trim() || "—"}
+                <span>{detail.patient.dentalConcerns?.trim() || "—"}</span>
               </p>
               <p>
                 <strong>Record type:</strong>{" "}
-                {isProfileLocked(detail.patient)
-                  ? "Linked account (profile synced)"
-                  : "Walk-in clinical record"}
+                <span>
+                  {isProfileLocked(detail.patient)
+                    ? "Linked account (profile synced)"
+                    : "Walk-in clinical record"}
+                </span>
               </p>
               <p>
                 <strong>Next Appointment:</strong>{" "}
-                {nextAppointmentLabel(null, detail.nextAppointment, detail.patient)}
+                <span>{nextAppointmentLabel(null, detail.nextAppointment, detail.patient)}</span>
               </p>
             </div>
           </section>
@@ -1169,7 +1167,7 @@ export function DentistRecordsPage() {
             </form>
           ) : null}
 
-          <section className="treatment-record" style={{ marginTop: "1.25rem" }}>
+          <section className="treatment-record dentist-wellness-assessment" style={{ marginTop: "1.25rem" }}>
             <div className="treatment-record__header">
               <div>
                 <span className="eyebrow">Preventive care</span>
