@@ -12,7 +12,6 @@ import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../compone
 import { DentistModal } from "../components/DentistUI";
 import { formatDentistDate } from "../dentistUtils";
 import { matchesNotificationFocus } from "../notificationFocus";
-import { ProcedureAuthorizationPanel } from "../components/ProcedureAuthorizationPanel";
 
 const emptyForm = {
   firstName: "",
@@ -1630,17 +1629,6 @@ export function DentistRecordsPage() {
               </p>
             )}
           </section>
-
-          <ProcedureAuthorizationPanel
-            portal="dentist"
-            patientId={detail.patient.id}
-            patient={detail.patient}
-            treatments={detail.treatments || []}
-            appointments={detail.appointments || []}
-            onToast={(message, tone) => {
-              if (tone === "error") setError(message);
-            }}
-          />
         </div>
       ) : null}
 
