@@ -281,44 +281,18 @@ function runEasyOcr(filePath) {
   }
 }
 
-async function recognizeWithTesseract(filePath, pageSegMode = "6") {
-  const { createWorker } = require("tesseract.js");
-  const worker = await createWorker("eng", 1, { legacyCore: true, legacyLang: true });
-  try {
-    await worker.setParameters({
-      tessedit_pageseg_mode: String(pageSegMode),
-      preserve_interword_spaces: "1",
-    });
-    const result = await worker.recognize(filePath);
-    return {
-      text: String(result?.data?.text || "").trim(),
-      confidence: Number(result?.data?.confidence || 0),
-    };
-  } finally {
-    await worker.terminate();
-  }
-}
-
-async function recognizeWithTesseractDigits(filePath, pageSegMode = "7", digitsOnly = false) {
-  const { createWorker } = require("tesseract.js");
-  const worker = await createWorker("eng", 1, { legacyCore: true, legacyLang: true });
-  try {
-    const params = {
-      tessedit_pageseg_mode: String(pageSegMode),
-      preserve_interword_spaces: "1",
-    };
-    if (digitsOnly) {
-      params.tessedit_char_whitelist = "0123456789";
-    }
-    await worker.setParameters(params);
-    const result = await worker.recognize(filePath);
-    return {
-      text: String(result?.data?.text || "").trim(),
-      confidence: Number(result?.data?.confidence || 0),
-    };
-  } finally {
-    await worker.terminate();
-  }
+async function recognizeWithCloudOcr(filePath, { digitsOnly = false } = {}) {
+  const { extractTextWithGoogleCloud } = require("./googleCloudOcr");
+  const result = await extractTextWithGoogleCloud({
+    filePath,
+    digitsOnly,
+    env: process.env,
+  });
+  return {
+    text: String(result?.text || "").trim(),
+    confidence: Number(result?.confidence || 0),
+    method: result?.method || "",
+  };
 }
 
 async function extractDentalChartPanelTexts(filePath) {
@@ -424,38 +398,12 @@ async function extractDentalChartPanelTexts(filePath) {
     for (const [gain, offset] of passes) {
       const tempPath = await buildPanel(gain, offset);
       try {
-        const psm =
-          spec.key === "amount" || spec.key === "date" || spec.key === "age" || spec.key === "phone"
-            ? "7"
-            : "6";
-        if (spec.key === "age" || spec.key === "phone") {
-          const free = await recognizeWithTesseract(tempPath, psm);
-          const digits = await recognizeWithTesseractDigits(tempPath, psm, true);
-          const digitsAlt = await recognizeWithTesseractDigits(tempPath, "8", true);
-          texts.push(free.text, digits.text, digitsAlt.text);
-          bestConfidence = Math.max(
-            bestConfidence,
-            free.confidence || 0,
-            digits.confidence || 0,
-            digitsAlt.confidence || 0
-          );
-        } else if (spec.key === "description" || spec.key === "treatment" || spec.key === "patient") {
-          // Free-text OCR — digits-only destroys procedure words.
-          const free = await recognizeWithTesseract(tempPath, psm);
-          texts.push(free.text);
-          bestConfidence = Math.max(bestConfidence, free.confidence || 0);
-        } else if (spec.key === "amount") {
-          const digits = await recognizeWithTesseractDigits(tempPath, psm, true);
-          const free = await recognizeWithTesseract(tempPath, psm);
-          texts.push(digits.text, free.text);
-          bestConfidence = Math.max(bestConfidence, digits.confidence || 0, free.confidence || 0);
-        } else if (spec.key === "date") {
-          const free = await recognizeWithTesseract(tempPath, "6");
-          const freeAlt = await recognizeWithTesseract(tempPath, "7");
-          texts.push(free.text, freeAlt.text);
-          bestConfidence = Math.max(bestConfidence, free.confidence || 0, freeAlt.confidence || 0);
+        const free = await recognizeWithCloudOcr(tempPath);
+        if (spec.key === "age" || spec.key === "phone" || spec.key === "amount") {
+          const digits = await recognizeWithCloudOcr(tempPath, { digitsOnly: true });
+          texts.push(free.text, digits.text);
+          bestConfidence = Math.max(bestConfidence, free.confidence || 0, digits.confidence || 0);
         } else {
-          const free = await recognizeWithTesseract(tempPath, psm);
           texts.push(free.text);
           bestConfidence = Math.max(bestConfidence, free.confidence || 0);
         }
@@ -758,10 +706,8 @@ async function extractTreatmentZoneText(filePath) {
       if (easy?.fields?.procedure) texts.push(String(easy.fields.procedure));
       if (easy?.fields?.treatmentDate) texts.push(String(easy.fields.treatmentDate));
       if (easy?.fields?.amountCharged) texts.push(String(easy.fields.amountCharged));
-      for (const psm of ["6", "4", "11"]) {
-        const tess = await recognizeWithTesseract(tempPath, psm);
-        if (tess.text) texts.push(tess.text);
-      }
+      const cloud = await recognizeWithCloudOcr(tempPath);
+      if (cloud.text) texts.push(cloud.text);
     } finally {
       fs.unlink(tempPath, () => {});
     }
@@ -818,10 +764,8 @@ async function extractTreatmentZoneText(filePath) {
         if (easy?.fields?.procedure) texts.push(String(easy.fields.procedure));
         if (easy?.fields?.treatmentDate) texts.push(String(easy.fields.treatmentDate));
       }
-      const tess = await recognizeWithTesseract(tempPath, "6");
-      if (tess.text) texts.push(tess.text);
-      const tessAlt = await recognizeWithTesseract(tempPath, "7");
-      if (tessAlt.text) texts.push(tessAlt.text);
+      const cloud = await recognizeWithCloudOcr(tempPath);
+      if (cloud.text) texts.push(cloud.text);
     } finally {
       fs.unlink(tempPath, () => {});
     }
@@ -831,6 +775,7 @@ async function extractTreatmentZoneText(filePath) {
 }
 
 async function extractBestImageText(filePath) {
+  const gcpOriginal = await recognizeWithCloudOcr(filePath);
   // Always OCR the original photo with EasyOCR first — aggressive preprocess can erase ink.
   const easyOriginal = runEasyOcr(filePath);
   let easyPrepPath = null;
@@ -850,6 +795,8 @@ async function extractBestImageText(filePath) {
   }
 
   const easyDirect = mergeEasyOcrResults(easyOriginal, easyPreprocessed);
+  const gcpScore = scoreDocumentText(gcpOriginal.text);
+  const gcpStrong = Boolean(gcpOriginal.text) && gcpScore >= 18 && gcpOriginal.text.length >= 40;
   const easyFilled = countFilledFields(easyDirect?.fields);
   const easyHasCritical =
     Boolean(String(easyDirect?.fields?.age || "").trim()) &&
@@ -892,30 +839,14 @@ async function extractBestImageText(filePath) {
     } catch {
       /* zone OCR is best-effort */
     }
-    // Mild Tesseract pass fills phone/age/amount digits EasyOCR often misses.
-    try {
-      const mild =
-        (await buildPreprocessVariants(filePath)).find((entry) => entry.label === "mild") ||
-        (await buildPreprocessVariants(filePath)).find((entry) => entry.label === "gray");
-      if (mild?.buffer) {
-        const mildPath = writeTempVariant(mild.buffer, "mild-strong");
-        try {
-          const tess = await recognizeWithTesseract(mildPath, "6");
-          if (tess.text) text = mergeUniqueTexts([text, tess.text]);
-        } finally {
-          fs.unlink(mildPath, () => {});
-        }
-      }
-    } catch {
-      /* optional */
-    }
+    if (gcpOriginal.text) text = mergeUniqueTexts([text, gcpOriginal.text]);
     if (easyPrepPath) fs.unlink(easyPrepPath, () => {});
     return {
       text,
-      score: Number(easyDirect.score || 0),
+      score: Math.max(Number(easyDirect.score || 0), gcpScore),
       degrees: Number(easyDirect.degrees || 0),
-      method: "easyocr",
-      confidence: Number(easyDirect.confidence || 0),
+      method: gcpOriginal.method ? `easyocr+${gcpOriginal.method}` : "easyocr",
+      confidence: Math.max(Number(easyDirect.confidence || 0), gcpOriginal.confidence || 0),
       fields,
       uprightPath: null,
     };
@@ -928,7 +859,7 @@ async function extractBestImageText(filePath) {
     const chromeProbe = easyDirect?.text || "";
     const needsChromeCheck = looksLikeAdminSyncUiChrome(chromeProbe) || countFilledFields(easyDirect?.fields) < 2;
     if (needsChromeCheck) {
-      const quickTess = chromeProbe ? { text: chromeProbe } : await recognizeWithTesseract(filePath, "6");
+      const quickTess = chromeProbe ? { text: chromeProbe } : await recognizeWithCloudOcr(filePath);
       if (looksLikeAdminSyncUiChrome(`${chromeProbe}\n${quickTess.text || ""}`)) {
         previewCropPath = await cropAdminSyncDocumentPreview(filePath);
         if (previewCropPath) workingPath = previewCropPath;
@@ -942,13 +873,19 @@ async function extractBestImageText(filePath) {
   const uprightVariants = variants.filter((entry) => entry.degrees === 0);
   const rotatedVariants = variants.filter((entry) => entry.degrees !== 0);
   const tempPaths = [];
-  const textParts = [easyDirect?.text || ""];
+  const textParts = [easyDirect?.text || "", gcpOriginal.text || ""].filter(Boolean);
   let best = {
-    text: easyDirect?.text || "",
-    score: Number(easyDirect?.score || -1),
+    text: mergeUniqueTexts(textParts),
+    score: Math.max(Number(easyDirect?.score || -1), gcpScore),
     degrees: Number(easyDirect?.degrees || 0),
-    method: easyDirect?.text ? "easyocr" : "ocr",
-    confidence: Number(easyDirect?.confidence || 0),
+    method: gcpOriginal.method
+      ? easyDirect?.text
+        ? `easyocr+${gcpOriginal.method}`
+        : gcpOriginal.method
+      : easyDirect?.text
+        ? "easyocr"
+        : "ocr",
+    confidence: Math.max(Number(easyDirect?.confidence || 0), gcpOriginal.confidence || 0),
     fields: easyDirect?.fields || {},
     uprightPath: null,
   };
@@ -958,42 +895,41 @@ async function extractBestImageText(filePath) {
   async function considerVariant(variant) {
     const tempPath = writeTempVariant(variant.buffer, `${variant.label}-${variant.degrees}`);
     tempPaths.push(tempPath);
-    const modes = variant.label === "redsup" || variant.label === "contrast" ? ["6", "4"] : ["6"];
-    for (const psm of modes) {
-      const tess = await recognizeWithTesseract(tempPath, psm);
-      if (tess.text) textParts.push(tess.text);
-      const mergedText = mergeUniqueTexts([
-        workingPath === filePath ? easyDirect?.text || "" : "",
-        ...textParts,
-      ]);
-      const tessScore = scoreDocumentText(mergedText || tess.text) + tess.confidence / 20;
-      const candidate = {
-        text: mergedText || tess.text,
-        score: Math.max(tessScore, Number(easyDirect?.score || 0)),
-        degrees: variant.degrees,
-        method: easyDirect?.text ? "easyocr+ocr" : "ocr",
-        confidence: Math.max(Number(easyDirect?.confidence || 0), tess.confidence),
-        fields: easyDirect?.fields || {},
-        uprightPath: tempPath,
-      };
-      const quality = resultQuality(candidate) + (tess.text ? 5 : 0) + (variant.degrees === 0 ? 3 : 0);
-      // Prefer cropped document-preview OCR over UI-chrome soup.
-      const chromePenalty = looksLikeAdminSyncUiChrome(candidate.text) ? -40 : 0;
-      if (quality + chromePenalty > bestQuality) {
-        best = candidate;
-        bestQuality = quality + chromePenalty;
-        keepPath = tempPath;
-      }
+    const cloud = await recognizeWithCloudOcr(tempPath);
+    if (cloud.text) textParts.push(cloud.text);
+    const mergedText = mergeUniqueTexts([
+      workingPath === filePath ? easyDirect?.text || "" : "",
+      ...textParts,
+    ]);
+    const cloudScore = scoreDocumentText(mergedText || cloud.text) + cloud.confidence / 20;
+    const methodPrefix = easyDirect?.text ? "easyocr+" : "";
+    const candidate = {
+      text: mergedText || cloud.text,
+      score: Math.max(cloudScore, Number(easyDirect?.score || 0)),
+      degrees: variant.degrees,
+      method: `${methodPrefix}${cloud.method || "gcp-vision"}`,
+      confidence: Math.max(Number(easyDirect?.confidence || 0), cloud.confidence),
+      fields: easyDirect?.fields || {},
+      uprightPath: tempPath,
+    };
+    const quality = resultQuality(candidate) + (cloud.text ? 5 : 0) + (variant.degrees === 0 ? 3 : 0);
+    const chromePenalty = looksLikeAdminSyncUiChrome(candidate.text) ? -40 : 0;
+    if (quality + chromePenalty > bestQuality) {
+      best = candidate;
+      bestQuality = quality + chromePenalty;
+      keepPath = tempPath;
     }
   }
 
   try {
-    for (const variant of uprightVariants) {
-      await considerVariant(variant);
-    }
-    if (countFilledFields(best.fields) < 2 && scoreDocumentText(best.text) < 24) {
-      for (const variant of rotatedVariants) {
+    if (!gcpStrong) {
+      for (const variant of uprightVariants) {
         await considerVariant(variant);
+      }
+      if (countFilledFields(best.fields) < 2 && scoreDocumentText(best.text) < 24) {
+        for (const variant of rotatedVariants) {
+          await considerVariant(variant);
+        }
       }
     }
 
@@ -1048,4 +984,5 @@ module.exports = {
   extractTreatmentZoneText,
   runEasyOcr,
   countFilledFields,
+  recognizeWithCloudOcr,
 };

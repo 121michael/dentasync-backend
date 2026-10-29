@@ -2,7 +2,7 @@
 
 /**
  * Cloud OCR fallback for dense handwritten clinic forms.
- * Uses OCR.space when local EasyOCR/Tesseract cannot fill fields.
+ * Uses OCR.space when Google Cloud Vision/Document AI and EasyOCR cannot fill fields.
  *
  * Set OCR_SPACE_API_KEY for production. A public free-tier key is used only
  * as a last-resort development fallback.

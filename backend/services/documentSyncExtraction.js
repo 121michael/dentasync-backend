@@ -6,6 +6,7 @@ const path = require("path");
 const { extractBestImageText, scoreDocumentText, extractTreatmentZoneText } = require("./documentImagePrep");
 const { extractFieldsWithGemini } = require("./documentVisionExtraction");
 const { extractTextWithOcrSpace } = require("./cloudOcrExtraction");
+const { extractTextWithGoogleCloud, googleCloudOcrIsConfigured } = require("./googleCloudOcr");
 
 const INVALID_DOCUMENT_MESSAGE =
   "Document Not Recognized. The uploaded file does not appear to be a supported patient or dental document. Please upload a valid patient record, dental treatment record, patient information form, or scanned dental document.";
@@ -3001,11 +3002,32 @@ async function extractTextFromFile(filePath, mimeType, originalName) {
     }
     const parser = new PDFParse({ data: buffer });
     try {
-      const parsed = await parser.getText();
+        const parsed = await parser.getText();
       // getText() returns every page, so multi-page records stay complete.
       const text = String(parsed?.text || "").trim();
       if (text && !pdfTextIsImageOnly(text)) {
         return { text, method: "pdf-text" };
+      }
+
+      try {
+        const gcpPdf = await extractTextWithGoogleCloud({
+          filePath,
+          mimeType: "application/pdf",
+          env: process.env,
+        });
+        if (gcpPdf?.text) {
+          return {
+            text: [text, gcpPdf.text].filter(Boolean).join("\n"),
+            method: gcpPdf.method || "gcp-vision-pdf",
+            confidence: gcpPdf.confidence,
+            warning:
+              gcpPdf.confidence && gcpPdf.confidence < 55
+                ? "Scanned PDF read with Google Cloud OCR. Please verify every field against the document preview."
+                : null,
+          };
+        }
+      } catch (error) {
+        console.warn("Google Cloud PDF OCR skipped:", error.message);
       }
 
       try {
@@ -3078,13 +3100,29 @@ async function extractTextFromFile(filePath, mimeType, originalName) {
     const missingCritical = dentalChartMissingCriticalFields(localStructured.payload);
 
     // Handwritten dental charts often fill Name/Amount while Age/Procedure/Date stay blank.
-    // Always escalate to OCR.space (engine 2) when those critical cells are still empty.
+    // Escalate to Google Cloud (then OCR.space) when those critical cells are still empty.
     if (
       localFilled < 3 ||
       (dentalChart && missingCritical) ||
       (treatmentLike && !hasReliableVisit) ||
       best.score < 14
     ) {
+      try {
+        if (!String(method || "").includes("gcp-")) {
+          const gcp = await extractTextWithGoogleCloud({
+            filePath,
+            mimeType: mimeType || "image/jpeg",
+            env: process.env,
+          });
+          if (gcp?.text) {
+            text = [text, gcp.text].filter(Boolean).join("\n");
+            method = method.includes("gcp-") ? method : `${method}+${gcp.method}`;
+            confidence = Math.max(confidence, Number(gcp.confidence || 0));
+          }
+        }
+      } catch (error) {
+        console.warn("Google Cloud OCR fallback skipped:", error.message);
+      }
       try {
         const cloud = await extractTextWithOcrSpace(filePath, mimeType || "image/jpeg");
         if (cloud?.text) {
@@ -3262,6 +3300,28 @@ async function extractDocumentDataUntracked(filePath, mimeType, originalName) {
 
     if (dentalChartMissingCriticalFields(structured.payload)) {
       try {
+        const gcp = await extractTextWithGoogleCloud({
+          filePath,
+          mimeType: mimeType || "image/jpeg",
+          env: process.env,
+        });
+        if (gcp?.text) {
+          extracted.text = [extracted.text, gcp.text].filter(Boolean).join("\n");
+          extracted.method = String(extracted.method || "").includes("gcp-")
+            ? extracted.method
+            : `${extracted.method || "ocr"}+${gcp.method}`;
+          const gcpFields = recoverNoisyOcrFields(gcp.text, extracted.fields || {});
+          extracted.fields = { ...(extracted.fields || {}), ...gcpFields };
+          structured.payload = applyExternalFields(structured.payload, gcpFields);
+          forceFillDentalChartTreatment(structured.payload, extracted.text, extracted.fields);
+        }
+      } catch (error) {
+        console.warn("Critical-field Google Cloud OCR pass skipped:", error.message);
+      }
+    }
+
+    if (dentalChartMissingCriticalFields(structured.payload)) {
+      try {
         const cloud = await extractTextWithOcrSpace(filePath, mimeType || "image/jpeg");
         if (cloud?.text) {
           extracted.text = [extracted.text, cloud.text].filter(Boolean).join("\n");
@@ -3287,7 +3347,7 @@ async function extractDocumentDataUntracked(filePath, mimeType, originalName) {
   } catch (error) {
     if (error instanceof DocumentValidationError) {
       throw new DocumentValidationError(
-        `${UNREADABLE_DOCUMENT_MESSAGE} Tip: use a bright, upright photo. On Windows, run npm.cmd install and ensure the PC can reach OCR.space (or set OCR_SPACE_API_KEY).`
+        `${UNREADABLE_DOCUMENT_MESSAGE} Tip: use a bright, upright photo and set GOOGLE_CLOUD_API_KEY (or a service account) so Admin Sync can read handwriting and scanned PDFs.`
       );
     }
     throw error;
@@ -3306,7 +3366,9 @@ async function extractDocumentDataUntracked(filePath, mimeType, originalName) {
       ? "Vision assist: on."
       : process.env.GEMINI_API_KEY
         ? ""
-        : "Tip: set GEMINI_API_KEY for handwriting vision (reads Age/Procedure/Date like a person). OCR.space is used when those fields are still blank.",
+        : googleCloudOcrIsConfigured()
+          ? "Google Cloud OCR is on for handwriting and scanned PDFs."
+          : "Tip: set GOOGLE_CLOUD_API_KEY or GOOGLE_APPLICATION_CREDENTIALS so Admin Sync can read handwriting and PDFs with Google Cloud.",
     extracted.method === "ocr" || extracted.method === "easyocr+ocr"
       ? "Tip: for clearer local OCR on Windows, install EasyOCR: py -3 -m pip install easyocr pillow"
       : "",

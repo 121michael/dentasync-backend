@@ -263,7 +263,7 @@ Queue/appointment data is scoped through `admin_portal_dentist_profiles.catalog_
 Admin **System Synchronization** supports document-to-database intake:
 
 1. Upload a hard-copy scan (JPG/PNG) or soft copy (PDF/TXT)
-2. The system extracts patient and dental procedure fields (PDF text + OCR)
+2. The system extracts patient and dental procedure fields (PDF text + Google Cloud OCR)
 3. Admin reviews/edits the extracted values
 4. **Sync to Database** creates/updates the patient and a treatment record
 
@@ -274,4 +274,10 @@ npm run migrate
 ```
 
 Open `/admin/sync` while signed in as admin.
+
+Admin Sync OCR uses Google Cloud Vision (`DOCUMENT_TEXT_DETECTION`) or Document AI when configured. Tesseract is not used.
+
+- `GOOGLE_CLOUD_API_KEY` or `GOOGLE_VISION_API_KEY`
+- or `GOOGLE_APPLICATION_CREDENTIALS` / `GOOGLE_SERVICE_ACCOUNT_JSON`
+- optional `GOOGLE_DOCUMENT_AI_PROCESSOR` (`projects/.../locations/.../processors/...`) for handwriting-heavy forms
 
