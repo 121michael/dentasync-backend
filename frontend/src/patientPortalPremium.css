@@ -423,6 +423,14 @@
   overflow-wrap: anywhere;
 }
 
+.portal-shell .profile-menu__item {
+  transition:
+    border-color var(--portal-duration) ease,
+    box-shadow var(--portal-duration) ease,
+    background var(--portal-duration) ease,
+    transform var(--portal-duration) ease;
+}
+
 /* Notifications */
 .portal-shell .notification-list {
   border: 1px solid var(--border);

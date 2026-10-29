@@ -3283,11 +3283,106 @@ body.booking-summary-open .patient-assistant__panel {
 .membership-card__bottom strong { color: #fff; font-size: .7rem; }
 .membership-card__verified { display: flex !important; align-items: center; gap: .32rem; color: #f8ecff; }
 
+.profile-menu {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.profile-menu__item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.8rem;
+  min-height: 72px;
+  width: 100%;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  color: inherit;
+  text-align: left;
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease, background 180ms ease;
+}
+
+.profile-menu__item:hover,
+.profile-menu__item:focus-visible {
+  border-color: color-mix(in srgb, var(--amethyst-500) 45%, var(--border));
+  background: color-mix(in srgb, var(--amethyst-100) 55%, #fff);
+  box-shadow: 0 10px 22px rgba(62, 24, 98, 0.08);
+  transform: translateY(-1px);
+}
+
+.profile-menu__item:focus-visible {
+  outline: 2px solid rgba(112, 57, 169, 0.5);
+  outline-offset: 2px;
+}
+
+.profile-menu__item:active {
+  transform: scale(0.99);
+}
+
+.profile-menu__icon {
+  display: grid;
+  width: 2.2rem;
+  height: 2.2rem;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: 12px;
+  color: var(--amethyst-700);
+  background: var(--amethyst-100);
+}
+
+.profile-menu__copy {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 0;
+}
+
+.profile-menu__copy strong {
+  font-size: 0.92rem;
+  letter-spacing: -0.03em;
+}
+
+.profile-menu__copy small {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.profile-menu__item > svg {
+  flex-shrink: 0;
+  color: var(--amethyst-600);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .profile-menu__item {
+    transition: none;
+  }
+
+  .profile-menu__item:hover,
+  .profile-menu__item:focus-visible,
+  .profile-menu__item:active {
+    transform: none;
+  }
+}
+
+.profile-back {
+  justify-self: start;
+}
+
 .profile-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(260px, .34fr);
   align-items: start;
   gap: .9rem;
+}
+
+.profile-layout--section {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .profile-form-stack,
@@ -3372,6 +3467,7 @@ body.booking-summary-open .patient-assistant__panel {
   }
   .records-layout { grid-template-columns: 1fr; }
   .profile-layout { grid-template-columns: 1fr; }
+  .profile-layout--section { grid-template-columns: 1fr; }
   .profile-security-stack { grid-template-columns: repeat(3, 1fr); }
   .support-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .support-grid .support-card:last-child { grid-column: 1 / -1; }
@@ -3746,6 +3842,16 @@ body.booking-summary-open .patient-assistant__panel {
   .membership-card { min-height: 300px; gap: 1.7rem; }
   .membership-card__bottom { display: grid; grid-template-columns: 1fr 1fr; }
   .membership-card__verified { grid-column: 1 / 2; }
+  .profile-menu {
+    grid-template-columns: 1fr;
+  }
+  .profile-menu__item {
+    min-height: 68px;
+  }
+  .profile-page {
+    min-width: 0;
+    padding-bottom: 0.5rem;
+  }
   .profile-security-stack { grid-template-columns: 1fr; }
   .profile-save-button { width: 100%; justify-self: stretch; }
   .support-grid { grid-template-columns: 1fr; }
