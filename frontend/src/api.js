@@ -183,6 +183,13 @@ export const api = {
     data.append("file", file);
     return request("/patient/uploads/hmo-authorization", { method: "POST", body: data });
   },
+  uploadMedicalDocument: (file) => {
+    const data = new FormData();
+    data.append("file", file);
+    return request("/patient/uploads/medical-document", { method: "POST", body: data, silent: true });
+  },
+  removeMedicalDocument: (documentId) =>
+    request(`/patient/uploads/medical-document/${documentId}`, { method: "DELETE", silent: true }),
   getProfile: () => request("/patient/profile"),
   updateProfile: (body) => request("/patient/profile", { method: "PUT", body }),
   updatePreferences: (body) => request("/patient/preferences", { method: "PUT", body }),
@@ -287,6 +294,19 @@ export const api = {
     }),
   getDentistPatientXrays: (patientId, options = {}) =>
     request(`/dentist/patients/${patientId}/xrays`, options),
+  getDentistMedicalDocuments: (patientId, options = {}) =>
+    request(`/dentist/patients/${patientId}/medical-documents`, { silent: true, ...options }),
+  downloadDentistMedicalDocument: (patientId, document) =>
+    download(
+      `/dentist/patients/${patientId}/medical-documents/${document.id}/download`,
+      document.name || "medical-document"
+    ),
+  reviewDentistMedicalDocument: (patientId, documentId) =>
+    request(`/dentist/patients/${patientId}/medical-documents/${documentId}`, {
+      method: "PATCH",
+      body: { status: "reviewed" },
+      silent: true,
+    }),
   getDentistProfile: () => request("/dentist/profile"),
   updateDentistProfile: (body) => request("/dentist/profile", { method: "PUT", body }),
   getDentistNotifications: (options = {}) => request("/dentist/notifications", options),

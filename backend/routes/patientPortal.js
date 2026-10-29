@@ -36,6 +36,7 @@ const patientAiConversations = require("../services/patientAiConversations");
 const { resolveAppSecrets } = require("../lib/securityConfig");
 const { attachDentalAuthorizationRoutes } = require("./dentalAuthorization");
 const { loadApprovedClinicCatalog, resolveCatalog } = require("../services/approvedClinicCatalog");
+const medicalDocuments = require("../services/medicalDocuments");
 
 const SERVICES = [
   {
@@ -495,6 +496,23 @@ function createPatientPortalRouter({
     },
   });
 
+  const medicalUpload = multer({
+    storage: multer.diskStorage({
+      destination: (_req, _file, callback) => callback(null, uploadDirectory),
+      filename: (_req, file, callback) => {
+        const extension = path.extname(file.originalname).toLowerCase();
+        callback(null, `${crypto.randomUUID()}${extension}`);
+      },
+    }),
+    limits: { fileSize: medicalDocuments.MAX_UPLOAD_BYTES, files: 1 },
+    fileFilter: (_req, file, callback) => {
+      if (!medicalDocuments.ALLOWED_MIME.has(file.mimetype)) {
+        return callback(new Error("Only PDF, JPG, and PNG documents are accepted."));
+      }
+      callback(null, true);
+    },
+  });
+
   router.use(authenticateToken, requirePatient);
   attachDentalAuthorizationRoutes(router, { db, role: "patient" });
 
@@ -924,6 +942,7 @@ function createPatientPortalRouter({
       hmoCompanyName,
       hmoBirthDate,
       authorizationDocumentId,
+      medicalDocumentId,
       notes,
       forPatientUserId,
       dependentUserId,
@@ -1021,6 +1040,20 @@ function createPatientPortalRouter({
         }
       }
 
+      if (medicalDocumentId) {
+        const medicalResult = await db.query(
+          `SELECT id
+           FROM patient_portal_documents
+           WHERE id = $1
+             AND user_id = $2
+             AND document_type = $3`,
+          [medicalDocumentId, userId, medicalDocuments.DOCUMENT_TYPE]
+        );
+        if (medicalResult.rows.length === 0) {
+          return res.status(400).json({ message: "The medical document is not available for this patient." });
+        }
+      }
+
       // Patients no longer pick a preferred dentist; assign the first available
       // clinician for the requested slot (falls back to the first catalog dentist).
       let dentist =
@@ -1103,6 +1136,23 @@ function createPatientPortalRouter({
           bookingNote,
         ]
       );
+
+      if (medicalDocumentId) {
+        try {
+          await db.query(
+            `UPDATE patient_portal_documents
+             SET appointment_id = $1
+             WHERE id = $2
+               AND user_id = $3
+               AND document_type = $4`,
+            [result.rows[0].id, medicalDocumentId, userId, medicalDocuments.DOCUMENT_TYPE]
+          );
+        } catch (linkError) {
+          if (linkError.code !== "42703") {
+            console.warn("Unable to link medical document to appointment:", linkError.message);
+          }
+        }
+      }
 
       await insertPatientNotification(db, {
         userId,
@@ -1730,6 +1780,122 @@ function createPatientPortalRouter({
       fs.unlink(req.file.path, () => {});
       console.error("HMO upload error:", error.message);
       return res.status(500).json({ message: "Unable to save the authorization document." });
+    }
+  });
+
+  router.post("/uploads/medical-document", medicalUpload.single("file"), async (req, res) => {
+    try {
+      medicalDocuments.validateMedicalUpload(req.file);
+    } catch (validationError) {
+      if (req.file?.path) fs.unlink(req.file.path, () => {});
+      return res.status(validationError.status || 400).json({ message: validationError.message });
+    }
+
+    const documentId = crypto.randomUUID();
+    const userId = userIdFor(req);
+    const values = [
+      documentId,
+      userId,
+      medicalDocuments.DOCUMENT_TYPE,
+      req.file.originalname,
+      req.file.filename,
+      req.file.mimetype,
+      req.file.size,
+      "Medical clearance / supporting document",
+      "uploaded",
+    ];
+
+    try {
+      try {
+        await db.query(
+          `INSERT INTO patient_portal_documents (
+             id, user_id, document_type, original_name, stored_name, mime_type, byte_size,
+             category, status
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          values
+        );
+      } catch (schemaError) {
+        if (schemaError.code !== "42703") throw schemaError;
+        await db.query(
+          `INSERT INTO patient_portal_documents (
+             id, user_id, document_type, original_name, stored_name, mime_type, byte_size
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          values.slice(0, 7)
+        );
+      }
+
+      await notifyClinicDentists({
+        type: "document",
+        title: "Medical document uploaded",
+        body: "A patient uploaded a supporting medical document for dentist review. This does not automatically clear the patient for treatment.",
+        entityType: "document",
+        entityId: documentId,
+      });
+
+      return res.status(201).json({
+        message: "Medical document saved for your dentist to review.",
+        document: {
+          id: documentId,
+          name: req.file.originalname,
+          mimeType: req.file.mimetype,
+          size: req.file.size,
+          category: "Medical clearance / supporting document",
+          status: "uploaded",
+        },
+      });
+    } catch (error) {
+      fs.unlink(req.file.path, () => {});
+      console.error("Medical document upload error:", error.message);
+      return res.status(500).json({ message: "Unable to save the medical document." });
+    }
+  });
+
+  router.delete("/uploads/medical-document/:documentId", async (req, res) => {
+    try {
+      let result;
+      try {
+        result = await db.query(
+          `SELECT original_name, stored_name, appointment_id
+           FROM patient_portal_documents
+           WHERE id = $1
+             AND user_id = $2
+             AND document_type = $3
+           LIMIT 1`,
+          [req.params.documentId, userIdFor(req), medicalDocuments.DOCUMENT_TYPE]
+        );
+      } catch (schemaError) {
+        if (schemaError.code !== "42703") throw schemaError;
+        result = await db.query(
+          `SELECT original_name, stored_name
+           FROM patient_portal_documents
+           WHERE id = $1
+             AND user_id = $2
+             AND document_type = $3
+           LIMIT 1`,
+          [req.params.documentId, userIdFor(req), medicalDocuments.DOCUMENT_TYPE]
+        );
+      }
+      if (!result.rows.length) {
+        return res.status(404).json({ message: "Document not found." });
+      }
+      if (result.rows[0].appointment_id) {
+        return res.status(409).json({
+          message: "This document is already linked to an appointment and cannot be removed here.",
+        });
+      }
+      await db.query(
+        `DELETE FROM patient_portal_documents
+         WHERE id = $1 AND user_id = $2 AND document_type = $3`,
+        [req.params.documentId, userIdFor(req), medicalDocuments.DOCUMENT_TYPE]
+      );
+      const filePath = medicalDocuments.resolveStoredPath(uploadDirectory, result.rows[0].stored_name);
+      if (filePath && fs.existsSync(filePath)) {
+        fs.unlink(filePath, () => {});
+      }
+      return res.json({ message: "Medical document removed." });
+    } catch (error) {
+      console.error("Medical document delete error:", error.message);
+      return res.status(500).json({ message: "Unable to remove the medical document." });
     }
   });
 
@@ -2763,7 +2929,14 @@ function createPatientPortalRouter({
     if (!error) {
       return next();
     }
-    if (error instanceof multer.MulterError || error.message?.includes("Only PDF")) {
+    if (error instanceof multer.MulterError) {
+      const message =
+        error.code === "LIMIT_FILE_SIZE"
+          ? "Documents must be 5 MB or smaller."
+          : error.message || "The uploaded document is not valid.";
+      return res.status(400).json({ message });
+    }
+    if (error.message?.includes("Only PDF")) {
       return res.status(400).json({ message: error.message || "The uploaded document is not valid." });
     }
     return next(error);

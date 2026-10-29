@@ -276,6 +276,22 @@ function displayStatus(status) {
   return String(status || "pending").replaceAll("_", " ");
 }
 
+function formatFileSize(bytes) {
+  const size = Number(bytes);
+  if (!Number.isFinite(size) || size <= 0) return "0 B";
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function fileKindLabel(name, mime) {
+  const lower = `${name || ""} ${mime || ""}`.toLowerCase();
+  if (lower.includes("pdf")) return "PDF";
+  if (lower.includes("png")) return "PNG";
+  if (lower.includes("jpeg") || lower.includes("jpg")) return "JPG";
+  return "Document";
+}
+
 function validateBooking(form, { selectedServicePrice, availability, throughStep }) {
   if (throughStep >= 1) {
     if (!form.serviceId) {
@@ -352,6 +368,11 @@ export function AppointmentsPage() {
     forPatientUserId: "",
   });
   const [authorizationFile, setAuthorizationFile] = useState(null);
+  const [medicalDocument, setMedicalDocument] = useState(null);
+  const [medicalUploadError, setMedicalUploadError] = useState("");
+  const [medicalUploadSuccess, setMedicalUploadSuccess] = useState("");
+  const [medicalUploading, setMedicalUploading] = useState(false);
+  const medicalFileInputRef = useRef(null);
   const [visitSummaryOpen, setVisitSummaryOpen] = useState(false);
   const [bookingStep, setBookingStep] = useState(1);
   const [detailsDismissed, setDetailsDismissed] = useState(false);
@@ -537,6 +558,42 @@ export function AppointmentsPage() {
     setVisitSummaryOpen(false);
   }
 
+  async function uploadMedicalDocument(file) {
+    if (!file) return;
+    setMedicalUploadError("");
+    setMedicalUploadSuccess("");
+    if (medicalDocument?.id) {
+      await api.removeMedicalDocument(medicalDocument.id).catch(() => {});
+    }
+    setMedicalUploading(true);
+    try {
+      const response = await api.uploadMedicalDocument(file);
+      setMedicalDocument({
+        ...response.document,
+        name: response.document?.name || file.name,
+        mimeType: response.document?.mimeType || file.type,
+        size: response.document?.size || file.size,
+      });
+      setMedicalUploadSuccess(response.message || "Medical document saved for your dentist to review.");
+    } catch (uploadError) {
+      setMedicalDocument(null);
+      setMedicalUploadError(uploadError.message || "Unable to save the medical document.");
+    } finally {
+      setMedicalUploading(false);
+      if (medicalFileInputRef.current) medicalFileInputRef.current.value = "";
+    }
+  }
+
+  async function removeMedicalDocument() {
+    if (medicalDocument?.id) {
+      await api.removeMedicalDocument(medicalDocument.id).catch(() => {});
+    }
+    setMedicalDocument(null);
+    setMedicalUploadError("");
+    setMedicalUploadSuccess("");
+    if (medicalFileInputRef.current) medicalFileInputRef.current.value = "";
+  }
+
   async function confirmAppointment(event) {
     event.preventDefault();
     if (!visitSummaryOpen || isBusy) return;
@@ -566,6 +623,7 @@ export function AppointmentsPage() {
         notes: [form.notes, optionNote].filter(Boolean).join("\n"),
         forPatientUserId: form.forPatientUserId || undefined,
         authorizationDocumentId,
+        medicalDocumentId: medicalDocument?.id || undefined,
       });
       setSuccess(
         `${response.appointment.treatment} was submitted for ${displayDate(response.appointment.date)}.`
@@ -583,6 +641,9 @@ export function AppointmentsPage() {
       }));
       setDetailsDismissed(false);
       setAuthorizationFile(null);
+      setMedicalDocument(null);
+      setMedicalUploadError("");
+      setMedicalUploadSuccess("");
       setVisitSummaryOpen(false);
       setBookingStep(1);
       await load();
@@ -1012,6 +1073,66 @@ export function AppointmentsPage() {
               />
             </label>
 
+            <section className="booking-medical-docs">
+              <div className="card-heading">
+                <div>
+                  <span className="eyebrow">Optional</span>
+                  <h3>Medical Documents (Optional)</h3>
+                </div>
+              </div>
+              <p>
+                Do you have a medical clearance, physician&apos;s certificate, or other important document
+                related to your dental treatment? You may upload it here for your dentist to review.
+              </p>
+              <p className="muted">
+                Examples: medical clearance for dental treatment, physician&apos;s certificate, or other
+                relevant medical documents. Uploading is optional. Your dentist may request additional
+                documentation if clinically necessary.
+              </p>
+              <p className="muted">Accepted files: PDF, JPG, or PNG — up to 5 MB.</p>
+              <input
+                ref={medicalFileInputRef}
+                className="booking-medical-docs__input"
+                type="file"
+                accept=".pdf,image/jpeg,image/png,.jpg,.jpeg,.png"
+                onChange={(event) => uploadMedicalDocument(event.target.files?.[0] || null)}
+              />
+              <div className="booking-medical-docs__actions">
+                <button
+                  type="button"
+                  className="button button--secondary"
+                  disabled={medicalUploading}
+                  onClick={() => medicalFileInputRef.current?.click()}
+                >
+                  <FileUp size={16} /> {medicalUploading ? "Uploading…" : "Upload Document"}
+                </button>
+                {medicalDocument ? (
+                  <button type="button" className="button button--secondary" onClick={removeMedicalDocument}>
+                    <X size={16} /> Remove
+                  </button>
+                ) : null}
+              </div>
+              {medicalDocument ? (
+                <p className="booking-medical-docs__file" role="status">
+                  <strong>{medicalDocument.name}</strong>
+                  <small>
+                    {fileKindLabel(medicalDocument.name, medicalDocument.mimeType)} ·{" "}
+                    {formatFileSize(medicalDocument.size)}
+                  </small>
+                </p>
+              ) : null}
+              {medicalUploadSuccess ? (
+                <p className="inline-alert inline-alert--success">
+                  <Check size={17} /> {medicalUploadSuccess}
+                </p>
+              ) : null}
+              {medicalUploadError ? (
+                <p className="inline-alert inline-alert--error" role="alert">
+                  {medicalUploadError}
+                </p>
+              ) : null}
+            </section>
+
             <div className="booking-step-actions booking-step-actions--coverage">
               <button type="button" className="button button--secondary" onClick={() => goToBookingStep(2)}>
                 <ChevronLeft size={16} /> Back
@@ -1088,6 +1209,14 @@ export function AppointmentsPage() {
                             ? `HMO coverage · ${form.hmoProvider}`
                             : "HMO coverage"
                           : "Out of pocket"}
+                      </strong>
+                    </div>
+                    <div className="booking-summary__line">
+                      <span>Document</span>
+                      <strong>
+                        {medicalDocument
+                          ? `Attached · ${medicalDocument.name}`
+                          : "None attached"}
                       </strong>
                     </div>
                   </div>

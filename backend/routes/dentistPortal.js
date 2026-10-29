@@ -1,8 +1,11 @@
 "use strict";
 
 const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
 const bcrypt = require("bcrypt");
 const express = require("express");
+const medicalDocuments = require("../services/medicalDocuments");
 const clinicalPatients = require("../services/clinicalPatients");
 const dentalWellness = require("../services/dentalWellness");
 const dentalChartSync = require("../services/dentalChartSync");
@@ -488,7 +491,13 @@ function requireDentistAccount(db) {
   };
 }
 
-function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, notifyDentist = async () => {} }) {
+function createDentistPortalRouter({
+  db,
+  authenticateToken,
+  clinicSms = null,
+  notifyDentist = async () => {},
+  uploadDirectory = path.join(process.cwd(), "uploads", "patient-portal"),
+}) {
   const router = express.Router();
   router.use(authenticateToken, requireDentistAccount(db));
   void notifyDentist;
@@ -1995,6 +2004,184 @@ function createDentistPortalRouter({ db, authenticateToken, clinicSms = null, no
       }
       console.error("Dentist patient x-rays error:", error.message);
       return res.status(500).json({ message: "Unable to load patient X-rays." });
+    }
+  });
+
+  router.get("/patients/:id/medical-documents", async (req, res) => {
+    const recordId = Number.parseInt(req.params.id, 10);
+    if (!Number.isSafeInteger(recordId) || recordId <= 0) {
+      return res.status(400).json({ message: "A valid patient record ID is required." });
+    }
+
+    try {
+      const detail = await clinicalPatients.getClinicalRecord(db, recordId);
+      if (!detail || detail.record.archived) {
+        return res.status(404).json({ message: "Patient record not found." });
+      }
+      const linkedUserId = detail.record.linkedUserId;
+      if (!linkedUserId) {
+        return res.json({
+          documents: [],
+          message: "No linked patient portal account — medical documents appear after the patient registers.",
+        });
+      }
+
+      let result;
+      try {
+        result = await db.query(
+          `SELECT
+             document.id,
+             document.original_name,
+             document.mime_type,
+             document.byte_size,
+             document.created_at,
+             document.category,
+             document.status,
+             document.reviewed_at,
+             document.reviewed_by_name,
+             document.appointment_id,
+             appointment.service_name,
+             appointment.appointment_date,
+             appointment.appointment_time
+           FROM patient_portal_documents AS document
+           LEFT JOIN patient_portal_appointments AS appointment
+             ON appointment.id = document.appointment_id
+           WHERE document.user_id = $1
+             AND document.document_type = $2
+           ORDER BY document.created_at DESC`,
+          [String(linkedUserId), medicalDocuments.DOCUMENT_TYPE]
+        );
+      } catch (schemaError) {
+        if (schemaError.code !== "42703") throw schemaError;
+        result = await db.query(
+          `SELECT id, original_name, mime_type, byte_size, created_at
+           FROM patient_portal_documents
+           WHERE user_id = $1
+             AND document_type = $2
+           ORDER BY created_at DESC`,
+          [String(linkedUserId), medicalDocuments.DOCUMENT_TYPE]
+        );
+      }
+
+      return res.json({
+        documents: result.rows.map((row) => medicalDocuments.mapMedicalDocument(row)),
+        disclaimer:
+          "Uploaded files are supporting documentation only. Reviewing a file does not automatically grant medical clearance.",
+      });
+    } catch (error) {
+      if (clinicalPatients.isMissingRelation(error)) {
+        return res.status(503).json({
+          message: "Clinical patient records are not available. Run npm run migrate:clinical-records.",
+        });
+      }
+      console.error("Dentist medical documents error:", error.message);
+      return res.status(500).json({ message: "Unable to load medical documents." });
+    }
+  });
+
+  router.get("/patients/:id/medical-documents/:documentId/download", async (req, res) => {
+    const recordId = Number.parseInt(req.params.id, 10);
+    if (!Number.isSafeInteger(recordId) || recordId <= 0) {
+      return res.status(400).json({ message: "A valid patient record ID is required." });
+    }
+
+    try {
+      const detail = await clinicalPatients.getClinicalRecord(db, recordId);
+      if (!detail || detail.record.archived || !detail.record.linkedUserId) {
+        return res.status(404).json({ message: "Document not found." });
+      }
+
+      const result = await db.query(
+        `SELECT original_name, stored_name, mime_type
+         FROM patient_portal_documents
+         WHERE id = $1
+           AND user_id = $2
+           AND document_type = $3
+         LIMIT 1`,
+        [req.params.documentId, String(detail.record.linkedUserId), medicalDocuments.DOCUMENT_TYPE]
+      );
+      if (!result.rows.length) {
+        return res.status(404).json({ message: "Document not found." });
+      }
+
+      const document = result.rows[0];
+      const filePath = medicalDocuments.resolveStoredPath(uploadDirectory, document.stored_name);
+      if (!filePath || !fs.existsSync(filePath)) {
+        return res.status(404).json({ message: "Document file is unavailable." });
+      }
+
+      const safeName = String(document.original_name || "medical-document").replace(/[\r\n"]/g, "");
+      const mime = medicalDocuments.ALLOWED_MIME.has(String(document.mime_type || "").toLowerCase())
+        ? document.mime_type
+        : "application/octet-stream";
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Cache-Control", "private, no-store");
+      res.setHeader("Content-Type", mime);
+      res.setHeader("Content-Disposition", `attachment; filename="${safeName}"`);
+      return res.sendFile(filePath);
+    } catch (error) {
+      console.error("Dentist medical document download error:", error.message);
+      return res.status(500).json({ message: "Unable to download the medical document." });
+    }
+  });
+
+  router.patch("/patients/:id/medical-documents/:documentId", async (req, res) => {
+    const recordId = Number.parseInt(req.params.id, 10);
+    if (!Number.isSafeInteger(recordId) || recordId <= 0) {
+      return res.status(400).json({ message: "A valid patient record ID is required." });
+    }
+    if (String(req.body?.status || "").toLowerCase() !== "reviewed") {
+      return res.status(400).json({ message: "Only a reviewed status can be recorded for this document." });
+    }
+
+    try {
+      const detail = await clinicalPatients.getClinicalRecord(db, recordId);
+      if (!detail || detail.record.archived || !detail.record.linkedUserId) {
+        return res.status(404).json({ message: "Document not found." });
+      }
+
+      const reviewerName = `${req.dentist?.first_name || ""} ${req.dentist?.last_name || ""}`.trim() || "Dentist";
+      let result;
+      try {
+        result = await db.query(
+          `UPDATE patient_portal_documents
+           SET status = 'reviewed',
+               reviewed_at = CURRENT_TIMESTAMP,
+               reviewed_by = $1,
+               reviewed_by_name = $2
+           WHERE id = $3
+             AND user_id = $4
+             AND document_type = $5
+           RETURNING *`,
+          [
+            String(req.dentist.id),
+            reviewerName,
+            req.params.documentId,
+            String(detail.record.linkedUserId),
+            medicalDocuments.DOCUMENT_TYPE,
+          ]
+        );
+      } catch (schemaError) {
+        if (schemaError.code === "42703") {
+          return res.status(503).json({
+            message: "Medical document review is not available. Run npm run migrate:patient-medical-documents.",
+          });
+        }
+        throw schemaError;
+      }
+
+      if (!result.rows.length) {
+        return res.status(404).json({ message: "Document not found." });
+      }
+
+      return res.json({
+        document: medicalDocuments.mapMedicalDocument(result.rows[0]),
+        message:
+          "Marked as reviewed. This records that the file was seen; it does not automatically grant medical clearance.",
+      });
+    } catch (error) {
+      console.error("Dentist medical document review error:", error.message);
+      return res.status(500).json({ message: "Unable to update the medical document." });
     }
   });
 

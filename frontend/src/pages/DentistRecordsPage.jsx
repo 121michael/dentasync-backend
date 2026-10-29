@@ -209,6 +209,9 @@ export function DentistRecordsPage() {
   const [ageSexForm, setAgeSexForm] = useState(emptyAgeSexForm);
   const [wellnessForm, setWellnessForm] = useState(emptyWellnessForm);
   const [savingWellness, setSavingWellness] = useState(false);
+  const [medicalDocuments, setMedicalDocuments] = useState([]);
+  const [medicalDocumentsMessage, setMedicalDocumentsMessage] = useState("");
+  const [medicalDocumentsBusy, setMedicalDocumentsBusy] = useState("");
   const treatmentFormRef = useRef(null);
   const focusHandledRef = useRef("");
   const focusedRowRef = useRef(null);
@@ -278,6 +281,14 @@ export function DentistRecordsPage() {
     const response = await api.getDentistPatient(patientId, { silent });
     setDetail(response);
     setWellnessForm(wellnessFormFromDetail(response));
+    try {
+      const documents = await api.getDentistMedicalDocuments(patientId, { silent: true });
+      setMedicalDocuments(documents.documents || []);
+      setMedicalDocumentsMessage(documents.message || documents.disclaimer || "");
+    } catch {
+      setMedicalDocuments([]);
+      setMedicalDocumentsMessage("");
+    }
     return response;
   }
 
@@ -1388,6 +1399,110 @@ export function DentistRecordsPage() {
                 <p className="muted-copy">No treatments on file yet.</p>
               )}
             </div>
+          </section>
+
+          <section className="glass-card dentist-medical-docs">
+            <div className="card-heading">
+              <div>
+                <span className="eyebrow">Supporting files</span>
+                <h2>Medical Documents</h2>
+              </div>
+            </div>
+            <p className="muted-copy">
+              Patient-uploaded medical clearance or related documents. Reviewing a file does not
+              automatically grant medical clearance.
+            </p>
+            {medicalDocuments.length ? (
+              <div className="table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Filename</th>
+                      <th>Category</th>
+                      <th>Uploaded</th>
+                      <th>Related visit</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {medicalDocuments.map((document) => (
+                      <tr key={document.id}>
+                        <td data-label="Filename">{document.name}</td>
+                        <td data-label="Category">{document.category || "Medical document"}</td>
+                        <td data-label="Uploaded">
+                          {document.uploadedAt
+                            ? new Intl.DateTimeFormat("en-US", {
+                                dateStyle: "medium",
+                                timeStyle: "short",
+                              }).format(new Date(document.uploadedAt))
+                            : "—"}
+                        </td>
+                        <td data-label="Related visit">
+                          {document.appointment?.service
+                            ? `${document.appointment.service}${
+                                document.appointment.date ? ` · ${formatDentistDate(document.appointment.date)}` : ""
+                              }`
+                            : "Not linked yet"}
+                        </td>
+                        <td className="status-text" data-label="Status">
+                          {document.status === "reviewed"
+                            ? `Reviewed${document.reviewedByName ? ` by ${document.reviewedByName}` : ""}`
+                            : "Uploaded"}
+                        </td>
+                        <td data-label="Actions">
+                          <div className="treatment-record__actions">
+                            <button
+                              type="button"
+                              className="button button--secondary button--compact"
+                              onClick={() =>
+                                api.downloadDentistMedicalDocument(detail.patient.id, document).catch((downloadError) => {
+                                  setError(downloadError.message);
+                                })
+                              }
+                            >
+                              View / Download
+                            </button>
+                            {document.status !== "reviewed" ? (
+                              <button
+                                type="button"
+                                className="button button--secondary button--compact"
+                                disabled={medicalDocumentsBusy === document.id}
+                                onClick={async () => {
+                                  setMedicalDocumentsBusy(document.id);
+                                  try {
+                                    const response = await api.reviewDentistMedicalDocument(
+                                      detail.patient.id,
+                                      document.id
+                                    );
+                                    setMedicalDocuments((current) =>
+                                      current.map((item) =>
+                                        item.id === document.id ? response.document : item
+                                      )
+                                    );
+                                    setSuccess(response.message);
+                                  } catch (reviewError) {
+                                    setError(reviewError.message);
+                                  } finally {
+                                    setMedicalDocumentsBusy("");
+                                  }
+                                }}
+                              >
+                                Mark reviewed
+                              </button>
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="muted-copy">
+                {medicalDocumentsMessage || "No medical documents have been uploaded for this patient."}
+              </p>
+            )}
           </section>
 
           <ProcedureAuthorizationPanel
