@@ -110,6 +110,9 @@ export const LANDING_NAV = [
   { id: "contact", label: "Contact Us" },
 ];
 
+/** Existing auth page, then patient booking once the visitor is signed in. */
+export const BOOK_APPOINTMENT_HREF = "/login?next=/appointments/book";
+
 export const PORTAL_FEATURES = [
   "Effortless appointment planning",
   "Secure treatment record access",
@@ -337,7 +340,7 @@ export function LandingHeader({ activeId, onNavigate }) {
   useEffect(() => {
     if (!menuOpen) return undefined;
     const closeOnEscape = (event) => event.key === "Escape" && setMenuOpen(false);
-    const closeOnDesktop = () => window.innerWidth > 900 && setMenuOpen(false);
+    const closeOnDesktop = () => window.innerWidth > 1080 && setMenuOpen(false);
     window.addEventListener("keydown", closeOnEscape);
     window.addEventListener("resize", closeOnDesktop);
     return () => {
@@ -376,18 +379,12 @@ export function LandingHeader({ activeId, onNavigate }) {
         </nav>
         <div className="landing-header__actions">
           <Link
-            to="/login"
-            className="landing-header__signin"
-            onClick={() => setMenuOpen(false)}
-          >
-            Sign in
-          </Link>
-          <Link
-            to="/register"
+            to={BOOK_APPOINTMENT_HREF}
             className="landing-button landing-button--gold landing-header__cta"
             onClick={() => setMenuOpen(false)}
           >
-            Create Account
+            <CalendarClock size={16} aria-hidden="true" />
+            Book an Appointment
           </Link>
           <button
             type="button"
@@ -595,16 +592,9 @@ function LandingServicePanel({ service, open, onClose }) {
           <p className="landing-service-detail__how">
             Review this information first. Book a consultation when you are ready — existing patients can sign in, and new patients can create an account on the same page.
           </p>
-          <Link to="/register" className="landing-button landing-button--gold" onClick={requestClose}>
-            Book a Consultation <ArrowRight size={17} aria-hidden="true" />
+          <Link to={BOOK_APPOINTMENT_HREF} className="landing-button landing-button--gold" onClick={requestClose}>
+            Book an Appointment <ArrowRight size={17} aria-hidden="true" />
           </Link>
-          <p className="landing-service-detail__how">
-            Already have an account?{" "}
-            <Link to="/login" onClick={requestClose}>
-              Sign in
-            </Link>{" "}
-            to continue. Sign in and Create Account share the same page.
-          </p>
         </div>
       </aside>
     </div>,
@@ -1021,8 +1011,8 @@ export function ContactSection({ clinic, status, onRetry }) {
               Contact details will appear here once the clinic publishes them.
             </p>
           )}
-          <Link to="/register" className="landing-button landing-button--gold">
-            Create Account <ArrowRight size={17} aria-hidden="true" />
+          <Link to={BOOK_APPOINTMENT_HREF} className="landing-button landing-button--gold">
+            Book an Appointment <ArrowRight size={17} aria-hidden="true" />
           </Link>
         </div>
       </div>

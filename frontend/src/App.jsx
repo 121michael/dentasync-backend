@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { BrowserRouter, Navigate, Outlet, Route, Routes, useNavigate, useSearchParams } from "react-router-dom";
+import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { AuthProvider } from "./auth";
 import { LoadingState } from "./components/UI";
 import { GlobalLoadingOverlay } from "./components/GlobalLoadingOverlay";
@@ -76,8 +76,13 @@ function landingRoute(user) {
 
 function RequireAuthenticated() {
   const { user, isLoading } = useAuth();
+  const location = useLocation();
   if (isLoading) return <LoadingState label="Opening your secure clinic session" />;
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) {
+    const next = `${location.pathname}${location.search}`;
+    const search = next.startsWith("/") && !next.startsWith("//") ? `?next=${encodeURIComponent(next)}` : "";
+    return <Navigate to={`/login${search}`} replace />;
+  }
   return <Outlet />;
 }
 

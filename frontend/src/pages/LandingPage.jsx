@@ -28,7 +28,7 @@ export function LandingPage() {
         <div className="auth-page__glow auth-page__glow--one" />
         <div className="auth-page__glow auth-page__glow--two" />
         <section className="auth-showcase">
-          <div className="auth-showcase__copy">
+          <div className="auth-showcase__copy landing-hero__copy">
             <span className="eyebrow">Private dental care, beautifully connected</span>
             <h1
               className="auth-showcase__tagline"

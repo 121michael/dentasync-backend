@@ -11124,11 +11124,13 @@ body.is-queue-display .fab-menu {
   position: sticky;
   top: 0;
   z-index: 60;
+  isolation: isolate;
   padding-top: env(safe-area-inset-top, 0px);
   color: #f8f3ff;
-  background: var(--lp-plum-900);
-  border-bottom: 1px solid rgba(215, 184, 137, 0.18);
-  box-shadow: 0 8px 24px rgba(23, 10, 39, 0.18);
+  background: color-mix(in srgb, var(--lp-plum-900) 94%, #000 6%);
+  border-bottom: 1px solid rgba(215, 184, 137, 0.22);
+  box-shadow: 0 10px 28px rgba(23, 10, 39, 0.16);
+  backdrop-filter: blur(16px);
 }
 
 .landing-header__bar {
@@ -11170,12 +11172,14 @@ body.is-queue-display .fab-menu {
   align-items: center;
   height: 40px;
   padding: 0 0.8rem;
-  color: rgba(248, 243, 255, 0.74);
+  color: rgba(248, 243, 255, 0.78);
   font-size: 0.86rem;
   font-weight: 600;
+  letter-spacing: 0.01em;
   text-decoration: none;
   white-space: nowrap;
-  transition: color 180ms ease;
+  border-radius: 10px;
+  transition: color 180ms ease, background-color 180ms ease;
 }
 
 .landing-header__nav a::after {
@@ -11195,6 +11199,7 @@ body.is-queue-display .fab-menu {
 .landing-header__nav a:hover,
 .landing-header__nav a.is-active {
   color: #fff;
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .landing-header__nav a:hover::after,
@@ -11296,9 +11301,23 @@ body.is-queue-display .fab-menu {
 }
 
 .landing-header__cta {
-  min-height: 40px;
-  padding: 0 1.1rem;
-  font-size: 0.82rem;
+  min-height: 42px;
+  padding: 0 1.15rem;
+  font-size: 0.8rem;
+  letter-spacing: 0.02em;
+  box-shadow: 0 6px 16px rgba(169, 131, 77, 0.22);
+}
+
+.landing-header__cta:hover {
+  transform: translateY(-1px);
+  background: #e4c9a0;
+  box-shadow: 0 10px 22px rgba(169, 131, 77, 0.3);
+}
+
+.landing-header__cta:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px rgba(215, 184, 137, 0.45);
 }
 
 /* Hero + existing auth panel */
@@ -11357,9 +11376,8 @@ body.is-queue-display .fab-menu {
   max-width: 440px;
   margin: 0;
   color: rgba(248, 241, 255, 0.76);
-  font-size: 1rem;
-  line-height: 1.7;
-  animation: landing-rise 520ms var(--lp-ease) 90ms both;
+  font-size: 1.02rem;
+  line-height: 1.75;
 }
 
 .landing-hero__scroll {
@@ -11499,12 +11517,14 @@ body.is-queue-display .fab-menu {
 
 .landing-section--ivory {
   color: var(--lp-ink);
-  background: var(--lp-ivory);
+  background:
+    linear-gradient(180deg, #f3ece4 0%, var(--lp-ivory) 48px, var(--lp-ivory) 100%);
 }
 
 .landing-section--plum {
   color: #f6f0fb;
-  background: var(--lp-plum-800);
+  background:
+    linear-gradient(180deg, #221033 0%, var(--lp-plum-800) 56px, #241136 100%);
 }
 
 .landing-section__inner {
@@ -11558,8 +11578,8 @@ body.is-queue-display .fab-menu {
   font-family: var(--lp-serif);
   font-size: clamp(2rem, 3.4vw, 2.9rem);
   font-weight: 500;
-  letter-spacing: -0.015em;
-  line-height: 1.1;
+  letter-spacing: -0.02em;
+  line-height: 1.12;
   overflow-wrap: break-word;
 }
 
@@ -11576,12 +11596,21 @@ body.is-queue-display .fab-menu {
 
 .landing--reveal-ready [data-reveal]:not(.is-revealed) {
   opacity: 0;
-  transform: translateY(14px);
+  transform: translateY(12px);
 }
 
 .landing [data-reveal] {
-  transition: opacity 300ms ease, transform 300ms var(--lp-ease);
+  transition: opacity 420ms var(--lp-ease), transform 420ms var(--lp-ease);
 }
+
+.landing-hero__copy > * {
+  animation: landing-rise 640ms var(--lp-ease) both;
+}
+
+.landing-hero__copy > :nth-child(1) { animation-delay: 40ms; }
+.landing-hero__copy > :nth-child(2) { animation-delay: 120ms; }
+.landing-hero__copy > :nth-child(3) { animation-delay: 200ms; }
+.landing-hero__copy > :nth-child(4) { animation-delay: 280ms; }
 
 /* Shared status, skeleton, panel */
 .landing-status {
@@ -11717,6 +11746,11 @@ body.is-queue-display .fab-menu {
   align-items: baseline;
   padding: 1.2rem 0;
   border-bottom: 1px solid var(--lp-line);
+  transition: padding-left 220ms var(--lp-ease);
+}
+
+.landing-about__pillars li:hover {
+  padding-left: 0.35rem;
 }
 
 .landing-about__numeral {
@@ -11902,7 +11936,12 @@ body.is-queue-display .fab-menu {
 
 .landing-carousel__card:hover {
   border-color: rgba(215, 184, 137, 0.5);
-  transform: translateY(-2px);
+  transform: translateY(-3px);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.landing-carousel__card:hover .landing-service-card__photo {
+  transform: scale(1.03);
 }
 
 .landing-carousel__card.is-active {
@@ -11943,6 +11982,7 @@ body.is-queue-display .fab-menu {
   height: 100%;
   object-fit: cover;
   object-position: center;
+  transition: transform 420ms var(--lp-ease);
 }
 
 .landing-service-card__photo.is-contain {
@@ -12698,25 +12738,6 @@ body.is-queue-display .fab-menu {
   outline-offset: 2px;
 }
 
-.landing-header__signin {
-  padding: 0.5rem 0.75rem;
-  border-radius: 10px;
-  color: rgba(255, 255, 255, 0.86);
-  font-size: 0.86rem;
-  font-weight: 650;
-  text-decoration: none;
-  transition: color 160ms ease;
-}
-
-.landing-header__signin:hover {
-  color: var(--lp-gold);
-}
-
-.landing-header__signin:focus-visible {
-  outline: 2px solid var(--lp-gold);
-  outline-offset: 2px;
-}
-
 @media (max-width: 860px) {
   .auth-screen__body {
     grid-template-columns: minmax(0, 1fr);
@@ -12949,6 +12970,11 @@ body.is-queue-display .fab-menu {
   align-items: center;
   padding: 1rem 0;
   border-bottom: 1px solid var(--lp-line-dark);
+  transition: transform 200ms var(--lp-ease);
+}
+
+.landing-contact__list li:hover {
+  transform: translateX(2px);
 }
 
 .landing-contact__list svg {
@@ -12993,10 +13019,10 @@ body.is-queue-display .fab-menu {
 
 /* Footer */
 .landing-footer {
-  padding: 2rem 0 calc(2rem + env(safe-area-inset-bottom, 0px));
+  padding: 2.15rem 0 calc(2.15rem + env(safe-area-inset-bottom, 0px));
   color: rgba(246, 240, 251, 0.72);
   background: var(--lp-plum-950);
-  border-top: 1px solid var(--lp-line-dark);
+  border-top: 1px solid rgba(215, 184, 137, 0.16);
 }
 
 .landing-footer__inner {
@@ -13102,7 +13128,7 @@ body.is-queue-display .fab-menu {
   }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1080px) {
   .landing-header__toggle {
     display: grid;
   }
@@ -13191,12 +13217,14 @@ body.is-queue-display .fab-menu {
   }
   .landing-header__cta {
     min-height: 38px;
-    padding: 0 0.9rem;
-    font-size: 0.78rem;
+    max-width: min(58vw, 13.5rem);
+    padding: 0 0.7rem;
+    font-size: 0.72rem;
+    white-space: nowrap;
   }
-  .landing-header__signin {
-    padding: 0.45rem 0.5rem;
-    font-size: 0.8rem;
+  .landing-header__cta svg {
+    width: 14px;
+    height: 14px;
   }
   .landing-header__toggle {
     width: 38px;

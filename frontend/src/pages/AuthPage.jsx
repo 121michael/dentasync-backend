@@ -59,6 +59,12 @@ export function AuthPage() {
     return next;
   }
 
+  function authHref(path) {
+    const next = safeNextPath();
+    if (!next) return path;
+    return `${path}?next=${encodeURIComponent(next)}`;
+  }
+
   useEffect(() => {
     if (screen === "otp") {
       document.getElementById("otp-code")?.focus();
@@ -202,7 +208,7 @@ export function AuthPage() {
         setPendingOtp(null);
         setScreen("form");
         setForm((current) => ({ ...current, password: "", otp: "" }));
-        navigate("/login", {
+        navigate(authHref("/login"), {
           state: {
             authNotice:
               response.message ||
@@ -212,7 +218,9 @@ export function AuthPage() {
         return;
       }
       startSession(response.token, response.user);
-      navigate(response.redirectTo || "/dashboard");
+      const nextPath = safeNextPath();
+      const role = String(response.user?.role || "").toLowerCase();
+      navigate(role === "patient" && nextPath ? nextPath : response.redirectTo || "/dashboard");
     } catch (error) {
       setMessage(error.message);
     } finally {
@@ -418,7 +426,7 @@ export function AuthPage() {
           </button>
           <p className="auth-switch">
             {isRegistration ? "Already have an account?" : "New to Amethyst Dental?"}{" "}
-            <Link to={isRegistration ? "/login" : "/register"}>
+            <Link to={isRegistration ? authHref("/login") : authHref("/register")}>
               {isRegistration ? "Sign in" : "Create an account"}
             </Link>
           </p>
@@ -479,10 +487,10 @@ export function AuthPage() {
           <section className="auth-panel auth-screen__panel" aria-label={isRegistration ? "Create your account" : "Sign in"}>
             {screen !== "otp" ? (
               <nav className="auth-tabs" aria-label="Account access">
-                <Link to="/login" className={isRegistration ? "" : "is-active"} aria-current={isRegistration ? undefined : "page"}>
+                <Link to={authHref("/login")} className={isRegistration ? "" : "is-active"} aria-current={isRegistration ? undefined : "page"}>
                   Sign in
                 </Link>
-                <Link to="/register" className={isRegistration ? "is-active" : ""} aria-current={isRegistration ? "page" : undefined}>
+                <Link to={authHref("/register")} className={isRegistration ? "is-active" : ""} aria-current={isRegistration ? "page" : undefined}>
                   Create account
                 </Link>
               </nav>
