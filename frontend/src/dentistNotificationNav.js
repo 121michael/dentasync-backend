@@ -48,5 +48,13 @@ export function getDentistNotificationTarget(notification) {
     };
   }
 
+  if (type === "document" || entityType === "document") {
+    return {
+      targetPage: "patient-records",
+      path: "/dentist/patient-records",
+      label: "View patient records",
+    };
+  }
+
   return null;
 }

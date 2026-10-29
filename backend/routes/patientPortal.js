@@ -2115,6 +2115,11 @@ function createPatientPortalRouter({
       });
     }
 
+    const description = medicalDocuments.sanitizeDocumentDescription(
+      req.body?.description || req.body?.documentDescription,
+      documentType.label
+    );
+
     const documentId = crypto.randomUUID();
     const userId = userIdFor(req);
     const values = [
@@ -2125,7 +2130,7 @@ function createPatientPortalRouter({
       req.file.filename,
       req.file.mimetype,
       req.file.size,
-      documentType.label,
+      description,
       "uploaded",
     ];
 
@@ -2160,10 +2165,11 @@ function createPatientPortalRouter({
         message: "Medical document saved for your dentist to review.",
         document: {
           id: documentId,
-          name: req.file.originalname,
+          name: description,
+          filename: req.file.originalname,
           mimeType: req.file.mimetype,
           size: req.file.size,
-          category: documentType.label,
+          category: description,
           documentType: documentType.id,
           status: "uploaded",
         },

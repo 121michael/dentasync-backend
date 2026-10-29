@@ -185,10 +185,11 @@ export const api = {
     data.append("file", file);
     return request("/patient/uploads/hmo-authorization", { method: "POST", body: data });
   },
-  uploadMedicalDocument: (file, category) => {
+  uploadMedicalDocument: (file, category, description) => {
     const data = new FormData();
     data.append("file", file);
     if (category) data.append("category", category);
+    if (description) data.append("description", description);
     return request("/patient/uploads/medical-document", { method: "POST", body: data, silent: true });
   },
   removeMedicalDocument: (documentId) =>
@@ -319,7 +320,7 @@ export const api = {
   downloadDentistMedicalDocument: (patientId, document) =>
     download(
       `/dentist/patients/${patientId}/medical-documents/${document.id}/download`,
-      document.name || "medical-document"
+      document.filename || document.name || "medical-document"
     ),
   reviewDentistMedicalDocument: (patientId, documentId) =>
     request(`/dentist/patients/${patientId}/medical-documents/${documentId}`, {

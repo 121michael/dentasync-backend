@@ -406,6 +406,7 @@ export function AppointmentsPage() {
   const [authorizationFile, setAuthorizationFile] = useState(null);
   const [medicalDocument, setMedicalDocument] = useState(null);
   const [medicalDocumentType, setMedicalDocumentType] = useState("");
+  const [medicalDocumentDescription, setMedicalDocumentDescription] = useState("");
   const [medicalUploadError, setMedicalUploadError] = useState("");
   const [medicalUploadSuccess, setMedicalUploadSuccess] = useState("");
   const [medicalUploading, setMedicalUploading] = useState(false);
@@ -620,20 +621,29 @@ export function AppointmentsPage() {
       if (medicalFileInputRef.current) medicalFileInputRef.current.value = "";
       return;
     }
+    const description =
+      medicalDocumentDescription.trim() || selectedMedicalType?.label || "";
+    if (!description) {
+      setMedicalUploadError("Enter a short description for this file, such as Medical Clearance.");
+      if (medicalFileInputRef.current) medicalFileInputRef.current.value = "";
+      return;
+    }
     if (medicalDocument?.id) {
       await api.removeMedicalDocument(medicalDocument.id).catch(() => {});
     }
     setMedicalUploading(true);
     try {
-      const response = await api.uploadMedicalDocument(file, medicalDocumentType);
+      const response = await api.uploadMedicalDocument(file, medicalDocumentType, description);
       setMedicalDocument({
         ...response.document,
-        name: response.document?.name || file.name,
+        name: response.document?.name || description,
+        filename: response.document?.filename || file.name,
         mimeType: response.document?.mimeType || file.type,
         size: response.document?.size || file.size,
-        category: response.document?.category || selectedMedicalType?.label,
+        category: response.document?.category || description,
         documentType: response.document?.documentType || medicalDocumentType,
       });
+      setMedicalDocumentDescription(response.document?.name || description);
       setMedicalUploadSuccess(response.message || "Medical document saved for your dentist to review.");
     } catch (uploadError) {
       setMedicalDocument(null);
@@ -1220,8 +1230,17 @@ export function AppointmentsPage() {
                 <select
                   value={medicalDocumentType}
                   onChange={(event) => {
+                    const nextType = event.target.value;
+                    const next = medicalDocumentTypes.find((item) => item.id === nextType);
+                    const previous = medicalDocumentTypes.find((item) => item.id === medicalDocumentType);
                     setMedicalUploadError("");
-                    setMedicalDocumentType(event.target.value);
+                    setMedicalDocumentType(nextType);
+                    setMedicalDocumentDescription((current) => {
+                      if (!current.trim() || current.trim() === previous?.label) {
+                        return next?.label || "";
+                      }
+                      return current;
+                    });
                   }}
                   required
                 >
@@ -1236,6 +1255,19 @@ export function AppointmentsPage() {
                   {selectedMedicalType?.description ||
                     "Choose the option that best describes the file. Uploading remains optional."}
                 </small>
+              </label>
+              <label className="field booking-medical-docs__type">
+                <span>Document description</span>
+                <input
+                  value={medicalDocumentDescription}
+                  onChange={(event) => {
+                    setMedicalUploadError("");
+                    setMedicalDocumentDescription(event.target.value);
+                  }}
+                  maxLength={160}
+                  placeholder="e.g. Medical Clearance"
+                />
+                <small>Your dentist will see this name in Uploaded Files on the patient record.</small>
               </label>
               <input
                 ref={medicalFileInputRef}
@@ -1263,9 +1295,12 @@ export function AppointmentsPage() {
                 <p className="booking-medical-docs__file" role="status">
                   <strong>{medicalDocument.name}</strong>
                   <small>
-                    {medicalDocument.category || selectedMedicalType?.label || "Uncategorized"} ·{" "}
-                    {fileKindLabel(medicalDocument.name, medicalDocument.mimeType)} ·{" "}
-                    {formatFileSize(medicalDocument.size)}
+                    {medicalDocument.filename || "File attached"} ·{" "}
+                    {fileKindLabel(
+                      medicalDocument.filename || medicalDocument.name,
+                      medicalDocument.mimeType
+                    )}{" "}
+                    · {formatFileSize(medicalDocument.size)}
                   </small>
                 </p>
               ) : null}
@@ -1364,9 +1399,7 @@ export function AppointmentsPage() {
                       <strong>
                         {medicalDocument
                           ? `Attached · ${medicalDocument.name}${
-                              medicalDocument.category || selectedMedicalType?.label
-                                ? ` · ${medicalDocument.category || selectedMedicalType.label}`
-                                : ""
+                              medicalDocument.filename ? ` · ${medicalDocument.filename}` : ""
                             }`
                           : "None attached"}
                       </strong>

@@ -205,6 +205,7 @@ function PortalRoutes() {
           <Route path="/dentist/queue" element={<DentistQueuePage />} />
           <Route path="/dentist/appointments" element={<DentistAppointmentsPage />} />
           <Route path="/dentist/patient-records" element={<DentistRecordsPage />} />
+          <Route path="/dentist/patient-records/:patientId" element={<DentistRecordsPage />} />
           <Route path="/dentist/notifications" element={<DentistNotificationsPage />} />
           <Route path="/dentist/profile" element={<DentistProfilePage />} />
         </Route>

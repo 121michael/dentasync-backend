@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Plus, Search } from "lucide-react";
-import { useSearchParams } from "react-router-dom";
+import { ArrowLeft, FolderOpen, Plus, Search } from "lucide-react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { DentalChart } from "../components/DentalChart";
 import {
@@ -184,6 +184,8 @@ function nextAppointmentLabel(treatment, fallbackAppointment, patient) {
 }
 
 export function DentistRecordsPage() {
+  const navigate = useNavigate();
+  const { patientId } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const [patients, setPatients] = useState(null);
   const [search, setSearch] = useState("");
@@ -212,6 +214,9 @@ export function DentistRecordsPage() {
   const [medicalDocuments, setMedicalDocuments] = useState([]);
   const [medicalDocumentsMessage, setMedicalDocumentsMessage] = useState("");
   const [medicalDocumentsBusy, setMedicalDocumentsBusy] = useState("");
+  const [filesOpen, setFilesOpen] = useState(() => searchParams.get("files") === "1");
+  const openFilesFromQuery = searchParams.get("files") === "1";
+  const filesSectionRef = useRef(null);
   const treatmentFormRef = useRef(null);
   const focusHandledRef = useRef("");
   const focusedRowRef = useRef(null);
@@ -228,8 +233,10 @@ export function DentistRecordsPage() {
   }, [applied]);
 
   useEffect(() => {
+    if (patientId) return undefined;
     load();
-  }, [load]);
+    return undefined;
+  }, [load, patientId]);
 
   useEffect(() => {
     const focusId = searchParams.get("focus");
@@ -241,12 +248,12 @@ export function DentistRecordsPage() {
     );
     focusHandledRef.current = focusId;
     if (match) {
-      viewPatient(match);
+      navigate(`/dentist/patient-records/${match.id}`);
     } else {
       api
         .getDentistPatient(focusId)
         .then((response) => {
-          if (response?.patient) viewPatient(response.patient);
+          if (response?.patient?.id) navigate(`/dentist/patient-records/${response.patient.id}`);
         })
         .catch(() => {});
     }
@@ -257,7 +264,7 @@ export function DentistRecordsPage() {
     next.delete("focus");
     setSearchParams(next, { replace: true });
     return () => window.clearTimeout(timer);
-  }, [searchParams, setSearchParams, patients]);
+  }, [searchParams, setSearchParams, patients, navigate]);
 
   async function createPatient(event) {
     event.preventDefault();
@@ -277,12 +284,12 @@ export function DentistRecordsPage() {
     }
   }
 
-  async function refreshPatientDetail(patientId, { silent = false } = {}) {
-    const response = await api.getDentistPatient(patientId, { silent });
+  const refreshPatientDetail = useCallback(async (recordId, { silent = false } = {}) => {
+    const response = await api.getDentistPatient(recordId, { silent });
     setDetail(response);
     setWellnessForm(wellnessFormFromDetail(response));
     try {
-      const documents = await api.getDentistMedicalDocuments(patientId, { silent: true });
+      const documents = await api.getDentistMedicalDocuments(recordId, { silent: true });
       setMedicalDocuments(documents.documents || []);
       setMedicalDocumentsMessage(documents.message || documents.disclaimer || "");
     } catch {
@@ -290,26 +297,46 @@ export function DentistRecordsPage() {
       setMedicalDocumentsMessage("");
     }
     return response;
+  }, []);
+
+  function openPatientRecord(patient) {
+    if (!patient?.id) return;
+    navigate(`/dentist/patient-records/${patient.id}`);
   }
 
-  async function viewPatient(patient) {
-    try {
-      setTreatmentForm(emptyTreatment);
-      setTreatmentDrafts([newProcedureDraft()]);
-      setActiveDraftIndex(0);
-      setProcedureErrors({});
-      setTreatmentFormOpen(false);
-      setEditingTreatmentId(null);
-      setEditSnapshot(null);
-      setDeleteTarget(null);
-      setAgeSexOpen(false);
-      setSavingWellness(false);
-      await refreshPatientDetail(patient.id);
-      setError("");
-    } catch (viewError) {
-      setError(viewError.message);
+  useEffect(() => {
+    if (!patientId) {
+      setDetail(null);
+      setMedicalDocuments([]);
+      setMedicalDocumentsMessage("");
+      return undefined;
     }
-  }
+    let cancelled = false;
+    setTreatmentForm(emptyTreatment);
+    setTreatmentDrafts([newProcedureDraft()]);
+    setActiveDraftIndex(0);
+    setProcedureErrors({});
+    setTreatmentFormOpen(false);
+    setEditingTreatmentId(null);
+    setEditSnapshot(null);
+    setDeleteTarget(null);
+    setAgeSexOpen(false);
+    setSavingWellness(false);
+    setFilesOpen(openFilesFromQuery);
+    refreshPatientDetail(patientId)
+      .then(() => {
+        if (!cancelled) setError("");
+      })
+      .catch((viewError) => {
+        if (!cancelled) {
+          setDetail(null);
+          setError(viewError.message);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [patientId, refreshPatientDetail, openFilesFromQuery]);
 
   function isProfileLocked(patient = detail?.patient) {
     return Boolean(patient?.profileLocked || patient?.accountLinked || patient?.linkedUserId);
@@ -626,7 +653,19 @@ export function DentistRecordsPage() {
 
   const toothRequired = procedureRequiresTooth(treatmentForm.name);
 
-  if (error && !patients) {
+  function toggleUploadedFiles() {
+    setFilesOpen((open) => {
+      const next = !open;
+      if (next) {
+        window.requestAnimationFrame(() => {
+          filesSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+      }
+      return next;
+    });
+  }
+
+  if (!patientId && error && !patients) {
     const needsMigration = /migrate:clinical-records/i.test(error);
     return (
       <ErrorState
@@ -639,10 +678,54 @@ export function DentistRecordsPage() {
       />
     );
   }
-  if (!patients) return <LoadingState label="Loading dental records vault…" />;
+  if (!patientId && !patients) return <LoadingState label="Loading dental records vault…" />;
+  if (patientId && !detail && error) {
+    return (
+      <div className="dentist-page">
+        <ErrorState message={error} onRetry={() => refreshPatientDetail(patientId)} />
+        <button
+          type="button"
+          className="button button--secondary"
+          onClick={() => navigate("/dentist/patient-records")}
+        >
+          <ArrowLeft size={16} /> Back to records
+        </button>
+      </div>
+    );
+  }
+  if (patientId && !detail) return <LoadingState label="Loading patient record…" />;
 
   return (
-    <div className="dentist-page">
+    <div className={`dentist-page${patientId ? " dentist-patient-record-page" : ""}`}>
+      {patientId && detail ? (
+        <SectionHeading
+          eyebrow="Shared patient record"
+          title={detail.patient.fullName || detail.patient.patientName || "Patient record"}
+          detail={`Patient ID ${detail.patient.patientId || detail.patient.recordCode || detail.patient.id}`}
+          action={
+            <div className="treatment-record__actions dentist-record-heading-actions">
+              <button
+                type="button"
+                className="button button--secondary"
+                onClick={() => navigate("/dentist/patient-records")}
+              >
+                <ArrowLeft size={16} /> Back
+              </button>
+              <button
+                type="button"
+                className={`button ${filesOpen ? "button--primary" : "button--secondary"}`}
+                aria-expanded={filesOpen}
+                onClick={toggleUploadedFiles}
+              >
+                <FolderOpen size={16} /> Uploaded Files
+                {medicalDocuments.length ? (
+                  <span className="uploaded-files-count">{medicalDocuments.length}</span>
+                ) : null}
+              </button>
+            </div>
+          }
+        />
+      ) : (
       <SectionHeading
         eyebrow="Clinical archive"
         title="Dental Records Vault"
@@ -653,10 +736,12 @@ export function DentistRecordsPage() {
           </button>
         }
       />
+      )}
 
       {error ? <p className="inline-alert inline-alert--error">{error}</p> : null}
       {success ? <p className="inline-alert inline-alert--success">{success}</p> : null}
 
+      {!patientId ? (
       <section className="dentist-panel">
         <form
           className="dentist-toolbar"
@@ -757,7 +842,7 @@ export function DentistRecordsPage() {
                     <td>
                       <button
                         className="button button--secondary button--compact"
-                        onClick={() => viewPatient(patient)}
+                        onClick={() => openPatientRecord(patient)}
                       >
                         View
                       </button>
@@ -774,8 +859,9 @@ export function DentistRecordsPage() {
           />
         )}
       </section>
+      ) : null}
 
-      {formOpen ? (
+      {formOpen && !patientId ? (
         <DentistModal title="Add Clinical Patient Record" onClose={() => setFormOpen(false)}>
           <form className="dentist-form" onSubmit={createPatient}>
             <p className="muted-copy">
@@ -855,7 +941,7 @@ export function DentistRecordsPage() {
       ) : null}
 
       {detail ? (
-        <DentistModal title={detail.patient.fullName} onClose={() => setDetail(null)} wide>
+        <div className="dentist-patient-record">
           <section className="dentist-patient-info">
             <div className="dentist-panel__heading">
               <div>
@@ -863,6 +949,17 @@ export function DentistRecordsPage() {
                 <h2>Patient Information</h2>
               </div>
               <div className="treatment-record__actions">
+                <button
+                  type="button"
+                  className={`button ${filesOpen ? "button--primary" : "button--secondary"} button--compact`}
+                  aria-expanded={filesOpen}
+                  onClick={toggleUploadedFiles}
+                >
+                  <FolderOpen size={16} /> Uploaded Files
+                  {medicalDocuments.length ? (
+                    <span className="uploaded-files-count">{medicalDocuments.length}</span>
+                  ) : null}
+                </button>
                 {!isProfileLocked(detail.patient) ? (
                   <button
                     type="button"
@@ -1401,106 +1498,135 @@ export function DentistRecordsPage() {
             </div>
           </section>
 
-          <section className="glass-card dentist-medical-docs">
-            <div className="card-heading">
+          <section
+            ref={filesSectionRef}
+            className={`glass-card dentist-medical-docs uploaded-files-folder ${
+              filesOpen ? "is-open" : ""
+            }`}
+          >
+            <div className="card-heading uploaded-files-folder__heading">
               <div>
-                <span className="eyebrow">Supporting files</span>
-                <h2>Medical Documents</h2>
+                <span className="eyebrow">Patient uploads</span>
+                <h2>Uploaded Files</h2>
               </div>
+              <button
+                type="button"
+                className="button button--secondary button--compact"
+                aria-expanded={filesOpen}
+                onClick={toggleUploadedFiles}
+              >
+                <FolderOpen size={16} /> {filesOpen ? "Hide files" : "Open folder"}
+              </button>
             </div>
-            <p className="muted-copy">
-              Patient-uploaded medical clearance or related documents. Reviewing a file does not
-              automatically grant medical clearance.
-            </p>
-            {medicalDocuments.length ? (
-              <div className="table-wrap">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Filename</th>
-                      <th>Document type</th>
-                      <th>Uploaded</th>
-                      <th>Related visit</th>
-                      <th>Status</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {medicalDocuments.map((document) => (
-                      <tr key={document.id}>
-                        <td data-label="Filename">{document.name}</td>
-                        <td data-label="Document type">{document.category || "Uncategorized"}</td>
-                        <td data-label="Uploaded">
-                          {document.uploadedAt
-                            ? new Intl.DateTimeFormat("en-US", {
-                                dateStyle: "medium",
-                                timeStyle: "short",
-                              }).format(new Date(document.uploadedAt))
-                            : "—"}
-                        </td>
-                        <td data-label="Related visit">
-                          {document.appointment?.service
-                            ? `${document.appointment.service}${
-                                document.appointment.date ? ` · ${formatDentistDate(document.appointment.date)}` : ""
-                              }`
-                            : "Not linked yet"}
-                        </td>
-                        <td className="status-text" data-label="Status">
-                          {document.status === "reviewed"
-                            ? `Reviewed${document.reviewedByName ? ` by ${document.reviewedByName}` : ""}`
-                            : "Uploaded"}
-                        </td>
-                        <td data-label="Actions">
-                          <div className="treatment-record__actions">
-                            <button
-                              type="button"
-                              className="button button--secondary button--compact"
-                              onClick={() =>
-                                api.downloadDentistMedicalDocument(detail.patient.id, document).catch((downloadError) => {
-                                  setError(downloadError.message);
-                                })
-                              }
-                            >
-                              View / Download
-                            </button>
-                            {document.status !== "reviewed" ? (
-                              <button
-                                type="button"
-                                className="button button--secondary button--compact"
-                                disabled={medicalDocumentsBusy === document.id}
-                                onClick={async () => {
-                                  setMedicalDocumentsBusy(document.id);
-                                  try {
-                                    const response = await api.reviewDentistMedicalDocument(
-                                      detail.patient.id,
-                                      document.id
-                                    );
-                                    setMedicalDocuments((current) =>
-                                      current.map((item) =>
-                                        item.id === document.id ? response.document : item
-                                      )
-                                    );
-                                    setSuccess(response.message);
-                                  } catch (reviewError) {
-                                    setError(reviewError.message);
-                                  } finally {
-                                    setMedicalDocumentsBusy("");
+            {filesOpen ? (
+              <>
+                <p className="muted-copy">
+                  Files this patient uploaded while booking. The name is the description they entered.
+                  Opening a file does not automatically grant medical clearance.
+                </p>
+                {medicalDocuments.length ? (
+                  <div className="table-wrap">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Document</th>
+                          <th>Filename</th>
+                          <th>Uploaded</th>
+                          <th>Appointment</th>
+                          <th>Status</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {medicalDocuments.map((document) => (
+                          <tr key={document.id}>
+                            <td data-label="Document">
+                              <strong>{document.name || document.category || "Uploaded file"}</strong>
+                            </td>
+                            <td data-label="Filename">{document.filename || "—"}</td>
+                            <td data-label="Uploaded">
+                              {document.uploadedAt
+                                ? new Intl.DateTimeFormat("en-US", {
+                                    dateStyle: "medium",
+                                    timeStyle: "short",
+                                  }).format(new Date(document.uploadedAt))
+                                : "—"}
+                            </td>
+                            <td data-label="Appointment">
+                              {document.appointment?.service
+                                ? `${document.appointment.service}${
+                                    document.appointment.date
+                                      ? ` · ${formatDentistDate(document.appointment.date)}`
+                                      : ""
+                                  }`
+                                : "Not linked"}
+                            </td>
+                            <td className="status-text" data-label="Status">
+                              {document.status === "reviewed"
+                                ? `Reviewed${document.reviewedByName ? ` by ${document.reviewedByName}` : ""}`
+                                : "Uploaded"}
+                            </td>
+                            <td data-label="Actions">
+                              <div className="treatment-record__actions">
+                                <button
+                                  type="button"
+                                  className="button button--secondary button--compact"
+                                  onClick={() =>
+                                    api
+                                      .downloadDentistMedicalDocument(detail.patient.id, document)
+                                      .catch((downloadError) => {
+                                        setError(downloadError.message);
+                                      })
                                   }
-                                }}
-                              >
-                                Mark reviewed
-                              </button>
-                            ) : null}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                                >
+                                  View / Download
+                                </button>
+                                {document.status !== "reviewed" ? (
+                                  <button
+                                    type="button"
+                                    className="button button--secondary button--compact"
+                                    disabled={medicalDocumentsBusy === document.id}
+                                    onClick={async () => {
+                                      setMedicalDocumentsBusy(document.id);
+                                      try {
+                                        const response = await api.reviewDentistMedicalDocument(
+                                          detail.patient.id,
+                                          document.id
+                                        );
+                                        setMedicalDocuments((current) =>
+                                          current.map((item) =>
+                                            item.id === document.id ? response.document : item
+                                          )
+                                        );
+                                        setSuccess(response.message);
+                                      } catch (reviewError) {
+                                        setError(reviewError.message);
+                                      } finally {
+                                        setMedicalDocumentsBusy("");
+                                      }
+                                    }}
+                                  >
+                                    Mark reviewed
+                                  </button>
+                                ) : null}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="muted-copy">
+                    {medicalDocumentsMessage || "No files have been uploaded for this patient."}
+                  </p>
+                )}
+              </>
             ) : (
-              <p className="muted-copy">
-                {medicalDocumentsMessage || "No medical documents have been uploaded for this patient."}
+              <p className="muted-copy uploaded-files-folder__hint">
+                {medicalDocuments.length
+                  ? `${medicalDocuments.length} file${medicalDocuments.length === 1 ? "" : "s"} on file. Open the folder to review.`
+                  : "Open the folder to review files this patient uploaded with a booking."}
               </p>
             )}
           </section>
@@ -1515,7 +1641,7 @@ export function DentistRecordsPage() {
               if (tone === "error") setError(message);
             }}
           />
-        </DentistModal>
+        </div>
       ) : null}
 
       {editingTreatmentId && detail?.patient ? (

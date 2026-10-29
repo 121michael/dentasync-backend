@@ -264,10 +264,11 @@ async function startDentistPortal({
   };
 }
 
-async function postFile(url, { name, type, bytes, category = "medical_clearance" }) {
+async function postFile(url, { name, type, bytes, category = "medical_clearance", description } = {}) {
   const form = new FormData();
   form.append("file", new Blob([bytes], { type }), name);
   if (category) form.append("category", category);
+  if (description) form.append("description", description);
   return fetch(url, { method: "POST", body: form });
 }
 
@@ -344,7 +345,8 @@ test("patient medical upload stores the file under a generated name", async () =
     assert.equal(response.status, 201);
     const body = await response.json();
     assert.match(body.message, /saved for your dentist/i);
-    assert.equal(body.document.name, "physician-clearance.pdf");
+    assert.equal(body.document.name, "Medical Clearance / Authorization");
+    assert.equal(body.document.filename, "physician-clearance.pdf");
     assert.equal(body.document.status, "uploaded");
     assert.equal(body.document.category, "Medical Clearance / Authorization");
     assert.equal(portal.store.documents.length, 1);
@@ -480,6 +482,28 @@ test("booking links an owned medical document to the appointment", async () => {
     });
     assert.equal(response.status, 201);
     assert.equal(portal.store.documents[0].appointment_id, 88);
+    assert.equal(portal.store.documents[0].user_id, "patient-1");
+  } finally {
+    await portal.close();
+  }
+});
+
+test("patient medical upload stores the description the dentist will see", async () => {
+  const portal = await startPatientPortal();
+  try {
+    const response = await postFile(`${portal.url}/uploads/medical-document`, {
+      name: "scan.pdf",
+      type: "application/pdf",
+      bytes: PDF_BYTES,
+      category: "medical_clearance",
+      description: "Medical Clearance",
+    });
+    assert.equal(response.status, 201);
+    const body = await response.json();
+    assert.equal(body.document.name, "Medical Clearance");
+    assert.equal(body.document.filename, "scan.pdf");
+    assert.equal(portal.store.documents[0].category, "Medical Clearance");
+    assert.equal(portal.store.documents[0].user_id, "patient-1");
   } finally {
     await portal.close();
   }
@@ -548,8 +572,10 @@ test("dentist can list and download a linked patient's medical document", async 
     assert.equal(list.status, 200);
     const body = await list.json();
     assert.equal(body.documents.length, 1);
-    assert.equal(body.documents[0].name, "physician-clearance.pdf");
+    assert.equal(body.documents[0].name, "Uncategorized");
+    assert.equal(body.documents[0].filename, "physician-clearance.pdf");
     assert.equal(body.documents[0].category, "Uncategorized");
+    assert.equal(body.documents[0].appointment.service, "Tooth Extraction");
     assert.match(body.disclaimer, /does not automatically grant medical clearance/i);
 
     const download = await fetch(`${portal.url}/patients/11/medical-documents/doc-1/download`);
@@ -573,31 +599,88 @@ test("dentist can list and download a linked patient's medical document", async 
   }
 });
 
+test("dentist medical document list uses the patient description as the document name", async () => {
+  const portal = await startDentistPortal({
+    documents: [
+      {
+        id: "doc-clearance",
+        user_id: "patient-1",
+        document_type: "medical_document",
+        original_name: "scan-room-2.pdf",
+        stored_name: "hidden.pdf",
+        mime_type: "application/pdf",
+        byte_size: 12,
+        category: "Medical Clearance",
+        status: "uploaded",
+        created_at: "2026-10-29T03:00:00.000Z",
+        appointment_id: 91,
+        service_name: "Tooth Extraction",
+        appointment_date: "2099-12-18",
+        appointment_time: "14:00",
+      },
+      {
+        id: "doc-other",
+        user_id: "someone-else",
+        document_type: "medical_document",
+        original_name: "other.pdf",
+        stored_name: "other.pdf",
+        mime_type: "application/pdf",
+        byte_size: 12,
+        category: "Secret File",
+        status: "uploaded",
+        created_at: "2026-10-29T03:00:00.000Z",
+      },
+    ],
+  });
+  try {
+    const list = await fetch(`${portal.url}/patients/11/medical-documents`);
+    assert.equal(list.status, 200);
+    const body = await list.json();
+    assert.equal(body.documents.length, 1);
+    assert.equal(body.documents[0].name, "Medical Clearance");
+    assert.equal(body.documents[0].filename, "scan-room-2.pdf");
+    assert.equal(body.documents[0].appointment.service, "Tooth Extraction");
+  } finally {
+    await portal.close();
+  }
+});
+
 test("mapMedicalDocument keeps known types and falls back to Uncategorized", () => {
-  assert.equal(
-    medicalDocuments.mapMedicalDocument({
-      id: "a",
-      original_name: "xray.png",
-      category: "dental_xray",
-      mime_type: "image/png",
-      byte_size: 12,
-      status: "uploaded",
-      created_at: "2026-10-29T02:00:00.000Z",
-    }).category,
-    "Dental X-ray / Radiograph"
-  );
-  assert.equal(
-    medicalDocuments.mapMedicalDocument({
-      id: "b",
-      original_name: "old.pdf",
-      category: "Medical clearance / supporting document",
-      mime_type: "application/pdf",
-      byte_size: 12,
-      status: "uploaded",
-      created_at: "2026-10-29T02:00:00.000Z",
-    }).category,
-    "Uncategorized"
-  );
+  const xray = medicalDocuments.mapMedicalDocument({
+    id: "a",
+    original_name: "xray.png",
+    category: "dental_xray",
+    mime_type: "image/png",
+    byte_size: 12,
+    status: "uploaded",
+    created_at: "2026-10-29T02:00:00.000Z",
+  });
+  assert.equal(xray.category, "Dental X-ray / Radiograph");
+  assert.equal(xray.name, "Dental X-ray / Radiograph");
+  assert.equal(xray.filename, "xray.png");
+  const legacy = medicalDocuments.mapMedicalDocument({
+    id: "b",
+    original_name: "old.pdf",
+    category: "Medical clearance / supporting document",
+    mime_type: "application/pdf",
+    byte_size: 12,
+    status: "uploaded",
+    created_at: "2026-10-29T02:00:00.000Z",
+  });
+  assert.equal(legacy.category, "Uncategorized");
+  assert.equal(legacy.name, "Uncategorized");
+  assert.equal(legacy.filename, "old.pdf");
+  const described = medicalDocuments.mapMedicalDocument({
+    id: "c",
+    original_name: "scan.pdf",
+    category: "Medical Clearance",
+    mime_type: "application/pdf",
+    byte_size: 12,
+    status: "uploaded",
+    created_at: "2026-10-29T02:00:00.000Z",
+  });
+  assert.equal(described.name, "Medical Clearance");
+  assert.equal(described.filename, "scan.pdf");
 });
 
 test("dentist cannot download another patient's medical document by swapping ids", async () => {

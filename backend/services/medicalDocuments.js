@@ -57,6 +57,16 @@ function displayDocumentCategory(value) {
   return raw;
 }
 
+function sanitizeDocumentDescription(value, fallback = "") {
+  const raw = String(value || "")
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 160);
+  if (raw) return raw;
+  return displayDocumentCategory(fallback);
+}
+
 function looksLikePdf(buffer) {
   return Buffer.isBuffer(buffer) && buffer.length >= 5 && buffer.subarray(0, 5).toString("ascii") === "%PDF-";
 }
@@ -150,10 +160,12 @@ function resolveStoredPath(uploadDirectory, storedName) {
 
 function mapMedicalDocument(row, appointment = null) {
   if (!row) return null;
+  const displayName = displayDocumentCategory(row.category);
   return {
     id: row.id,
-    name: row.original_name,
-    category: displayDocumentCategory(row.category),
+    name: displayName,
+    filename: row.original_name,
+    category: displayName,
     documentType: resolveDocumentType(row.category)?.id || null,
     mimeType: row.mime_type,
     size: Number(row.byte_size) || 0,
@@ -186,6 +198,7 @@ module.exports = {
   LEGACY_GENERIC_CATEGORY,
   resolveDocumentType,
   displayDocumentCategory,
+  sanitizeDocumentDescription,
   validateMedicalUpload,
   resolveStoredPath,
   mapMedicalDocument,
