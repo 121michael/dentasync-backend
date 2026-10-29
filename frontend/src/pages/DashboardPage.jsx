@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { api } from "../api";
 import { DentalAuthorizationDocument, statusLabel } from "../components/DentalAuthorizationDocument";
+import { PatientPrescriptionResults } from "../components/PatientPrescriptionResults";
 import { DetailLink, ErrorState, LoadingState } from "../components/UI";
 import { PatientQrCheckInScanner } from "../components/PatientQrCheckInScanner";
 import { getPatientNotificationTarget } from "../patientNotificationNav";
@@ -318,6 +319,8 @@ export function DashboardPage() {
           </div>
         </article>
       </section>
+
+      <PatientPrescriptionResults />
 
       <section className="glass-card procedure-auth-panel">
         <div className="card-heading">

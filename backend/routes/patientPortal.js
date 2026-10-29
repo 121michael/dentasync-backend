@@ -35,6 +35,7 @@ const accountDependents = require("../services/accountDependents");
 const patientAiConversations = require("../services/patientAiConversations");
 const { resolveAppSecrets } = require("../lib/securityConfig");
 const { attachDentalAuthorizationRoutes } = require("./dentalAuthorization");
+const prescriptions = require("../services/prescriptions");
 const { loadApprovedClinicCatalog, resolveCatalog } = require("../services/approvedClinicCatalog");
 const medicalDocuments = require("../services/medicalDocuments");
 const appointmentLifecycle = require("../services/appointmentLifecycle");
@@ -558,6 +559,46 @@ function createPatientPortalRouter({
 
   router.use(authenticateToken, requirePatient);
   attachDentalAuthorizationRoutes(router, { db, role: "patient" });
+
+  router.get("/prescriptions", async (req, res) => {
+    try {
+      const list = await prescriptions.listForPatientUser(db, userIdFor(req));
+      return res.json({ prescriptions: list });
+    } catch (error) {
+      console.error("Patient prescriptions list error:", error.message);
+      return res.status(error.status || 500).json({
+        message: error.status ? error.message : "Unable to load your prescriptions.",
+      });
+    }
+  });
+
+  router.get("/prescriptions/:id/pdf", async (req, res) => {
+    try {
+      const userId = userIdFor(req);
+      await prescriptions.assertPatientOwnsPrescription(db, userId, req.params.id);
+      const { filePath, storedName } = await prescriptions.generateOrRetrievePdf(db, {
+        actorId: userId,
+        actorRole: "patient",
+        prescriptionId: req.params.id,
+        uploadDirectory,
+      });
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Cache-Control", "private, no-store");
+      res.setHeader(
+        "Content-Disposition",
+        `inline; filename="${storedName || "prescription.pdf"}"`
+      );
+      return fs.createReadStream(filePath).pipe(res);
+    } catch (error) {
+      const status = Number(error.status) || 500;
+      if (status >= 500) {
+        console.error("Patient prescription PDF error:", error.message);
+      }
+      return res.status(status).json({
+        message: error.status ? error.message : "Unable to open this prescription.",
+      });
+    }
+  });
 
   router.get("/catalog", async (_req, res) => {
     let clinicServices = resolveCatalog(null).publicServices;

@@ -9,6 +9,7 @@ const express = require("express");
 const db = require("../db");
 const { createDentistPortalRouter } = require("../routes/dentistPortal");
 const { createStaffPortalRouter } = require("../routes/staffPortal");
+const { createPatientPortalRouter } = require("../routes/patientPortal");
 const {
   normalizeItems,
   contentHash,
@@ -352,5 +353,149 @@ test("missing prescription tables are created on first list request", async () =
     assert.equal(tables.rows[0].count, 1);
   } finally {
     await dentist.close();
+  }
+});
+
+test("patient portal shows owned prescriptions and hides drafts from other patients", async () => {
+  await ensureSchema();
+  const suffix = Date.now();
+  const dentistRow = await db.query(
+    `SELECT id FROM users WHERE LOWER(role) = 'dentist' AND is_verified = TRUE LIMIT 1`
+  );
+  const liveDentistId = String(dentistRow.rows[0].id);
+  const patientRow = await db.query(
+    `INSERT INTO users (first_name, last_name, email, phone, password_hash, role, status, is_verified)
+     VALUES ('Lina', 'Reyes', $1, $2, 'x', 'patient', 'Active', TRUE)
+     RETURNING id`,
+    [`lina${suffix}@example.test`, `63919${String(suffix).slice(-7)}`]
+  );
+  const otherRow = await db.query(
+    `INSERT INTO users (first_name, last_name, email, phone, password_hash, role, status, is_verified)
+     VALUES ('Other', 'Patient', $1, $2, 'x', 'patient', 'Active', TRUE)
+     RETURNING id`,
+    [`other${suffix}@example.test`, `63916${String(suffix).slice(-7)}`]
+  );
+  const patientId = String(patientRow.rows[0].id);
+  const otherId = String(otherRow.rows[0].id);
+  const record = await db.query(
+    `INSERT INTO clinic_patient_records (
+       record_code, first_name, last_name, email, phone, date_of_birth, gender, linked_user_id, created_by, created_by_role
+     ) VALUES ($1, 'Lina', 'Reyes', $2, '639193333333', '1996-01-12', 'Female', $3, $4, 'dentist')
+     RETURNING id`,
+    [`CPR-RX-PT-${suffix}`, `lina${suffix}@example.test`, patientId, liveDentistId]
+  );
+  const clinicalRecordId = record.rows[0].id;
+
+  const dentistApp = express();
+  dentistApp.use(express.json());
+  dentistApp.use(
+    "/api/dentist",
+    createDentistPortalRouter({
+      db,
+      authenticateToken(req, _res, next) {
+        req.user = { id: liveDentistId, role: "dentist" };
+        next();
+      },
+    })
+  );
+  const patientApp = express();
+  patientApp.use(express.json());
+  patientApp.use(
+    "/api/patient",
+    createPatientPortalRouter({
+      db,
+      jwtSecret: "test-patient-rx",
+      authenticateToken(req, _res, next) {
+        req.user = { id: patientId, role: "patient" };
+        next();
+      },
+    })
+  );
+  const otherApp = express();
+  otherApp.use(express.json());
+  otherApp.use(
+    "/api/patient",
+    createPatientPortalRouter({
+      db,
+      jwtSecret: "test-patient-rx",
+      authenticateToken(req, _res, next) {
+        req.user = { id: otherId, role: "patient" };
+        next();
+      },
+    })
+  );
+
+  const dentist = await listen(dentistApp);
+  const patient = await listen(patientApp);
+  const other = await listen(otherApp);
+  try {
+    const created = await fetch(`${dentist.url}/api/dentist/prescriptions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        clinicalRecordId,
+        items: [
+          {
+            medicationName: "Amoxicillin 500 mg",
+            dosage: "1 capsule",
+            quantity: "21",
+            sig: "Take after meals every 8 hours for 7 days",
+          },
+        ],
+      }),
+    });
+    const createdBody = await created.json();
+    assert.equal(created.status, 201, createdBody.message);
+    const rxId = createdBody.prescription.id;
+
+    const draftList = await fetch(`${patient.url}/api/patient/prescriptions`);
+    const draftBody = await draftList.json();
+    assert.equal(draftList.status, 200, draftBody.message);
+    assert.equal(draftBody.prescriptions.some((row) => row.id === rxId), false);
+
+    const submitted = await fetch(`${dentist.url}/api/dentist/prescriptions/${rxId}/submit`, {
+      method: "POST",
+    });
+    assert.equal(submitted.status, 200);
+
+    const pendingList = await fetch(`${patient.url}/api/patient/prescriptions?patientId=${otherId}`);
+    const pendingBody = await pendingList.json();
+    assert.equal(pendingList.status, 200);
+    const pending = pendingBody.prescriptions.find((row) => row.id === rxId);
+    assert.ok(pending);
+    assert.equal(pending.workflowLabel, "Pending Authorization");
+    assert.equal(pending.canViewDocument, false);
+    assert.equal(pending.medications.length, 0);
+
+    const unauthorizedPdf = await fetch(`${patient.url}/api/patient/prescriptions/${rxId}/pdf`);
+    assert.equal(unauthorizedPdf.status, 409);
+
+    const authorized = await fetch(`${dentist.url}/api/dentist/prescriptions/${rxId}/authorize`, {
+      method: "POST",
+    });
+    assert.equal(authorized.status, 200);
+
+    const readyList = await fetch(`${patient.url}/api/patient/prescriptions`);
+    const readyBody = await readyList.json();
+    const ready = readyBody.prescriptions.find((row) => row.id === rxId);
+    assert.equal(ready.workflowLabel, "Authorized");
+    assert.equal(ready.emailLabel, "Email pending");
+    assert.equal(ready.canViewDocument, true);
+    assert.equal(ready.medications[0].medicationName, "Amoxicillin 500 mg");
+    assert.equal(ready.dentistName.includes("Sarah") || ready.dentistName.includes("Cruz"), true);
+
+    const pdf = await fetch(`${patient.url}/api/patient/prescriptions/${rxId}/pdf`);
+    assert.equal(pdf.status, 200, await pdf.clone().text().then((text) => text.slice(0, 180)));
+    assert.equal(pdf.headers.get("content-type"), "application/pdf");
+
+    const stolen = await fetch(`${other.url}/api/patient/prescriptions/${rxId}/pdf`);
+    assert.equal(stolen.status, 404);
+    const otherList = await fetch(`${other.url}/api/patient/prescriptions`);
+    const otherBody = await otherList.json();
+    assert.equal(otherBody.prescriptions.some((row) => row.id === rxId), false);
+  } finally {
+    await dentist.close();
+    await patient.close();
+    await other.close();
   }
 });

@@ -26,6 +26,22 @@ const EMAIL_STATUS = {
 };
 const CLINICAL_EDITABLE = new Set([WORKFLOW.DRAFT, WORKFLOW.RETURNED]);
 const STAFF_QUEUE = new Set([WORKFLOW.SENT_TO_STAFF, WORKFLOW.PROCESSING, WORKFLOW.AUTHORIZED]);
+const PATIENT_VISIBLE = new Set([WORKFLOW.SENT_TO_STAFF, WORKFLOW.PROCESSING, WORKFLOW.AUTHORIZED]);
+
+function patientWorkflowLabel(status) {
+  if (status === WORKFLOW.SENT_TO_STAFF) return "Pending Authorization";
+  if (status === WORKFLOW.AUTHORIZED) return "Authorized";
+  if (status === WORKFLOW.PROCESSING) return "Processing";
+  return String(status || "").replace(/_/g, " ");
+}
+
+function patientEmailLabel(status) {
+  if (status === EMAIL_STATUS.SENT) return "Sent";
+  if (status === EMAIL_STATUS.FAILED || status === EMAIL_STATUS.BOUNCED) return "Email Failed";
+  if (status === EMAIL_STATUS.SENDING) return "Sending";
+  if (status === EMAIL_STATUS.PENDING) return "Email pending";
+  return String(status || "").replace(/_/g, " ");
+}
 
 function httpError(status, message) {
   const error = new Error(message);
@@ -481,6 +497,98 @@ async function listPrescriptions(db, { clinicalRecordId, workflowStatus, search 
       dentist: row.snapshot?.dentist,
     })
   );
+}
+
+function serializePatientView(row, items = []) {
+  const authorized = row.workflow_status === WORKFLOW.AUTHORIZED && Boolean(row.authorized_at);
+  const snapshot = row.snapshot || {};
+  return {
+    id: row.id,
+    prescriptionNumber: row.prescription_number,
+    issuedAt: row.authorized_at || row.created_at,
+    dentistName: snapshot.dentist?.fullName || "Dentist",
+    workflowStatus: row.workflow_status,
+    emailStatus: row.email_status,
+    workflowLabel: patientWorkflowLabel(row.workflow_status),
+    emailLabel: patientEmailLabel(row.email_status),
+    medications: authorized
+      ? items.map((item) => ({
+          medicationName: item.medication_name || item.medicationName,
+          quantity: item.quantity,
+          dosage: item.dosage,
+          sig: item.sig,
+        }))
+      : [],
+    canViewDocument: authorized,
+  };
+}
+
+async function listForPatientUser(db, userId) {
+  const ownerId = String(userId || "");
+  if (!ownerId) return [];
+  const result = await db.query(
+    `SELECT
+       rx.*,
+       ver.snapshot,
+       ver.authorized_at,
+       ver.authorization_method,
+       ver.id AS version_row_id
+     FROM prescriptions AS rx
+     JOIN prescription_versions AS ver
+       ON ver.prescription_id = rx.id AND ver.version = rx.current_version
+     LEFT JOIN clinic_patient_records AS rec
+       ON rec.id = rx.clinical_record_id
+     WHERE rx.workflow_status = ANY($2::text[])
+       AND (
+         rx.linked_user_id = $1
+         OR rec.linked_user_id = $1
+       )
+     ORDER BY COALESCE(ver.authorized_at, rx.updated_at) DESC
+     LIMIT 100`,
+    [ownerId, [...PATIENT_VISIBLE]]
+  );
+  const versionIds = result.rows.filter((row) => row.authorized_at).map((row) => row.version_row_id);
+  const itemsByVersion = new Map();
+  if (versionIds.length) {
+    const items = await db.query(
+      `SELECT * FROM prescription_items
+       WHERE version_id = ANY($1::uuid[])
+       ORDER BY sort_order ASC`,
+      [versionIds]
+    );
+    for (const item of items.rows) {
+      const list = itemsByVersion.get(item.version_id) || [];
+      list.push(item);
+      itemsByVersion.set(item.version_id, list);
+    }
+  }
+  return result.rows.map((row) =>
+    serializePatientView(row, itemsByVersion.get(row.version_row_id) || [])
+  );
+}
+
+async function assertPatientOwnsPrescription(db, userId, prescriptionId) {
+  const ownerId = String(userId || "");
+  const result = await db.query(
+    `SELECT rx.id, rx.workflow_status, ver.authorized_at
+     FROM prescriptions AS rx
+     JOIN prescription_versions AS ver
+       ON ver.prescription_id = rx.id AND ver.version = rx.current_version
+     LEFT JOIN clinic_patient_records AS rec
+       ON rec.id = rx.clinical_record_id
+     WHERE rx.id = $1
+       AND (
+         rx.linked_user_id = $2
+         OR rec.linked_user_id = $2
+       )
+     LIMIT 1`,
+    [prescriptionId, ownerId]
+  );
+  const row = result.rows[0];
+  if (!row || !PATIENT_VISIBLE.has(row.workflow_status)) {
+    throw httpError(404, "That prescription was not found.");
+  }
+  return row;
 }
 
 async function createPrescription(db, { dentist, body }) {
@@ -1163,6 +1271,8 @@ module.exports = {
   clinicalPayload,
   maskEmail,
   listPrescriptions: withSchema(listPrescriptions),
+  listForPatientUser: withSchema(listForPatientUser),
+  assertPatientOwnsPrescription: withSchema(assertPatientOwnsPrescription),
   loadDetail: withSchema(loadDetail),
   createPrescription: withSchema(createPrescription),
   updateDraft: withSchema(updateDraft),

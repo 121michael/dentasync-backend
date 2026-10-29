@@ -131,6 +131,10 @@ export const api = {
     request("/auth/reset-password", { method: "POST", body, authenticated: false }),
   getCurrentUser: () => request("/auth/me"),
   getDashboard: (options = {}) => request("/patient/dashboard", options),
+  getPatientPrescriptions: (options = {}) => request("/patient/prescriptions", options),
+  viewPatientPrescriptionPdf: (id) => fetchAuthorizedBlob(`/patient/prescriptions/${id}/pdf?inline=1`),
+  downloadPatientPrescriptionPdf: (id, filename) =>
+    download(`/patient/prescriptions/${id}/pdf`, filename || "prescription.pdf"),
   getCatalog: () => request("/patient/catalog"),
   getAppointmentAvailability: (date) =>
     request(`/patient/availability?date=${encodeURIComponent(date)}`),
