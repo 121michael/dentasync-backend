@@ -34,14 +34,17 @@ const MEDICAL_DOCUMENT_TYPES = [
   },
   {
     id: "other",
-    label: "Other Medical Document",
-    description: "Another relevant medical document not covered by the options above.",
+    label: "Other Dental Document",
+    description: "Another relevant dental document not covered by the options above.",
   },
 ];
 
 function resolveDocumentType(value) {
   const raw = String(value || "").trim().toLowerCase();
   if (!raw) return null;
+  if (raw === "other medical document") {
+    return MEDICAL_DOCUMENT_TYPES.find((item) => item.id === "other") || null;
+  }
   return (
     MEDICAL_DOCUMENT_TYPES.find(
       (item) => item.id === raw || item.label.toLowerCase() === raw

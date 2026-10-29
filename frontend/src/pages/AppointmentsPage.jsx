@@ -69,8 +69,8 @@ const DEFAULT_MEDICAL_DOCUMENT_TYPES = [
   },
   {
     id: "other",
-    label: "Other Medical Document",
-    description: "Another relevant medical document not covered by the options above.",
+    label: "Other Dental Document",
+    description: "Another relevant dental document not covered by the options above.",
   },
 ];
 
@@ -644,7 +644,7 @@ export function AppointmentsPage() {
         documentType: response.document?.documentType || medicalDocumentType,
       });
       setMedicalDocumentDescription(response.document?.name || description);
-      setMedicalUploadSuccess(response.message || "Medical document saved for your dentist to review.");
+      setMedicalUploadSuccess(response.message || "Dental document saved for your dentist to review.");
     } catch (uploadError) {
       setMedicalDocument(null);
       setMedicalUploadError(uploadError.message || "Unable to save the medical document.");
@@ -1212,7 +1212,7 @@ export function AppointmentsPage() {
               <div className="card-heading">
                 <div>
                   <span className="eyebrow">Optional</span>
-                  <h3>Medical Documents (Optional)</h3>
+                  <h3>Dental Documents (Optional)</h3>
                 </div>
               </div>
               <p>
@@ -1221,7 +1221,7 @@ export function AppointmentsPage() {
               </p>
               <p className="muted">
                 Examples: medical clearance for dental treatment, physician&apos;s certificate, or other
-                relevant medical documents. Uploading is optional. Your dentist may request additional
+                relevant dental documents. Uploading is optional. Your dentist may request additional
                 documentation if clinically necessary.
               </p>
               <p className="muted">Accepted files: PDF, JPG, or PNG — up to 5 MB.</p>
@@ -1267,7 +1267,7 @@ export function AppointmentsPage() {
                   maxLength={160}
                   placeholder="e.g. Medical Clearance"
                 />
-                <small>Your dentist will see this name in Uploaded Files on the patient record.</small>
+                <small>Your dentist will see this name in Dental Documents on the patient record.</small>
               </label>
               <input
                 ref={medicalFileInputRef}

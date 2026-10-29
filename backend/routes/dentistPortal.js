@@ -2040,7 +2040,7 @@ function createDentistPortalRouter({
       if (!linkedUserId) {
         return res.json({
           documents: [],
-          message: "No linked patient portal account — medical documents appear after the patient registers.",
+          message: "No linked patient portal account — dental documents appear after the patient registers.",
         });
       }
 
@@ -2093,7 +2093,7 @@ function createDentistPortalRouter({
         });
       }
       console.error("Dentist medical documents error:", error.message);
-      return res.status(500).json({ message: "Unable to load medical documents." });
+      return res.status(500).json({ message: "Unable to load dental documents." });
     }
   });
 
@@ -2128,14 +2128,17 @@ function createDentistPortalRouter({
         return res.status(404).json({ message: "Document file is unavailable." });
       }
 
-      const safeName = String(document.original_name || "medical-document").replace(/[\r\n"]/g, "");
+      const safeName = String(document.original_name || "dental-document").replace(/[\r\n"]/g, "");
       const mime = medicalDocuments.ALLOWED_MIME.has(String(document.mime_type || "").toLowerCase())
         ? document.mime_type
         : "application/octet-stream";
+      const inline =
+        String(req.query.inline || "").toLowerCase() === "1" ||
+        String(req.query.disposition || "").toLowerCase() === "inline";
       res.setHeader("X-Content-Type-Options", "nosniff");
       res.setHeader("Cache-Control", "private, no-store");
       res.setHeader("Content-Type", mime);
-      res.setHeader("Content-Disposition", `attachment; filename="${safeName}"`);
+      res.setHeader("Content-Disposition", `${inline ? "inline" : "attachment"}; filename="${safeName}"`);
       return res.sendFile(filePath);
     } catch (error) {
       console.error("Dentist medical document download error:", error.message);

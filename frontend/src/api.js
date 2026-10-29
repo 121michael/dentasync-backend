@@ -97,6 +97,29 @@ async function download(path, filename, { silent = false, fullscreen } = {}) {
   }
 }
 
+async function fetchAuthorizedBlob(path, { silent = false } = {}) {
+  const token = accessToken();
+  const track = shouldTrackLoading(path, { method: "GET", silent });
+  if (track) beginApiLoading();
+  try {
+    const response = await fetch(`${API_BASE}${path}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => null);
+      throw new ApiError(data?.message || "Unable to open the document.", response.status, data);
+    }
+    const blob = await response.blob();
+    return {
+      blob,
+      mimeType: String(response.headers.get("content-type") || blob.type || "").toLowerCase(),
+      filename: filenameFromDisposition(response.headers.get("content-disposition"), "document"),
+    };
+  } finally {
+    if (track) endApiLoading();
+  }
+}
+
 export const api = {
   login: (body) => request("/auth/login", { method: "POST", body, authenticated: false }),
   register: (body) => request("/auth/register", { method: "POST", body, authenticated: false }),
@@ -317,10 +340,14 @@ export const api = {
     request(`/dentist/patients/${patientId}/xrays`, options),
   getDentistMedicalDocuments: (patientId, options = {}) =>
     request(`/dentist/patients/${patientId}/medical-documents`, { silent: true, ...options }),
+  viewDentistMedicalDocument: (patientId, document) =>
+    fetchAuthorizedBlob(
+      `/dentist/patients/${patientId}/medical-documents/${document.id}/download?inline=1`
+    ),
   downloadDentistMedicalDocument: (patientId, document) =>
     download(
       `/dentist/patients/${patientId}/medical-documents/${document.id}/download`,
-      document.filename || document.name || "medical-document"
+      document.filename || document.name || "dental-document"
     ),
   reviewDentistMedicalDocument: (patientId, documentId) =>
     request(`/dentist/patients/${patientId}/medical-documents/${documentId}`, {

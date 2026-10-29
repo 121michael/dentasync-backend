@@ -2155,14 +2155,14 @@ function createPatientPortalRouter({
 
       await notifyClinicDentists({
         type: "document",
-        title: "Medical document uploaded",
-        body: "A patient uploaded a supporting medical document for dentist review. This does not automatically clear the patient for treatment.",
+        title: "Dental document uploaded",
+        body: "A patient uploaded a supporting dental document for dentist review. This does not automatically clear the patient for treatment.",
         entityType: "document",
         entityId: documentId,
       });
 
       return res.status(201).json({
-        message: "Medical document saved for your dentist to review.",
+        message: "Dental document saved for your dentist to review.",
         document: {
           id: documentId,
           name: description,

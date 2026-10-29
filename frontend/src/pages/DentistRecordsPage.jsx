@@ -10,6 +10,7 @@ import {
 } from "../components/DentalChart/dentalChartData";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
 import { DentistModal } from "../components/DentistUI";
+import { DentalDocumentPreview } from "../components/DentalDocumentPreview";
 import { formatDentistDate } from "../dentistUtils";
 import { matchesNotificationFocus } from "../notificationFocus";
 
@@ -216,6 +217,8 @@ export function DentistRecordsPage() {
   const [filesOpen, setFilesOpen] = useState(() => searchParams.get("files") === "1");
   const openFilesFromQuery = searchParams.get("files") === "1";
   const filesSectionRef = useRef(null);
+  const [documentPreview, setDocumentPreview] = useState(null);
+  const previewUrlRef = useRef("");
   const treatmentFormRef = useRef(null);
   const focusHandledRef = useRef("");
   const focusedRowRef = useRef(null);
@@ -296,6 +299,51 @@ export function DentistRecordsPage() {
       setMedicalDocumentsMessage("");
     }
     return response;
+  }, []);
+
+  function closeDocumentPreview() {
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = "";
+    }
+    setDocumentPreview(null);
+  }
+
+  async function viewDentalDocument(document) {
+    setError("");
+    try {
+      const file = await api.viewDentistMedicalDocument(detail.patient.id, document);
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+      const objectUrl = URL.createObjectURL(file.blob);
+      previewUrlRef.current = objectUrl;
+      setDocumentPreview({
+        document: {
+          ...document,
+          mimeType: file.mimeType || document.mimeType,
+          filename: file.filename || document.filename,
+        },
+        objectUrl,
+        error: "",
+      });
+    } catch (viewError) {
+      setDocumentPreview({
+        document,
+        objectUrl: "",
+        error: viewError.message || "This dental document could not be opened.",
+      });
+    }
+  }
+
+  function downloadDentalDocument(document) {
+    api.downloadDentistMedicalDocument(detail.patient.id, document).catch((downloadError) => {
+      setError(downloadError.message);
+    });
+  }
+
+  useEffect(() => {
+    return () => {
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    };
   }, []);
 
   function openPatientRecord(patient) {
@@ -716,7 +764,7 @@ export function DentistRecordsPage() {
                 aria-expanded={filesOpen}
                 onClick={toggleUploadedFiles}
               >
-                <FolderOpen size={16} /> Uploaded Files
+                <FolderOpen size={16} /> Dental Documents
                 {medicalDocuments.length ? (
                   <span className="uploaded-files-count">{medicalDocuments.length}</span>
                 ) : null}
@@ -954,7 +1002,7 @@ export function DentistRecordsPage() {
                   aria-expanded={filesOpen}
                   onClick={toggleUploadedFiles}
                 >
-                  <FolderOpen size={16} /> Uploaded Files
+                  <FolderOpen size={16} /> Dental Documents
                   {medicalDocuments.length ? (
                     <span className="uploaded-files-count">{medicalDocuments.length}</span>
                   ) : null}
@@ -1506,7 +1554,7 @@ export function DentistRecordsPage() {
             <div className="card-heading uploaded-files-folder__heading">
               <div>
                 <span className="eyebrow">Patient uploads</span>
-                <h2>Uploaded Files</h2>
+                <h2>Dental Documents</h2>
               </div>
               <button
                 type="button"
@@ -1521,7 +1569,7 @@ export function DentistRecordsPage() {
               <>
                 <p className="muted-copy">
                   Files this patient uploaded while booking. The name is the description they entered.
-                  Opening a file does not automatically grant medical clearance.
+                  Viewing a file does not automatically grant medical clearance.
                 </p>
                 {medicalDocuments.length ? (
                   <div className="table-wrap">
@@ -1566,19 +1614,20 @@ export function DentistRecordsPage() {
                                 : "Uploaded"}
                             </td>
                             <td data-label="Actions">
-                              <div className="treatment-record__actions">
+                              <div className="dental-docs-actions">
+                                <button
+                                  type="button"
+                                  className="button button--primary button--compact"
+                                  onClick={() => viewDentalDocument(document)}
+                                >
+                                  View
+                                </button>
                                 <button
                                   type="button"
                                   className="button button--secondary button--compact"
-                                  onClick={() =>
-                                    api
-                                      .downloadDentistMedicalDocument(detail.patient.id, document)
-                                      .catch((downloadError) => {
-                                        setError(downloadError.message);
-                                      })
-                                  }
+                                  onClick={() => downloadDentalDocument(document)}
                                 >
-                                  View / Download
+                                  Download
                                 </button>
                                 {document.status !== "reviewed" ? (
                                   <button
@@ -1617,7 +1666,7 @@ export function DentistRecordsPage() {
                   </div>
                 ) : (
                   <p className="muted-copy">
-                    {medicalDocumentsMessage || "No files have been uploaded for this patient."}
+                    {medicalDocumentsMessage || "No dental documents have been uploaded for this patient."}
                   </p>
                 )}
               </>
@@ -1671,6 +1720,16 @@ export function DentistRecordsPage() {
             </div>
           </form>
         </DentistModal>
+      ) : null}
+
+      {documentPreview ? (
+        <DentalDocumentPreview
+          document={documentPreview.document}
+          objectUrl={documentPreview.objectUrl}
+          error={documentPreview.error}
+          onClose={closeDocumentPreview}
+          onDownload={() => downloadDentalDocument(documentPreview.document)}
+        />
       ) : null}
 
       {deleteTarget ? (

@@ -584,6 +584,11 @@ test("dentist can list and download a linked patient's medical document", async 
     assert.match(download.headers.get("content-disposition") || "", /attachment/);
     assert.equal(Buffer.from(await download.arrayBuffer()).subarray(0, 5).toString(), "%PDF-");
 
+    const preview = await fetch(`${portal.url}/patients/11/medical-documents/doc-1/download?inline=1`);
+    assert.equal(preview.status, 200);
+    assert.match(preview.headers.get("content-disposition") || "", /inline/);
+    assert.match(preview.headers.get("content-type") || "", /pdf/i);
+
     const reviewed = await fetch(`${portal.url}/patients/11/medical-documents/doc-1`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -681,6 +686,8 @@ test("mapMedicalDocument keeps known types and falls back to Uncategorized", () 
   });
   assert.equal(described.name, "Medical Clearance");
   assert.equal(described.filename, "scan.pdf");
+  assert.equal(medicalDocuments.resolveDocumentType("Other Medical Document")?.id, "other");
+  assert.equal(medicalDocuments.resolveDocumentType("other")?.label, "Other Dental Document");
 });
 
 test("dentist cannot download another patient's medical document by swapping ids", async () => {
@@ -701,6 +708,10 @@ test("dentist cannot download another patient's medical document by swapping ids
   try {
     const download = await fetch(`${portal.url}/patients/11/medical-documents/secret-doc/download`);
     assert.equal(download.status, 404);
+    const inlinePreview = await fetch(
+      `${portal.url}/patients/11/medical-documents/secret-doc/download?inline=1`
+    );
+    assert.equal(inlinePreview.status, 404);
     const missingRecord = await fetch(`${portal.url}/patients/999/medical-documents/secret-doc/download`);
     assert.equal(missingRecord.status, 404);
   } finally {

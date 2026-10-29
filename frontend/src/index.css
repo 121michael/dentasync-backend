@@ -2742,7 +2742,9 @@ strong {
 }
 
 .uploaded-files-folder {
+  width: min(100%, calc(100vw - 1.5rem));
   max-width: 100%;
+  box-sizing: border-box;
 }
 
 .uploaded-files-folder__heading {
@@ -2784,10 +2786,66 @@ strong {
 
 .dentist-medical-docs .table-wrap {
   overflow-x: auto;
+  max-width: 100%;
 }
 
 .dentist-medical-docs .data-table {
-  min-width: 48rem;
+  width: 100%;
+  min-width: 0;
+}
+
+.dentist-medical-docs .data-table th,
+.dentist-medical-docs .data-table td {
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+
+.dental-docs-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.dental-docs-actions .button {
+  min-height: 32px;
+}
+
+.dentist-medical-docs .data-table td.status-text {
+  white-space: nowrap;
+}
+
+.dentist-medical-docs .data-table td[data-label="Actions"] {
+  min-width: 12.5rem;
+}
+
+.dental-docs-actions--preview {
+  justify-content: flex-end;
+  margin-top: 0.85rem;
+}
+
+.dental-doc-preview {
+  width: min(960px, 100%);
+}
+
+.dental-doc-preview__image {
+  display: block;
+  width: 100%;
+  max-height: min(70vh, 720px);
+  object-fit: contain;
+  background: #f6f1fb;
+  border-radius: 12px;
+}
+
+.dental-doc-preview__frame {
+  display: block;
+  width: 100%;
+  min-height: min(70vh, 720px);
+  border: 0;
+  border-radius: 12px;
+  background: #fff;
 }
 
 @media (max-width: 720px) {
@@ -2827,6 +2885,34 @@ strong {
     color: var(--text-muted);
     font-size: 0.62rem;
     font-weight: 650;
+  }
+
+  .dentist-medical-docs .data-table td[data-label="Actions"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dentist-medical-docs .data-table td[data-label="Actions"]::before {
+    display: none;
+  }
+
+  .dentist-medical-docs .data-table td.status-text {
+    white-space: normal;
+  }
+
+  .dental-docs-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    width: 100%;
+  }
+
+  .dental-docs-actions .button {
+    width: 100%;
+    max-width: 100%;
+    justify-content: center;
+  }
+
+  .dental-docs-actions .button:nth-child(n + 3) {
+    grid-column: 1 / -1;
   }
 }
 
