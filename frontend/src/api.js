@@ -429,6 +429,8 @@ export const api = {
   deleteAdminSchedule: (id) => request(`/admin/schedules/${id}`, { method: "DELETE" }),
   getAdminAiSettings: () => request("/admin/ai-settings"),
   updateAdminAiSettings: (body) => request("/admin/ai-settings", { method: "PUT", body }),
+  getAdminClinicServices: () => request("/admin/clinic-services"),
+  updateAdminClinicServices: (body) => request("/admin/clinic-services", { method: "PUT", body }),
   getAdminAuditLogs: (params = {}) => {
     const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value || value === 0));
     return request(`/admin/audit-logs${search.size ? `?${search}` : ""}`);

@@ -35,6 +35,7 @@ const accountDependents = require("../services/accountDependents");
 const patientAiConversations = require("../services/patientAiConversations");
 const { resolveAppSecrets } = require("../lib/securityConfig");
 const { attachDentalAuthorizationRoutes } = require("./dentalAuthorization");
+const { loadApprovedClinicCatalog, resolveCatalog } = require("../services/approvedClinicCatalog");
 
 const SERVICES = [
   {
@@ -497,7 +498,13 @@ function createPatientPortalRouter({
   router.use(authenticateToken, requirePatient);
   attachDentalAuthorizationRoutes(router, { db, role: "patient" });
 
-  router.get("/catalog", (_req, res) => {
+  router.get("/catalog", async (_req, res) => {
+    let clinicServices = resolveCatalog(null).publicServices;
+    try {
+      clinicServices = (await loadApprovedClinicCatalog(db)).publicServices;
+    } catch {
+      clinicServices = resolveCatalog(null).publicServices;
+    }
     res.json({
       services: SERVICES.map(mapCatalogService),
       dentists: DENTISTS,
@@ -506,6 +513,7 @@ function createPatientPortalRouter({
         name: provider.name,
         filipinoDoctors: Boolean(provider.filipinoDoctors),
       })),
+      clinicServices,
     });
   });
 
@@ -1841,6 +1849,12 @@ function createPatientPortalRouter({
       const patientContext = await loadAuthorizedPatientContext(db, userId, {
         includeWait: isAiFeatureEnabled(settings, "waitingTimePrediction"),
       });
+      let approvedCatalog = resolveCatalog(null);
+      try {
+        approvedCatalog = await loadApprovedClinicCatalog(db);
+      } catch {
+        approvedCatalog = resolveCatalog(null);
+      }
       const assistantOptions = {
         services: SERVICES,
         dentists: DENTISTS,
@@ -1852,6 +1866,9 @@ function createPatientPortalRouter({
         db,
         usageUserId: userId,
         usageUserRole: "patient",
+        approvedServices: approvedCatalog.chatbotServices,
+        approvedFactsEn: approvedCatalog.factsEn,
+        approvedFactsTl: approvedCatalog.factsTl,
       };
 
       async function persistAndRespond(payload) {

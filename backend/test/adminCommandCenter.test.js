@@ -30,6 +30,22 @@ async function startPortal() {
         };
       }
 
+      if (sql.includes("admin_portal_settings") && sql.includes("setting_key = $1")) {
+        return { rows: [] };
+      }
+
+      if (sql.includes("INTO admin_portal_settings") && String(params[0] || "") === "clinic_services") {
+        return {
+          rows: [
+            {
+              setting_value: params[1] ? JSON.parse(params[1]) : { services: [] },
+              updated_at: "2026-10-29T00:00:00.000Z",
+              updated_by: "admin-1",
+            },
+          ],
+        };
+      }
+
       if (sql.includes("admin_portal_settings") && sql.includes("setting_key = 'ai'")) {
         return {
           rows: [
@@ -105,6 +121,21 @@ test("admin AI settings endpoint returns persisted configuration", async () => {
     const body = await response.json();
     assert.equal(body.settings.amethystAiEnabled, true);
     assert.equal(body.settings.automatedReminders, false);
+  } finally {
+    await portal.close();
+  }
+});
+
+test("admin clinic services endpoint returns the approved catalog", async () => {
+  const portal = await startPortal();
+  try {
+    const response = await fetch(`${portal.url}/clinic-services`);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    const cleaning = body.services.find((item) => item.id === "cleaning");
+    assert.match(cleaning.details, /₱1,000–₱1,500/);
+    assert.match(cleaning.details, /₱4,000 and above/);
+    assert.ok(body.groups.some((group) => group.id === "preventive"));
   } finally {
     await portal.close();
   }

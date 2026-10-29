@@ -30,10 +30,10 @@ test("split denture bridge and crown services keep distinct verified prices", ()
       "Dentures are removable dental appliances designed to replace missing teeth and help restore everyday oral function and appearance. The suitable denture type and materials depend on the patient's needs and the dentist's assessment.",
   });
   assert.equal(dentures.verified, true);
-  assert.match(dentures.priceLabel, /Starting at ₱7,500/);
+  assert.match(dentures.priceLabel, /₱7,500–₱30,000/);
   assert.match(dentures.description, /removable dental appliances/);
-  assert.match(dentures.compactNote, /denture type, materials, and individual dental needs/);
-  assert.match(dentures.extraNotes.join(" "), /not a guaranteed final cost/);
+  assert.match(dentures.compactNote, /₱7,500–₱30,000, depending on type and materials/);
+  assert.match(dentures.extraNotes.join(" "), /FREE consultation/);
 
   const bridge = getApprovedClinicPrice({ id: "fixed-bridge", name: "Fixed Bridge" });
   assert.equal(bridge.verified, true);
@@ -55,7 +55,7 @@ test("orthodontics shows metal braces prices and not retainer fees for invisible
   assert.match(metal.details, /₱1,250/);
   assert.equal(metal.lines.find((line) => line.label === "Down payment")?.value, "₱5,000");
   assert.equal(metal.lines.find((line) => line.label === "Monthly adjustment")?.value, "₱1,250");
-  assert.match(metal.lines.find((line) => line.label === "Monthly cleaning")?.value, /Free cleaning/);
+  assert.match(metal.lines.find((line) => line.label === "Included benefit")?.value, /Free cleaning/);
   assert.match(metal.notes.join(" "), /not the total cost of treatment/);
   assert.match(invisible.description, /clear aligner/);
   assert.equal(invisible.priceLabel, "Price available upon consultation");
@@ -123,7 +123,7 @@ test("dentures orthodontics implants veneers and cleaning reuse one public image
   assert.equal(existsSync(join(frontendRoot, "public", gumContouring.imageUrl.replace(/^\//, ""))), true);
 });
 
-test("dental cleaning shows the verified starting price with a case qualification", () => {
+test("dental cleaning shows three severity-based price ranges", () => {
   const cleaning = getApprovedClinicPrice({
     id: "cleaning",
     name: "Dental Cleaning / Oral Prophylaxis",
@@ -131,29 +131,36 @@ test("dental cleaning shows the verified starting price with a case qualificatio
       "Professional dental cleaning helps remove plaque and hardened deposits from the teeth. The recommended cleaning approach depends on your oral health and the dentist's assessment.",
   });
   assert.equal(cleaning.verified, true);
-  assert.equal(cleaning.priceLabel, "Starting at ₱1,000; depends on the case");
+  assert.match(cleaning.priceLabel, /₱1,000–₱1,500/);
+  assert.match(cleaning.details, /₱2,000–₱2,500/);
+  assert.match(cleaning.details, /₱4,000 and above/);
+  assert.equal(cleaning.lines.find((line) => line.label === "Mild cleaning")?.value, "₱1,000–₱1,500");
+  assert.equal(cleaning.lines.find((line) => line.label === "Moderate cleaning")?.value, "₱2,000–₱2,500");
+  assert.match(cleaning.lines.find((line) => line.label === "More extensive cleaning")?.value, /₱4,000/);
   assert.match(cleaning.description, /plaque and hardened deposits/);
-  assert.match(cleaning.compactNote, /Final pricing depends on your dental needs/);
   assert.match(cleaning.extraNotes.join(" "), /does not guarantee the same result/);
 });
 
-test("veneers implants and gum contouring do not invent peso prices", () => {
+test("veneers and implants do not invent peso prices", () => {
   const veneers = getApprovedClinicPrice({ id: "veneers", name: "Veneers" });
   const implants = getApprovedClinicPrice({ id: "dental-implants", name: "Dental Implants" });
-  const gums = getApprovedClinicPrice({ id: "gum-contouring", name: "Gum Contouring" });
   assert.equal(veneers.priceLabel, "Price available upon consultation");
   assert.match(veneers.description, /thin restorations placed over the front surfaces/);
   assert.match(veneers.compactNote, /treatment plan/);
   assert.equal(implants.priceLabel, "Price available upon consultation");
   assert.match(implants.description, /implant placed in the jawbone/);
   assert.match(implants.compactNote, /dentist's assessment/);
-  assert.equal(gums.priceLabel, "Available upon consultation");
-  for (const price of [veneers, implants, gums]) {
+  for (const price of [veneers, implants]) {
     assert.doesNotMatch(price.priceLabel, /₱\d/);
     assert.doesNotMatch(price.details, /₱\d/);
   }
-  assert.doesNotMatch(veneers.priceLabel, /₱10,000/);
-  assert.doesNotMatch(veneers.priceLabel, /₱7,500/);
-  assert.doesNotMatch(implants.priceLabel, /₱7,500/);
-  assert.doesNotMatch(implants.priceLabel, /₱7,000/);
+});
+
+test("gum contouring filling and dentures keep unit and range wording", () => {
+  const gums = getApprovedClinicPrice({ id: "gum-contouring", name: "Gum Contouring" });
+  const filling = getApprovedClinicPrice({ id: "filling", name: "Permanent Filling / Restoration" });
+  const extraction = getApprovedClinicPrice({ id: "extraction", name: "Tooth Extraction" });
+  assert.equal(gums.priceLabel, "₱1,000 per tooth");
+  assert.equal(filling.priceLabel, "₱1,000 per surface");
+  assert.equal(extraction.priceLabel, "₱1,500–₱5,000");
 });

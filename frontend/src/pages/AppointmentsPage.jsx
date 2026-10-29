@@ -16,7 +16,7 @@ import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
 import { useAuth } from "../useAuth";
 import { matchesNotificationFocus } from "../notificationFocus";
-import { getApprovedClinicPrice } from "../clinic/approvedClinicPrices";
+import { applyApprovedClinicPriceOverrides, getApprovedClinicPrice } from "../clinic/approvedClinicPrices";
 import { attachServiceVisual } from "../clinic/serviceVisuals";
 
 const PERIOD_ORDER = ["Morning", "Afternoon", "Evening"];
@@ -320,6 +320,7 @@ export function AppointmentsPage() {
         api.getDependents().catch(() => ({ dependents: [] })),
       ]);
       setCatalog(catalogResponse);
+      applyApprovedClinicPriceOverrides(catalogResponse.clinicServices || []);
       setAppointments(appointmentResponse.appointments || []);
       setDependents(
         (dependentsResponse.dependents || dependentsResponse.items || []).filter(

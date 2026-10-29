@@ -70,175 +70,12 @@ Mag-book ng appointment at sundan ang HMO verification process ng klinika. Kaila
 
 ${HMO_PRIVACY_TL}`;
 
-// Clinic-approved service and price catalog. Update here to change Patient AI answers without retraining Gemini.
-const APPROVED_CLINIC_SERVICES = [
-  {
-    id: "consultation",
-    terms: [
-      "consultation",
-      "oral examination",
-      "oral exam",
-      "checkup",
-      "check up",
-      "free consultation",
-      "konsulta",
-      "magpatingin",
-      "patingin",
-      "libre bang consultation",
-      "free ba ang consultation",
-      "may free consultation",
-    ],
-    en: "Consultation / Oral Examination is FREE at Amethyst Dental Clinic. You're welcome to book a consultation so our dentist can assess your needs.",
-    tl: "FREE ang Consultation / Oral Examination sa Amethyst Dental Clinic. Welcome kayong mag-book ng consultation para ma-assess ng dentista ang pangangailangan ninyo.",
-  },
-  {
-    id: "cleaning",
-    terms: [
-      "cleaning",
-      "prophylaxis",
-      "oral prophylaxis",
-      "oral prophy",
-      "hygiene",
-      "magpacleaning",
-      "magpa-cleaning",
-      "paglilinis sa klinika",
-    ],
-    en: "Oral Prophylaxis (Cleaning): Starting at ₱1,000, depending on the patient's case. The dentist confirms the final cost after assessing your teeth, so this starting amount can change. You can book a FREE consultation / oral examination for a personalized quote. Mag-book sa Appointments.",
-    tl: "Oral Prophylaxis (Cleaning): Starting at ₱1,000, depending on the patient's case. Kino-confirm ng dentista ang final cost pagkatapos i-assess ang ngipin, kaya puwedeng magbago ang starting amount. Puwede kayong mag-book ng FREE consultation / oral examination. Mag-book sa Appointments.",
-  },
-  {
-    id: "filling",
-    terms: [
-      "filling",
-      "restoration",
-      "permanent filling",
-      "cavity filling",
-      "composite",
-      "magpapasta",
-      "pasta sa ngipin",
-      "pasta ng ngipin",
-    ],
-    en: "Restoration / Permanent Filling: Starting at ₱1,000, depending on the patient's case. The dentist confirms the final cost after assessing the tooth. Book a FREE consultation if you need a personalized recommendation. Mag-book sa Appointments.",
-    tl: "Restoration / Permanent Filling: Starting at ₱1,000, depending on the patient's case. Kino-confirm ng dentista ang final cost pagkatapos i-assess ang ngipin. Mag-book ng FREE consultation kung kailangan ninyo ng personalized na paliwanag. Mag-book sa Appointments.",
-  },
-  {
-    id: "extraction",
-    terms: ["extraction", "extract", "pull a tooth", "pulling a tooth", "bunot", "magpabunot", "pagbunot", "tooth extraction"],
-    en: "Extraction: Starting at ₱1,500, depending on the patient's case. We cannot promise a final extraction fee before the dentist examines the tooth. FREE consultation / oral examination is available. Mag-book sa Appointments.",
-    tl: "Extraction: Starting at ₱1,500, depending on the patient's case. Hindi kami makakapangako ng final bayad bago mag-exam ang dentista. May FREE consultation / oral examination. Mag-book sa Appointments.",
-  },
-  {
-    id: "odontectomy",
-    terms: ["odontectomy", "wisdom tooth removal", "wisdom extraction", "bunot ng wisdom"],
-    en: "Odontectomy is ₱5,000–₱15,000, depending on the case. We do not guarantee a specific price before assessment. Book a FREE consultation so the dentist can examine the tooth and explain the fee within that range.",
-    tl: "Ang Odontectomy ay ₱5,000–₱15,000, depending on the case. Hindi kami nag-gaguarantee ng specific na presyo bago ang assessment. Mag-book ng FREE consultation para ma-exam ng dentista at maipaliwanag ang bayad sa range na iyon.",
-  },
-  {
-    id: "whitening",
-    terms: ["whitening", "whiten", "bleaching", "teeth bleaching", "pampaputi", "paputiin", "puting ngipin"],
-    en: "Teeth Bleaching / Whitening is ₱10,000 per session, consisting of two applications. We do not add unlisted packages or discounts to this approved price.",
-    tl: "Ang Teeth Bleaching / Whitening ay ₱10,000 per session, consisting of two applications. Hindi kami nagdaragdag ng unlisted na package o discount sa approved na presyo na ito.",
-  },
-  {
-    id: "fluoride",
-    terms: ["fluoride", "fluoride application", "fluoride treatment"],
-    en: "Fluoride Application is ₱1,500.",
-    tl: "Ang Fluoride Application ay ₱1,500.",
-  },
-  {
-    id: "metal-braces",
-    terms: ["metal braces", "standard metal braces", "standard braces", "braces", "magpabraces", "braces ko"],
-    en: "Standard Metal Braces: ₱5,000 down payment, plus ₱1,250 monthly adjustment. Free cleaning is included every month during the adjustment visit. The monthly adjustment is not the total cost of treatment, and we do not invent an overall braces total.",
-    tl: "Standard Metal Braces: ₱5,000 down payment, plus ₱1,250 monthly adjustment. Kasama ang free cleaning every month during the adjustment visit. Hindi overall cost ng treatment ang monthly adjustment, at hindi kami gumagawa ng invented na total.",
-  },
-  {
-    id: "clear-retainer-plan",
-    terms: ["clear retainer", "clear retainers"],
-    en: "Clear Retainer: ₱15,000 down payment, plus ₱1,500 monthly adjustment. These are separate amounts, not an invented overall treatment total.",
-    tl: "Clear Retainer: ₱15,000 down payment, plus ₱1,500 monthly adjustment. Hiwalay ang down payment at monthly adjustment, hindi invented overall treatment total.",
-  },
-  {
-    id: "pfm-crown",
-    terms: ["pfm", "porcelain-fused-to-metal", "porcelain fused to metal", "porcelain fused"],
-    en: "Porcelain-Fused-to-Metal (PFM) is ₱7,000 per unit/tooth. That price is per unit, not automatically the total price for an entire bridge or multiple teeth.",
-    tl: "Ang Porcelain-Fused-to-Metal (PFM) ay ₱7,000 per unit/tooth. Per unit ang presyo, hindi automatic na total para sa buong bridge o maraming ngipin.",
-  },
-  {
-    id: "zirconia-crown",
-    terms: ["zirconia", "pure porcelain", "all porcelain"],
-    en: "Pure Porcelain / Zirconia is ₱15,000 per unit. That price is per unit, not automatically the total price for an entire bridge or multiple teeth.",
-    tl: "Ang Pure Porcelain / Zirconia ay ₱15,000 per unit. Per unit ang presyo, hindi automatic na total para sa buong bridge o maraming ngipin.",
-  },
-  {
-    id: "crown-bridge",
-    terms: ["crown", "bridge", "fixed bridge", "dental crown", "korona"],
-    en: "Fixed Bridge / Dental Crown prices are per unit: Porcelain-Fused-to-Metal (PFM) is ₱7,000 per unit/tooth, and Pure Porcelain / Zirconia is ₱15,000 per unit. Per-unit fees are not automatically the total for an entire bridge or multiple teeth. For which material is appropriate, book a FREE consultation — we will not guess without an exam.",
-    tl: "Per unit ang Fixed Bridge / Dental Crown: Porcelain-Fused-to-Metal (PFM) ₱7,000 per unit/tooth, at Pure Porcelain / Zirconia ₱15,000 per unit. Hindi automatic na total ng buong bridge o maraming ngipin ang per-unit fee. Para sa tamang material, mag-book ng FREE consultation — hindi kami huhula nang walang exam.",
-  },
-  {
-    id: "hawley-retainer",
-    terms: ["hawley", "hawley retainer", "straight-wire retainer", "straight wire retainer"],
-    en: "Hawley Retainer / Straight-Wire Retainer is ₱3,500 for the upper or lower retainer. That listed price applies to the upper or lower retainer as specified, rather than automatically covering both.",
-    tl: "Ang Hawley Retainer / Straight-Wire Retainer ay ₱3,500 for the upper or lower retainer. Para sa upper o lower retainer ang listed price, hindi automatic na pareho.",
-  },
-  {
-    id: "invisible-retainer",
-    terms: ["invisible retainer", "invisible retainers"],
-    en: "Invisible Retainer is ₱5,000 for the upper or lower retainer. That listed price applies to the upper or lower retainer as specified, rather than automatically covering both.",
-    tl: "Ang Invisible Retainer ay ₱5,000 for the upper or lower retainer. Para sa upper o lower retainer ang listed price, hindi automatic na pareho.",
-  },
-  {
-    id: "retainers",
-    terms: ["retainer", "retainers"],
-    en: "Hawley Retainer / Straight-Wire Retainer is ₱3,500 for the upper or lower retainer. Invisible Retainer is ₱5,000 for the upper or lower retainer. Those listed prices apply to the upper or lower retainer as specified, rather than automatically covering both. The Clear Retainer orthodontic arrangement is a separate plan: ₱15,000 down payment, plus ₱1,500 monthly adjustment.",
-    tl: "Ang Hawley Retainer / Straight-Wire Retainer ay ₱3,500 for the upper or lower retainer. Ang Invisible Retainer ay ₱5,000 for the upper or lower retainer. Para sa upper o lower retainer ang listed price, hindi automatic na pareho. Hiwalay ang Clear Retainer orthodontic arrangement: ₱15,000 down payment, plus ₱1,500 monthly adjustment.",
-  },
-  {
-    id: "dentures",
-    terms: ["denture", "dentures", "pustiso"],
-    en: "Dentures: Starting at ₱7,500, depending on the type and materials used. We do not list additional denture types, material options, or exact prices beyond this approved knowledge.",
-    tl: "Dentures: Starting at ₱7,500, depending on the type and materials used. Wala kaming karagdagang denture types, material options, o exact prices na wala sa approved knowledge.",
-  },
-  {
-    id: "veneers",
-    terms: ["veneer", "veneers"],
-    en: "Veneers are available at Amethyst Dental Clinic. Pricing is available upon consultation or confirmation by the clinic. We do not quote an amount before the dentist examines your teeth. Book a FREE consultation / oral examination. Mag-book sa Appointments.",
-    tl: "Available ang Veneers sa Amethyst Dental Clinic. Available upon consultation o confirmation ng klinika ang presyo. Hindi kami magku-quote ng amount bago i-exam ng dentista ang ngipin. Mag-book ng FREE consultation / oral examination. Mag-book sa Appointments.",
-  },
-  {
-    id: "dental-implants",
-    terms: ["implant", "implants", "dental implant", "dental implants"],
-    en: "Dental Implants are available at Amethyst Dental Clinic. Pricing is available upon consultation or confirmation by the clinic. We do not quote an implant fee before the dentist examines your case. Book a FREE consultation / oral examination. Mag-book sa Appointments.",
-    tl: "Available ang Dental Implants sa Amethyst Dental Clinic. Available upon consultation o confirmation ng klinika ang presyo. Hindi kami magku-quote ng implant fee bago i-exam ng dentista ang kaso. Mag-book ng FREE consultation / oral examination. Mag-book sa Appointments.",
-  },
-  {
-    id: "gum-contouring",
-    terms: ["gum contouring", "gum contour", "gingivoplasty", "gingival contouring"],
-    en: "Gum Contouring is available at Amethyst Dental Clinic. Pricing is available upon consultation or confirmation by the clinic. We do not quote an amount before the dentist examines your gums. Book a FREE consultation / oral examination. Mag-book sa Appointments.",
-    tl: "Available ang Gum Contouring sa Amethyst Dental Clinic. Available upon consultation o confirmation ng klinika ang presyo. Hindi kami magku-quote ng amount bago i-exam ng dentista ang gilagid. Mag-book ng FREE consultation / oral examination. Mag-book sa Appointments.",
-  },
-];
+const { resolveCatalog } = require("./approvedClinicCatalog");
 
-const APPROVED_SERVICE_FACTS_EN = `Official Amethyst Dental Clinic services and prices (quote exactly; do not invent discounts, extras, or totals):
-- Consultation / Oral Examination: FREE.
-- Oral Prophylaxis (Cleaning): Starting at ₱1,000, depending on the patient's case.
-- Restoration / Permanent Filling: Starting at ₱1,000, depending on the patient's case.
-- Extraction: Starting at ₱1,500, depending on the patient's case.
-- Odontectomy: ₱5,000–₱15,000, depending on the case.
-- Teeth Bleaching / Whitening: ₱10,000 per session, consisting of two applications.
-- Fluoride Application: ₱1,500.
-- Standard Metal Braces: ₱5,000 down payment, plus ₱1,250 monthly adjustment. Free cleaning is included every month during the adjustment visit. Do not treat the monthly fee as the total cost of treatment.
-- Clear Retainer: ₱15,000 down payment, plus ₱1,500 monthly adjustment. Do not invent an overall treatment total.
-- Porcelain-Fused-to-Metal (PFM): ₱7,000 per unit/tooth. Per unit, not automatically the total for an entire bridge or multiple teeth.
-- Pure Porcelain / Zirconia: ₱15,000 per unit. Per unit, not automatically the total for an entire bridge or multiple teeth.
-- Hawley Retainer / Straight-Wire Retainer: ₱3,500 for the upper or lower retainer, not automatically both.
-- Invisible Retainer: ₱5,000 for the upper or lower retainer, not automatically both.
-- Dentures: Starting at ₱7,500, depending on the type and materials used. Do not invent additional denture types or material prices.
-- Veneers: Available; pricing is available upon consultation or confirmation by the clinic. Do not invent a peso amount.
-- Dental Implants: Available; pricing is available upon consultation or confirmation by the clinic. Do not invent a peso amount.
-- Gum Contouring: Available; pricing is available upon consultation or confirmation by the clinic. Do not invent a peso amount.
-Never present a starting price as a guaranteed final price. If the patient asks which material, denture type, or treatment is best for them, do not guess. Explain that it depends on their needs and invite a FREE consultation / oral examination. Do not claim a dentist has evaluated the patient unless an assessment is recorded.`;
-
+const DEFAULT_RESOLVED_CATALOG = resolveCatalog(null);
+const APPROVED_CLINIC_SERVICES = DEFAULT_RESOLVED_CATALOG.chatbotServices;
+const APPROVED_SERVICE_FACTS_EN = DEFAULT_RESOLVED_CATALOG.factsEn;
+const APPROVED_SERVICE_FACTS_TL = DEFAULT_RESOLVED_CATALOG.factsTl;
 const GENERIC_SERVICE_TOKENS = new Set([
   "dental",
   "teeth",
@@ -618,25 +455,11 @@ const CLINIC_TOPICS = [
       "bayad",
       "gastos",
     ],
-    build: (_clinic, _dentists, _services, lang) =>
+    build: (_clinic, _dentists, _services, lang, extras = {}) =>
       pick(
         lang,
-        `${APPROVED_SERVICE_FACTS_EN} Starting prices and case-based fees are confirmed at a FREE consultation / oral examination. Mag-book sa Appointments.`,
-        `Opisyal na serbisyo at presyo ng Amethyst Dental Clinic (huwag imbento ng discount o extra):
-Consultation / Oral Examination: FREE.
-Oral Prophylaxis (Cleaning): Starting at ₱1,000, depending on the patient's case.
-Restoration / Permanent Filling: Starting at ₱1,000, depending on the patient's case.
-Extraction: Starting at ₱1,500, depending on the patient's case.
-Odontectomy: ₱5,000–₱15,000, depending on the case.
-Teeth Bleaching / Whitening: ₱10,000 per session, consisting of two applications.
-Fluoride Application: ₱1,500.
-Standard Metal Braces: ₱5,000 down payment, plus ₱1,250 monthly adjustment, with free cleaning every month during the adjustment visit.
-Clear Retainer: ₱15,000 down payment, plus ₱1,500 monthly adjustment.
-PFM: ₱7,000 per unit/tooth. Zirconia / Pure Porcelain: ₱15,000 per unit. Per unit, hindi automatic total ng buong bridge.
-Hawley / Straight-Wire Retainer: ₱3,500 for the upper or lower retainer.
-Invisible Retainer: ₱5,000 for the upper or lower retainer.
-Dentures: Starting at ₱7,500, depending on the type and materials used.
-Huwag ituring na final cost ang “starting at” amount. Mag-book ng FREE consultation / oral examination. Mag-book sa Appointments.`
+        `${extras.factsEn || APPROVED_SERVICE_FACTS_EN} Listed fees and case-based costs are confirmed at a FREE consultation / oral examination. Mag-book sa Appointments.`,
+        `${extras.factsTl || APPROVED_SERVICE_FACTS_TL} Mag-book ng FREE consultation / oral examination. Mag-book sa Appointments.`
       ),
   },
   {
@@ -915,6 +738,11 @@ function normalizeOptions(servicesOrOptions) {
     db: options.db || null,
     usageUserId: options.usageUserId || null,
     usageUserRole: options.usageUserRole || null,
+    approvedServices: Array.isArray(options.approvedServices)
+      ? options.approvedServices
+      : APPROVED_CLINIC_SERVICES,
+    approvedFactsEn: options.approvedFactsEn || APPROVED_SERVICE_FACTS_EN,
+    approvedFactsTl: options.approvedFactsTl || APPROVED_SERVICE_FACTS_TL,
   };
 }
 
@@ -927,7 +755,10 @@ function looksLikeFeeQuestion(normalized) {
 function matchApprovedClinicService(normalized, options = {}) {
   let best = null;
   let bestLen = 0;
-  for (const service of APPROVED_CLINIC_SERVICES) {
+  const catalog = Array.isArray(options.approvedServices)
+    ? options.approvedServices
+    : APPROVED_CLINIC_SERVICES;
+  for (const service of catalog) {
     for (const alias of service.terms) {
       if (normalized.includes(alias) && alias.length >= bestLen) {
         best = service;
@@ -956,8 +787,10 @@ function answerApprovedClinicService(service, normalized, lang) {
     if (service.id === "dentures") {
       return pick(
         lang,
-        "Of course! 😊 The best denture type and material depend on your dental needs and preferences. Our dentures start at ₱7,500, depending on the type and materials used. We offer FREE consultation so our dentist can assess your needs and explain the available options. You’re welcome to book a consultation with Amethyst Dental Clinic so we can guide you.",
-        "Siyempre! 😊 Depende sa dental needs at preferences ninyo ang pinakabagay na denture type at material. Nagsisimula ang dentures namin sa ₱7,500, depending on the type and materials used. May FREE consultation kami para ma-assess ng dentista ang pangangailangan ninyo at maipaliwanag ang options. Welcome kayong mag-book ng consultation sa Amethyst Dental Clinic."
+        service.adviceEn ||
+          "Our dentures range from ₱7,500 to ₱30,000, depending on the type and materials. 😊 The best option depends on your dental needs, so we recommend booking a consultation with our dentist. Good news—our consultation is free! Our dentist can explain the available options and help you choose what suits you best.",
+        service.adviceTl ||
+          "Ang dentures namin ay ₱7,500 hanggang ₱30,000, depending on the type and materials. 😊 Depende sa dental needs ninyo ang pinakabagay na option, kaya inirerekomenda namin ang consultation sa dentista. Maganda ang balita—libre ang consultation!"
       );
     }
     return pick(
@@ -1251,7 +1084,7 @@ function matchTopic(normalized, topics) {
   return bestScore > 0 ? best : null;
 }
 
-function describeService(service, lang) {
+function describeService(service, lang, approvedCatalog = APPROVED_CLINIC_SERVICES) {
   const intro = service.description || pick(lang, "Available at Amethyst Dental.", "Available sa Amethyst Dental.");
   const parts = [`${service.name}: ${intro}`];
   if (service.durationMinutes) {
@@ -1279,8 +1112,10 @@ function describeService(service, lang) {
   };
   const mappedId = bookingToApproved[String(service.id || "")];
   const approved = mappedId
-    ? APPROVED_CLINIC_SERVICES.find((item) => item.id === mappedId)
-    : matchApprovedClinicService(normalizeQuestion(`${service.name || ""} how much`));
+    ? approvedCatalog.find((item) => item.id === mappedId)
+    : matchApprovedClinicService(normalizeQuestion(`${service.name || ""} how much`), {
+        approvedServices: approvedCatalog,
+      });
   if (approved) {
     return answerApprovedClinicService(approved, normalizeQuestion(`how much is ${service.name || approved.id}`), lang);
   }
@@ -1464,8 +1299,17 @@ function languageInstruction(question) {
 }
 
 function answerFromCatalog(question, servicesOrOptions) {
-  const { services, dentists, clinic, knowledgeMode, patientContext, conversationHistoryBlock } =
-    normalizeOptions(servicesOrOptions);
+  const {
+    services,
+    dentists,
+    clinic,
+    knowledgeMode,
+    patientContext,
+    conversationHistoryBlock,
+    approvedServices,
+    approvedFactsEn,
+    approvedFactsTl,
+  } = normalizeOptions(servicesOrOptions);
   const normalized = normalizeQuestion(question);
   const lang = detectLanguage(question);
   if (looksLikeOtherPatientRequest(question)) {
@@ -1535,7 +1379,7 @@ function answerFromCatalog(question, servicesOrOptions) {
     };
   }
 
-  const approvedService = matchApprovedClinicService(normalized);
+  const approvedService = matchApprovedClinicService(normalized, { approvedServices });
   if (approvedService) {
     return {
       answer: answerApprovedClinicService(approvedService, normalized, lang),
@@ -1567,7 +1411,11 @@ function answerFromCatalog(question, servicesOrOptions) {
     !preferOralOverService &&
     (!clinicTopic || clinicTopic.id === "services" || clinicTopic.id === "emergency")
   ) {
-    return { answer: describeService(service, lang), source: "catalog", language: lang };
+    return {
+      answer: describeService(service, lang, approvedServices),
+      source: "catalog",
+      language: lang,
+    };
   }
 
   if (
@@ -1575,7 +1423,10 @@ function answerFromCatalog(question, servicesOrOptions) {
     (!oralTopic || keywordHits(normalized, clinicTopic.keywords) >= keywordHits(normalized, oralTopic.keywords))
   ) {
     return {
-      answer: clinicTopic.build(clinic, dentists, services, lang),
+      answer: clinicTopic.build(clinic, dentists, services, lang, {
+        factsEn: approvedFactsEn,
+        factsTl: approvedFactsTl,
+      }),
       source: "faq",
       language: lang,
     };
@@ -1614,8 +1465,8 @@ function answerFromCatalog(question, servicesOrOptions) {
   };
 }
 
-function clinicContextBlock(clinic, services, dentists) {
-  const serviceLines = APPROVED_SERVICE_FACTS_EN;
+function clinicContextBlock(clinic, services, dentists, factsEn = APPROVED_SERVICE_FACTS_EN) {
+  const serviceLines = factsEn;
   const dentistLines = dentists
     .map((dentist) => `- ${dentist.name}${dentist.specialty ? `, ${dentist.specialty}` : ""}`)
     .join("\n");
@@ -1905,7 +1756,7 @@ ${knowledgeModeInstructions(options.knowledgeMode)}
 ${diagnosticsSensitivityInstructions(options.diagnosticsSensitivity)}
 ${languageInstruction(question)}
 
-${clinicContextBlock(options.clinic, options.services, options.dentists)}
+${clinicContextBlock(options.clinic, options.services, options.dentists, options.approvedFactsEn)}
 
 ${ownVisit}
 ${historyBlock ? `\n${historyBlock}\nTreat prior assistant text as conversation context only, not as verified clinic data.\n` : ""}

@@ -2152,7 +2152,7 @@ strong {
 .treatment-option small,
 .treatment-option__price {
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
   padding: 0 0.18rem;
@@ -9155,6 +9155,74 @@ body.is-queue-display .staff-mobile-nav {
   .admin-ai-knowledge .button--primary,
   .admin-ai-knowledge__form select {
     transition: none;
+  }
+}
+
+.admin-clinic-services {
+  margin-top: 1rem;
+}
+
+.admin-clinic-services__form {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.admin-clinic-services__group {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.admin-clinic-services__group > h3 {
+  margin: 0.4rem 0 0;
+  color: var(--text-strong);
+  font-size: 0.92rem;
+  font-weight: 800;
+}
+
+.admin-clinic-services__card {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem 1rem;
+  padding: 0.95rem;
+  border: 1px solid rgba(115, 59, 170, 0.14);
+  border-radius: 16px;
+  background: #fff;
+}
+
+.admin-clinic-services__card label {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--text-strong);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.admin-clinic-services__wide {
+  grid-column: 1 / -1;
+}
+
+.admin-clinic-services__card input,
+.admin-clinic-services__card textarea {
+  width: 100%;
+  border: 1px solid rgba(115, 59, 170, 0.18);
+  border-radius: 12px;
+  padding: 0.65rem 0.8rem;
+  color: var(--text-strong);
+  font-size: 0.84rem;
+  font-weight: 600;
+  background: #fff;
+}
+
+.admin-clinic-services__card textarea {
+  resize: vertical;
+  min-height: 4.5rem;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+@media (max-width: 720px) {
+  .admin-clinic-services__card {
+    grid-template-columns: 1fr;
   }
 }
 

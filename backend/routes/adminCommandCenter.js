@@ -16,6 +16,10 @@ const {
   normalizeAiSettings,
   invalidateAiSettingsCache,
 } = require("../services/aiSettings");
+const {
+  loadApprovedClinicCatalog,
+  saveApprovedClinicCatalog,
+} = require("../services/approvedClinicCatalog");
 
 const ACCOUNT_ROLES = new Set(["admin", "dentist", "staff", "patient"]);
 // Must match the statuses postgresPasswordResetStore refuses to issue reset links for.
@@ -1280,6 +1284,57 @@ function attachAdminCommandCenterRoutes(router, { db, passwordResetService = nul
       }
       console.error("Admin AI settings write error:", error.message);
       return res.status(500).json({ message: "Unable to save AI settings." });
+    }
+  });
+
+  router.get("/clinic-services", async (_req, res) => {
+    try {
+      const resolved = await loadApprovedClinicCatalog(db);
+      return res.json({
+        groups: resolved.adminCatalog.groups,
+        services: resolved.adminCatalog.services,
+      });
+    } catch (error) {
+      if (isMissingRelation(error)) {
+        return migrationUnavailable(res);
+      }
+      console.error("Admin clinic services read error:", error.message);
+      return res.status(500).json({ message: "Unable to load clinic services." });
+    }
+  });
+
+  router.put("/clinic-services", async (req, res) => {
+    const payload = Array.isArray(req.body?.services)
+      ? req.body.services
+      : Array.isArray(req.body)
+        ? req.body
+        : null;
+    if (!payload) {
+      return res.status(400).json({ message: "Provide clinic service catalog values to update." });
+    }
+    try {
+      const saved = await saveApprovedClinicCatalog(db, payload, String(req.admin.id));
+      await audit(db, req, {
+        action: "update_clinic_services",
+        targetType: "settings",
+        targetId: "clinic_services",
+        targetLabel: "Clinic Services knowledge",
+        result: "success",
+        detail: "Updated approved clinic service catalog",
+      });
+      return res.json({
+        message: "Clinic services updated successfully.",
+        groups: saved.catalog.adminCatalog.groups,
+        services: saved.catalog.adminCatalog.services,
+        updatedAt: saved.updatedAt,
+        updatedBy: saved.updatedBy,
+      });
+    } catch (error) {
+      if (isMissingRelation(error)) {
+        return migrationUnavailable(res);
+      }
+      console.error("Admin clinic services write error:", error.message);
+      return res.status(500).json({ message: "Unable to save clinic services." });
     }
   });
 

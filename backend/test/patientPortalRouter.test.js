@@ -50,8 +50,11 @@ test("patient portal exposes the booking catalog only to patient accounts", asyn
     assert.equal(response.status, 200);
     const body = await response.json();
 
-    assert.equal(body.services.length, 10);
+    assert.equal(body.services.length, 15);
     assert.equal(body.services[0].id, "cleaning");
+    const cleaningPrice = (body.clinicServices || []).find((item) => item.id === "cleaning");
+    assert.match(cleaningPrice.details, /₱1,000–₱1,500/);
+    assert.match(cleaningPrice.details, /₱4,000 and above/);
     assert.equal(body.dentists.length, 4);
     assert.equal(body.dentists[0].id, "dr-sarah-cruz");
     assert.deepEqual(

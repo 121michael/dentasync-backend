@@ -569,18 +569,20 @@ test("approved clinic prices are a maintainable catalog, not a Gemini fine-tune"
   assert.equal(matchApprovedClinicService("how much is zirconia per tooth").id, "zirconia-crown");
 });
 
-test("cleaning and extraction answers use official starting prices, not guaranteed totals", () => {
+test("cleaning and extraction answers use official ranges, not guaranteed totals", () => {
   const cleaning = answerFromCatalog("How much is cleaning?", options);
   assert.equal(cleaning.source, "catalog");
-  assert.match(cleaning.answer, /Oral Prophylaxis/i);
-  assert.match(cleaning.answer, /Starting at ₱1,000/);
-  assert.match(cleaning.answer, /depending on the patient's case/i);
+  assert.match(cleaning.answer, /oral prophylaxis/i);
+  assert.match(cleaning.answer, /₱1,000–₱1,500/);
+  assert.match(cleaning.answer, /₱2,000–₱2,500/);
+  assert.match(cleaning.answer, /₱4,000/);
+  assert.match(cleaning.answer, /mild cleaning/i);
+  assert.match(cleaning.answer, /moderate cleaning/i);
+  assert.match(cleaning.answer, /extensive cleaning/i);
   assert.doesNotMatch(cleaning.answer, /guaranteed final/i);
-  assert.doesNotMatch(cleaning.answer, /₱1,500/);
 
   const extraction = answerFromCatalog("How much is tooth extraction?", options);
-  assert.match(extraction.answer, /₱1,500/);
-  assert.match(extraction.answer, /depending on the patient's case/i);
+  assert.match(extraction.answer, /₱1,500–₱5,000/);
 });
 
 test("odontectomy answers keep the approved range without promising a quote", () => {
@@ -615,13 +617,15 @@ test("zirconia and invisible retainer answers stay per unit or per arch", () => 
 test("denture questions invite a free consultation instead of inventing types", () => {
   const cost = answerFromCatalog("How much do dentures cost, and what types are available?", options);
   assert.match(cost.answer, /₱7,500/);
-  assert.match(cost.answer, /FREE consultation/i);
+  assert.match(cost.answer, /₱30,000/);
+  assert.match(cost.answer, /consultation/i);
   assert.doesNotMatch(cost.answer, /acrylic partial/i);
 
   const advice = answerFromCatalog("What denture material is best for me?", options);
   assert.match(advice.answer, /depend/i);
   assert.match(advice.answer, /₱7,500/);
-  assert.match(advice.answer, /FREE consultation/i);
+  assert.match(advice.answer, /₱30,000/);
+  assert.match(advice.answer, /consultation/i);
 });
 
 test("consultation is described as free in English and Tagalog", () => {
@@ -656,7 +660,7 @@ test("approved price catalog answers skip Gemini so knowledge updates apply imme
   }
 });
 
-test("veneers implants and gum contouring do not invent peso amounts", () => {
+test("veneers and implants do not invent peso amounts", () => {
   const veneers = answerFromCatalog("How much are veneers?", options);
   assert.equal(veneers.source, "catalog");
   assert.match(veneers.answer, /Veneers/i);
@@ -667,16 +671,29 @@ test("veneers implants and gum contouring do not invent peso amounts", () => {
   assert.match(implants.answer, /Dental Implants/i);
   assert.match(implants.answer, /consultation/i);
   assert.doesNotMatch(implants.answer, /₱\d/);
+});
 
+test("gum contouring uses the approved per-tooth price", () => {
   const gums = answerFromCatalog("How much is gum contouring?", options);
   assert.match(gums.answer, /Gum Contouring/i);
-  assert.match(gums.answer, /consultation/i);
-  assert.doesNotMatch(gums.answer, /₱\d/);
+  assert.match(gums.answer, /₱1,000 per tooth/);
+});
+
+test("filling answers stay per surface", () => {
+  const filling = answerFromCatalog("How much is a permanent filling?", options);
+  assert.match(filling.answer, /₱1,000 per surface/);
+});
+
+test("frenectomy uses the approved fixed price", () => {
+  const result = answerFromCatalog("How much is frenectomy?", options);
+  assert.match(result.answer, /₱5,000/);
+  assert.doesNotMatch(result.answer, /₱5,000–₱15,000/);
 });
 
 test("dentures stay independent from crown and bridge prices", () => {
   const dentures = answerFromCatalog("How much are dentures?", options);
-  assert.match(dentures.answer, /Starting at ₱7,500/);
+  assert.match(dentures.answer, /₱7,500/);
+  assert.match(dentures.answer, /₱30,000/);
   assert.doesNotMatch(dentures.answer, /₱7,000 per unit/);
 
   const bridge = answerFromCatalog("How much is a fixed bridge?", options);
