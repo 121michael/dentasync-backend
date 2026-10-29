@@ -37,6 +37,7 @@ const { resolveAppSecrets } = require("../lib/securityConfig");
 const { attachDentalAuthorizationRoutes } = require("./dentalAuthorization");
 const { loadApprovedClinicCatalog, resolveCatalog } = require("../services/approvedClinicCatalog");
 const medicalDocuments = require("../services/medicalDocuments");
+const appointmentLifecycle = require("../services/appointmentLifecycle");
 
 const SERVICES = [
   {
@@ -381,7 +382,7 @@ function normalizeTime(value) {
   return `${match[1].padStart(2, "0")}:${match[2]}`;
 }
 
-function mapAppointment(appointment) {
+function mapAppointment(appointment, queueStatus) {
   if (!appointment) {
     return null;
   }
@@ -404,7 +405,15 @@ function mapAppointment(appointment) {
     hmoVerificationStatus: appointment.hmo_verification_status || "not_applicable",
     estimatedCost: Number(appointment.estimated_cost),
     status: appointment.status,
+    statusLabel: appointmentLifecycle.displayAppointmentStatus(appointment.status),
     notes: appointment.notes,
+    cancellationReason: appointment.cancellation_reason || null,
+    cancelledAt: appointment.cancelled_at || null,
+    cancelledBy: appointment.cancelled_by || null,
+    rescheduledFromId: appointment.rescheduled_from_id || null,
+    rescheduledToId: appointment.rescheduled_to_id || null,
+    canCancel: appointmentLifecycle.canPatientCancel(appointment.status, queueStatus),
+    canReschedule: appointmentLifecycle.canPatientReschedule(appointment.status, queueStatus),
   };
 }
 
@@ -856,7 +865,7 @@ function createPatientPortalRouter({
     let statusClause = "";
     let fallbackStatusClause = "";
 
-    if (status && ["pending", "confirmed", "checked_in", "completed", "cancelled"].includes(status)) {
+    if (status && ["pending", "confirmed", "checked_in", "completed", "cancelled", "rescheduled"].includes(status)) {
       params.push(status);
       statusClause = ` AND appointments.status = $${params.length}`;
       fallbackStatusClause = ` AND status = $${params.length}`;
@@ -881,7 +890,32 @@ function createPatientPortalRouter({
         params
       );
 
-      return res.json({ appointments: result.rows.map(mapAppointment) });
+      const appointmentIds = result.rows.map((row) => row.id);
+      const queueByAppointment = new Map();
+      if (appointmentIds.length) {
+        try {
+          const queueResult = await db.query(
+            `SELECT DISTINCT ON (appointment_id) appointment_id, status
+             FROM patient_portal_queue_entries
+             WHERE appointment_id = ANY($1::bigint[])
+               AND status NOT IN ('completed', 'no_show')
+             ORDER BY appointment_id, checked_in_at DESC`,
+            [appointmentIds]
+          );
+          for (const row of queueResult.rows) {
+            queueByAppointment.set(String(row.appointment_id), row.status);
+          }
+        } catch (queueError) {
+          if (queueError.code !== "42P01" && queueError.code !== "42703") {
+            console.warn("Appointment queue flags skipped:", queueError.message);
+          }
+        }
+      }
+      return res.json({
+        appointments: result.rows.map((row) =>
+          mapAppointment(row, queueByAppointment.get(String(row.id)))
+        ),
+      });
     } catch (error) {
       if (error?.code === "42703") {
         try {
@@ -1224,33 +1258,78 @@ function createPatientPortalRouter({
     }
   });
 
-  router.patch("/appointments/:id/cancel", async (req, res) => {
-    const actorUserId = userIdFor(req);
+  async function loadOwnedAppointment(appointmentId, actorUserId) {
     try {
       const result = await db.query(
-        `UPDATE patient_portal_appointments AS appointments
-         SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
+        `SELECT appointments.*
+         FROM patient_portal_appointments AS appointments
          WHERE appointments.id = $1
-           AND appointments.status IN ('pending', 'confirmed')
-           AND (
-             appointments.user_id = $2
-             OR appointments.user_id IN (
-               SELECT dependent_user_id
-               FROM patient_portal_dependents
-               WHERE guardian_user_id = $2
-                 AND dependent_user_id IS NOT NULL
-                 AND LOWER(COALESCE(approval_status, 'approved')) = 'approved'
-                 AND removed_at IS NULL
-             )
-           )
-         RETURNING *`,
-        [req.params.id, actorUserId]
+           AND ${appointmentLifecycle.appointmentOwnershipSql("appointments")}
+         LIMIT 1`,
+        [appointmentId, actorUserId]
       );
+      return result.rows[0] || null;
+    } catch (error) {
+      if (error.code !== "42P01") throw error;
+      const fallback = await db.query(
+        `SELECT *
+         FROM patient_portal_appointments
+         WHERE id = $1 AND user_id = $2
+         LIMIT 1`,
+        [appointmentId, actorUserId]
+      );
+      return fallback.rows[0] || null;
+    }
+  }
 
-      if (result.rows.length === 0) {
+  router.patch("/appointments/:id/cancel", async (req, res) => {
+    const actorUserId = userIdFor(req);
+    const reason = stringValue(req.body?.reason, 180) || "patient_cancelled";
+    try {
+      const current = await loadOwnedAppointment(req.params.id, actorUserId);
+      if (!current) {
         return res.status(404).json({ message: "A cancellable appointment was not found." });
       }
+      const queue = await appointmentLifecycle.loadActiveQueueForAppointment(db, current.id);
+      if (!appointmentLifecycle.canPatientCancel(current.status, queue?.status)) {
+        return res.status(409).json({
+          message: appointmentLifecycle.isTerminalAppointment(current.status)
+            ? "This appointment can no longer be cancelled."
+            : "This visit is already with the dentist and cannot be cancelled here.",
+        });
+      }
 
+      let result;
+      try {
+        result = await db.query(
+          `UPDATE patient_portal_appointments
+           SET status = 'cancelled',
+               cancellation_reason = $2,
+               cancelled_at = CURRENT_TIMESTAMP,
+               cancelled_by = $3,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $1
+             AND status IN ('pending', 'confirmed', 'checked_in')
+           RETURNING *`,
+          [current.id, reason, actorUserId]
+        );
+      } catch (schemaError) {
+        if (schemaError.code !== "42703") throw schemaError;
+        result = await db.query(
+          `UPDATE patient_portal_appointments
+           SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
+           WHERE id = $1
+             AND status IN ('pending', 'confirmed', 'checked_in')
+           RETURNING *`,
+          [current.id]
+        );
+      }
+
+      if (result.rows.length === 0) {
+        return res.status(409).json({ message: "This appointment can no longer be cancelled." });
+      }
+
+      await appointmentLifecycle.closeQueueForAppointment(db, current.id, "no_show");
       await notifyClinicStaff({
         type: "appointment",
         title: "Appointment cancellation",
@@ -1267,30 +1346,197 @@ function createPatientPortalRouter({
         dentistId: result.rows[0].dentist_id,
         dentistName: result.rows[0].dentist_name,
       });
-      return res.json({ appointment: mapAppointment(result.rows[0]) });
+      return res.json({
+        message: "Your appointment has been cancelled.",
+        appointment: mapAppointment(result.rows[0]),
+      });
     } catch (error) {
-      if (error?.code === "42P01") {
-        try {
-          const fallback = await db.query(
-            `UPDATE patient_portal_appointments
-             SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
-             WHERE id = $1
-               AND user_id = $2
-               AND status IN ('pending', 'confirmed')
-             RETURNING *`,
-            [req.params.id, actorUserId]
-          );
-          if (!fallback.rows.length) {
-            return res.status(404).json({ message: "A cancellable appointment was not found." });
-          }
-          return res.json({ appointment: mapAppointment(fallback.rows[0]) });
-        } catch (fallbackError) {
-          console.error("Cancel appointment error:", fallbackError.message);
-          return res.status(500).json({ message: "Unable to cancel the appointment." });
-        }
-      }
       console.error("Cancel appointment error:", error.message);
       return res.status(500).json({ message: "Unable to cancel the appointment." });
+    }
+  });
+
+  router.post("/appointments/:id/reschedule", async (req, res) => {
+    const actorUserId = userIdFor(req);
+    const appointmentDate = stringValue(req.body?.appointmentDate, 10);
+    const appointmentTime = clinicSchedule.normalizeTime(req.body?.appointmentTime);
+    if (!clinicSchedule.isIsoDate(appointmentDate) || !appointmentTime) {
+      return res.status(400).json({ message: "Choose a valid date and available time." });
+    }
+
+    const client = await db.connect();
+    let transactionOpen = false;
+    try {
+      const current = await loadOwnedAppointment(req.params.id, actorUserId);
+      if (!current) {
+        return res.status(404).json({ message: "Appointment not found." });
+      }
+      const queue = await appointmentLifecycle.loadActiveQueueForAppointment(db, current.id);
+      if (!appointmentLifecycle.canPatientReschedule(current.status, queue?.status)) {
+        return res.status(409).json({
+          message: appointmentLifecycle.isTerminalAppointment(current.status)
+            ? "This appointment can no longer be rescheduled."
+            : "This visit is already with the dentist and cannot be rescheduled here.",
+        });
+      }
+
+      const sameSlot =
+        normalizeIsoDate(current.appointment_date) === appointmentDate &&
+        normalizeTime(current.appointment_time) === appointmentTime;
+      if (sameSlot) {
+        return res.status(400).json({ message: "Choose a different date or time to reschedule." });
+      }
+
+      const defaults = await clinicSchedule.loadDefaults(db);
+      const dayMap = await clinicSchedule.loadDayMap(db, appointmentDate, appointmentDate);
+      const hours = clinicSchedule.resolveOperatingHours(appointmentDate, dayMap.get(appointmentDate), defaults);
+      const savedSlots = await clinicSchedule.loadSlotMap(db, appointmentDate);
+      const bookedTimes = await clinicSchedule.loadBookedTimes(db, appointmentDate);
+      if (hours.closed || !clinicSchedule.isSlotBookable(hours, defaults, savedSlots, bookedTimes, appointmentTime)) {
+        return res.status(409).json({
+          message: "That time is outside clinic hours or is no longer available. Please choose another slot.",
+        });
+      }
+
+      await client.query("BEGIN");
+      transactionOpen = true;
+
+      const conflict = await client.query(
+        `SELECT id
+         FROM patient_portal_appointments
+         WHERE dentist_id = $1
+           AND appointment_date = $2
+           AND appointment_time = $3
+           AND id <> $4
+           AND status NOT IN ('cancelled', 'no_show', 'rescheduled')
+         LIMIT 1`,
+        [current.dentist_id, appointmentDate, appointmentTime, current.id]
+      );
+      if (conflict.rows.length) {
+        await client.query("ROLLBACK");
+        transactionOpen = false;
+        return res.status(409).json({
+          message: "That time was just booked. Please choose another available slot.",
+        });
+      }
+
+      let inserted;
+      const nextStatus = current.status === "pending" ? "pending" : "confirmed";
+      try {
+        inserted = await client.query(
+          `INSERT INTO patient_portal_appointments (
+             user_id, service_id, service_name, dentist_id, dentist_name,
+             appointment_date, appointment_time, coverage_type, hmo_provider,
+             hmo_member_number, hmo_company_name, hmo_birth_date, hmo_verification_status,
+             authorization_document_id, estimated_cost, notes, status, clinic_location,
+             rescheduled_from_id
+           ) VALUES (
+             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+             $17, $18, $19
+           )
+           RETURNING *`,
+          [
+            current.user_id,
+            current.service_id,
+            current.service_name,
+            current.dentist_id,
+            current.dentist_name,
+            appointmentDate,
+            appointmentTime,
+            current.coverage_type,
+            current.hmo_provider,
+            current.hmo_member_number,
+            current.hmo_company_name,
+            current.hmo_birth_date,
+            current.hmo_verification_status,
+            current.authorization_document_id,
+            current.estimated_cost,
+            current.notes,
+            nextStatus,
+            current.clinic_location,
+            current.id,
+          ]
+        );
+      } catch (schemaError) {
+        if (schemaError.code !== "42703") throw schemaError;
+        inserted = await client.query(
+          `INSERT INTO patient_portal_appointments (
+             user_id, service_id, service_name, dentist_id, dentist_name,
+             appointment_date, appointment_time, coverage_type, hmo_provider,
+             hmo_member_number, authorization_document_id, estimated_cost, notes, status
+           ) VALUES (
+             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+           )
+           RETURNING *`,
+          [
+            current.user_id,
+            current.service_id,
+            current.service_name,
+            current.dentist_id,
+            current.dentist_name,
+            appointmentDate,
+            appointmentTime,
+            current.coverage_type,
+            current.hmo_provider,
+            current.hmo_member_number,
+            current.authorization_document_id,
+            current.estimated_cost,
+            current.notes,
+            nextStatus,
+          ]
+        );
+      }
+
+      let original;
+      try {
+        original = await client.query(
+          `UPDATE patient_portal_appointments
+           SET status = 'rescheduled',
+               rescheduled_to_id = $2,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $1
+           RETURNING *`,
+          [current.id, inserted.rows[0].id]
+        );
+      } catch (schemaError) {
+        if (schemaError.code !== "42703") throw schemaError;
+        original = await client.query(
+          `UPDATE patient_portal_appointments
+           SET status = 'cancelled',
+               notes = LEFT(CONCAT_WS(E'\n', NULLIF(notes, ''), 'Rescheduled to a new visit.'), 1200),
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $1
+           RETURNING *`,
+          [current.id]
+        );
+      }
+
+      await client.query("COMMIT");
+      transactionOpen = false;
+      await appointmentLifecycle.closeQueueForAppointment(db, current.id, "no_show");
+
+      const nextAppointment = mapAppointment(inserted.rows[0]);
+      await notifyClinicStaff({
+        type: "appointment",
+        title: "Appointment rescheduled",
+        body: `A patient rescheduled ${current.service_name} to ${appointmentDate} at ${appointmentTime}.`,
+        entityType: "appointment",
+        entityId: nextAppointment.id,
+      });
+      return res.json({
+        message: `${current.service_name} was rescheduled to ${appointmentDate} at ${appointmentTime}.`,
+        appointment: nextAppointment,
+        originalAppointment: mapAppointment(original.rows[0]),
+      });
+    } catch (error) {
+      if (transactionOpen) await client.query("ROLLBACK");
+      if (error?.code === "23505") {
+        return res.status(409).json({ message: "That time was just booked. Please choose another available slot." });
+      }
+      console.error("Reschedule appointment error:", error.message);
+      return res.status(500).json({ message: "Unable to reschedule the appointment." });
+    } finally {
+      client.release();
     }
   });
 
@@ -1382,6 +1628,17 @@ function createPatientPortalRouter({
                 : null,
               additionalProcedureCount,
               checkedInAt: current.checked_in_at,
+              waitedMinutes: current.checked_in_at
+                ? Math.max(
+                    0,
+                    Math.floor((Date.now() - new Date(current.checked_in_at).getTime()) / 60000)
+                  )
+                : 0,
+              waitedTooLong: appointmentLifecycle.waitedTooLong({
+                checkedInAt: current.checked_in_at,
+                queueStatus: current.status,
+              }),
+              appointmentId: current.appointment_id || null,
               steps: queueSteps(current.status),
             }
           : null,

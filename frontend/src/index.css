@@ -1830,7 +1830,8 @@ strong {
 }
 
 .appointments-book-cta-wrap {
-  margin-bottom: 1rem;
+  flex: 0 0 auto;
+  margin: 0.15rem 0 0;
 }
 
 .appointments-book-cta {
@@ -1878,24 +1879,30 @@ strong {
     padding-bottom: 1rem;
   }
 
+  .appointments-page--list .section-heading {
+    flex-wrap: nowrap;
+    align-items: flex-start;
+    gap: 0.55rem 0.7rem;
+  }
+
+  .appointments-page--list .section-heading > div {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
   .appointments-page--list .appointments-book-cta-wrap {
-    margin-bottom: 0;
+    flex: 0 0 auto;
+    align-self: flex-start;
+    margin: 1.2rem 0 0;
+    position: relative;
+    z-index: 2;
   }
 
   .appointments-page--list .appointments-book-cta {
-    position: fixed;
-    z-index: 23;
-    left: max(0.75rem, env(safe-area-inset-left, 0px));
-    right: auto;
-    bottom: calc(1.2rem + env(safe-area-inset-bottom, 0px));
+    position: static;
     width: max-content;
-    max-width: calc(100vw - 8.75rem);
-  }
-}
-
-@media (max-width: 980px) {
-  .appointments-page--list .appointments-book-cta {
-    bottom: calc(6.45rem + env(safe-area-inset-bottom, 0px));
+    max-width: none;
+    white-space: nowrap;
   }
 }
 
@@ -3051,6 +3058,54 @@ body.booking-summary-open .patient-assistant__panel {
 .status-pill--waiting,
 .status-pill--preparing { color: var(--amber); background: var(--amber-wash); }
 .status-pill--cancelled { color: var(--danger); background: var(--danger-wash); }
+.status-pill--rescheduled { color: var(--amethyst-700); background: var(--amethyst-100); }
+.status-pill {
+  text-transform: none;
+}
+
+.appointment-history-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.7rem;
+}
+
+.queue-waited-too-long {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.85rem;
+  padding: 0.85rem 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--amethyst-500) 22%, var(--border));
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--amethyst-50) 70%, #fff);
+}
+
+.queue-waited-too-long p {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.queue-waited-too-long__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.reschedule-modal {
+  width: min(34rem, calc(100vw - 1.5rem));
+  max-height: min(86dvh, calc(100dvh - 2rem));
+  overflow: auto;
+}
+
+.reschedule-modal .staff-modal__header {
+  align-items: flex-start;
+}
+
+.reschedule-modal .time-slots {
+  margin-bottom: 0.4rem;
+}
 
 /* Queue */
 .queue-hero {
@@ -4012,9 +4067,10 @@ body.booking-summary-open .patient-assistant__panel {
   }
 
   .appointments-page--list .appointments-book-cta {
-    min-height: 44px;
-    padding: 0.55rem 1.05rem 0.55rem 0.85rem;
-    font-size: 0.82rem;
+    position: static;
+    min-height: 40px;
+    padding: 0.5rem 0.9rem 0.5rem 0.75rem;
+    font-size: 0.74rem;
   }
   .booking-summary .button--wide {
     width: 100%;
@@ -4068,8 +4124,14 @@ body.booking-summary-open .patient-assistant__panel {
     width: auto;
   }
 
+  .appointments-page--list .section-heading p {
+    display: none;
+  }
+
   .appointments-page--list .appointments-book-cta {
     width: max-content;
+    font-size: 0.72rem;
+    padding: 0.48rem 0.8rem 0.48rem 0.65rem;
   }
 }
 

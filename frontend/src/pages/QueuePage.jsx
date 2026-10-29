@@ -8,7 +8,10 @@ import {
 } from "lucide-react";
 import { api } from "../api";
 import { PatientQrCheckInScanner } from "../components/PatientQrCheckInScanner";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { RescheduleAppointmentModal } from "../components/RescheduleAppointmentModal";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
+import { displayAppointmentStatus } from "../utils/appointmentStatus";
 import { displayQueueStatus } from "../utils/walkInQr";
 import {
   callRangeFromEntry,
@@ -21,6 +24,12 @@ export function QueuePage() {
   const [appointments, setAppointments] = useState([]);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [keepWaiting, setKeepWaiting] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const [rescheduleOpen, setRescheduleOpen] = useState(false);
+  const [rescheduleBusy, setRescheduleBusy] = useState(false);
+  const [rescheduleError, setRescheduleError] = useState("");
 
   const load = useCallback(async (options = {}) => {
     setError("");
@@ -46,6 +55,10 @@ export function QueuePage() {
     return () => window.clearInterval(interval);
   }, [load]);
 
+  useEffect(() => {
+    setKeepWaiting(false);
+  }, [queueData?.current?.id]);
+
   async function updateNotificationPreference(event) {
     const nextValue = event.target.checked;
     try {
@@ -60,6 +73,11 @@ export function QueuePage() {
   if (!queueData) return <LoadingState label="Syncing your live queue" />;
 
   const { current, nowServing } = queueData;
+  const linkedAppointment =
+    appointments.find((appointment) => String(appointment.id) === String(current?.appointmentId)) ||
+    appointments[0] ||
+    null;
+  const showWaitedTooLong = Boolean(current?.waitedTooLong) && !keepWaiting && Boolean(linkedAppointment);
   const todayAppointments = appointments.filter((appointment) => {
     const date = String(appointment.date || "").slice(0, 10);
     const today = new Date().toISOString().slice(0, 10);
@@ -154,6 +172,33 @@ export function QueuePage() {
                 </span>
               </div>
               <p className="queue-estimate-note">{QUEUE_WAIT_DISCLAIMER}</p>
+              {showWaitedTooLong ? (
+                <div className="queue-waited-too-long" role="region" aria-label="Waited too long">
+                  <strong>Waited too long?</strong>
+                  <p>
+                    Sorry for the long wait. Would you like to keep waiting, cancel your visit, or reschedule
+                    your appointment?
+                  </p>
+                  <div className="queue-waited-too-long__actions">
+                    <button type="button" className="button button--secondary" onClick={() => setKeepWaiting(true)}>
+                      Keep Waiting
+                    </button>
+                    <button type="button" className="button button--secondary" onClick={() => setCancelOpen(true)}>
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="button button--primary"
+                      onClick={() => {
+                        setRescheduleError("");
+                        setRescheduleOpen(true);
+                      }}
+                    >
+                      Reschedule
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
             <label className="queue-toggle">
               <span>
@@ -205,7 +250,7 @@ export function QueuePage() {
                 {todayAppointments.map((appointment) => (
                   <p key={appointment.id}>
                     <strong>{appointment.treatment || appointment.service}</strong>
-                    <span> · {String(appointment.status || "").replaceAll("_", " ")}</span>
+                    <span> · {displayAppointmentStatus(appointment.status)}</span>
                   </p>
                 ))}
               </div>
@@ -213,6 +258,62 @@ export function QueuePage() {
           </div>
         </section>
       )}
+      <ConfirmDialog
+        open={cancelOpen}
+        title="Are you sure you want to cancel this appointment?"
+        message="Your appointment will be cancelled if you confirm. If you change your mind, you can keep your current appointment."
+        busy={cancelBusy}
+        onCancel={() => {
+          if (!cancelBusy) setCancelOpen(false);
+        }}
+        onConfirm={async () => {
+          if (!linkedAppointment || cancelBusy) return;
+          setCancelBusy(true);
+          setError("");
+          try {
+            await api.cancelAppointment(linkedAppointment.id, { reason: "patient_cancelled" });
+            setSuccess("Your appointment has been cancelled.");
+            setCancelOpen(false);
+            setKeepWaiting(false);
+            await load();
+          } catch (cancelError) {
+            setError(cancelError.message);
+          } finally {
+            setCancelBusy(false);
+          }
+        }}
+      />
+      {rescheduleOpen && linkedAppointment ? (
+        <RescheduleAppointmentModal
+          appointment={linkedAppointment}
+          busy={rescheduleBusy}
+          error={rescheduleError}
+          onClose={() => {
+            if (!rescheduleBusy) {
+              setRescheduleOpen(false);
+              setRescheduleError("");
+            }
+          }}
+          onConfirm={async ({ appointmentDate, appointmentTime }) => {
+            setRescheduleBusy(true);
+            setRescheduleError("");
+            try {
+              const response = await api.rescheduleAppointment(linkedAppointment.id, {
+                appointmentDate,
+                appointmentTime,
+              });
+              setSuccess(response.message || "Your appointment was rescheduled.");
+              setRescheduleOpen(false);
+              setKeepWaiting(false);
+              await load();
+            } catch (rescheduleFailure) {
+              setRescheduleError(rescheduleFailure.message);
+            } finally {
+              setRescheduleBusy(false);
+            }
+          }}
+        />
+      ) : null}
     </div>
   );
 }

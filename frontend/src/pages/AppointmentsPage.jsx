@@ -14,6 +14,9 @@ import {
 } from "lucide-react";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { RescheduleAppointmentModal } from "../components/RescheduleAppointmentModal";
+import { canManageAppointment, displayAppointmentStatus } from "../utils/appointmentStatus";
 import { useAuth } from "../useAuth";
 import { matchesNotificationFocus } from "../notificationFocus";
 import { applyApprovedClinicPriceOverrides, getApprovedClinicPrice } from "../clinic/approvedClinicPrices";
@@ -273,7 +276,7 @@ function TreatmentServiceOption({ service, selected, onSelect }) {
 }
 
 function displayStatus(status) {
-  return String(status || "pending").replaceAll("_", " ");
+  return displayAppointmentStatus(status);
 }
 
 function formatFileSize(bytes) {
@@ -373,6 +376,11 @@ export function AppointmentsPage() {
   const [medicalUploadSuccess, setMedicalUploadSuccess] = useState("");
   const [medicalUploading, setMedicalUploading] = useState(false);
   const medicalFileInputRef = useRef(null);
+  const [cancelTarget, setCancelTarget] = useState(null);
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const [rescheduleTarget, setRescheduleTarget] = useState(null);
+  const [rescheduleBusy, setRescheduleBusy] = useState(false);
+  const [rescheduleError, setRescheduleError] = useState("");
   const [visitSummaryOpen, setVisitSummaryOpen] = useState(false);
   const [bookingStep, setBookingStep] = useState(1);
   const [detailsDismissed, setDetailsDismissed] = useState(false);
@@ -655,18 +663,41 @@ export function AppointmentsPage() {
     }
   }
 
-  async function cancelAppointment(appointmentId) {
-    if (!window.confirm("Cancel this appointment?")) return;
+  async function confirmCancelAppointment() {
+    if (!cancelTarget || cancelBusy) return;
     setError("");
+    setCancelBusy(true);
     try {
-      await api.cancelAppointment(appointmentId);
+      const response = await api.cancelAppointment(cancelTarget.id, { reason: "patient_cancelled" });
+      const next = response.appointment || { ...cancelTarget, status: "cancelled" };
       setAppointments((current) =>
-        current.map((appointment) =>
-          appointment.id === appointmentId ? { ...appointment, status: "cancelled" } : appointment
-        )
+        current.map((appointment) => (appointment.id === next.id ? { ...appointment, ...next } : appointment))
       );
+      setSuccess("Your appointment has been cancelled.");
+      setCancelTarget(null);
     } catch (cancelError) {
       setError(cancelError.message);
+    } finally {
+      setCancelBusy(false);
+    }
+  }
+
+  async function confirmReschedule({ appointmentDate, appointmentTime }) {
+    if (!rescheduleTarget || rescheduleBusy) return;
+    setRescheduleError("");
+    setRescheduleBusy(true);
+    try {
+      const response = await api.rescheduleAppointment(rescheduleTarget.id, {
+        appointmentDate,
+        appointmentTime,
+      });
+      await load();
+      setSuccess(response.message || "Your appointment was rescheduled.");
+      setRescheduleTarget(null);
+    } catch (rescheduleFailure) {
+      setRescheduleError(rescheduleFailure.message);
+    } finally {
+      setRescheduleBusy(false);
     }
   }
 
@@ -680,18 +711,19 @@ export function AppointmentsPage() {
           eyebrow="Your bookings"
           title="Appointment"
           detail="Only appointments you booked appear here — not the service catalog or clinical treatment records."
+          action={
+            <div className="appointments-book-cta-wrap">
+              <button
+                type="button"
+                className="button button--primary appointments-book-cta"
+                onClick={() => navigate("/appointments/book")}
+              >
+                <CalendarDays size={16} aria-hidden="true" />
+                Book Appointment
+              </button>
+            </div>
+          }
         />
-
-        <div className="admin-heading-actions appointments-book-cta-wrap">
-          <button
-            type="button"
-            className="button button--primary appointments-book-cta"
-            onClick={() => navigate("/appointments/book")}
-          >
-            <CalendarDays size={16} aria-hidden="true" />
-            Book Appointment
-          </button>
-        </div>
 
         {error ? <p className="inline-alert inline-alert--error">{error}</p> : null}
         {success ? (
@@ -735,14 +767,30 @@ export function AppointmentsPage() {
                       <dd>{displayStatus(appointment.status)}</dd>
                     </div>
                   </dl>
-                  {["confirmed", "pending"].includes(appointment.status) ? (
-                    <button
-                      type="button"
-                      className="button button--secondary button--compact"
-                      onClick={() => cancelAppointment(appointment.id)}
-                    >
-                      <X size={15} /> Cancel appointment
-                    </button>
+                  {canManageAppointment(appointment).cancel || canManageAppointment(appointment).reschedule ? (
+                    <div className="appointment-history-card__actions">
+                      {canManageAppointment(appointment).reschedule ? (
+                        <button
+                          type="button"
+                          className="button button--secondary button--compact"
+                          onClick={() => {
+                            setRescheduleError("");
+                            setRescheduleTarget(appointment);
+                          }}
+                        >
+                          Reschedule
+                        </button>
+                      ) : null}
+                      {canManageAppointment(appointment).cancel ? (
+                        <button
+                          type="button"
+                          className="button button--secondary button--compact"
+                          onClick={() => setCancelTarget(appointment)}
+                        >
+                          <X size={15} /> Cancel
+                        </button>
+                      ) : null}
+                    </div>
                   ) : null}
                 </article>
               ))}
@@ -754,6 +802,30 @@ export function AppointmentsPage() {
             />
           )}
         </section>
+        <ConfirmDialog
+          open={Boolean(cancelTarget)}
+          title="Are you sure you want to cancel this appointment?"
+          message="Your appointment will be cancelled if you confirm. If you change your mind, you can keep your current appointment."
+          busy={cancelBusy}
+          onCancel={() => {
+            if (!cancelBusy) setCancelTarget(null);
+          }}
+          onConfirm={confirmCancelAppointment}
+        />
+        {rescheduleTarget ? (
+          <RescheduleAppointmentModal
+            appointment={rescheduleTarget}
+            busy={rescheduleBusy}
+            error={rescheduleError}
+            onClose={() => {
+              if (!rescheduleBusy) {
+                setRescheduleTarget(null);
+                setRescheduleError("");
+              }
+            }}
+            onConfirm={confirmReschedule}
+          />
+        ) : null}
       </div>
     );
   }

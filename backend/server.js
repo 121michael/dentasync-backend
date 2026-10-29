@@ -95,6 +95,7 @@ app.use((req, res, next) => {
 
 const { createClinicSmsService } = require("./services/clinicSms");
 const { createCleaningReminderJob } = require("./services/cleaningReminders");
+const { createUnproceededAppointmentCancelJob } = require("./services/unproceededAppointmentCancelJob");
 const { createDocumentSyncCleanupJob } = require("./services/documentSyncCleanupJob");
 const { createBackupScheduleJob } = require("./services/backupRecovery");
 const path = require("path");
@@ -420,6 +421,7 @@ const documentSyncCleanupJob = createDocumentSyncCleanupJob({
   uploadDirectory: path.join(process.cwd(), "uploads", "admin-document-sync"),
 });
 const backupScheduleJob = createBackupScheduleJob({ db });
+const unproceededAppointmentJob = createUnproceededAppointmentCancelJob({ db });
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`✅ DentaSync server running on http://localhost:${PORT}`);
@@ -461,9 +463,11 @@ if (require.main === module) {
     cleaningReminderJob.start();
     documentSyncCleanupJob.start();
     backupScheduleJob.start();
+    unproceededAppointmentJob.start();
     console.log("Cleaning reminder SMS job scheduled (every 4–6 months based on last visit).");
     console.log("Document sync temporary scans expire after 24 hours (server clock).");
     console.log("Backup scheduler checks daily/weekly settings while this API process is running.");
+    console.log("Unproceeded same-day appointments are cancelled after 6:00 PM clinic time.");
   });
 }
 

@@ -113,8 +113,10 @@ export const api = {
     request(`/patient/availability?date=${encodeURIComponent(date)}`),
   getAppointments: (options = {}) => request("/patient/appointments", options),
   createAppointment: (body) => request("/patient/appointments", { method: "POST", body }),
-  cancelAppointment: (appointmentId) =>
-    request(`/patient/appointments/${appointmentId}/cancel`, { method: "PATCH" }),
+  cancelAppointment: (appointmentId, body = {}) =>
+    request(`/patient/appointments/${appointmentId}/cancel`, { method: "PATCH", body }),
+  rescheduleAppointment: (appointmentId, body) =>
+    request(`/patient/appointments/${appointmentId}/reschedule`, { method: "POST", body }),
   getQueue: (options = {}) => request("/patient/queue", options),
   getPublicQueueDisplay: (options = {}) =>
     request("/public/queue-display", { authenticated: false, ...options }),
