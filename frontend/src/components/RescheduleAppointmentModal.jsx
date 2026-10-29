@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CalendarDays, Clock3, X } from "lucide-react";
 import { api } from "../api";
 import { clinicTodayYmd } from "../utils/appointmentStatus";
@@ -20,6 +20,8 @@ export function RescheduleAppointmentModal({ appointment, busy, error, onClose, 
   const [period, setPeriod] = useState("Morning");
   const [availability, setAvailability] = useState(null);
   const [loadError, setLoadError] = useState("");
+  const confirmLock = useRef(false);
+  const selectedTime = time;
 
   useEffect(() => {
     let cancelled = false;
@@ -40,6 +42,25 @@ export function RescheduleAppointmentModal({ appointment, busy, error, onClose, 
       cancelled = true;
     };
   }, [date]);
+
+  useEffect(() => {
+    if (!error) return undefined;
+    let cancelled = false;
+    api
+      .getAppointmentAvailability(date)
+      .then((response) => {
+        if (cancelled) return;
+        setAvailability(response);
+        const stillBookable = (response.slots || []).some(
+          (slot) => slot.bookable && slot.time === selectedTime
+        );
+        if (!stillBookable) setTime("");
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [error, date, selectedTime]);
 
   if (!appointment) return null;
   const slots = (availability?.slots || []).filter((slot) => slot.bookable && slot.period === period);
@@ -93,6 +114,7 @@ export function RescheduleAppointmentModal({ appointment, busy, error, onClose, 
             <button
               type="button"
               key={slot.time}
+              data-slot-time={slot.time}
               className={`time-slot ${time === slot.time ? "is-selected" : ""}`}
               onClick={() => setTime(slot.time)}
             >
@@ -116,7 +138,13 @@ export function RescheduleAppointmentModal({ appointment, busy, error, onClose, 
             type="button"
             className="button button--primary"
             disabled={busy || !time}
-            onClick={() => onConfirm({ appointmentDate: date, appointmentTime: time })}
+            onClick={() => {
+              if (busy || confirmLock.current || !time) return;
+              confirmLock.current = true;
+              Promise.resolve(onConfirm({ appointmentDate: date, appointmentTime: time })).finally(() => {
+                confirmLock.current = false;
+              });
+            }}
           >
             <CalendarDays size={16} /> {busy ? "Saving…" : "Confirm Reschedule"}
           </button>
