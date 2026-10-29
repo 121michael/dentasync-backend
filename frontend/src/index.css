@@ -13923,57 +13923,281 @@ body.is-queue-display .fab-menu {
   }
 }
 
+.prescription-page {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.prescription-page > .section-heading {
+  align-items: flex-start;
+  margin-bottom: 0;
+  min-width: 0;
+}
+
+.prescription-page > .section-heading > div {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.prescription-page > .section-heading p {
+  max-width: 42rem;
+}
+
+.prescription-page .dentist-heading-actions {
+  flex-shrink: 0;
+}
+
+.prescription-page .dentist-heading-actions .button {
+  white-space: nowrap;
+}
+
 .prescription-layout {
   display: grid;
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.2fr);
-  gap: 1rem;
+  grid-template-columns: minmax(260px, 0.82fr) minmax(0, 1.38fr);
+  gap: 1.1rem;
   align-items: start;
+  min-width: 0;
+}
+
+.prescription-history,
+.prescription-composer {
+  min-width: 0;
+}
+
+.prescription-panel-heading {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.prescription-panel-heading h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  letter-spacing: -0.03em;
+}
+
+.prescription-search {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-muted);
+  overflow: hidden;
+}
+
+.prescription-search .dentist-search {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  min-height: 44px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.prescription-search .button {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding-inline: 1rem;
+  border: 0;
+  border-left: 1px solid var(--border);
+  border-radius: 0;
+  color: var(--amethyst-700);
+  background: #fff;
+  box-shadow: none;
+}
+
+.prescription-search .button:hover:not(:disabled) {
+  transform: none;
+  background: color-mix(in srgb, var(--amethyst-100) 70%, #fff);
 }
 
 .prescription-list {
   display: grid;
-  gap: 0.45rem;
-  margin-top: 0.75rem;
+  gap: 0.55rem;
 }
 
 .prescription-list__item {
   display: grid;
-  gap: 0.12rem;
+  gap: 0.22rem;
   width: 100%;
-  padding: 0.7rem 0.8rem;
+  padding: 0.82rem 0.9rem;
   border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface-muted);
+  border-radius: 14px;
+  background: #fff;
   text-align: left;
   color: inherit;
+  box-shadow: 0 6px 16px rgba(74, 36, 112, 0.04);
+  cursor: pointer;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.prescription-list__item:hover {
+  border-color: color-mix(in srgb, var(--amethyst-400) 45%, var(--border));
+  transform: translateY(-1px);
+}
+
+.prescription-list__item:focus-visible {
+  outline: 2px solid var(--amethyst-500);
+  outline-offset: 2px;
 }
 
 .prescription-list__item.is-active {
-  border-color: color-mix(in srgb, var(--amethyst-400) 55%, var(--border));
-  background: color-mix(in srgb, var(--amethyst-100) 70%, #fff);
+  border-color: color-mix(in srgb, var(--amethyst-400) 70%, var(--border));
+  background: color-mix(in srgb, var(--amethyst-100) 62%, #fff);
+  box-shadow: 0 10px 22px rgba(74, 36, 112, 0.08);
+}
+
+.prescription-list__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.prescription-list__item strong {
+  font-size: 0.88rem;
+  letter-spacing: -0.02em;
+}
+
+.prescription-list__patient {
+  color: var(--text-strong);
+  font-size: 0.8rem;
+  font-weight: 650;
 }
 
 .prescription-list__item small {
   color: var(--text-muted);
+  font-size: 0.7rem;
+}
+
+.prescription-history .empty-state {
+  min-height: 240px;
+  padding: 1.5rem 1rem;
+}
+
+.prescription-composer .dentist-form {
+  gap: 1rem;
+}
+
+.prescription-composer .dentist-panel__heading {
+  align-items: center;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.prescription-patient {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--amethyst-100) 38%, #fff);
+}
+
+.prescription-patient__selected {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.prescription-patient__selected.is-empty {
+  color: var(--text-muted);
+  font-weight: 550;
 }
 
 .prescription-item {
   margin: 0;
-  padding: 0.75rem 0.85rem 0.9rem;
+  padding: 0.95rem 1rem 1.05rem;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(74, 36, 112, 0.035);
 }
 
 .prescription-item legend {
-  padding: 0 0.3rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: calc(100% - 0.4rem);
+  padding: 0 0.15rem;
   color: var(--amethyst-800);
-  font-size: 0.72rem;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.prescription-item legend .button {
+  text-transform: none;
+  letter-spacing: 0;
   font-weight: 750;
+}
+
+.prescription-item .field-grid--two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.prescription-add-med {
+  justify-self: start;
+}
+
+.prescription-notes textarea {
+  min-height: 6.5rem;
+}
+
+.prescription-aftercare {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: flex-start;
+  gap: 0.7rem 0.75rem;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-muted);
+}
+
+.prescription-aftercare input {
+  width: 1.05rem;
+  height: 1.05rem;
+  margin-top: 0.18rem;
+  accent-color: var(--amethyst-700);
+}
+
+.prescription-aftercare span {
+  display: grid;
+  gap: 0.2rem;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 550;
+  line-height: 1.5;
+}
+
+.prescription-aftercare strong {
+  color: var(--text-strong);
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.prescription-auth-meta {
+  margin: 0;
+}
+
+.prescription-composer .dentist-form__actions {
+  padding-top: 0.35rem;
+}
+
+.prescription-composer .dentist-form__actions .button {
+  min-height: 44px;
 }
 
 .prescription-status {
   display: inline-flex;
   align-items: center;
+  flex-shrink: 0;
   min-height: 26px;
   padding: 0.25rem 0.55rem;
   border-radius: 999px;
@@ -13982,6 +14206,31 @@ body.is-queue-display .fab-menu {
   font-size: 0.68rem;
   font-weight: 750;
   text-transform: capitalize;
+}
+
+.prescription-status.is-authorized {
+  color: var(--emerald);
+  background: var(--emerald-wash);
+}
+
+.prescription-status.is-cancelled {
+  color: var(--danger);
+  background: var(--danger-wash);
+}
+
+.prescription-status.is-returned {
+  color: var(--amber);
+  background: var(--amber-wash);
+}
+
+.prescription-status.is-draft {
+  color: var(--amethyst-700);
+  background: var(--amethyst-100);
+}
+
+.prescription-status.is-queue {
+  color: #3974ad;
+  background: #eaf3ff;
 }
 
 .prescription-item-readonly {
@@ -14031,8 +14280,74 @@ body.is-queue-display .fab-menu {
   margin-top: 0.2rem;
 }
 
+.prescription-page .field input:focus-visible,
+.prescription-page .field select:focus-visible,
+.prescription-page .field textarea:focus-visible,
+.prescription-page .dentist-search:focus-within,
+.prescription-page .button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--amethyst-500) 80%, #fff);
+  outline-offset: 2px;
+}
+
+@media (max-width: 1100px) {
+  .prescription-layout {
+    grid-template-columns: minmax(240px, 0.9fr) minmax(0, 1.2fr);
+  }
+}
+
 @media (max-width: 860px) {
   .prescription-layout {
     grid-template-columns: 1fr;
+  }
+
+  .dentist-page.prescription-page > .section-heading {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.9rem;
+  }
+
+  .dentist-page.prescription-page > .section-heading > div,
+  .dentist-page.prescription-page > .section-heading > .dentist-heading-actions {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .dentist-page.prescription-page .dentist-heading-actions {
+    display: flex;
+  }
+
+  .dentist-page.prescription-page .prescription-new-btn,
+  .dentist-page.prescription-page .dentist-heading-actions .button {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 640px) {
+  .prescription-page {
+    padding-bottom: 0.5rem;
+  }
+
+  .prescription-search {
+    flex-direction: column;
+  }
+
+  .prescription-search .button {
+    width: 100%;
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+
+  .prescription-item .field-grid--two {
+    grid-template-columns: 1fr;
+  }
+
+  .prescription-list__top {
+    flex-wrap: wrap;
+  }
+
+  .prescription-composer .dentist-form__actions .button {
+    flex: 1 1 100%;
   }
 }

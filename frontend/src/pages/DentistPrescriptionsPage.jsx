@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, Search, Trash2 } from "lucide-react";
+import { ClipboardPlus, Plus, Search, Trash2 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, SectionHeading } from "../components/UI";
@@ -19,6 +19,14 @@ const emptyItem = {
 
 function statusLabel(status) {
   return String(status || "").replace(/_/g, " ");
+}
+
+function statusTone(status) {
+  if (status === "authorized") return "is-authorized";
+  if (status === "cancelled") return "is-cancelled";
+  if (status === "returned_to_dentist") return "is-returned";
+  if (status === "draft") return "is-draft";
+  return "is-queue";
 }
 
 export function DentistPrescriptionsPage() {
@@ -146,25 +154,42 @@ export function DentistPrescriptionsPage() {
       })),
     [patients]
   );
+  const selectedPatient = patientOptions.find(
+    (patient) => String(patient.id) === String(form.clinicalRecordId)
+  );
+
+  function updateItem(index, field, value) {
+    setForm((current) => {
+      const items = [...current.items];
+      items[index] = { ...items[index], [field]: value };
+      return { ...current, items };
+    });
+  }
 
   return (
     <div className="dentist-page prescription-page">
       <SectionHeading
         eyebrow="Clinical documents"
         title="Prescription Management"
-        detail="Create, submit, and authorize prescriptions. Staff email only the version you authorize."
+        detail="Write, submit, and authorize clinical prescriptions. Staff can email only the version you authorize."
         action={
-          <button type="button" className="button button--primary" onClick={startNew}>
-            <Plus size={16} /> New prescription
-          </button>
+          <div className="dentist-heading-actions">
+            <button type="button" className="button button--primary prescription-new-btn" onClick={startNew}>
+              <Plus size={16} /> New prescription
+            </button>
+          </div>
         }
       />
       {error ? <p className="inline-alert inline-alert--error">{error}</p> : null}
 
       <div className="prescription-layout">
-        <section className="dentist-panel">
+        <section className="dentist-panel prescription-history">
+          <div className="prescription-panel-heading">
+            <span className="eyebrow">History</span>
+            <h2>Prescriptions</h2>
+          </div>
           <form
-            className="dentist-toolbar"
+            className="prescription-search"
             onSubmit={(event) => {
               event.preventDefault();
               load();
@@ -175,10 +200,11 @@ export function DentistPrescriptionsPage() {
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search by prescription number or patient"
+                placeholder="Prescription number or patient"
+                aria-label="Search prescriptions"
               />
             </label>
-            <button className="button button--secondary button--compact" type="submit">
+            <button className="button button--secondary" type="submit">
               Search
             </button>
           </form>
@@ -191,20 +217,29 @@ export function DentistPrescriptionsPage() {
                   className={`prescription-list__item ${selectedId === row.id ? "is-active" : ""}`}
                   onClick={() => openDetail(row.id).catch((openError) => setError(openError.message))}
                 >
-                  <strong>{row.prescriptionNumber}</strong>
-                  <span>{row.patient?.fullName || "Patient"}</span>
+                  <span className="prescription-list__top">
+                    <strong>{row.prescriptionNumber}</strong>
+                    <span className={`prescription-status ${statusTone(row.workflowStatus)}`}>
+                      {statusLabel(row.workflowStatus)}
+                    </span>
+                  </span>
+                  <span className="prescription-list__patient">{row.patient?.fullName || "Patient"}</span>
                   <small>
-                    {statusLabel(row.workflowStatus)} · email {row.emailStatus} · v{row.currentVersion}
+                    Email {row.emailStatus} · v{row.currentVersion}
                   </small>
                 </button>
               ))}
             </div>
           ) : (
-            <EmptyState title="No prescriptions yet" detail="Create a draft from a selected patient record." />
+            <EmptyState
+              icon={<ClipboardPlus size={22} />}
+              title="No prescriptions yet"
+              detail="Select a patient on the right and save a draft. Submitted prescriptions will appear here."
+            />
           )}
         </section>
 
-        <section className="dentist-panel">
+        <section className="dentist-panel prescription-composer">
           <form className="dentist-form" onSubmit={saveDraft}>
             <div className="dentist-panel__heading">
               <div>
@@ -212,31 +247,60 @@ export function DentistPrescriptionsPage() {
                 <h2>{detail ? `Version ${detail.currentVersion}` : "Create prescription"}</h2>
               </div>
               {detail ? (
-                <span className="prescription-status">{statusLabel(detail.workflowStatus)}</span>
-              ) : null}
+                <span className={`prescription-status ${statusTone(detail.workflowStatus)}`}>
+                  {statusLabel(detail.workflowStatus)}
+                </span>
+              ) : (
+                <span className="prescription-status is-draft">Draft</span>
+              )}
             </div>
             {detail?.returnReason ? (
               <p className="inline-alert">Returned: {detail.returnReason}</p>
             ) : null}
-            <label className="field">
-              <span>Patient</span>
-              <select
-                required
-                disabled={!editable || Boolean(detail)}
-                value={form.clinicalRecordId}
-                onChange={(event) => setForm((current) => ({ ...current, clinicalRecordId: event.target.value }))}
-              >
-                <option value="">Select a patient</option>
-                {patientOptions.map((patient) => (
-                  <option key={patient.id} value={patient.id}>
-                    {patient.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="prescription-patient">
+              <label className="field">
+                <span>Patient</span>
+                <select
+                  required
+                  disabled={!editable || Boolean(detail)}
+                  value={form.clinicalRecordId}
+                  onChange={(event) => setForm((current) => ({ ...current, clinicalRecordId: event.target.value }))}
+                >
+                  <option value="">Select a patient</option>
+                  {patientOptions.map((patient) => (
+                    <option key={patient.id} value={patient.id}>
+                      {patient.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {selectedPatient ? (
+                <p className="prescription-patient__selected">
+                  Selected patient: <strong>{selectedPatient.label}</strong>
+                </p>
+              ) : (
+                <p className="prescription-patient__selected is-empty">Choose an existing clinical patient record.</p>
+              )}
+            </div>
             {form.items.map((item, index) => (
               <fieldset key={index} className="prescription-item">
-                <legend>Medication {index + 1}</legend>
+                <legend>
+                  <span>Medication {index + 1}</span>
+                  {editable && form.items.length > 1 ? (
+                    <button
+                      type="button"
+                      className="button button--secondary button--compact"
+                      onClick={() =>
+                        setForm((current) => ({
+                          ...current,
+                          items: current.items.filter((_, itemIndex) => itemIndex !== index),
+                        }))
+                      }
+                    >
+                      <Trash2 size={14} /> Remove
+                    </button>
+                  ) : null}
+                </legend>
                 <div className="field-grid field-grid--two">
                   <label className="field">
                     <span>Medication name</span>
@@ -244,13 +308,7 @@ export function DentistPrescriptionsPage() {
                       required
                       disabled={!editable}
                       value={item.medicationName}
-                      onChange={(event) =>
-                        setForm((current) => {
-                          const items = [...current.items];
-                          items[index] = { ...items[index], medicationName: event.target.value };
-                          return { ...current, items };
-                        })
-                      }
+                      onChange={(event) => updateItem(index, "medicationName", event.target.value)}
                     />
                   </label>
                   <label className="field">
@@ -258,13 +316,7 @@ export function DentistPrescriptionsPage() {
                     <input
                       disabled={!editable}
                       value={item.strength}
-                      onChange={(event) =>
-                        setForm((current) => {
-                          const items = [...current.items];
-                          items[index] = { ...items[index], strength: event.target.value };
-                          return { ...current, items };
-                        })
-                      }
+                      onChange={(event) => updateItem(index, "strength", event.target.value)}
                     />
                   </label>
                   <label className="field">
@@ -273,13 +325,7 @@ export function DentistPrescriptionsPage() {
                       required
                       disabled={!editable}
                       value={item.dosage}
-                      onChange={(event) =>
-                        setForm((current) => {
-                          const items = [...current.items];
-                          items[index] = { ...items[index], dosage: event.target.value };
-                          return { ...current, items };
-                        })
-                      }
+                      onChange={(event) => updateItem(index, "dosage", event.target.value)}
                     />
                   </label>
                   <label className="field">
@@ -288,13 +334,7 @@ export function DentistPrescriptionsPage() {
                       required
                       disabled={!editable}
                       value={item.quantity}
-                      onChange={(event) =>
-                        setForm((current) => {
-                          const items = [...current.items];
-                          items[index] = { ...items[index], quantity: event.target.value };
-                          return { ...current, items };
-                        })
-                      }
+                      onChange={(event) => updateItem(index, "quantity", event.target.value)}
                     />
                   </label>
                   <label className="field">
@@ -303,13 +343,7 @@ export function DentistPrescriptionsPage() {
                       required
                       disabled={!editable}
                       value={item.frequency}
-                      onChange={(event) =>
-                        setForm((current) => {
-                          const items = [...current.items];
-                          items[index] = { ...items[index], frequency: event.target.value };
-                          return { ...current, items };
-                        })
-                      }
+                      onChange={(event) => updateItem(index, "frequency", event.target.value)}
                     />
                   </label>
                   <label className="field">
@@ -318,81 +352,49 @@ export function DentistPrescriptionsPage() {
                       required
                       disabled={!editable}
                       value={item.duration}
-                      onChange={(event) =>
-                        setForm((current) => {
-                          const items = [...current.items];
-                          items[index] = { ...items[index], duration: event.target.value };
-                          return { ...current, items };
-                        })
-                      }
+                      onChange={(event) => updateItem(index, "duration", event.target.value)}
                     />
                   </label>
-                  <label className="field">
+                  <label className="field field--full">
                     <span>Route</span>
                     <input
                       disabled={!editable}
                       value={item.route}
-                      onChange={(event) =>
-                        setForm((current) => {
-                          const items = [...current.items];
-                          items[index] = { ...items[index], route: event.target.value };
-                          return { ...current, items };
-                        })
-                      }
+                      onChange={(event) => updateItem(index, "route", event.target.value)}
                     />
                   </label>
                   <label className="field field--full">
                     <span>Sig / patient-use instructions</span>
                     <textarea
                       required
-                      rows="2"
+                      rows="3"
                       disabled={!editable}
                       value={item.sig}
-                      onChange={(event) =>
-                        setForm((current) => {
-                          const items = [...current.items];
-                          items[index] = { ...items[index], sig: event.target.value };
-                          return { ...current, items };
-                        })
-                      }
+                      onChange={(event) => updateItem(index, "sig", event.target.value)}
                     />
                   </label>
                 </div>
-                {editable && form.items.length > 1 ? (
-                  <button
-                    type="button"
-                    className="button button--secondary button--compact"
-                    onClick={() =>
-                      setForm((current) => ({
-                        ...current,
-                        items: current.items.filter((_, itemIndex) => itemIndex !== index),
-                      }))
-                    }
-                  >
-                    <Trash2 size={14} /> Remove item
-                  </button>
-                ) : null}
               </fieldset>
             ))}
             {editable ? (
               <button
                 type="button"
-                className="button button--secondary"
+                className="button button--secondary prescription-add-med"
                 onClick={() => setForm((current) => ({ ...current, items: [...current.items, { ...emptyItem }] }))}
               >
-                Add medication
+                <Plus size={16} /> Add medication
               </button>
             ) : null}
-            <label className="field">
+            <label className="field prescription-notes">
               <span>Clinical notes</span>
               <textarea
-                rows="3"
+                rows="4"
                 disabled={!editable}
                 value={form.clinicalNotes}
                 onChange={(event) => setForm((current) => ({ ...current, clinicalNotes: event.target.value }))}
               />
             </label>
-            <label className="field field--check">
+            <label className="prescription-aftercare">
               <input
                 type="checkbox"
                 disabled={!editable}
@@ -402,19 +404,19 @@ export function DentistPrescriptionsPage() {
                 }
               />
               <span>
-                Flag extraction aftercare (printed only when clinic-approved wording exists and an extraction procedure
-                is linked)
+                <strong>Flag extraction aftercare</strong>
+                Printed only when clinic-approved wording exists and an extraction procedure is linked.
               </span>
             </label>
             {detail ? (
-              <p className="muted-copy">
+              <p className="muted-copy prescription-auth-meta">
                 Authorization: {detail.authorizedAt ? `${detail.authorizationMethod} at ${detail.authorizedAt}` : "not authorized"}
                 {detail.contentHash ? ` · hash ${detail.contentHash.slice(0, 12)}` : ""}
               </p>
             ) : null}
             <div className="dentist-form__actions">
               {editable ? (
-                <button className="button button--primary" disabled={Boolean(busy)}>
+                <button className="button button--primary" type="submit" disabled={Boolean(busy)}>
                   {busy === "save" ? "Saving…" : "Save draft"}
                 </button>
               ) : null}

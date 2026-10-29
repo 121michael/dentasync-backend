@@ -37,12 +37,10 @@ export function ErrorState({ message, onRetry }) {
   );
 }
 
-export function EmptyState({ title, detail, action }) {
+export function EmptyState({ title, detail, action, icon }) {
   return (
     <section className="empty-state">
-      <span className="empty-state__icon">
-        <Sparkles size={23} />
-      </span>
+      <span className="empty-state__icon">{icon || <Sparkles size={23} />}</span>
       <h2>{title}</h2>
       <p>{detail}</p>
       {action}

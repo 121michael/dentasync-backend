@@ -126,7 +126,7 @@ export function StaffPrescriptionsPage() {
       <div className="prescription-layout">
         <section className="dentist-panel">
           <form
-            className="dentist-toolbar"
+            className="prescription-search"
             onSubmit={(event) => {
               event.preventDefault();
               load();
@@ -138,9 +138,10 @@ export function StaffPrescriptionsPage() {
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Search prescriptions"
+                aria-label="Search prescriptions"
               />
             </label>
-            <button className="button button--secondary button--compact">Search</button>
+            <button className="button button--secondary" type="submit">Search</button>
           </form>
           {list.length ? (
             <div className="prescription-list">
@@ -151,10 +152,13 @@ export function StaffPrescriptionsPage() {
                   className={`prescription-list__item ${detail?.id === row.id ? "is-active" : ""}`}
                   onClick={() => openDetail(row.id).catch((openError) => setError(openError.message))}
                 >
-                  <strong>{row.prescriptionNumber}</strong>
-                  <span>{row.patient?.fullName || "Patient"}</span>
+                  <span className="prescription-list__top">
+                    <strong>{row.prescriptionNumber}</strong>
+                    <span className="prescription-status">{statusLabel(row.workflowStatus)}</span>
+                  </span>
+                  <span className="prescription-list__patient">{row.patient?.fullName || "Patient"}</span>
                   <small>
-                    {statusLabel(row.workflowStatus)} · {row.dentist?.fullName || "Dentist"} · email {row.emailStatus}
+                    {row.dentist?.fullName || "Dentist"} · email {row.emailStatus}
                   </small>
                 </button>
               ))}
