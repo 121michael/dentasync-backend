@@ -46,6 +46,8 @@ import { DentistAppointmentsPage } from "./pages/DentistAppointmentsPage";
 import { DentistRecordsPage } from "./pages/DentistRecordsPage";
 import { DentistProfilePage } from "./pages/DentistProfilePage";
 import { DentistNotificationsPage } from "./pages/DentistNotificationsPage";
+import { DentistPrescriptionsPage } from "./pages/DentistPrescriptionsPage";
+import { StaffPrescriptionsPage } from "./pages/StaffPrescriptionsPage";
 import { WalkInCheckInPage } from "./pages/WalkInCheckInPage";
 import { LegalPage } from "./pages/LegalPage";
 import { LandingPage } from "./pages/LandingPage";
@@ -171,6 +173,7 @@ function PortalRoutes() {
           <Route path="/staff/patients" element={<Navigate to="/staff/patient-records" replace />} />
           <Route path="/staff/queue" element={<StaffQueuePage />} />
           <Route path="/staff/billing" element={<StaffBillingPage />} />
+          <Route path="/staff/prescriptions" element={<StaffPrescriptionsPage />} />
           <Route path="/staff/notifications" element={<StaffNotificationsPage />} />
           <Route path="/staff/profile" element={<StaffProfilePage />} />
         </Route>
@@ -206,6 +209,7 @@ function PortalRoutes() {
           <Route path="/dentist/appointments" element={<DentistAppointmentsPage />} />
           <Route path="/dentist/patient-records" element={<DentistRecordsPage />} />
           <Route path="/dentist/patient-records/:patientId" element={<DentistRecordsPage />} />
+          <Route path="/dentist/prescriptions" element={<DentistPrescriptionsPage />} />
           <Route path="/dentist/notifications" element={<DentistNotificationsPage />} />
           <Route path="/dentist/profile" element={<DentistProfilePage />} />
         </Route>

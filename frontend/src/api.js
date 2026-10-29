@@ -571,6 +571,46 @@ export const api = {
     data.append("backup", file);
     return request("/admin/backups/upload", { method: "POST", body: data });
   },
+  getDentistPrescriptions: (params = {}) => {
+    const search = new URLSearchParams(
+      Object.entries(params).filter(([, value]) => value || value === 0)
+    );
+    return request(`/dentist/prescriptions${search.size ? `?${search}` : ""}`);
+  },
+  getDentistPrescription: (id) => request(`/dentist/prescriptions/${id}`),
+  getDentistPatientPrescriptions: (patientId) =>
+    request(`/dentist/patients/${patientId}/prescriptions`),
+  createDentistPrescription: (body) => request("/dentist/prescriptions", { method: "POST", body }),
+  updateDentistPrescription: (id, body) =>
+    request(`/dentist/prescriptions/${id}`, { method: "PATCH", body }),
+  submitDentistPrescription: (id) => request(`/dentist/prescriptions/${id}/submit`, { method: "POST" }),
+  authorizeDentistPrescription: (id) =>
+    request(`/dentist/prescriptions/${id}/authorize`, { method: "POST" }),
+  cancelDentistPrescription: (id) => request(`/dentist/prescriptions/${id}/cancel`, { method: "POST" }),
+  viewDentistPrescriptionPdf: (id) => fetchAuthorizedBlob(`/dentist/prescriptions/${id}/pdf?inline=1`),
+  downloadDentistPrescriptionPdf: (id, filename) =>
+    download(`/dentist/prescriptions/${id}/pdf`, filename || "prescription.pdf"),
+  getStaffPrescriptions: (params = {}) => {
+    const search = new URLSearchParams(
+      Object.entries(params).filter(([, value]) => value || value === 0)
+    );
+    return request(`/staff/prescriptions${search.size ? `?${search}` : ""}`);
+  },
+  getStaffPrescription: (id) => request(`/staff/prescriptions/${id}`),
+  getStaffPatientPrescriptions: (patientId) =>
+    request(`/staff/patients/${patientId}/prescriptions`),
+  processStaffPrescription: (id) => request(`/staff/prescriptions/${id}/process`, { method: "POST" }),
+  returnStaffPrescription: (id, reason) =>
+    request(`/staff/prescriptions/${id}/return`, { method: "POST", body: { reason } }),
+  prepareStaffPrescriptionSend: (id) =>
+    request(`/staff/prescriptions/${id}/prepare-send`, { method: "POST" }),
+  sendStaffPrescription: (id, body) =>
+    request(`/staff/prescriptions/${id}/send`, { method: "POST", body }),
+  retryStaffPrescriptionSend: (id, body) =>
+    request(`/staff/prescriptions/${id}/retry-send`, { method: "POST", body }),
+  viewStaffPrescriptionPdf: (id) => fetchAuthorizedBlob(`/staff/prescriptions/${id}/pdf?inline=1`),
+  downloadStaffPrescriptionPdf: (id, filename) =>
+    download(`/staff/prescriptions/${id}/pdf`, filename || "prescription.pdf"),
   downloadAdminAnalyticsExport: (format, range = "month", extras = {}) => {
     const search = new URLSearchParams({
       format,

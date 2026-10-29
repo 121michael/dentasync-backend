@@ -2,6 +2,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   Bell,
   CalendarDays,
+  ClipboardPlus,
   FolderOpen,
   LayoutDashboard,
   LogOut,
@@ -27,6 +28,7 @@ const navigation = [
   { to: "/dentist/queue", label: "Patient Queue", icon: UsersRound },
   { to: "/dentist/appointments", label: "Appointments", icon: CalendarDays },
   { to: "/dentist/patient-records", label: "Patient Records", icon: FolderOpen },
+  { to: "/dentist/prescriptions", label: "Prescription Management", icon: ClipboardPlus },
   { to: "/dentist/notifications", label: "Notifications", icon: Bell },
   { to: "/dentist/profile", label: "Profile", icon: UserRound },
 ];
@@ -188,6 +190,7 @@ export function DentistLayout() {
                 { to: "/dentist/queue", label: "Patient Queue", icon: UsersRound },
                 { to: "/dentist/appointments", label: "Appointments", icon: CalendarDays },
                 { to: "/dentist/patient-records", label: "Patient Records", icon: FolderOpen },
+                { to: "/dentist/prescriptions", label: "Prescription Management", icon: ClipboardPlus },
               ],
             },
             {

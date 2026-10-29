@@ -27,6 +27,7 @@ export const SPA_ROUTES = [
   "/staff/patients",
   "/staff/queue",
   "/staff/billing",
+  "/staff/prescriptions",
   "/staff/notifications",
   "/staff/profile",
   "/admin",
@@ -50,6 +51,7 @@ export const SPA_ROUTES = [
   "/dentist/queue",
   "/dentist/appointments",
   "/dentist/patient-records",
+  "/dentist/prescriptions",
   "/dentist/notifications",
   "/dentist/profile",
 ];

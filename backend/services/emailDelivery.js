@@ -124,13 +124,18 @@ async function sendViaGmailHttpsRelay(config, { to, subject, html }, fetchImpl =
   }
 }
 
-async function sendMailMessage({ to, subject, html }, env = process.env, fetchImpl = fetch) {
+async function sendMailMessage({ to, subject, html, attachments }, env = process.env, fetchImpl = fetch) {
   const config = getMailConfig(env);
   if (!config.configured) {
     throw new Error("Email delivery is not configured.");
   }
 
   if (config.httpsRelayConfigured) {
+    if (attachments?.length) {
+      throw new Error(
+        "The Gmail HTTPS relay cannot attach PDF files. Configure SMTP with EMAIL_USER and EMAIL_PASSWORD to send prescription PDFs."
+      );
+    }
     return sendViaGmailHttpsRelay(config, { to, subject, html }, fetchImpl);
   }
 
@@ -140,6 +145,7 @@ async function sendMailMessage({ to, subject, html }, env = process.env, fetchIm
       to,
       subject,
       html,
+      attachments: attachments || undefined,
     });
   } catch (error) {
     throw new Error(describeSmtpFailure(error));
@@ -223,6 +229,7 @@ module.exports = {
   emailDeliveryIsConfigured,
   probeGmailHttpsRelay,
   createMailTransporter,
+  sendMailMessage,
   sendEmailOtp,
   sendPasswordResetEmail,
 };

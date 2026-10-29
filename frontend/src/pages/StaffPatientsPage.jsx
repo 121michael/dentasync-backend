@@ -9,6 +9,7 @@ import { useStaffUi } from "../components/StaffLayout";
 import { formatStaffDate } from "../staffUtils";
 import { formatDentistDate } from "../dentistUtils";
 import { ProcedureAuthorizationPanel } from "../components/ProcedureAuthorizationPanel";
+import { PrescriptionsPanel } from "../components/PrescriptionsPanel";
 
 const emptyForm = {
   firstName: "",
@@ -498,6 +499,8 @@ export function StaffPatientsPage() {
               </p>
             ) : null}
           </section>
+
+          <PrescriptionsPanel role="staff" patientId={detail.id} />
 
           <DentalChart
             patientId={detail.id}

@@ -2,6 +2,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   Bell,
   CalendarDays,
+  ClipboardList,
   ClipboardPlus,
   LayoutDashboard,
   LogOut,
@@ -41,6 +42,7 @@ const navigation = [
   { to: "/staff/patient-records", label: "Patient Records", icon: Stethoscope },
   { to: "/staff/queue", label: "Queue Management", icon: UsersRound },
   { to: "/staff/billing", label: "Billing & Invoices", icon: Receipt },
+  { to: "/staff/prescriptions", label: "Prescription Processing", icon: ClipboardList },
   { to: "/staff/notifications", label: "Notifications", icon: Bell },
   { to: "/staff/profile", label: "Profile", icon: UserRound },
 ];
@@ -52,6 +54,7 @@ const PAGE_TITLES = {
   "/staff/patient-records": "Patient Records",
   "/staff/queue": "Live Patient Queue",
   "/staff/billing": "Billing & Invoice Center",
+  "/staff/prescriptions": "Prescription Processing",
   "/staff/notifications": "Notification Center",
   "/staff/profile": "Professional Profile",
 };
@@ -264,6 +267,7 @@ export function StaffLayout() {
                   { to: "/staff/patient-records", label: "Patient Records", icon: Stethoscope },
                   { to: "/staff/queue", label: "Queue Management", icon: UsersRound },
                   { to: "/staff/billing", label: "Billing & Invoices", icon: Receipt },
+                  { to: "/staff/prescriptions", label: "Prescription Processing", icon: ClipboardList },
                 ],
               },
               {

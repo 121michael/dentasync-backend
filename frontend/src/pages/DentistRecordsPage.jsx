@@ -11,6 +11,7 @@ import {
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
 import { DentistModal } from "../components/DentistUI";
 import { DentalDocumentPreview } from "../components/DentalDocumentPreview";
+import { PrescriptionsPanel } from "../components/PrescriptionsPanel";
 import { formatDentistDate } from "../dentistUtils";
 import { matchesNotificationFocus } from "../notificationFocus";
 
@@ -1104,6 +1105,12 @@ export function DentistRecordsPage() {
               </p>
             </div>
           </section>
+
+          <PrescriptionsPanel
+            role="dentist"
+            patientId={detail.patient.id}
+            onCreate={() => navigate(`/dentist/prescriptions?patientId=${detail.patient.id}`)}
+          />
 
           {ageSexOpen && !isProfileLocked(detail.patient) ? (
             <form className="dentist-form" onSubmit={saveAgeSex} style={{ marginBottom: "1rem" }}>
