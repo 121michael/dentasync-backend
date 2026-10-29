@@ -276,6 +276,52 @@ function displayStatus(status) {
   return String(status || "pending").replaceAll("_", " ");
 }
 
+function validateBooking(form, { selectedServicePrice, availability, throughStep }) {
+  if (throughStep >= 1) {
+    if (!form.serviceId) {
+      return { step: 1, message: "Select a dental service before continuing." };
+    }
+    if (selectedServicePrice?.options?.length && !form.bracesOption) {
+      return { step: 1, message: "Choose Standard Metal Braces or Invisible Braces before continuing." };
+    }
+  }
+  if (throughStep >= 2) {
+    if (!form.appointmentDate) {
+      return { step: 2, message: "Choose an appointment date." };
+    }
+    if (availability?.closed) {
+      return { step: 2, message: `The clinic is closed on ${displayDate(form.appointmentDate)}. Choose another date.` };
+    }
+    if (!form.appointmentTime) {
+      return { step: 2, message: "Choose an available appointment time." };
+    }
+    const bookable = availability?.availableTimes || [];
+    if (availability && bookable.length && !bookable.includes(form.appointmentTime)) {
+      return { step: 2, message: "That time is no longer available. Choose another appointment slot." };
+    }
+  }
+  if (throughStep >= 3) {
+    if (form.coverageType !== "hmo" && form.coverageType !== "self_pay") {
+      return { step: 3, message: "Choose HMO coverage or pay out of pocket." };
+    }
+    if (form.coverageType === "hmo") {
+      if (!String(form.hmoProvider || "").trim()) {
+        return { step: 3, message: "Select your HMO provider." };
+      }
+      if (!String(form.hmoMemberNumber || "").trim()) {
+        return { step: 3, message: "Enter your HMO member number." };
+      }
+      if (!String(form.hmoCompanyName || "").trim()) {
+        return { step: 3, message: "Enter the company name on your HMO." };
+      }
+      if (!form.hmoBirthDate) {
+        return { step: 3, message: "Enter the birth date on your HMO record." };
+      }
+    }
+  }
+  return null;
+}
+
 export function AppointmentsPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -307,7 +353,9 @@ export function AppointmentsPage() {
   });
   const [authorizationFile, setAuthorizationFile] = useState(null);
   const [visitSummaryOpen, setVisitSummaryOpen] = useState(false);
+  const [bookingStep, setBookingStep] = useState(1);
   const [detailsDismissed, setDetailsDismissed] = useState(false);
+  const errorAlertRef = useRef(null);
   const [focusKey, setFocusKey] = useState(() => searchParams.get("focus") || "");
   const focusedCardRef = useRef(null);
 
@@ -397,6 +445,19 @@ export function AppointmentsPage() {
     };
   }, [focusKey, appointments, searchParams, setSearchParams]);
 
+  useEffect(() => {
+    document.body.classList.toggle("booking-summary-open", visitSummaryOpen);
+    if (!visitSummaryOpen) return undefined;
+    function onKey(event) {
+      if (event.key === "Escape") closeVisitSummary();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.classList.remove("booking-summary-open");
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [visitSummaryOpen, isBusy]);
+
   const selectedService = useMemo(
     () =>
       attachServiceVisual((catalog?.services || []).find((service) => service.id === form.serviceId)),
@@ -413,17 +474,83 @@ export function AppointmentsPage() {
   const selectedHmo = hmoProviders.find((provider) => provider.name === form.hmoProvider);
 
   function updateForm(event) {
+    setError("");
     setForm((current) => ({ ...current, [event.target.name]: event.target.value }));
+  }
+
+  function showBookingIssue(issue) {
+    setVisitSummaryOpen(false);
+    setBookingStep(issue.step);
+    setError(issue.message);
+    window.requestAnimationFrame(() => {
+      errorAlertRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }
+
+  function goToBookingStep(step) {
+    if (step < 1 || step > 3) return;
+    if (step > bookingStep) {
+      const issue = validateBooking(form, {
+        selectedServicePrice,
+        availability,
+        throughStep: step - 1,
+      });
+      if (issue) {
+        showBookingIssue(issue);
+        return;
+      }
+    }
+    setError("");
+    setBookingStep(step);
+  }
+
+  function continueBooking() {
+    const issue = validateBooking(form, {
+      selectedServicePrice,
+      availability,
+      throughStep: bookingStep,
+    });
+    if (issue) {
+      showBookingIssue(issue);
+      return;
+    }
+    setError("");
+    setBookingStep((current) => Math.min(3, current + 1));
+  }
+
+  function openVisitSummary() {
+    const issue = validateBooking(form, {
+      selectedServicePrice,
+      availability,
+      throughStep: 3,
+    });
+    if (issue) {
+      showBookingIssue(issue);
+      return;
+    }
+    setError("");
+    setVisitSummaryOpen(true);
+  }
+
+  function closeVisitSummary() {
+    if (isBusy) return;
+    setVisitSummaryOpen(false);
   }
 
   async function confirmAppointment(event) {
     event.preventDefault();
+    if (!visitSummaryOpen || isBusy) return;
     setError("");
     setSuccess("");
     setIsBusy(true);
     try {
-      if (selectedServicePrice?.options?.length && !form.bracesOption) {
-        setError("Choose Standard Metal Braces or Invisible Braces before requesting an appointment.");
+      const issue = validateBooking(form, {
+        selectedServicePrice,
+        availability,
+        throughStep: 3,
+      });
+      if (issue) {
+        showBookingIssue(issue);
         setIsBusy(false);
         return;
       }
@@ -456,6 +583,8 @@ export function AppointmentsPage() {
       }));
       setDetailsDismissed(false);
       setAuthorizationFile(null);
+      setVisitSummaryOpen(false);
+      setBookingStep(1);
       await load();
       navigate("/appointments");
     } catch (submitError) {
@@ -585,23 +714,53 @@ export function AppointmentsPage() {
       </div>
 
       <div className="booking-progress" aria-label="Appointment booking progress">
-        {["Service", "Schedule", "Coverage", "Confirmation"].map((step, index) => (
-          <span key={step} className={index === 0 ? "is-current" : ""}>
-            <b>0{index + 1}</b> {step}
-          </span>
-        ))}
+        {[
+          { id: 1, label: "Service" },
+          { id: 2, label: "Schedule" },
+          { id: 3, label: "Coverage" },
+          { id: 4, label: "Confirmation" },
+        ].map((step) => {
+          const current = visitSummaryOpen ? 4 : bookingStep;
+          const className = [
+            current === step.id ? "is-current" : "",
+            !visitSummaryOpen && step.id < bookingStep ? "is-complete" : "",
+          ]
+            .filter(Boolean)
+            .join(" ");
+          if (step.id === 4) {
+            return (
+              <span key={step.label} className={className}>
+                <b>0{step.id}</b> {step.label}
+              </span>
+            );
+          }
+          return (
+            <button
+              key={step.label}
+              type="button"
+              className={className}
+              onClick={() => goToBookingStep(step.id)}
+            >
+              <b>0{step.id}</b> {step.label}
+            </button>
+          );
+        })}
       </div>
 
-      {error ? <p className="inline-alert inline-alert--error">{error}</p> : null}
+      {error ? (
+        <p ref={errorAlertRef} className="inline-alert inline-alert--error" role="alert">
+          {error}
+        </p>
+      ) : null}
       {success ? (
         <p className="inline-alert inline-alert--success">
           <Check size={17} /> {success}
         </p>
       ) : null}
 
-      <form className="booking-layout" onSubmit={confirmAppointment}>
+      <form id="patient-booking-form" className="booking-layout" onSubmit={confirmAppointment} noValidate>
         <div className="booking-form">
-          <section className="glass-card booking-section">
+          <section className={`glass-card booking-section${bookingStep === 1 ? "" : " is-hidden"}`} hidden={bookingStep !== 1}>
             <div className="card-heading">
               <div>
                 <span className="eyebrow">01 — Service</span>
@@ -615,6 +774,7 @@ export function AppointmentsPage() {
                   service={service}
                   selected={form.serviceId === service.id}
                   onSelect={() => {
+                    setError("");
                     setForm((current) => {
                       if (current.serviceId === service.id && !detailsDismissed) {
                         return { ...current, serviceId: "", bracesOption: "" };
@@ -628,7 +788,7 @@ export function AppointmentsPage() {
             </div>
             <ServicePriceDetails
               price={selectedServicePrice}
-              open={detailsOpen}
+              open={detailsOpen && bookingStep === 1}
               selectedOptionId={form.bracesOption}
               photoUrl={servicePhotoUrl(selectedService)}
               imageFit={selectedService?.imageFit}
@@ -638,9 +798,14 @@ export function AppointmentsPage() {
               }
               onClose={closeServiceDetails}
             />
+            <div className="booking-step-actions">
+              <button type="button" className="button button--primary" onClick={continueBooking}>
+                Continue to schedule <ChevronRight size={18} />
+              </button>
+            </div>
           </section>
 
-          <section className="glass-card booking-section">
+          <section className={`glass-card booking-section${bookingStep === 2 ? "" : " is-hidden"}`} hidden={bookingStep !== 2}>
             <div className="card-heading">
               <div>
                 <span className="eyebrow">02 — Schedule</span>
@@ -720,9 +885,17 @@ export function AppointmentsPage() {
             {availability && !availability.closed && !(availability.availableTimes || []).length ? (
               <p className="muted">No appointment slots are available on this date.</p>
             ) : null}
+            <div className="booking-step-actions">
+              <button type="button" className="button button--secondary" onClick={() => goToBookingStep(1)}>
+                <ChevronLeft size={16} /> Back
+              </button>
+              <button type="button" className="button button--primary" onClick={continueBooking}>
+                Continue to coverage <ChevronRight size={18} />
+              </button>
+            </div>
           </section>
 
-          <section className="glass-card booking-section">
+          <section className={`glass-card booking-section${bookingStep === 3 ? "" : " is-hidden"}`} hidden={bookingStep !== 3}>
             <div className="card-heading">
               <div>
                 <span className="eyebrow">03 — Coverage</span>
@@ -825,10 +998,8 @@ export function AppointmentsPage() {
                 </label>
               </div>
             ) : null}
-          </section>
 
-          <section className="glass-card booking-section booking-section--notes">
-            <label className="field">
+            <label className="field booking-section__notes">
               <span>
                 Anything your care team should know? <small>(optional)</small>
               </span>
@@ -840,80 +1011,105 @@ export function AppointmentsPage() {
                 placeholder="Share accessibility needs, concerns, or preferences."
               />
             </label>
+
+            <div className="booking-step-actions booking-step-actions--coverage">
+              <button type="button" className="button button--secondary" onClick={() => goToBookingStep(2)}>
+                <ChevronLeft size={16} /> Back
+              </button>
+              <button type="button" className="button button--primary booking-done" onClick={openVisitSummary}>
+                Done
+              </button>
+            </div>
           </section>
         </div>
 
-        <aside className={`booking-summary ${visitSummaryOpen ? "is-open" : ""}`}>
-          <button
-            type="button"
-            className="booking-summary__toggle"
-            aria-expanded={visitSummaryOpen}
-            onClick={() => setVisitSummaryOpen((current) => !current)}
-          >
-            <span className="booking-summary__mark" aria-hidden="true">
-              <CalendarDays size={16} />
-            </span>
-            <span>
-              <span className="eyebrow">04 — Confirmation</span>
-              <strong>Visit Summary</strong>
-              <small>
-                {selectedService
-                  ? `${selectedService.name}${selectedBracesOption ? ` · ${selectedBracesOption.title}` : ""} · ${selectedBracesOption?.priceLabel || selectedServicePrice?.priceLabel || "Price to confirm"}`
-                  : "Select a service to review your visit"}
-              </small>
-            </span>
-            <ChevronDown size={18} aria-hidden="true" />
-          </button>
-          <div className="booking-summary__intro">
-            <span className="booking-summary__mark" aria-hidden="true">
-              <CalendarDays size={18} />
-            </span>
-            <div>
-              <span className="eyebrow">04 — Confirmation</span>
-              <h2>Your visit summary</h2>
-            </div>
-          </div>
-          <div className="booking-summary__body">
-            <div className="booking-summary__line">
-              <span>Service</span>
-              <strong>
-                {selectedService
-                  ? `${selectedService.name}${selectedBracesOption ? ` — ${selectedBracesOption.title}` : ""}`
-                  : "Select a service"}
-              </strong>
-            </div>
-            {selectedBracesOption || selectedServicePrice ? (
-              <div className="booking-summary__line">
-                <span>Price</span>
-                <strong>{selectedBracesOption?.details || selectedServicePrice?.details}</strong>
-              </div>
-            ) : null}
-            <div className="booking-summary__line">
-              <span>Date</span>
-              <strong>{form.appointmentDate ? displayDate(form.appointmentDate) : "Choose a date"}</strong>
-            </div>
-            <div className="booking-summary__line">
-              <span>Time</span>
-              <strong>{form.appointmentTime ? displayTime(form.appointmentTime) : "Choose a time"}</strong>
-            </div>
-            <div className="booking-summary__line">
-              <span>Coverage</span>
-              <strong>{form.coverageType === "hmo" ? "HMO coverage" : "Out of pocket"}</strong>
-            </div>
-          </div>
-          <button
-            className="button button--primary button--wide"
-            disabled={
-              isBusy ||
-              !form.serviceId ||
-              !form.appointmentTime ||
-              (Boolean(selectedServicePrice?.options?.length) && !form.bracesOption)
-            }
-          >
-            {isBusy ? "Submitting your request…" : "Request appointment"} <ChevronRight size={18} />
-          </button>
-          <p>The service you select is saved with this appointment and shown in Appointment History.</p>
-        </aside>
+        {visitSummaryOpen && typeof document !== "undefined"
+          ? createPortal(
+              <div className="booking-summary-layer is-open">
+                <button
+                  type="button"
+                  className="booking-summary-layer__backdrop"
+                  tabIndex={-1}
+                  aria-label="Close visit summary"
+                  onClick={closeVisitSummary}
+                />
+                <aside
+                  className="booking-summary is-open"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="visit-summary-title"
+                >
+                  <button
+                    type="button"
+                    className="booking-summary__close"
+                    aria-label="Close visit summary"
+                    onClick={closeVisitSummary}
+                    disabled={isBusy}
+                  >
+                    <X size={16} />
+                  </button>
+                  <div className="booking-summary__intro">
+                    <span className="booking-summary__mark" aria-hidden="true">
+                      <CalendarDays size={18} />
+                    </span>
+                    <div>
+                      <span className="eyebrow">04 — Confirmation</span>
+                      <h2 id="visit-summary-title">Visit Summary</h2>
+                    </div>
+                  </div>
+                  <div className="booking-summary__body">
+                    <div className="booking-summary__line">
+                      <span>Service</span>
+                      <strong>
+                        {selectedService
+                          ? `${selectedService.name}${selectedBracesOption ? ` — ${selectedBracesOption.title}` : ""}`
+                          : "Select a service"}
+                      </strong>
+                    </div>
+                    {selectedBracesOption || selectedServicePrice ? (
+                      <div className="booking-summary__line">
+                        <span>Price</span>
+                        <strong>{selectedBracesOption?.details || selectedServicePrice?.details}</strong>
+                      </div>
+                    ) : null}
+                    <div className="booking-summary__line">
+                      <span>Date</span>
+                      <strong>{form.appointmentDate ? displayDate(form.appointmentDate) : "Choose a date"}</strong>
+                    </div>
+                    <div className="booking-summary__line">
+                      <span>Time</span>
+                      <strong>{form.appointmentTime ? displayTime(form.appointmentTime) : "Choose a time"}</strong>
+                    </div>
+                    <div className="booking-summary__line">
+                      <span>Coverage</span>
+                      <strong>
+                        {form.coverageType === "hmo"
+                          ? form.hmoProvider
+                            ? `HMO coverage · ${form.hmoProvider}`
+                            : "HMO coverage"
+                          : "Out of pocket"}
+                      </strong>
+                    </div>
+                  </div>
+                  {error ? (
+                    <p className="inline-alert inline-alert--error" role="alert">
+                      {error}
+                    </p>
+                  ) : null}
+                  <button
+                    type="submit"
+                    form="patient-booking-form"
+                    className="button button--primary button--wide"
+                    disabled={isBusy}
+                  >
+                    {isBusy ? "Submitting your request…" : "Request appointment"} <ChevronRight size={18} />
+                  </button>
+                  <p>The service you select is saved with this appointment and shown in Appointment History.</p>
+                </aside>
+              </div>,
+              document.body
+            )
+          : null}
       </form>
     </div>
   );
