@@ -11320,6 +11320,25 @@ body.is-queue-display .fab-menu {
   box-shadow: 0 0 0 4px rgba(215, 184, 137, 0.45);
 }
 
+.landing-header__signin {
+  padding: 0.5rem 0.75rem;
+  border-radius: 10px;
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 0.86rem;
+  font-weight: 650;
+  text-decoration: none;
+  transition: color 160ms ease;
+}
+
+.landing-header__signin:hover {
+  color: var(--lp-gold);
+}
+
+.landing-header__signin:focus-visible {
+  outline: 2px solid var(--lp-gold);
+  outline-offset: 2px;
+}
+
 /* Hero + existing auth panel */
 .landing .auth-page {
   grid-template-columns: minmax(0, 1.08fr) minmax(400px, 0.92fr);
@@ -13217,14 +13236,13 @@ body.is-queue-display .fab-menu {
   }
   .landing-header__cta {
     min-height: 38px;
-    max-width: min(58vw, 13.5rem);
-    padding: 0 0.7rem;
-    font-size: 0.72rem;
+    padding: 0 0.85rem;
+    font-size: 0.76rem;
     white-space: nowrap;
   }
-  .landing-header__cta svg {
-    width: 14px;
-    height: 14px;
+  .landing-header__signin {
+    padding: 0.45rem 0.5rem;
+    font-size: 0.8rem;
   }
   .landing-header__toggle {
     width: 38px;
