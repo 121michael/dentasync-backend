@@ -8,16 +8,19 @@ const { EXTRACTION_AFTERCARE, RX_PAD_HEADER } = require("./prescriptionAftercare
 const AMETHYST = "#5b2a86";
 const INK = "#1c1c1c";
 const MUTED = "#444444";
-const PAGE_WIDTH = 595.28;
-const PAGE_HEIGHT = 841.89;
-const MARGIN = 42;
+// ISO A5 portrait: 148 mm × 210 mm. PDFKit "A5" is 419.53 × 595.28 pt.
+const PAGE_SIZE = "A5";
+const PAGE_WIDTH = 419.53;
+const PAGE_HEIGHT = 595.28;
+const MARGIN = 28;
+const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
 const LOGO_CANDIDATES = [
   path.join(__dirname, "..", "assets", "amethyst-logo.png"),
   path.join(__dirname, "..", "..", "frontend", "public", "logo.png"),
 ];
-const AFTERCARE_BLOCK = 188;
-const SIGNATURE_BLOCK = 84;
-const FOOTER_RESERVE = 28;
+const AFTERCARE_BLOCK = 176;
+const SIGNATURE_BLOCK = 78;
+const FOOTER_RESERVE = 18;
 
 function textOrDash(value) {
   const text = value == null ? "" : String(value).trim();
@@ -56,6 +59,23 @@ function findLogo() {
   return LOGO_CANDIDATES.find((candidate) => fs.existsSync(candidate)) || null;
 }
 
+function readPdfMediaBoxes(pdfBuffer) {
+  const source = Buffer.isBuffer(pdfBuffer) ? pdfBuffer.toString("latin1") : String(pdfBuffer);
+  const boxes = [];
+  const pattern = /\/MediaBox\s*\[\s*([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)\s*\]/g;
+  let match = pattern.exec(source);
+  while (match) {
+    boxes.push({
+      x: Number(match[1]),
+      y: Number(match[2]),
+      width: Number(match[3]) - Number(match[1]),
+      height: Number(match[4]) - Number(match[2]),
+    });
+    match = pattern.exec(source);
+  }
+  return boxes;
+}
+
 function generatePrescriptionPdf({
   prescriptionNumber,
   version,
@@ -68,12 +88,13 @@ function generatePrescriptionPdf({
   const dentist = snapshot?.dentist || {};
   const logoPath = findLogo();
   const showAftercare = Boolean(snapshot?.includeExtractionAftercare);
-  const closingBlock = SIGNATURE_BLOCK + (showAftercare ? AFTERCARE_BLOCK : 0) + FOOTER_RESERVE;
+  const medicationItems = Array.isArray(items) ? items : [];
 
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
-      size: "A4",
-      margins: { top: 28, left: MARGIN, right: MARGIN, bottom: 0 },
+      size: PAGE_SIZE,
+      layout: "portrait",
+      margins: { top: 0, left: 0, right: 0, bottom: 0 },
       bufferPages: true,
       info: {
         Title: `Prescription ${prescriptionNumber}`,
@@ -86,162 +107,210 @@ function generatePrescriptionPdf({
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
 
-    function drawHeader() {
-      const logoSize = 62;
+    const usableBottom = PAGE_HEIGHT - MARGIN - FOOTER_RESERVE;
+
+    function medicationBlockHeight(item, index) {
+      const name = `${index + 1}. ${item.medicationName || "Medication"}`;
+      const details = [`Qty: ${item.quantity}`, `Dosage: ${item.dosage}`, `Sig: ${item.sig}`].join("    ");
+      doc.font("Times-Bold").fontSize(10);
+      const nameH = doc.heightOfString(name, { width: CONTENT_WIDTH - 6 });
+      doc.font("Times-Roman").fontSize(9);
+      const detailsH = doc.heightOfString(details, { width: CONTENT_WIDTH - 16, lineGap: 1.4 });
+      return nameH + detailsH + 8;
+    }
+
+    function patientBlockHeight() {
+      doc.font("Times-Bold").fontSize(9);
+      const nameLine = `Patient's Name:  ${textOrDash(patient.fullName)}`;
+      const addrLine = `Address:  ${textOrDash(patient.address)}`;
+      const nameH = doc.heightOfString(nameLine, { width: CONTENT_WIDTH / 2 - 6 });
+      const addrH = doc.heightOfString(addrLine, { width: CONTENT_WIDTH * 0.58 });
+      return nameH + 8 + addrH + 36;
+    }
+
+    const headerHeight = 96;
+    const rxHeight = 34;
+    const signatureHeight = SIGNATURE_BLOCK;
+    const aftercareHeight = showAftercare ? AFTERCARE_BLOCK : 0;
+    const medicationsHeight = medicationItems.reduce(
+      (sum, item, index) => sum + medicationBlockHeight(item, index),
+      0
+    );
+    const bodyHeight =
+      headerHeight + patientBlockHeight() + rxHeight + medicationsHeight + 12 + signatureHeight + aftercareHeight;
+    const available = usableBottom - MARGIN;
+    const originY = bodyHeight <= available ? MARGIN + (available - bodyHeight) / 2 : MARGIN;
+
+    function drawHeader(top) {
+      const logoSize = 48;
+      const brandingLeft = logoPath ? MARGIN + logoSize + 10 : MARGIN;
+      const brandingWidth = PAGE_WIDTH - brandingLeft - MARGIN;
       if (logoPath) {
         try {
-          doc.image(logoPath, MARGIN, 28, { fit: [logoSize, logoSize], align: "center", valign: "center" });
+          doc.image(logoPath, MARGIN, top, {
+            fit: [logoSize, logoSize],
+            align: "center",
+            valign: "center",
+          });
         } catch {
           // continue without logo if the file cannot be decoded
         }
       }
-      const textX = logoPath ? MARGIN + logoSize + 12 : MARGIN;
-      const textWidth = PAGE_WIDTH - textX - MARGIN;
-      doc.fillColor(INK).font("Times-Bold").fontSize(22);
-      doc.text(RX_PAD_HEADER.name, textX, 30, { width: textWidth, align: "center" });
-      const barY = 56;
-      const barWidth = Math.min(220, textWidth);
-      const barX = textX + (textWidth - barWidth) / 2;
+      doc.fillColor(INK).font("Times-Bold").fontSize(16);
+      doc.text(RX_PAD_HEADER.name, brandingLeft, top + 2, { width: brandingWidth, align: "center" });
+      const barWidth = Math.min(168, brandingWidth);
+      const barX = brandingLeft + (brandingWidth - barWidth) / 2;
+      const barY = top + 22;
       doc.save();
-      doc.rect(barX, barY, barWidth, 16).fill(AMETHYST);
-      doc.fillColor("#fff").font("Times-Bold").fontSize(9);
-      doc.text(RX_PAD_HEADER.bar, barX, barY + 3.5, { width: barWidth, align: "center" });
+      doc.rect(barX, barY, barWidth, 13).fill(AMETHYST);
+      doc.fillColor("#fff").font("Times-Bold").fontSize(7.5);
+      doc.text(RX_PAD_HEADER.bar, barX, barY + 2.6, { width: barWidth, align: "center" });
       doc.restore();
-      doc.fillColor(INK).font("Times-Roman").fontSize(8.5);
-      doc.text(RX_PAD_HEADER.address1, textX, 78, { width: textWidth, align: "center" });
-      doc.text(RX_PAD_HEADER.address2, textX, doc.y, { width: textWidth, align: "center" });
-      doc.text(`Tel. ${RX_PAD_HEADER.phones}`, textX, doc.y, { width: textWidth, align: "center" });
-      const ruleY = 118;
-      doc.moveTo(MARGIN, ruleY).lineTo(PAGE_WIDTH - MARGIN, ruleY).strokeColor(INK).lineWidth(2.2).stroke();
-      doc.y = ruleY + 14;
+      doc.fillColor(INK).font("Times-Roman").fontSize(7);
+      doc.text(RX_PAD_HEADER.address1, brandingLeft, top + 40, { width: brandingWidth, align: "center" });
+      doc.text(RX_PAD_HEADER.address2, brandingLeft, doc.y, { width: brandingWidth, align: "center" });
+      doc.text(`Tel. ${RX_PAD_HEADER.phones}`, brandingLeft, doc.y, { width: brandingWidth, align: "center" });
+      const ruleY = top + 82;
+      doc
+        .moveTo(MARGIN, ruleY)
+        .lineTo(PAGE_WIDTH - MARGIN, ruleY)
+        .strokeColor(INK)
+        .lineWidth(1.6)
+        .stroke();
+      doc.y = ruleY + 10;
     }
 
     function drawPatientBlock() {
-      const col = (PAGE_WIDTH - MARGIN * 2) / 2;
+      const col = CONTENT_WIDTH / 2;
       const y = doc.y;
-      doc.font("Times-Bold").fontSize(10).fillColor(INK);
-      doc.text("Patient's Name:", MARGIN, y, { continued: true });
-      doc.font("Times-Roman").text(`  ${textOrDash(patient.fullName)}`, { width: col - 8 });
+      doc.font("Times-Bold").fontSize(9).fillColor(INK);
+      doc.text("Patient's Name:", MARGIN, y, { width: 78, lineBreak: false });
+      doc.font("Times-Roman").text(textOrDash(patient.fullName), MARGIN + 80, y, { width: col - 84 });
       const nameBottom = doc.y;
-      doc.font("Times-Bold").text("Age:", MARGIN + col, y, { continued: true });
-      doc.font("Times-Roman").text(`  ${textOrDash(patient.age)}`);
-      doc.font("Times-Bold").text("Sex:", MARGIN + col + 90, y, { continued: true });
-      doc.font("Times-Roman").text(`  ${textOrDash(patient.sex)}`);
-      doc.y = Math.max(nameBottom, doc.y) + 6;
+      doc.font("Times-Bold").text("Age:", MARGIN + col, y, { width: 24, lineBreak: false });
+      doc.font("Times-Roman").text(textOrDash(patient.age), MARGIN + col + 26, y, { width: 36 });
+      doc.font("Times-Bold").text("Sex:", MARGIN + col + 68, y, { width: 24, lineBreak: false });
+      doc.font("Times-Roman").text(textOrDash(patient.sex), MARGIN + col + 94, y, { width: col - 98 });
+      doc.y = Math.max(nameBottom, y + 12) + 5;
       const y2 = doc.y;
-      doc.font("Times-Bold").text("Address:", MARGIN, y2, { continued: true });
-      doc.font("Times-Roman").text(`  ${textOrDash(patient.address)}`, { width: col + 40 });
+      doc.font("Times-Bold").text("Address:", MARGIN, y2, { width: 48, lineBreak: false });
+      doc.font("Times-Roman").text(textOrDash(patient.address), MARGIN + 50, y2, { width: col - 54 });
       const addrBottom = doc.y;
-      doc.font("Times-Bold").text("Date:", MARGIN + col, y2, { continued: true });
-      doc.font("Times-Roman").text(`  ${formatDate(authorizedAt || new Date())}`);
-      doc.y = Math.max(addrBottom, doc.y) + 10;
-      doc.fillColor(AMETHYST).font("Times-BoldItalic").fontSize(42);
+      doc.font("Times-Bold").text("Date:", MARGIN + col, y2, { width: 28, lineBreak: false });
+      doc.font("Times-Roman").text(formatDate(authorizedAt || new Date()), MARGIN + col + 30, y2, {
+        width: col - 34,
+      });
+      doc.y = Math.max(addrBottom, y2 + 12) + 8;
+    }
+
+    function drawRxMark(size) {
+      doc.fillColor(AMETHYST).font("Times-BoldItalic").fontSize(size);
       doc.text("Rx", MARGIN, doc.y);
       doc.fillColor(INK);
-      doc.moveDown(0.35);
+      doc.moveDown(0.28);
     }
 
     function startContinuationPage() {
-      doc.addPage();
-      drawHeader();
-      doc.fillColor(MUTED).font("Times-Roman").fontSize(8);
+      doc.addPage({ size: PAGE_SIZE, layout: "portrait", margins: { top: 0, left: 0, right: 0, bottom: 0 } });
+      drawHeader(MARGIN);
+      doc.fillColor(MUTED).font("Times-Roman").fontSize(7.5);
       doc.text(`${prescriptionNumber}  ·  version ${version}  ·  continued`, MARGIN, doc.y, {
-        width: PAGE_WIDTH - MARGIN * 2,
+        width: CONTENT_WIDTH,
+        align: "center",
       });
-      doc.moveDown(0.5);
-      doc.fillColor(AMETHYST).font("Times-BoldItalic").fontSize(28).text("Rx", MARGIN, doc.y);
-      doc.fillColor(INK);
-      doc.moveDown(0.3);
+      doc.moveDown(0.35);
+      drawRxMark(22);
     }
 
     function ensureMedicationSpace(needed) {
-      if (doc.y + needed + closingBlock < PAGE_HEIGHT - 8) return;
+      if (doc.y + needed + signatureHeight <= usableBottom) return;
       startContinuationPage();
     }
 
     function drawMedications() {
-      (items || []).forEach((item, index) => {
-        const name = item.medicationName || "Medication";
-        const details = [
-          `Qty: ${item.quantity}`,
-          `Dosage: ${item.dosage}`,
-          `Sig: ${item.sig}`,
-        ].join("    ");
-        ensureMedicationSpace(72);
-        doc.font("Times-Bold").fontSize(11).fillColor(INK);
-        doc.text(`${index + 1}. ${name}`, MARGIN + 8, doc.y, {
-          width: PAGE_WIDTH - MARGIN * 2 - 8,
+      medicationItems.forEach((item, index) => {
+        const name = `${index + 1}. ${item.medicationName || "Medication"}`;
+        const details = [`Qty: ${item.quantity}`, `Dosage: ${item.dosage}`, `Sig: ${item.sig}`].join("    ");
+        ensureMedicationSpace(medicationBlockHeight(item, index) + 4);
+        doc.font("Times-Bold").fontSize(10).fillColor(INK);
+        doc.text(name, MARGIN + 4, doc.y, { width: CONTENT_WIDTH - 6 });
+        doc.font("Times-Roman").fontSize(9).fillColor(INK);
+        doc.text(details, MARGIN + 14, doc.y, {
+          width: CONTENT_WIDTH - 16,
+          lineGap: 1.4,
         });
-        doc.font("Times-Roman").fontSize(10).fillColor(INK);
-        doc.text(details, MARGIN + 22, doc.y, {
-          width: PAGE_WIDTH - MARGIN * 2 - 22,
-          lineGap: 2,
-        });
-        doc.moveDown(0.45);
+        doc.moveDown(0.35);
       });
     }
 
     function drawSignature() {
-      if (doc.y + closingBlock > PAGE_HEIGHT - 12) {
+      const sigWidth = 190;
+      const sigX = PAGE_WIDTH - MARGIN - sigWidth;
+      const reserved = signatureHeight + aftercareHeight;
+      if (doc.y + reserved > usableBottom) {
         startContinuationPage();
       }
-      const sigWidth = 220;
-      const sigX = PAGE_WIDTH - MARGIN - sigWidth;
-      const y = Math.max(doc.y + 18, PAGE_HEIGHT - closingBlock);
-      doc.font("Times-Bold").fontSize(11).fillColor(INK);
-      doc.text(textOrDash(dentist.fullName).toUpperCase(), sigX, y, { width: sigWidth, align: "center" });
+      const sigY =
+        bodyHeight <= available
+          ? doc.y + 12
+          : Math.max(doc.y + 12, usableBottom - reserved);
+      doc.font("Times-Bold").fontSize(10).fillColor(INK);
+      doc.text(textOrDash(dentist.fullName).toUpperCase(), sigX, sigY, { width: sigWidth, align: "center" });
       if (dentist.specialization) {
-        doc.font("Times-Roman").fontSize(9).fillColor(MUTED);
+        doc.font("Times-Roman").fontSize(8).fillColor(MUTED);
         doc.text(dentist.specialization, sigX, doc.y, { width: sigWidth, align: "center" });
       }
       if (dentist.licenseNumber) {
-        doc.font("Times-Roman").fontSize(9).fillColor(INK);
+        doc.font("Times-Roman").fontSize(8).fillColor(INK);
         doc.text(`Lic. No. ${dentist.licenseNumber}`, sigX, doc.y, { width: sigWidth, align: "center" });
       }
-      const lineY = doc.y + 18;
-      doc.moveTo(sigX + 20, lineY).lineTo(sigX + sigWidth - 20, lineY).strokeColor(INK).lineWidth(0.7).stroke();
-      doc.font("Times-Italic").fontSize(7.5).fillColor(MUTED);
+      const lineY = doc.y + 14;
+      doc.moveTo(sigX + 16, lineY).lineTo(sigX + sigWidth - 16, lineY).strokeColor(INK).lineWidth(0.6).stroke();
+      doc.font("Times-Italic").fontSize(6.5).fillColor(MUTED);
       doc.text(
         "Authorized in DentaSync by the authenticated dentist account. This line is not a reproduced handwritten signature.",
         sigX,
-        lineY + 4,
+        lineY + 3,
         { width: sigWidth, align: "center" }
       );
-      doc.font("Times-Roman").fontSize(7.5);
+      doc.font("Times-Roman").fontSize(6.5);
       doc.text(`Authorized ${formatDateTime(authorizedAt)}`, sigX, doc.y, { width: sigWidth, align: "center" });
     }
 
     function drawAftercare() {
-      const y = PAGE_HEIGHT - AFTERCARE_BLOCK - FOOTER_RESERVE;
-      doc.page.margins.bottom = 0;
+      if (doc.y + AFTERCARE_BLOCK > usableBottom) {
+        startContinuationPage();
+      }
+      const y = doc.y + 10;
       doc.save();
-      doc.rect(MARGIN, y, PAGE_WIDTH - MARGIN * 2, 22).fill(AMETHYST);
-      doc.fillColor("#fff").font("Helvetica-Bold").fontSize(9);
-      doc.text(EXTRACTION_AFTERCARE.title, MARGIN, y + 6.5, {
-        width: PAGE_WIDTH - MARGIN * 2,
+      doc.rect(MARGIN, y, CONTENT_WIDTH, 16).fill(AMETHYST);
+      doc.fillColor("#fff").font("Helvetica-Bold").fontSize(7.2);
+      doc.text(EXTRACTION_AFTERCARE.title, MARGIN, y + 4.2, {
+        width: CONTENT_WIDTH,
         align: "center",
       });
-      const colW = (PAGE_WIDTH - MARGIN * 2 - 16) / 2;
-      const colY = y + 28;
-      doc.fillColor(INK).font("Times-Bold").fontSize(8);
-      doc.text(EXTRACTION_AFTERCARE.dosHeading, MARGIN + 4, colY, { width: colW });
-      doc.font("Times-Roman").fontSize(7.4);
+      const colW = (CONTENT_WIDTH - 12) / 2;
+      const colY = y + 20;
+      doc.fillColor(INK).font("Times-Bold").fontSize(7);
+      doc.text(EXTRACTION_AFTERCARE.dosHeading, MARGIN + 2, colY, { width: colW });
+      doc.font("Times-Roman").fontSize(6.3);
       EXTRACTION_AFTERCARE.dos.forEach((line) => {
-        doc.text(`• ${line}`, MARGIN + 4, doc.y, { width: colW, lineGap: 1.1 });
+        doc.text(`• ${line}`, MARGIN + 2, doc.y, { width: colW, lineGap: 0.6 });
       });
-      doc.font("Times-Bold").fontSize(8);
-      doc.text(EXTRACTION_AFTERCARE.dontsHeading, MARGIN + 12 + colW, colY, { width: colW });
-      doc.font("Times-Roman").fontSize(7.4);
-      let dontY = colY + 12;
+      doc.font("Times-Bold").fontSize(7);
+      doc.text(EXTRACTION_AFTERCARE.dontsHeading, MARGIN + 10 + colW, colY, { width: colW });
+      doc.font("Times-Roman").fontSize(6.3);
+      let dontY = colY + 10;
       EXTRACTION_AFTERCARE.donts.forEach((line) => {
-        doc.text(`• ${line}`, MARGIN + 12 + colW, dontY, { width: colW, lineGap: 1.1 });
+        doc.text(`• ${line}`, MARGIN + 10 + colW, dontY, { width: colW, lineGap: 0.6 });
         dontY = doc.y;
       });
       doc.restore();
     }
 
-    drawHeader();
+    drawHeader(originY);
     drawPatientBlock();
+    drawRxMark(32);
     drawMedications();
     drawSignature();
     if (showAftercare) drawAftercare();
@@ -249,13 +318,12 @@ function generatePrescriptionPdf({
     const range = doc.bufferedPageRange();
     for (let i = range.start; i < range.start + range.count; i += 1) {
       doc.switchToPage(i);
-      doc.page.margins.bottom = 0;
-      doc.font("Times-Roman").fontSize(7).fillColor(MUTED);
+      doc.font("Times-Roman").fontSize(6.5).fillColor(MUTED);
       doc.text(
         `${prescriptionNumber} v${version}  ·  integrity ${String(contentHash || "").slice(0, 16)}  ·  Authorized clinic use only`,
         MARGIN,
-        PAGE_HEIGHT - 14,
-        { width: PAGE_WIDTH - MARGIN * 2, align: "center", lineBreak: false, height: 10 }
+        PAGE_HEIGHT - 16,
+        { width: CONTENT_WIDTH, align: "center", lineBreak: false, height: 10 }
       );
     }
 
@@ -271,12 +339,12 @@ async function rasterizePrescriptionPdf(pdfBuffer) {
     const shots = await parser.getScreenshot({
       imageBuffer: true,
       imageDataUrl: false,
-      scale: 2,
+      scale: 2.4,
     });
     const pages = [];
     for (const page of shots.pages || []) {
       if (!page?.data?.length) continue;
-      const jpeg = await sharp(Buffer.from(page.data)).jpeg({ quality: 88 }).toBuffer();
+      const jpeg = await sharp(Buffer.from(page.data)).jpeg({ quality: 90 }).toBuffer();
       pages.push(jpeg);
     }
     return pages;
@@ -288,4 +356,8 @@ async function rasterizePrescriptionPdf(pdfBuffer) {
 module.exports = {
   generatePrescriptionPdf,
   rasterizePrescriptionPdf,
+  readPdfMediaBoxes,
+  PAGE_SIZE,
+  PAGE_WIDTH,
+  PAGE_HEIGHT,
 };

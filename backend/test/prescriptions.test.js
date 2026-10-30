@@ -16,7 +16,12 @@ const {
   clinicalPayload,
   maskEmail,
 } = require("../services/prescriptions");
-const { generatePrescriptionPdf } = require("../services/prescriptionPdf");
+const {
+  generatePrescriptionPdf,
+  readPdfMediaBoxes,
+  PAGE_WIDTH,
+  PAGE_HEIGHT,
+} = require("../services/prescriptionPdf");
 
 const longSig =
   "Take one capsule after meals with a full glass of water and continue until the bottle is finished even if symptoms improve, unless the dentist instructs otherwise. Avoid alcohol. ".repeat(
@@ -80,6 +85,13 @@ test("PDF lists multiple medications from the supplied snapshot only", async () 
     clinicalNotes: "Synthetic test prescription",
   });
   assert.ok(buffer.slice(0, 5).toString() === "%PDF-");
+  const boxes = readPdfMediaBoxes(buffer);
+  assert.ok(boxes.length >= 1);
+  for (const box of boxes) {
+    assert.ok(Math.abs(box.width - PAGE_WIDTH) < 0.6, `width ${box.width}`);
+    assert.ok(Math.abs(box.height - PAGE_HEIGHT) < 0.6, `height ${box.height}`);
+    assert.ok(box.width < box.height, "portrait A5");
+  }
   const { PDFParse } = require("pdf-parse");
   const parser = new PDFParse({ data: buffer });
   const parsed = await parser.getText();
@@ -102,6 +114,53 @@ test("PDF lists multiple medications from the supplied snapshot only", async () 
   assert.equal(pages[0][0], 0xff);
   assert.equal(pages[0][1], 0xd8);
   fs.writeFileSync(path.join(outDir, "generated-prescription-page-1.jpg"), pages[0]);
+  const evidenceDir = path.join(__dirname, "..", "..", "screenshots", "prescription-a5");
+  fs.mkdirSync(evidenceDir, { recursive: true });
+  fs.writeFileSync(path.join(evidenceDir, "a5-two-meds.pdf"), buffer);
+  fs.writeFileSync(path.join(evidenceDir, "a5-page-1.jpg"), pages[0]);
+  if (pages[1]) fs.writeFileSync(path.join(evidenceDir, "a5-page-2.jpg"), pages[1]);
+  const meta = await require("sharp")(pages[0]).metadata();
+  assert.ok(meta.width < meta.height, "raster is portrait");
+});
+
+test("prescription PDF is ISO A5 portrait and paginates extra medications onto more A5 pages", async () => {
+  const many = Array.from({ length: 12 }, (_, index) => ({
+    medicationName: `Long named dental analgesic compound ${index + 1} with extended label`,
+    dosage: "500mg",
+    quantity: "10",
+    sig: longSig,
+  }));
+  const buffer = await generatePrescriptionPdf({
+    prescriptionNumber: "RX-TEST-A5-MULTI",
+    version: 2,
+    contentHash: "ffffffffffffffff",
+    authorizedAt: "2026-10-30T04:00:00.000Z",
+    snapshot: {
+      patient: {
+        fullName: "Synthetic Overflow Patient",
+        age: 41,
+        sex: "Male",
+        address: "Unit 1204 Grand Central Residences, Highway Hills, Mandaluyong City",
+      },
+      dentist: { fullName: "Dr. Sarah Cruz", specialization: "Orthodontics and Dentalofacial Orthopedics" },
+    },
+    items: many,
+  });
+  const boxes = readPdfMediaBoxes(buffer);
+  assert.ok(boxes.length >= 2, "overflow must create additional A5 pages");
+  for (const box of boxes) {
+    assert.ok(Math.abs(box.width - 419.53) < 0.6);
+    assert.ok(Math.abs(box.height - 595.28) < 0.6);
+  }
+  const { rasterizePrescriptionPdf } = require("../services/prescriptionPdf");
+  const pages = await rasterizePrescriptionPdf(buffer);
+  assert.ok(pages.length >= 2);
+  const evidenceDir = path.join(__dirname, "..", "..", "screenshots", "prescription-a5");
+  fs.mkdirSync(evidenceDir, { recursive: true });
+  fs.writeFileSync(path.join(evidenceDir, "a5-multi.pdf"), buffer);
+  pages.forEach((page, index) => {
+    fs.writeFileSync(path.join(evidenceDir, `a5-multi-page-${index + 1}.jpg`), page);
+  });
 });
 
 test("extraction aftercare prints clinic pad wording only when flagged", async () => {
@@ -125,10 +184,14 @@ test("extraction aftercare prints clinic pad wording only when flagged", async (
   assert.match(parsed.text, /Bite firmly on gauze/);
   const { rasterizePrescriptionPdf } = require("../services/prescriptionPdf");
   const pages = await rasterizePrescriptionPdf(buffer);
-  assert.equal(pages.length, 1, "short extraction Rx should stay on one page");
+  assert.ok(pages.length >= 1);
+  assert.ok(pages.length <= 2, "short extraction Rx should not spill past a second A5 page");
   const outDir = path.join(__dirname, "..", "..", "screenshots", "prescription-management");
   fs.mkdirSync(outDir, { recursive: true });
   fs.writeFileSync(path.join(outDir, "generated-rx-pad.jpg"), pages[0]);
+  const evidenceDir = path.join(__dirname, "..", "..", "screenshots", "prescription-a5");
+  fs.mkdirSync(evidenceDir, { recursive: true });
+  fs.writeFileSync(path.join(evidenceDir, "a5-extraction-aftercare.jpg"), pages[0]);
 });
 
 async function ensureSchema() {
