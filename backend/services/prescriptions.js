@@ -75,19 +75,20 @@ function numericId(value) {
 
 function normalizeItem(raw, index) {
   const medicationName = stringValue(raw?.medicationName || raw?.medication_name, 160);
-  const dosage = stringValue(raw?.dosage, 120);
+  const strength = stringValue(raw?.strength, 80);
+  const dosage = stringValue(raw?.dosage, 120) || strength;
   const quantity = stringValue(raw?.quantity, 80);
   const sig = stringValue(raw?.sig || raw?.instructions, 1000);
   if (!medicationName || !dosage || !quantity || !sig) {
     throw httpError(
       400,
-      `Medication ${index + 1} needs a medicine name, quantity, dosage, and Sig / patient instructions.`
+      `Medication ${index + 1} needs a medicine name, strength, quantity, and Sig / patient instructions entered by the dentist.`
     );
   }
   return {
     sortOrder: index,
     medicationName,
-    strength: stringValue(raw?.strength, 80),
+    strength: strength || dosage,
     dosage,
     quantity,
     frequency: stringValue(raw?.frequency, 120) || "",
@@ -325,7 +326,13 @@ async function insertVersion(client, {
     dentist: {
       id: dentist.id,
       fullName: dentistDisplayName(dentist),
+      firstName: dentist.first_name || dentist.firstName || "",
+      lastName: dentist.last_name || dentist.lastName || "",
       specialization: dentist.specialization || "",
+      professionalDesignation:
+        dentist.professional_designation || dentist.professionalDesignation || "DMD",
+      licenseNumber: dentist.license_number || dentist.licenseNumber || "",
+      ptrNumber: dentist.ptr_number || dentist.ptrNumber || "",
       email: dentist.email || "",
     },
     clinic,

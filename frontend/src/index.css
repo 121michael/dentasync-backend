@@ -14300,6 +14300,11 @@ body.is-queue-display .fab-menu {
   background: var(--surface-muted);
 }
 
+.prescription-qty {
+  float: right;
+  font-weight: 700;
+}
+
 .prescription-confirm {
   margin-top: 1rem;
   padding: 0.9rem;

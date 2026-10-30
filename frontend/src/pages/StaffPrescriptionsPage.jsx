@@ -159,12 +159,14 @@ export function StaffPrescriptionsPage() {
                 {(detail.items || []).map((item, index) => (
                   <article key={item.id || index}>
                     <strong>
-                      {index + 1}. {item.medicationName}
+                      {item.medicationName}{" "}
+                      <span className="prescription-qty">
+                        {String(item.quantity || "").startsWith("#") ? item.quantity : `#${item.quantity || ""}`}
+                      </span>
                     </strong>
-                    <p>
-                      Qty {item.quantity} · Dosage {item.dosage}
-                    </p>
+                    <p>{item.strength || item.dosage}</p>
                     <p>Sig: {item.sig}</p>
+                    {item.additionalInstructions ? <p>{item.additionalInstructions}</p> : null}
                   </article>
                 ))}
               </div>

@@ -117,6 +117,32 @@ export function DentistProfilePage() {
               required
             />
           </label>
+          <label className="field">
+            <span>Professional designation</span>
+            <input
+              value={form.professionalDesignation || "DMD"}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, professionalDesignation: event.target.value }))
+              }
+              placeholder="DMD"
+            />
+          </label>
+          <label className="field">
+            <span>PRC license number</span>
+            <input
+              value={form.licenseNumber || ""}
+              onChange={(event) => setForm((current) => ({ ...current, licenseNumber: event.target.value }))}
+              placeholder="Lic. No. as printed on the pad"
+            />
+          </label>
+          <label className="field">
+            <span>PTR number</span>
+            <input
+              value={form.ptrNumber || ""}
+              onChange={(event) => setForm((current) => ({ ...current, ptrNumber: event.target.value }))}
+              placeholder="PTR No."
+            />
+          </label>
           <label className="field field--full">
             <span>Schedule Notes</span>
             <input

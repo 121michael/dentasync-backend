@@ -29,9 +29,9 @@ const EXTRACTION_AFTERCARE = {
 const RX_PAD_HEADER = {
   name: "AMETHYST",
   bar: "DENTAL CLINIC",
-  address1: "102 Grand central Residences Cityland EDSA cor. Sultan st",
+  address1: "102 Grand Central Residences Cityland EDSA cor Sultan St",
   address2: "Brgy Highway Hills Mandaluyong City",
-  phones: "09658045988 / 0275030553",
+  phones: "0965.804.5988 / 7.5030553",
 };
 
 module.exports = {

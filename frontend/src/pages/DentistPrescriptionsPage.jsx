@@ -7,9 +7,10 @@ import { DentalDocumentPreview } from "../components/DentalDocumentPreview";
 
 const emptyItem = {
   medicationName: "",
-  dosage: "",
+  strength: "",
   quantity: "",
   sig: "",
+  additionalInstructions: "",
 };
 
 function statusLabel(status) {
@@ -100,9 +101,11 @@ export function DentistPrescriptionsPage() {
         includeExtractionAftercare: form.includeExtractionAftercare,
         items: form.items.map((item) => ({
           medicationName: item.medicationName,
-          dosage: item.dosage,
+          strength: item.strength,
+          dosage: item.strength,
           quantity: item.quantity,
           sig: item.sig,
+          additionalInstructions: item.additionalInstructions,
         })),
       };
       const data = selectedId
@@ -196,7 +199,7 @@ export function DentistPrescriptionsPage() {
       <SectionHeading
         eyebrow="Clinical documents"
         title="Prescription Management"
-        detail="Write, submit, and authorize clinical prescriptions. Staff can email only the version you authorize."
+        detail="Enter each medicine, strength, quantity, and Sig yourself. DentaSync does not suggest or fill dosages."
         action={
           <div className="dentist-heading-actions">
             <button type="button" className="button button--primary prescription-new-btn" onClick={startNew}>
@@ -345,13 +348,14 @@ export function DentistPrescriptionsPage() {
                 </legend>
                 <div className="field-grid field-grid--two">
                   <label className="field">
-                    <span>Type of medicine / Medication name</span>
+                    <span>Medicine name</span>
                     <input
                       required
                       disabled={!editable}
-                      placeholder="Include strength here if needed"
+                      placeholder="As you would write it on the pad"
                       value={item.medicationName}
                       onChange={(event) => updateItem(index, "medicationName", event.target.value)}
+                      autoComplete="off"
                     />
                   </label>
                   <label className="field">
@@ -359,28 +363,42 @@ export function DentistPrescriptionsPage() {
                     <input
                       required
                       disabled={!editable}
+                      placeholder="#21"
                       value={item.quantity}
                       onChange={(event) => updateItem(index, "quantity", event.target.value)}
+                      autoComplete="off"
                     />
                   </label>
                   <label className="field">
-                    <span>Dosage</span>
+                    <span>Strength / dosage</span>
                     <input
                       required
                       disabled={!editable}
-                      value={item.dosage}
-                      onChange={(event) => updateItem(index, "dosage", event.target.value)}
+                      placeholder="500 mg"
+                      value={item.strength || item.dosage || ""}
+                      onChange={(event) => updateItem(index, "strength", event.target.value)}
+                      autoComplete="off"
                     />
                   </label>
                   <label className="field field--full">
-                    <span>Sig / Instructions for the patient</span>
+                    <span>Sig / Instructions for taking the medication</span>
                     <textarea
                       required
                       rows="3"
                       disabled={!editable}
-                      placeholder="How the patient should take this medicine. Include frequency, duration, or route here if needed."
+                      placeholder="How this patient should take this medicine"
                       value={item.sig}
                       onChange={(event) => updateItem(index, "sig", event.target.value)}
+                    />
+                  </label>
+                  <label className="field field--full">
+                    <span>Additional instructions (optional)</span>
+                    <textarea
+                      rows="2"
+                      disabled={!editable}
+                      placeholder="Only if needed for this medicine"
+                      value={item.additionalInstructions || ""}
+                      onChange={(event) => updateItem(index, "additionalInstructions", event.target.value)}
                     />
                   </label>
                 </div>

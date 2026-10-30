@@ -437,6 +437,20 @@ async function repairOrphanWalkInQueueForDentist(db, dentist) {
   }
 }
 
+let padCredentialsReady = null;
+
+async function ensureDentistPadCredentials(database) {
+  if (!padCredentialsReady) {
+    const sqlPath = path.join(__dirname, "..", "migrations", "046_dentist_pad_credentials.sql");
+    const sql = fs.readFileSync(sqlPath, "utf8");
+    padCredentialsReady = database.query(sql).catch((error) => {
+      padCredentialsReady = null;
+      throw error;
+    });
+  }
+  await padCredentialsReady;
+}
+
 function requireDentistAccount(db) {
   return async (req, res, next) => {
     const tokenUserId = req.user?.id;
@@ -445,6 +459,7 @@ function requireDentistAccount(db) {
     }
 
     try {
+      await ensureDentistPadCredentials(db);
       const result = await db.query(
         `SELECT
            account.id,
@@ -458,7 +473,10 @@ function requireDentistAccount(db) {
            account.created_at,
            profile.specialization,
            profile.schedule_notes,
-           profile.catalog_dentist_id
+           profile.catalog_dentist_id,
+           profile.license_number,
+           profile.ptr_number,
+           profile.professional_designation
          FROM users AS account
          LEFT JOIN admin_portal_dentist_profiles AS profile
            ON profile.user_id = account.id::text
@@ -2877,6 +2895,9 @@ function createDentistPortalRouter({
         specialization: req.dentist.specialization || "",
         scheduleNotes: req.dentist.schedule_notes || "",
         catalogDentistId: req.dentist.catalog_dentist_id || null,
+        licenseNumber: req.dentist.license_number || "",
+        ptrNumber: req.dentist.ptr_number || "",
+        professionalDesignation: req.dentist.professional_designation || "DMD",
         createdAt: req.dentist.created_at || null,
       },
     });
@@ -2889,6 +2910,9 @@ function createDentistPortalRouter({
     const phone = normalizePhone(req.body?.phone);
     const specialization = stringValue(req.body?.specialization, 180) || "";
     const scheduleNotes = stringValue(req.body?.scheduleNotes, 2000) || "";
+    const licenseNumber = stringValue(req.body?.licenseNumber, 80) || "";
+    const ptrNumber = stringValue(req.body?.ptrNumber, 80) || "";
+    const professionalDesignation = stringValue(req.body?.professionalDesignation, 40) || "DMD";
 
     if (!firstName || !lastName || !email || !phone) {
       return res.status(400).json({
@@ -2913,17 +2937,24 @@ function createDentistPortalRouter({
 
       await client.query(
         `INSERT INTO admin_portal_dentist_profiles (
-           user_id, specialization, schedule_notes, catalog_dentist_id
-         ) VALUES ($1, $2, $3, $4)
+           user_id, specialization, schedule_notes, catalog_dentist_id,
+           license_number, ptr_number, professional_designation
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7)
          ON CONFLICT (user_id) DO UPDATE SET
            specialization = EXCLUDED.specialization,
            schedule_notes = EXCLUDED.schedule_notes,
+           license_number = EXCLUDED.license_number,
+           ptr_number = EXCLUDED.ptr_number,
+           professional_designation = EXCLUDED.professional_designation,
            updated_at = CURRENT_TIMESTAMP`,
         [
           String(req.dentist.id),
           specialization || null,
           scheduleNotes || null,
           req.dentist.catalog_dentist_id || null,
+          licenseNumber || null,
+          ptrNumber || null,
+          professionalDesignation || "DMD",
         ]
       );
 
@@ -2943,6 +2974,9 @@ function createDentistPortalRouter({
           specialization,
           scheduleNotes,
           catalogDentistId: req.dentist.catalog_dentist_id || null,
+          licenseNumber,
+          ptrNumber,
+          professionalDesignation,
           createdAt: profile.created_at || null,
         },
       });
