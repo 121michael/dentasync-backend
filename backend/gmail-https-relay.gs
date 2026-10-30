@@ -4,16 +4,20 @@
  * OTP, password reset, and authorized prescription PDFs all POST here because
  * Render Free blocks SMTP ports 587/465.
  *
+ * Prescription PDFs are uploaded as small `action=chunk` posts, then sent with
+ * `action=send`. Do not POST the whole PDF in one request (Google returns HTTP 403).
+ *
  * Setup (one-time or when updating):
  * 1. https://script.google.com → the existing DentaSync relay project (or New project).
  * 2. Replace Code.gs with this file.
  * 3. Project Settings → Script properties → DENTASYNC_RELAY_SECRET
  *    = the same value as GMAIL_APPS_SCRIPT_SECRET on Render.
- *    If that property is empty, the script falls back to RELAY_SECRET below.
- * 4. Deploy → New deployment (or Manage deployments → Edit → New version).
- *    Type: Web app. Execute as: Me. Who has access: Anyone.
- * 5. Copy the /exec URL into GMAIL_APPS_SCRIPT_URL on the Render web service.
- * 6. Redeploy is not required on Render if the URL and secret are unchanged.
+ *    If that property is empty, paste the secret into RELAY_SECRET below.
+ * 4. Deploy → Manage deployments → the existing Web App → pencil/Edit → New version.
+ *    Do not click "New deployment" (that creates a new /exec URL).
+ *    Type: Web app. Execute as: Me. Who has access: Anyone
+ *    (not "Anyone with a Google account").
+ * 5. GMAIL_APPS_SCRIPT_URL on Render must stay the /exec URL already used for OTP.
  */
 
 const RELAY_SECRET = "";
@@ -47,8 +51,69 @@ function parseParams_(e) {
   return params;
 }
 
+function cache_() {
+  return CacheService.getScriptCache();
+}
+
+function storeChunk_(params) {
+  const uploadId = String(params.uploadId || "");
+  const index = String(params.index || "");
+  const data = String(params.data || "");
+  if (!/^[a-zA-Z0-9_-]+$/.test(uploadId)) {
+    throw new Error("bad upload");
+  }
+  if (!/^\d+$/.test(index)) {
+    throw new Error("bad index");
+  }
+  if (data.length > 12000) {
+    throw new Error("chunk too large");
+  }
+  const cache = cache_();
+  cache.put("rx:" + uploadId + ":" + index, data, 600);
+  if (params.parts) {
+    cache.put(
+      "rx:" + uploadId + ":meta",
+      JSON.stringify({
+        parts: Number(params.parts),
+        filename: params.filename || "prescription.pdf",
+        mimeType: params.mimeType || "application/pdf",
+      }),
+      600
+    );
+  }
+}
+
+function blobFromUpload_(uploadId) {
+  const cache = cache_();
+  const metaRaw = cache.get("rx:" + uploadId + ":meta");
+  if (!metaRaw) {
+    throw new Error("upload expired");
+  }
+  const meta = JSON.parse(metaRaw);
+  const pieces = [];
+  const keys = ["rx:" + uploadId + ":meta"];
+  for (var i = 0; i < meta.parts; i++) {
+    const piece = cache.get("rx:" + uploadId + ":" + i);
+    if (piece == null) {
+      throw new Error("missing chunk " + i);
+    }
+    pieces.push(piece);
+    keys.push("rx:" + uploadId + ":" + i);
+  }
+  cache.removeAll(keys);
+  return Utilities.newBlob(Utilities.base64Decode(pieces.join("")), meta.mimeType, meta.filename);
+}
+
 function attachmentBlobs_(params) {
   const blobs = [];
+  if (params.uploadIds) {
+    String(params.uploadIds)
+      .split(",")
+      .forEach(function (id) {
+        const uploadId = String(id || "").trim();
+        if (uploadId) blobs.push(blobFromUpload_(uploadId));
+      });
+  }
   if (params.pdfBase64) {
     blobs.push(
       Utilities.newBlob(
@@ -70,17 +135,6 @@ function attachmentBlobs_(params) {
       );
     });
   }
-  if (Array.isArray(params.attachments)) {
-    params.attachments.forEach(function (item) {
-      blobs.push(
-        Utilities.newBlob(
-          Utilities.base64Decode(String(item.contentBase64 || "")),
-          item.mimeType || "application/octet-stream",
-          item.filename || "attachment.bin"
-        )
-      );
-    });
-  }
   return blobs;
 }
 
@@ -90,6 +144,11 @@ function doPost(e) {
     const expected = relaySecret_();
     if (!expected || String(params.secret || "") !== expected) {
       return ContentService.createTextOutput("forbidden");
+    }
+
+    if (String(params.action || "") === "chunk") {
+      storeChunk_(params);
+      return ContentService.createTextOutput("ok");
     }
 
     const blobs = attachmentBlobs_(params);

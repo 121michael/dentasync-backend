@@ -1,5 +1,6 @@
 "use strict";
 
+const crypto = require("crypto");
 const nodemailer = require("nodemailer");
 
 function getMailConfig(env = process.env) {
@@ -104,6 +105,7 @@ function describeSmtpFailure(error) {
 }
 
 const MAX_RELAY_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+const RELAY_CHUNK_CHARS = 8000;
 
 function encodeRelayAttachments(attachments = []) {
   return (attachments || []).map((attachment) => {
@@ -135,35 +137,78 @@ function relayAccepted(body, attachmentCount = 0) {
   return true;
 }
 
+function describeRelayFailure(status, body) {
+  const text = String(body || "").replace(/\s+/g, " ").trim();
+  if (Number(status) === 403 || /<!DOCTYPE html/i.test(text) || /ppConfig/i.test(text)) {
+    return (
+      "Google blocked the Gmail relay (HTTP 403). Paste the latest backend/gmail-https-relay.gs into the existing Apps Script project, then Deploy → Manage deployments → Edit the current Web App → New version. Execute as: Me. Who has access: Anyone. Keep the same /exec URL on Render."
+    );
+  }
+  return `Gmail HTTPS relay failed (${status}): ${text.slice(0, 220)}`;
+}
+
+async function postRelayForm(config, fields, fetchImpl) {
+  const response = await fetchImpl(config.appsScriptUrl, {
+    method: "POST",
+    redirect: "follow",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(fields).toString(),
+  });
+  const body = String(await response.text());
+  return { response, body };
+}
+
+async function uploadRelayAttachment(config, file, fetchImpl) {
+  const uploadId = crypto.randomUUID();
+  const parts = Math.max(1, Math.ceil(file.contentBase64.length / RELAY_CHUNK_CHARS));
+  for (let index = 0; index < parts; index += 1) {
+    const fields = {
+      secret: config.appsScriptSecret,
+      action: "chunk",
+      uploadId,
+      index: String(index),
+      data: file.contentBase64.slice(index * RELAY_CHUNK_CHARS, (index + 1) * RELAY_CHUNK_CHARS),
+    };
+    if (index === 0) {
+      fields.parts = String(parts);
+      fields.filename = file.filename;
+      fields.mimeType = file.mimeType;
+    }
+    const { response, body } = await postRelayForm(config, fields, fetchImpl);
+    if (!response.ok || !relayAccepted(body, 0)) {
+      throw new Error(describeRelayFailure(response.status, body));
+    }
+  }
+  return uploadId;
+}
+
 async function sendViaGmailHttpsRelay(config, { to, subject, html, attachments }, fetchImpl = fetch) {
   const encodedAttachments = encodeRelayAttachments(attachments);
+  const uploadIds = [];
+  for (const file of encodedAttachments) {
+    uploadIds.push(await uploadRelayAttachment(config, file, fetchImpl));
+  }
+
   const params = {
     secret: config.appsScriptSecret,
     to,
     subject,
     html,
   };
-  if (encodedAttachments.length) {
-    params.expectAttachments = String(encodedAttachments.length);
-    params.attachmentsJson = JSON.stringify(encodedAttachments);
+  if (uploadIds.length) {
+    params.action = "send";
+    params.expectAttachments = String(uploadIds.length);
+    params.uploadIds = uploadIds.join(",");
   }
 
-  const response = await fetchImpl(config.appsScriptUrl, {
-    method: "POST",
-    redirect: "follow",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams(params).toString(),
-  });
-  const body = String(await response.text());
-  if (response.ok && /\bok\b/i.test(body) && encodedAttachments.length && !relayAccepted(body, encodedAttachments.length)) {
+  const { response, body } = await postRelayForm(config, params, fetchImpl);
+  if (response.ok && /\bok\b/i.test(body) && uploadIds.length && !relayAccepted(body, uploadIds.length)) {
     throw new Error(
       "The Gmail HTTPS relay sent the message without confirming the PDF attachment. Deploy backend/gmail-https-relay.gs as a new version of the existing Web App (keep the same secret), then retry Send authorized PDF."
     );
   }
-  if (!response.ok || !relayAccepted(body, encodedAttachments.length)) {
-    throw new Error(
-      `Gmail HTTPS relay failed (${response.status}): ${body.replace(/\s+/g, " ").slice(0, 220)}`
-    );
+  if (!response.ok || !relayAccepted(body, uploadIds.length)) {
+    throw new Error(describeRelayFailure(response.status, body));
   }
   return { messageId: `gmail-https-relay:${Date.now()}` };
 }
@@ -268,6 +313,7 @@ module.exports = {
   emailDeliveryIsConfigured,
   probeGmailHttpsRelay,
   createMailTransporter,
+  describeRelayFailure,
   sendMailMessage,
   sendEmailOtp,
   sendPasswordResetEmail,
