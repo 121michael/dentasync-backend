@@ -10,9 +10,8 @@
  * Setup (one-time or when updating):
  * 1. https://script.google.com → the existing DentaSync relay project (or New project).
  * 2. Replace Code.gs with this file.
- * 3. Project Settings → Script properties → DENTASYNC_RELAY_SECRET
- *    = the same value as GMAIL_APPS_SCRIPT_SECRET on Render.
- *    If that property is empty, paste the secret into RELAY_SECRET below.
+ * 3. Project Settings → Script properties: keep SECRET (already used by OTP)
+ *    or set DENTASYNC_RELAY_SECRET to the same value as GMAIL_APPS_SCRIPT_SECRET.
  * 4. Deploy → Manage deployments → the existing Web App → pencil/Edit → New version.
  *    Do not click "New deployment" (that creates a new /exec URL).
  *    Type: Web app. Execute as: Me. Who has access: Anyone
@@ -23,8 +22,13 @@
 const RELAY_SECRET = "";
 
 function relaySecret_() {
-  const fromProperties = PropertiesService.getScriptProperties().getProperty("DENTASYNC_RELAY_SECRET");
-  return String(fromProperties || RELAY_SECRET || "").trim();
+  const props = PropertiesService.getScriptProperties();
+  return String(
+    props.getProperty("DENTASYNC_RELAY_SECRET") ||
+      props.getProperty("SECRET") ||
+      RELAY_SECRET ||
+      ""
+  ).trim();
 }
 
 function parseParams_(e) {
