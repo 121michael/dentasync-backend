@@ -103,25 +103,69 @@ function describeSmtpFailure(error) {
   return message;
 }
 
-async function sendViaGmailHttpsRelay(config, { to, subject, html }, fetchImpl = fetch) {
+const MAX_RELAY_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+
+function encodeRelayAttachments(attachments = []) {
+  return (attachments || []).map((attachment) => {
+    const raw = attachment.content;
+    const buffer = Buffer.isBuffer(raw)
+      ? raw
+      : raw instanceof Uint8Array
+        ? Buffer.from(raw)
+        : Buffer.from(raw || "");
+    if (buffer.length > MAX_RELAY_ATTACHMENT_BYTES) {
+      throw new Error("The prescription PDF is too large to send through the Gmail HTTPS relay.");
+    }
+    return {
+      filename: String(attachment.filename || "prescription.pdf"),
+      mimeType: String(attachment.contentType || "application/pdf"),
+      contentBase64: buffer.toString("base64"),
+    };
+  });
+}
+
+function relayAccepted(body, attachmentCount = 0) {
+  const text = String(body || "");
+  const ok = /\bok\b/i.test(text) || /"status"\s*:\s*"ok"/i.test(text);
+  if (!ok) return false;
+  if (attachmentCount > 0) {
+    const match = text.match(/"attachments"\s*:\s*(\d+)/);
+    return Boolean(match && Number(match[1]) >= attachmentCount);
+  }
+  return true;
+}
+
+async function sendViaGmailHttpsRelay(config, { to, subject, html, attachments }, fetchImpl = fetch) {
+  const encodedAttachments = encodeRelayAttachments(attachments);
+  const params = {
+    secret: config.appsScriptSecret,
+    to,
+    subject,
+    html,
+  };
+  if (encodedAttachments.length) {
+    params.expectAttachments = String(encodedAttachments.length);
+    params.attachmentsJson = JSON.stringify(encodedAttachments);
+  }
+
   const response = await fetchImpl(config.appsScriptUrl, {
     method: "POST",
     redirect: "follow",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      secret: config.appsScriptSecret,
-      to,
-      subject,
-      html,
-    }).toString(),
+    body: new URLSearchParams(params).toString(),
   });
   const body = String(await response.text());
-  const accepted = /\bok\b/i.test(body) || /"status"\s*:\s*"ok"/i.test(body);
-  if (!response.ok || !accepted) {
+  if (response.ok && /\bok\b/i.test(body) && encodedAttachments.length && !relayAccepted(body, encodedAttachments.length)) {
+    throw new Error(
+      "The Gmail HTTPS relay sent the message without confirming the PDF attachment. Deploy backend/gmail-https-relay.gs as a new version of the existing Web App (keep the same secret), then retry Send authorized PDF."
+    );
+  }
+  if (!response.ok || !relayAccepted(body, encodedAttachments.length)) {
     throw new Error(
       `Gmail HTTPS relay failed (${response.status}): ${body.replace(/\s+/g, " ").slice(0, 220)}`
     );
   }
+  return { messageId: `gmail-https-relay:${Date.now()}` };
 }
 
 async function sendMailMessage({ to, subject, html, attachments }, env = process.env, fetchImpl = fetch) {
@@ -131,12 +175,7 @@ async function sendMailMessage({ to, subject, html, attachments }, env = process
   }
 
   if (config.httpsRelayConfigured) {
-    if (attachments?.length) {
-      throw new Error(
-        "The Gmail HTTPS relay cannot attach PDF files. Configure SMTP with EMAIL_USER and EMAIL_PASSWORD to send prescription PDFs."
-      );
-    }
-    return sendViaGmailHttpsRelay(config, { to, subject, html }, fetchImpl);
+    return sendViaGmailHttpsRelay(config, { to, subject, html, attachments }, fetchImpl);
   }
 
   try {

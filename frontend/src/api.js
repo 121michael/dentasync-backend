@@ -45,20 +45,29 @@ async function request(path, { method = "GET", body, headers = {}, authenticated
 
   if (track) beginApiLoading();
   try {
-    const response = await fetch(`${API_BASE}${path}`, {
-      method,
-      headers: requestHeaders,
-      body: body instanceof FormData ? body : body ? JSON.stringify(body) : undefined,
-    });
+    try {
+      const response = await fetch(`${API_BASE}${path}`, {
+        method,
+        headers: requestHeaders,
+        body: body instanceof FormData ? body : body ? JSON.stringify(body) : undefined,
+      });
 
-    const contentType = response.headers.get("content-type") || "";
-    const data = contentType.includes("application/json") ? await response.json() : null;
+      const contentType = response.headers.get("content-type") || "";
+      const data = contentType.includes("application/json") ? await response.json() : null;
 
-    if (!response.ok) {
-      throw new ApiError(data?.message || "Something went wrong. Please try again.", response.status, data);
+      if (!response.ok) {
+        throw new ApiError(data?.message || "Something went wrong. Please try again.", response.status, data);
+      }
+
+      return data;
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      const message = String(error?.message || "");
+      if (error?.name === "TypeError" || /failed to fetch|networkerror|load failed|type error/i.test(message)) {
+        throw new ApiError("The request could not be completed. Check the connection and try again.", 0);
+      }
+      throw new ApiError(message || "Something went wrong. Please try again.", 0);
     }
-
-    return data;
   } finally {
     if (track) endApiLoading();
   }

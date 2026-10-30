@@ -438,7 +438,7 @@ if (require.main === module) {
     if (emailDeliveryIsConfigured()) {
       const mail = getMailConfig();
       if (mail.httpsRelayConfigured) {
-        console.log("Clinic email OTP: Gmail HTTPS relay ready (Render Free compatible).");
+        console.log("Clinic email: Gmail HTTPS relay ready for OTP and prescription PDFs (Render Free compatible).");
         probeGmailHttpsRelay()
           .then((probe) => {
             if (!probe) return;

@@ -1226,7 +1226,11 @@ async function sendAuthorizedEmail(db, {
         "The email provider did not confirm the result. The attempt was recorded as unknown so it will not be treated as delivered."
       );
     }
-    throw httpError(502, "The prescription email could not be sent.");
+    const detail = String(error.message || "").replace(/\s+/g, " ").trim().slice(0, 280);
+    throw httpError(
+      502,
+      detail || "The prescription email could not be sent."
+    );
   } finally {
     void inserted;
   }
