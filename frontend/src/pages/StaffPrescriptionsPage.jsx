@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import { Search } from "lucide-react";
 import { api } from "../api";
 import { EmptyState, SectionHeading } from "../components/UI";
-import { DentalDocumentPreview } from "../components/DentalDocumentPreview";
 import { useStaffUi } from "../components/StaffLayout";
 
 function statusLabel(status) {
@@ -16,7 +15,6 @@ export function StaffPrescriptionsPage() {
   const [detail, setDetail] = useState(null);
   const [returnReason, setReturnReason] = useState("");
   const [confirmation, setConfirmation] = useState(null);
-  const [preview, setPreview] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
 
@@ -38,20 +36,6 @@ export function StaffPrescriptionsPage() {
     const data = await api.getStaffPrescription(id);
     setDetail(data.prescription);
     setConfirmation(null);
-  }
-
-  async function processRx() {
-    setBusy("process");
-    try {
-      const data = await api.processStaffPrescription(detail.id);
-      setDetail(data.prescription);
-      pushToast(data.message);
-      await load();
-    } catch (actionError) {
-      pushToast(actionError.message, "error");
-    } finally {
-      setBusy("");
-    }
   }
 
   async function returnRx() {
@@ -100,18 +84,6 @@ export function StaffPrescriptionsPage() {
       pushToast(actionError.message, "error");
     } finally {
       setBusy("");
-    }
-  }
-
-  async function openPdf() {
-    try {
-      const blob = await api.viewStaffPrescriptionPdf(detail.id);
-      setPreview({
-        document: { name: `${detail.prescriptionNumber}.pdf`, mimeType: "application/pdf" },
-        objectUrl: URL.createObjectURL(blob),
-      });
-    } catch (pdfError) {
-      pushToast(pdfError.message, "error");
     }
   }
 
@@ -197,43 +169,18 @@ export function StaffPrescriptionsPage() {
                 ))}
               </div>
               <p className="muted-copy">Clinical content is read-only for staff.</p>
-              <div className="dentist-form__actions">
-                <button type="button" className="button button--secondary" onClick={processRx} disabled={Boolean(busy)}>
-                  Mark processing
-                </button>
-                {detail.workflowStatus === "authorized" ? (
-                  <>
-                    <button type="button" className="button button--secondary" onClick={openPdf}>
-                      Preview PDF
+              {detail.workflowStatus === "authorized" ? (
+                <div className="dentist-form__actions prescription-staff-actions">
+                  <button type="button" className="button button--primary" onClick={prepareSend} disabled={Boolean(busy)}>
+                    Prepare email
+                  </button>
+                  {["failed", "unknown"].includes(detail.emailStatus) ? (
+                    <button type="button" className="button button--secondary" onClick={prepareSend} disabled={Boolean(busy)}>
+                      Retry email
                     </button>
-                    <button
-                      type="button"
-                      className="button button--secondary"
-                      onClick={async () => {
-                        try {
-                          const blob = await api.viewStaffPrescriptionJpeg(detail.id);
-                          setPreview({
-                            document: { name: `${detail.prescriptionNumber}.jpg`, mimeType: "image/jpeg" },
-                            objectUrl: URL.createObjectURL(blob),
-                          });
-                        } catch (jpegError) {
-                          pushToast(jpegError.message, "error");
-                        }
-                      }}
-                    >
-                      Export JPEG
-                    </button>
-                    <button type="button" className="button button--primary" onClick={prepareSend}>
-                      Prepare email
-                    </button>
-                    {["failed", "unknown"].includes(detail.emailStatus) ? (
-                      <button type="button" className="button button--secondary" onClick={prepareSend}>
-                        Retry email
-                      </button>
-                    ) : null}
-                  </>
-                ) : null}
-              </div>
+                  ) : null}
+                </div>
+              ) : null}
               <label className="field">
                 <span>Return to dentist (clinical correction)</span>
                 <textarea
@@ -276,17 +223,6 @@ export function StaffPrescriptionsPage() {
           )}
         </section>
       </div>
-      {preview ? (
-        <DentalDocumentPreview
-          document={preview.document}
-          objectUrl={preview.objectUrl}
-          onClose={() => {
-            URL.revokeObjectURL(preview.objectUrl);
-            setPreview(null);
-          }}
-          onDownload={() => api.downloadStaffPrescriptionPdf(detail.id)}
-        />
-      ) : null}
     </div>
   );
 }
