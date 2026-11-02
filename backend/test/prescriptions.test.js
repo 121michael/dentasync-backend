@@ -209,9 +209,36 @@ test("extraction aftercare prints clinic pad wording only when flagged", async (
   fs.writeFileSync(path.join(evidenceDir, "a4-extraction-aftercare.jpg"), pages[0]);
 });
 
+async function applySqlFile(fileName) {
+  const sql = fs.readFileSync(path.join(__dirname, "..", "migrations", fileName), "utf8");
+  const statements = sql
+    .split(/;\s*(?:\r?\n|$)/)
+    .map((statement) => statement.trim())
+    .filter((statement) => statement && !statement.split("\n").every((line) => line.trim().startsWith("--")));
+  for (const statement of statements) {
+    await db.query(statement);
+  }
+}
+
 async function ensureSchema() {
-  const sql = fs.readFileSync(path.join(__dirname, "..", "migrations", "045_prescriptions.sql"), "utf8");
-  await db.query(sql);
+  await applySqlFile("000_create_users.sql");
+  await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_archived BOOLEAN NOT NULL DEFAULT FALSE`);
+  await db.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name TEXT`);
+  await applySqlFile("009_create_clinical_patient_records.sql");
+  await db.query(`ALTER TABLE clinic_patient_records ADD COLUMN IF NOT EXISTS patient_id TEXT`);
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS admin_portal_dentist_profiles (
+      user_id TEXT PRIMARY KEY,
+      specialization TEXT,
+      schedule_notes TEXT,
+      catalog_dentist_id TEXT,
+      license_number TEXT,
+      ptr_number TEXT,
+      professional_designation TEXT
+    )
+  `);
+  const { applyPrescriptionSchema } = require("../services/prescriptionSchema");
+  await applyPrescriptionSchema(db);
 }
 
 async function listen(app) {
@@ -290,6 +317,7 @@ test("dentist-staff workflow authorizes a version and blocks staff clinical edit
         next();
       },
       passwordResetService: { requestReset: async () => ({}) },
+      prescriptionUploadDirectory: uploadDirectory,
     })
   );
 
@@ -345,6 +373,24 @@ test("dentist-staff workflow authorizes a version and blocks staff clinical edit
     const prescriptionsMod = require("../services/prescriptions");
     const originalSend = prescriptionsMod.sendAuthorizedEmail;
     void originalSend;
+    await prescriptionsMod.generateOrRetrievePdf(db, {
+      actorId: liveStaffId,
+      actorRole: "staff",
+      prescriptionId: draft.id,
+      uploadDirectory,
+    });
+    await prescriptionsMod.retrieveStoredPdf(db, {
+      actorId: liveStaffId,
+      actorRole: "staff",
+      prescriptionId: draft.id,
+      uploadDirectory,
+      recordView: true,
+    });
+    await prescriptionsMod.confirmPdfReview(db, {
+      staff: { id: liveStaffId },
+      prescriptionId: draft.id,
+      uploadDirectory,
+    });
     const send = await prescriptionsMod.sendAuthorizedEmail(db, {
       staff: { id: liveStaffId },
       prescriptionId: draft.id,
@@ -575,5 +621,150 @@ test("patient portal shows owned prescriptions and hides drafts from other patie
     await dentist.close();
     await patient.close();
     await other.close();
+  }
+});
+
+test("staff generate, view, review, and email the stored PDF in order", async () => {
+  await ensureSchema();
+  const suffix = `${Date.now()}${Math.floor(Math.random() * 1000)}`.slice(-8);
+  const dentistRow = await db.query(
+    `SELECT id FROM users WHERE LOWER(role) = 'dentist' AND is_verified = TRUE LIMIT 1`
+  );
+  const staffRow = await db.query(
+    `SELECT id FROM users WHERE LOWER(role) = 'staff' AND is_verified = TRUE LIMIT 1`
+  );
+  assert.ok(dentistRow.rows[0]?.id && staffRow.rows[0]?.id);
+  const liveDentistId = String(dentistRow.rows[0].id);
+  const liveStaffId = String(staffRow.rows[0].id);
+  const record = await db.query(
+    `INSERT INTO clinic_patient_records (
+       record_code, first_name, last_name, email, phone, date_of_birth, gender, linked_user_id, created_by, created_by_role
+     ) VALUES ($1, 'Review', 'Patient', $2, '639173333333', '1991-01-11', 'Male', NULL, $3, 'dentist')
+     RETURNING id`,
+    [`CPR-RV-${suffix}`, `review${suffix}@example.test`, liveDentistId]
+  );
+  const uploadDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "rx-review-"));
+  const dentistApp = express();
+  dentistApp.use(express.json());
+  dentistApp.use(
+    "/api/dentist",
+    createDentistPortalRouter({
+      db,
+      authenticateToken(req, _res, next) {
+        req.user = { id: liveDentistId, role: "dentist" };
+        next();
+      },
+    })
+  );
+  const staffApp = express();
+  staffApp.use(express.json());
+  staffApp.use(
+    "/api/staff",
+    createStaffPortalRouter({
+      db,
+      authenticateToken(req, _res, next) {
+        req.user = { id: liveStaffId, role: "staff" };
+        next();
+      },
+      passwordResetService: { requestReset: async () => ({}) },
+      prescriptionUploadDirectory: uploadDirectory,
+    })
+  );
+  const dentist = await listen(dentistApp);
+  const staff = await listen(staffApp);
+  try {
+    const created = await fetch(`${dentist.url}/api/dentist/prescriptions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        clinicalRecordId: record.rows[0].id,
+        items: [
+          {
+            medicationName: "Ibuprofen 400 mg",
+            dosage: "1 tablet",
+            quantity: "10",
+            sig: "Take after meals every 8 hours as needed for pain",
+          },
+        ],
+      }),
+    });
+    const createdBody = await created.json();
+    assert.equal(created.status, 201, createdBody.message);
+    const id = createdBody.prescription.id;
+    assert.equal((await fetch(`${dentist.url}/api/dentist/prescriptions/${id}/submit`, { method: "POST" })).status, 200);
+
+    const generateUnauthorized = await fetch(`${staff.url}/api/staff/prescriptions/${id}/generate`, { method: "POST" });
+    assert.equal(generateUnauthorized.status, 409);
+
+    const viewUnauthorized = await fetch(`${staff.url}/api/staff/prescriptions/${id}/pdf?inline=1`);
+    assert.equal(viewUnauthorized.status, 409);
+
+    assert.equal((await fetch(`${dentist.url}/api/dentist/prescriptions/${id}/authorize`, { method: "POST" })).status, 200);
+
+    const viewBeforeGenerate = await fetch(`${staff.url}/api/staff/prescriptions/${id}/pdf?inline=1`);
+    assert.equal(viewBeforeGenerate.status, 409);
+
+    const prepareBeforePdf = await fetch(`${staff.url}/api/staff/prescriptions/${id}/prepare-send`, { method: "POST" });
+    assert.equal(prepareBeforePdf.status, 409);
+
+    const generated = await fetch(`${staff.url}/api/staff/prescriptions/${id}/generate`, { method: "POST" });
+    const generatedBody = await generated.json();
+    assert.equal(generated.status, 200, generatedBody.message);
+    assert.equal(generatedBody.prescription.hasGeneratedPdf, true);
+    assert.equal(generatedBody.prescription.pdfReviewValid, false);
+    assert.match(generatedBody.message, /generated and stored/i);
+
+    const reviewBeforeView = await fetch(`${staff.url}/api/staff/prescriptions/${id}/confirm-review`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirmPdfId: generatedBody.prescription.generatedPdf.id }),
+    });
+    assert.equal(reviewBeforeView.status, 409);
+
+    const viewed = await fetch(`${staff.url}/api/staff/prescriptions/${id}/pdf?inline=1`);
+    assert.equal(viewed.status, 200);
+    assert.equal(viewed.headers.get("content-type"), "application/pdf");
+    assert.match(String(viewed.headers.get("cache-control") || ""), /private/);
+    const pdfBytes = Buffer.from(await viewed.arrayBuffer());
+    assert.ok(pdfBytes.slice(0, 5).toString() === "%PDF-");
+
+    const reviewed = await fetch(`${staff.url}/api/staff/prescriptions/${id}/confirm-review`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirmPdfId: generatedBody.prescription.generatedPdf.id }),
+    });
+    const reviewedBody = await reviewed.json();
+    assert.equal(reviewed.status, 200, reviewedBody.message);
+    assert.equal(reviewedBody.prescription.pdfReviewValid, true);
+
+    const regenerated = await fetch(`${staff.url}/api/staff/prescriptions/${id}/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ regenerate: true }),
+    });
+    const regeneratedBody = await regenerated.json();
+    assert.equal(regenerated.status, 200, regeneratedBody.message);
+    assert.equal(regeneratedBody.prescription.pdfReviewValid, false);
+
+    const prepareStaleReview = await fetch(`${staff.url}/api/staff/prescriptions/${id}/prepare-send`, { method: "POST" });
+    assert.equal(prepareStaleReview.status, 409);
+
+    assert.equal((await fetch(`${staff.url}/api/staff/prescriptions/${id}/pdf?inline=1`)).status, 200);
+    const rereviewed = await fetch(`${staff.url}/api/staff/prescriptions/${id}/confirm-review`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirmPdfId: regeneratedBody.prescription.generatedPdf.id }),
+    });
+    assert.equal(rereviewed.status, 200);
+
+    const prepared = await fetch(`${staff.url}/api/staff/prescriptions/${id}/prepare-send`, { method: "POST" });
+    const preparedBody = await prepared.json();
+    assert.equal(prepared.status, 200, preparedBody.message);
+    assert.equal(preparedBody.confirmation.pdfId, regeneratedBody.prescription.generatedPdf.id);
+    assert.match(preparedBody.confirmation.medications[0].medicationName, /Ibuprofen/);
+  } finally {
+    await dentist.close();
+    await staff.close();
+    fs.rmSync(uploadDirectory, { recursive: true, force: true });
   }
 });

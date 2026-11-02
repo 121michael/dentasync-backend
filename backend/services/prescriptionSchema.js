@@ -3,7 +3,10 @@
 const fs = require("fs");
 const path = require("path");
 
-const SQL_PATH = path.join(__dirname, "..", "migrations", "045_prescriptions.sql");
+const SQL_PATHS = [
+  path.join(__dirname, "..", "migrations", "045_prescriptions.sql"),
+  path.join(__dirname, "..", "migrations", "047_prescription_pdf_review.sql"),
+];
 let applying = null;
 
 function splitStatements(sql) {
@@ -24,10 +27,12 @@ function splitStatements(sql) {
 async function applyPrescriptionSchema(database) {
   if (!applying) {
     applying = (async () => {
-      const sql = fs.readFileSync(SQL_PATH, "utf8");
-      const statements = splitStatements(sql);
-      for (const statement of statements) {
-        await database.query(statement);
+      for (const sqlPath of SQL_PATHS) {
+        const sql = fs.readFileSync(sqlPath, "utf8");
+        const statements = splitStatements(sql);
+        for (const statement of statements) {
+          await database.query(statement);
+        }
       }
     })().finally(() => {
       applying = null;

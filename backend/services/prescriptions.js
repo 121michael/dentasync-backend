@@ -196,7 +196,41 @@ function serialize(row, extras = {}) {
     emailAttempts: extras.emailAttempts || undefined,
     recipientEmailMasked: extras.recipientEmailMasked || maskEmail(snapshot.patient?.email),
     recipientEmail: extras.includeFullEmail ? snapshot.patient?.email || extras.patient?.email || null : undefined,
+    hasGeneratedPdf: Boolean(extras.hasGeneratedPdf),
+    pdfReviewValid: Boolean(extras.pdfReviewValid),
+    generatedPdf: extras.generatedPdf || null,
   };
+}
+
+function mapGeneratedPdf(row, versionId, contentHash) {
+  if (!row) {
+    return { hasGeneratedPdf: false, pdfReviewValid: false, generatedPdf: null };
+  }
+  const reviewValid = Boolean(
+    row.reviewed_at &&
+      row.reviewed_content_hash === contentHash &&
+      String(row.version_id) === String(versionId)
+  );
+  return {
+    hasGeneratedPdf: true,
+    pdfReviewValid: reviewValid,
+    generatedPdf: {
+      id: row.id,
+      contentHash: row.content_hash,
+      generatedAt: row.generated_at,
+      generatedByRole: row.generated_by_role || null,
+      reviewedAt: row.reviewed_at || null,
+      reviewedBy: row.reviewed_by || null,
+    },
+  };
+}
+
+async function loadPdfRow(db, versionId, contentHash) {
+  const result = await db.query(
+    `SELECT * FROM prescription_pdfs WHERE version_id = $1 AND content_hash = $2 LIMIT 1`,
+    [versionId, contentHash]
+  );
+  return result.rows[0] || null;
 }
 
 async function audit(client, { prescriptionId, version, actorId, actorRole, action, detail }) {
@@ -455,6 +489,11 @@ async function loadDetail(db, prescriptionId) {
     emailAttempts: attempts.rows.map(mapAttempt),
     recipientEmailMasked: maskEmail(row.snapshot?.patient?.email),
     includeFullEmail: false,
+    ...mapGeneratedPdf(
+      await loadPdfRow(db, row.version_row_id, row.content_hash),
+      row.version_row_id,
+      row.content_hash
+    ),
   });
 }
 
@@ -963,21 +1002,25 @@ function ensureUploadDir(directory = DEFAULT_UPLOAD_DIR) {
   return directory;
 }
 
-async function generateOrRetrievePdf(db, { actorId, actorRole, prescriptionId, uploadDirectory = DEFAULT_UPLOAD_DIR }) {
+async function generateOrRetrievePdf(db, {
+  actorId,
+  actorRole,
+  prescriptionId,
+  uploadDirectory = DEFAULT_UPLOAD_DIR,
+  forceRegenerate = false,
+}) {
   const row = await authorizedVersionRow(db, prescriptionId);
-  const existing = await db.query(
-    `SELECT * FROM prescription_pdfs WHERE version_id = $1 AND content_hash = $2 LIMIT 1`,
-    [row.id, row.content_hash]
-  );
+  const existing = await loadPdfRow(db, row.id, row.content_hash);
   const directory = ensureUploadDir(uploadDirectory);
-  if (existing.rows[0]) {
-    const stored = path.join(directory, existing.rows[0].stored_name);
+  if (existing && !forceRegenerate) {
+    const stored = path.join(directory, existing.stored_name);
     if (fs.existsSync(stored)) {
       return {
         filePath: stored,
-        meta: existing.rows[0],
+        meta: existing,
         prescription: row,
-        storedName: existing.rows[0].stored_name,
+        storedName: existing.stored_name,
+        created: false,
       };
     }
   }
@@ -997,14 +1040,24 @@ async function generateOrRetrievePdf(db, { actorId, actorRole, prescriptionId, u
     clinicalNotes: row.clinical_notes,
   });
   fs.writeFileSync(filePath, buffer);
-  const pdfId = crypto.randomUUID();
+  const pdfId = existing?.id || crypto.randomUUID();
   await db.query(
     `INSERT INTO prescription_pdfs (
-       id, prescription_id, version_id, content_hash, stored_name, byte_size, generated_by, generated_by_role
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-     ON CONFLICT (version_id, content_hash) DO UPDATE SET stored_name = EXCLUDED.stored_name, byte_size = EXCLUDED.byte_size`,
+       id, prescription_id, version_id, content_hash, stored_name, byte_size, generated_by, generated_by_role,
+       reviewed_at, reviewed_by, reviewed_content_hash
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, NULL, NULL)
+     ON CONFLICT (version_id, content_hash) DO UPDATE SET
+       stored_name = EXCLUDED.stored_name,
+       byte_size = EXCLUDED.byte_size,
+       generated_by = EXCLUDED.generated_by,
+       generated_by_role = EXCLUDED.generated_by_role,
+       generated_at = CURRENT_TIMESTAMP,
+       reviewed_at = NULL,
+       reviewed_by = NULL,
+       reviewed_content_hash = NULL`,
     [pdfId, prescriptionId, row.id, row.content_hash, storedName, buffer.length, actorId, actorRole]
   );
+  const meta = await loadPdfRow(db, row.id, row.content_hash);
   await audit(db, {
     prescriptionId,
     version: row.version,
@@ -1013,7 +1066,103 @@ async function generateOrRetrievePdf(db, { actorId, actorRole, prescriptionId, u
     action: "pdf_generated",
     detail: storedName,
   });
-  return { filePath, buffer, prescription: row, storedName };
+  return { filePath, buffer, meta, prescription: row, storedName, created: true };
+}
+
+async function retrieveStoredPdf(db, {
+  actorId,
+  actorRole,
+  prescriptionId,
+  uploadDirectory = DEFAULT_UPLOAD_DIR,
+  recordView = false,
+}) {
+  const row = await authorizedVersionRow(db, prescriptionId);
+  const meta = await loadPdfRow(db, row.id, row.content_hash);
+  if (!meta) {
+    throw httpError(409, "Generate the prescription PDF before viewing or emailing it.");
+  }
+  const directory = ensureUploadDir(uploadDirectory);
+  const filePath = path.join(directory, meta.stored_name);
+  if (!fs.existsSync(filePath)) {
+    throw httpError(409, "The generated PDF is missing from storage. Generate the prescription again.");
+  }
+  if (recordView) {
+    await audit(db, {
+      prescriptionId,
+      version: row.version,
+      actorId,
+      actorRole,
+      action: "pdf_viewed",
+      detail: String(meta.id),
+    });
+  }
+  return { filePath, meta, prescription: row, storedName: meta.stored_name };
+}
+
+async function generateStaffPdf(db, options) {
+  await generateOrRetrievePdf(db, options);
+  return loadDetail(db, options.prescriptionId);
+}
+
+async function confirmPdfReview(db, { staff, prescriptionId, confirmPdfId, uploadDirectory = DEFAULT_UPLOAD_DIR }) {
+  const stored = await retrieveStoredPdf(db, {
+    actorId: String(staff.id),
+    actorRole: "staff",
+    prescriptionId,
+    uploadDirectory,
+  });
+  if (confirmPdfId && String(confirmPdfId) !== String(stored.meta.id)) {
+    throw httpError(400, "Confirm the generated PDF version you reviewed.");
+  }
+  const viewed = await db.query(
+    `SELECT id FROM prescription_audit_events
+     WHERE prescription_id = $1
+       AND action = 'pdf_viewed'
+       AND detail = $2
+       AND created_at >= $3
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [prescriptionId, String(stored.meta.id), stored.meta.generated_at]
+  );
+  if (!viewed.rows[0]) {
+    throw httpError(409, "View the generated PDF before confirming this review.");
+  }
+  await db.query(
+    `UPDATE prescription_pdfs
+     SET reviewed_at = CURRENT_TIMESTAMP,
+         reviewed_by = $2,
+         reviewed_content_hash = $3
+     WHERE id = $1
+       AND version_id = $4
+       AND content_hash = $3`,
+    [stored.meta.id, String(staff.id), stored.prescription.content_hash, stored.prescription.id]
+  );
+  await audit(db, {
+    prescriptionId,
+    version: stored.prescription.version,
+    actorId: String(staff.id),
+    actorRole: "staff",
+    action: "pdf_reviewed",
+    detail: String(stored.meta.id),
+  });
+  return loadDetail(db, prescriptionId);
+}
+
+function assertCurrentPdfReviewed(meta, versionRow) {
+  if (!meta) {
+    throw httpError(409, "Generate and review the prescription PDF before preparing email.");
+  }
+  const valid = Boolean(
+    meta.reviewed_at &&
+      meta.reviewed_content_hash === versionRow.content_hash &&
+      String(meta.version_id) === String(versionRow.id)
+  );
+  if (!valid) {
+    throw httpError(
+      409,
+      "Review the current generated PDF before preparing email. A new PDF or authorized version requires another review."
+    );
+  }
 }
 
 async function generateOrRetrieveJpeg(db, options) {
@@ -1048,9 +1197,16 @@ function sendConfirmation(detail) {
   };
 }
 
-async function prepareSend(db, { staff, prescriptionId }) {
+async function prepareSend(db, { staff, prescriptionId, uploadDirectory = DEFAULT_UPLOAD_DIR }) {
   void staff;
   const row = await authorizedVersionRow(db, prescriptionId);
+  const stored = await retrieveStoredPdf(db, {
+    actorId: String(staff?.id || ""),
+    actorRole: "staff",
+    prescriptionId,
+    uploadDirectory,
+  });
+  assertCurrentPdfReviewed(stored.meta, row);
   const detail = await loadDetail(db, prescriptionId);
   if (!detail.patient?.email && !row.snapshot?.patient?.email) {
     throw httpError(409, "This patient record has no registered email address.");
@@ -1061,8 +1217,18 @@ async function prepareSend(db, { staff, prescriptionId }) {
       prescriptionNumber: detail.prescriptionNumber,
       authorizedVersion: detail.currentVersion,
       patientName: row.snapshot?.patient?.fullName,
+      patientId: row.snapshot?.patient?.patientId || detail.patient?.patientId || null,
+      dentistName: row.snapshot?.dentist?.fullName || detail.dentist?.fullName || null,
+      prescriptionDate: row.authorized_at,
+      medications: (detail.items || []).map((item) => ({
+        medicationName: item.medicationName,
+        quantity: item.quantity,
+        dosage: item.dosage || item.strength,
+        sig: item.sig,
+      })),
       recipientEmailMasked: maskEmail(row.snapshot?.patient?.email),
       contentHash: row.content_hash,
+      pdfId: stored.meta.id,
     },
     recipientEmail: row.snapshot?.patient?.email,
   };
@@ -1074,11 +1240,12 @@ async function sendAuthorizedEmail(db, {
   confirmPrescriptionId,
   confirmVersion,
   confirmRecipientMasked,
+  confirmPdfId,
   sendMail = sendMailMessage,
   env = process.env,
   uploadDirectory = DEFAULT_UPLOAD_DIR,
 }) {
-  const prepared = await prepareSend(db, { staff, prescriptionId });
+  const prepared = await prepareSend(db, { staff, prescriptionId, uploadDirectory });
   if (String(confirmPrescriptionId) !== String(prescriptionId)) {
     throw httpError(400, "Confirm the prescription identifier before sending.");
   }
@@ -1088,6 +1255,9 @@ async function sendAuthorizedEmail(db, {
   if (stringValue(confirmRecipientMasked) !== prepared.confirmation.recipientEmailMasked) {
     throw httpError(400, "Confirm the registered recipient email before sending.");
   }
+  if (confirmPdfId && String(confirmPdfId) !== String(prepared.confirmation.pdfId)) {
+    throw httpError(400, "Confirm the reviewed PDF before sending.");
+  }
   const intended = normalizeEmail(prepared.recipientEmail);
   if (!intended) throw httpError(409, "This patient record has no registered email address.");
   const override = stringValue(env.PRESCRIPTION_EMAIL_OVERRIDE, 160);
@@ -1095,7 +1265,7 @@ async function sendAuthorizedEmail(db, {
   const actual = !production && override ? normalizeEmail(override) : intended;
   if (!actual) throw httpError(400, "PRESCRIPTION_EMAIL_OVERRIDE is not a valid email address.");
 
-  const { filePath, prescription } = await generateOrRetrievePdf(db, {
+  const { filePath, prescription } = await retrieveStoredPdf(db, {
     actorId: String(staff.id),
     actorRole: "staff",
     prescriptionId,
@@ -1295,6 +1465,9 @@ module.exports = {
   prepareSend: withSchema(prepareSend),
   generateOrRetrievePdf: withSchema(generateOrRetrievePdf),
   generateOrRetrieveJpeg: withSchema(generateOrRetrieveJpeg),
+  retrieveStoredPdf: withSchema(retrieveStoredPdf),
+  generateStaffPdf: withSchema(generateStaffPdf),
+  confirmPdfReview: withSchema(confirmPdfReview),
   sendAuthorizedEmail: withSchema(sendAuthorizedEmail),
   retrySend: withSchema(retrySend),
   sendConfirmation,

@@ -611,6 +611,10 @@ export const api = {
   processStaffPrescription: (id) => request(`/staff/prescriptions/${id}/process`, { method: "POST" }),
   returnStaffPrescription: (id, reason) =>
     request(`/staff/prescriptions/${id}/return`, { method: "POST", body: { reason } }),
+  generateStaffPrescriptionPdf: (id, body = {}) =>
+    request(`/staff/prescriptions/${id}/generate`, { method: "POST", body }),
+  confirmStaffPrescriptionReview: (id, body = {}) =>
+    request(`/staff/prescriptions/${id}/confirm-review`, { method: "POST", body }),
   prepareStaffPrescriptionSend: (id) =>
     request(`/staff/prescriptions/${id}/prepare-send`, { method: "POST" }),
   sendStaffPrescription: (id, body) =>

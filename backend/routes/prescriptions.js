@@ -57,14 +57,18 @@ function attachPrescriptionRoutes(router, { db, role, uploadDirectory }) {
   router.get("/prescriptions/:id/pdf", async (req, res) => {
     try {
       const actor = role === "dentist" ? req.dentist : req.staff;
-      const { filePath, storedName, prescription } = await prescriptions.generateOrRetrievePdf(db, {
+      const loader =
+        role === "staff" ? prescriptions.retrieveStoredPdf : prescriptions.generateOrRetrievePdf;
+      const { filePath, storedName, prescription } = await loader(db, {
         actorId: String(actor.id),
         actorRole: role,
         prescriptionId: req.params.id,
         uploadDirectory: directory,
+        recordView: role === "staff",
       });
       const inline = String(req.query.inline || "") === "1";
       res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Cache-Control", "private, no-store");
       res.setHeader(
         "Content-Disposition",
         `${inline ? "inline" : "attachment"}; filename="${storedName || `prescription-v${prescription.version}.pdf`}"`
@@ -178,6 +182,44 @@ function attachPrescriptionRoutes(router, { db, role, uploadDirectory }) {
       }
     });
 
+    router.post("/prescriptions/:id/generate", async (req, res) => {
+      try {
+        const generated = await prescriptions.generateOrRetrievePdf(db, {
+          actorId: String(req.staff.id),
+          actorRole: "staff",
+          prescriptionId: req.params.id,
+          uploadDirectory: directory,
+          forceRegenerate: Boolean(req.body?.regenerate),
+        });
+        const prescription = await prescriptions.loadDetail(db, req.params.id);
+        return res.json({
+          prescription,
+          message: generated.created
+            ? "Prescription PDF generated and stored."
+            : "This authorized version already has a stored PDF.",
+        });
+      } catch (error) {
+        return sendError(res, error);
+      }
+    });
+
+    router.post("/prescriptions/:id/confirm-review", async (req, res) => {
+      try {
+        const prescription = await prescriptions.confirmPdfReview(db, {
+          staff: req.staff,
+          prescriptionId: req.params.id,
+          confirmPdfId: req.body?.confirmPdfId,
+          uploadDirectory: directory,
+        });
+        return res.json({
+          prescription,
+          message: "PDF review recorded for this generated version. Prepare email is now available.",
+        });
+      } catch (error) {
+        return sendError(res, error);
+      }
+    });
+
     router.post("/prescriptions/:id/return", async (req, res) => {
       try {
         const prescription = await prescriptions.returnToDentist(db, {
@@ -196,6 +238,7 @@ function attachPrescriptionRoutes(router, { db, role, uploadDirectory }) {
         const prepared = await prescriptions.prepareSend(db, {
           staff: req.staff,
           prescriptionId: req.params.id,
+          uploadDirectory: directory,
         });
         return res.json({
           confirmation: prepared.confirmation,
@@ -214,6 +257,7 @@ function attachPrescriptionRoutes(router, { db, role, uploadDirectory }) {
           confirmPrescriptionId: req.body?.confirmPrescriptionId,
           confirmVersion: req.body?.confirmVersion,
           confirmRecipientMasked: req.body?.confirmRecipientMasked,
+          confirmPdfId: req.body?.confirmPdfId,
           uploadDirectory: directory,
         });
         return res.json({
@@ -233,6 +277,7 @@ function attachPrescriptionRoutes(router, { db, role, uploadDirectory }) {
           confirmPrescriptionId: req.body?.confirmPrescriptionId,
           confirmVersion: req.body?.confirmVersion,
           confirmRecipientMasked: req.body?.confirmRecipientMasked,
+          confirmPdfId: req.body?.confirmPdfId,
           uploadDirectory: directory,
         });
         return res.json({ prescription, message: "Retry submitted for the authorized version." });

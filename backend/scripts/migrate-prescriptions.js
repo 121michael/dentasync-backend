@@ -6,6 +6,7 @@ const { applyPrescriptionSchema } = require("../services/prescriptionSchema");
 async function migrate() {
   await applyPrescriptionSchema(db);
   console.log("Applied migrations/045_prescriptions.sql");
+  console.log("Applied migrations/047_prescription_pdf_review.sql");
 }
 
 if (require.main === module) {

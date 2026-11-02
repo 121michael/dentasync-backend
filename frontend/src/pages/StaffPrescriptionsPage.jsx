@@ -1,11 +1,23 @@
 import { useCallback, useEffect, useState } from "react";
 import { Search } from "lucide-react";
 import { api } from "../api";
+import { DentalDocumentPreview } from "../components/DentalDocumentPreview";
 import { EmptyState, SectionHeading } from "../components/UI";
 import { useStaffUi } from "../components/StaffLayout";
 
 function statusLabel(status) {
   return String(status || "").replace(/_/g, " ");
+}
+
+function formatDate(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleDateString("en-PH", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
 }
 
 export function StaffPrescriptionsPage() {
@@ -15,6 +27,9 @@ export function StaffPrescriptionsPage() {
   const [detail, setDetail] = useState(null);
   const [returnReason, setReturnReason] = useState("");
   const [confirmation, setConfirmation] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [viewedPdfId, setViewedPdfId] = useState("");
+  const [reviewChecked, setReviewChecked] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
 
@@ -32,10 +47,18 @@ export function StaffPrescriptionsPage() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    return () => {
+      if (preview?.objectUrl) URL.revokeObjectURL(preview.objectUrl);
+    };
+  }, [preview]);
+
   async function openDetail(id) {
     const data = await api.getStaffPrescription(id);
     setDetail(data.prescription);
     setConfirmation(null);
+    setReviewChecked(false);
+    setViewedPdfId("");
   }
 
   async function returnRx() {
@@ -44,8 +67,70 @@ export function StaffPrescriptionsPage() {
       const data = await api.returnStaffPrescription(detail.id, returnReason);
       setDetail(data.prescription);
       setReturnReason("");
+      setConfirmation(null);
+      setReviewChecked(false);
       pushToast(data.message);
       await load();
+    } catch (actionError) {
+      pushToast(actionError.message, "error");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function generatePdf(regenerate = false) {
+    setBusy("generate");
+    try {
+      const data = await api.generateStaffPrescriptionPdf(detail.id, { regenerate });
+      setDetail(data.prescription);
+      setConfirmation(null);
+      setReviewChecked(false);
+      if (regenerate || data.prescription.generatedPdf?.id !== viewedPdfId) {
+        setViewedPdfId("");
+      }
+      pushToast(data.message);
+      await load();
+    } catch (actionError) {
+      pushToast(actionError.message, "error");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function openPdf() {
+    setBusy("view");
+    try {
+      const file = await api.viewStaffPrescriptionPdf(detail.id);
+      const blob = file.blob || file;
+      const objectUrl = URL.createObjectURL(blob);
+      if (preview?.objectUrl) URL.revokeObjectURL(preview.objectUrl);
+      setPreview({
+        document: {
+          name: file.filename || `${detail.prescriptionNumber}.pdf`,
+          filename: file.filename || `${detail.prescriptionNumber}.pdf`,
+          mimeType: file.mimeType || "application/pdf",
+        },
+        objectUrl,
+      });
+      setViewedPdfId(detail.generatedPdf?.id || "viewed");
+      const refreshed = await api.getStaffPrescription(detail.id);
+      setDetail(refreshed.prescription);
+    } catch (actionError) {
+      pushToast(actionError.message, "error");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function confirmReview() {
+    setBusy("review");
+    try {
+      const data = await api.confirmStaffPrescriptionReview(detail.id, {
+        confirmPdfId: detail.generatedPdf?.id,
+      });
+      setDetail(data.prescription);
+      setReviewChecked(true);
+      pushToast(data.message);
     } catch (actionError) {
       pushToast(actionError.message, "error");
     } finally {
@@ -72,6 +157,7 @@ export function StaffPrescriptionsPage() {
         confirmPrescriptionId: confirmation.prescriptionId,
         confirmVersion: confirmation.authorizedVersion,
         confirmRecipientMasked: confirmation.recipientEmailMasked,
+        confirmPdfId: confirmation.pdfId,
       };
       const data = retry
         ? await api.retryStaffPrescriptionSend(detail.id, body)
@@ -87,12 +173,23 @@ export function StaffPrescriptionsPage() {
     }
   }
 
+  const authorized = detail?.workflowStatus === "authorized";
+  const hasPdf = Boolean(detail?.hasGeneratedPdf);
+  const reviewValid = Boolean(detail?.pdfReviewValid);
+  const emailSent = detail?.emailStatus === "sent";
+  const canView = authorized && hasPdf;
+  const canGenerate = authorized;
+  const canPrepare = authorized && hasPdf && reviewValid && !emailSent;
+  const viewedCurrentPdf = Boolean(
+    detail?.generatedPdf?.id && viewedPdfId === detail.generatedPdf.id
+  );
+
   return (
     <div className="staff-page prescription-page">
       <SectionHeading
         eyebrow="Clinical documents"
         title="Prescription Processing"
-        detail="Process dentist-authorized prescriptions and email the exact authorized PDF."
+        detail="Generate the authorized PDF, inspect it, confirm your review, then email that same file."
       />
       {error ? <p className="inline-alert inline-alert--error">{error}</p> : null}
       <div className="prescription-layout">
@@ -154,6 +251,8 @@ export function StaffPrescriptionsPage() {
                 {detail.currentVersion}
                 {detail.authorizedVersion ? ` · authorized v${detail.authorizedVersion}` : " · not authorized"}
                 {` · email ${detail.emailStatus}`}
+                {hasPdf ? " · PDF stored" : " · PDF not generated"}
+                {reviewValid ? " · reviewed" : ""}
               </p>
               <div className="prescription-item-readonly">
                 {(detail.items || []).map((item, index) => (
@@ -171,18 +270,69 @@ export function StaffPrescriptionsPage() {
                 ))}
               </div>
               <p className="muted-copy">Clinical content is read-only for staff.</p>
-              {detail.workflowStatus === "authorized" ? (
-                <div className="dentist-form__actions prescription-staff-actions">
-                  <button type="button" className="button button--primary" onClick={prepareSend} disabled={Boolean(busy)}>
-                    Prepare email
+              <div className="prescription-staff-workflow">
+                <div className="prescription-staff-actions">
+                  <button
+                    type="button"
+                    className={`button ${hasPdf ? "button--secondary" : "button--primary"}`}
+                    onClick={() => generatePdf(hasPdf)}
+                    disabled={!canGenerate || Boolean(busy)}
+                  >
+                    {busy === "generate"
+                      ? "Generating…"
+                      : hasPdf
+                        ? "Regenerate Prescription"
+                        : "Generate Prescription"}
+                  </button>
+                  <button
+                    type="button"
+                    className="button button--secondary"
+                    onClick={openPdf}
+                    disabled={!canView || Boolean(busy)}
+                  >
+                    {busy === "view" ? "Opening…" : "View Prescription"}
+                  </button>
+                </div>
+                <label className={`field field--check ${!canView ? "is-disabled" : ""}`}>
+                  <input
+                    type="checkbox"
+                    checked={reviewValid || reviewChecked}
+                    disabled={!canView || reviewValid || !viewedCurrentPdf || Boolean(busy)}
+                    onChange={(event) => {
+                      if (event.target.checked) confirmReview();
+                      else setReviewChecked(false);
+                    }}
+                  />
+                  <span>
+                    I verified the generated PDF: patient name and ID, registered email, prescribing dentist,
+                    medications, quantities, dosages, Sig, prescription date, and authorized version.
+                    {!viewedCurrentPdf && canView ? " Open View Prescription first." : null}
+                  </span>
+                </label>
+                <div className="prescription-staff-actions">
+                  <button
+                    type="button"
+                    className="button button--primary"
+                    onClick={prepareSend}
+                    disabled={!canPrepare || Boolean(busy)}
+                  >
+                    {emailSent ? "Email sent" : "Prepare email"}
                   </button>
                   {["failed", "unknown"].includes(detail.emailStatus) ? (
-                    <button type="button" className="button button--secondary" onClick={prepareSend} disabled={Boolean(busy)}>
+                    <button
+                      type="button"
+                      className="button button--secondary"
+                      onClick={prepareSend}
+                      disabled={!canPrepare || Boolean(busy)}
+                    >
                       Retry email
                     </button>
                   ) : null}
                 </div>
-              ) : null}
+                {emailSent ? (
+                  <p className="muted-copy">This authorized version was already emailed. You can still view the stored PDF.</p>
+                ) : null}
+              </div>
               <label className="field">
                 <span>Return to dentist (clinical correction)</span>
                 <textarea
@@ -197,13 +347,21 @@ export function StaffPrescriptionsPage() {
               </button>
               {confirmation ? (
                 <div className="prescription-confirm">
-                  <h3>Confirm recipient</h3>
+                  <h3>Confirm recipient and reviewed PDF</h3>
                   <p>
                     <strong>{confirmation.patientName}</strong>
+                    {confirmation.patientId ? ` · Patient ID ${confirmation.patientId}` : ""}
                   </p>
                   <p>Prescription {confirmation.prescriptionNumber}</p>
+                  <p>Dentist {confirmation.dentistName || "—"}</p>
                   <p>Authorized version {confirmation.authorizedVersion}</p>
+                  <p>Prescription date {formatDate(confirmation.prescriptionDate)}</p>
                   <p>Registered email {confirmation.recipientEmailMasked}</p>
+                  {(confirmation.medications || []).map((item, index) => (
+                    <p key={`${item.medicationName}-${index}`}>
+                      {item.medicationName} · {item.quantity} · {item.dosage} · Sig: {item.sig}
+                    </p>
+                  ))}
                   <div className="dentist-form__actions">
                     <button type="button" className="button button--secondary" onClick={() => setConfirmation(null)}>
                       Back
@@ -214,7 +372,7 @@ export function StaffPrescriptionsPage() {
                       onClick={() => confirmSend(detail.emailStatus === "failed" || detail.emailStatus === "unknown")}
                       disabled={busy === "send"}
                     >
-                      {busy === "send" ? "Sending…" : "Send authorized PDF"}
+                      {busy === "send" ? "Sending…" : "Send reviewed PDF"}
                     </button>
                   </div>
                 </div>
@@ -225,6 +383,21 @@ export function StaffPrescriptionsPage() {
           )}
         </section>
       </div>
+      {preview ? (
+        <DentalDocumentPreview
+          document={preview.document}
+          objectUrl={preview.objectUrl}
+          onClose={() => {
+            if (preview.objectUrl) URL.revokeObjectURL(preview.objectUrl);
+            setPreview(null);
+          }}
+          onDownload={() =>
+            api.downloadStaffPrescriptionPdf(detail.id, preview.document.filename).catch((downloadError) => {
+              pushToast(downloadError.message, "error");
+            })
+          }
+        />
+      ) : null}
     </div>
   );
 }

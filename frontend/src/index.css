@@ -14285,8 +14285,26 @@ body.is-queue-display .fab-menu {
   margin: 0.7rem 0;
 }
 
+.prescription-staff-workflow {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0.35rem 0 1rem;
+}
+
 .prescription-staff-actions {
-  margin: 0.15rem 0 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin: 0;
+}
+
+.prescription-staff-actions .button {
+  min-height: 2.6rem;
+  flex: 1 1 11.5rem;
+}
+
+.prescription-staff-workflow .field--check.is-disabled {
+  opacity: 0.65;
 }
 
 .prescription-page .prescription-staff-actions + .field {
@@ -14404,6 +14422,10 @@ body.is-queue-display .fab-menu {
 
   .prescription-list__top {
     flex-wrap: wrap;
+  }
+
+  .prescription-staff-actions .button {
+    flex: 1 1 100%;
   }
 
   .prescription-composer .dentist-form__actions .button {

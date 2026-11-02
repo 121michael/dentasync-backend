@@ -290,12 +290,17 @@ function createStaffPortalRouter({
   notifyStaff = async () => {},
   notifyDentist = async () => {},
   clinicSms = null,
+  prescriptionUploadDirectory,
 }) {
   const router = express.Router();
 
   router.use(authenticateToken, requireStaffAccount(db));
   attachDentalAuthorizationRoutes(router, { db, role: "staff" });
-  attachPrescriptionRoutes(router, { db, role: "staff" });
+  attachPrescriptionRoutes(router, {
+    db,
+    role: "staff",
+    uploadDirectory: prescriptionUploadDirectory,
+  });
 
   router.get("/dashboard", async (req, res) => {
     try {
