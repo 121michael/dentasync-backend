@@ -114,10 +114,13 @@ test("PDF lists multiple medications from the supplied snapshot only", async () 
   assert.match(text, /Patient's Name/);
   assert.match(text, /Sarah Cruz/i);
   assert.match(text, /DMD/);
-  assert.match(text, /Lic\. No\. 52384/);
   assert.match(text, /PTR No\. 998877/);
+  assert.match(text, /Issued /);
+  assert.match(text, /This document is valid without signature, and valid 24hrs after the issuance/);
   assert.match(text, /Rx/);
   assert.match(text, /0965\.804\.5988/);
+  assert.doesNotMatch(text, /\bSignature\b/);
+  assert.doesNotMatch(text, /Lic\. No\./);
   assert.doesNotMatch(text, /EVIE SUNGA/i);
   assert.doesNotMatch(text, /DO'S AND DONT'S AFTER A TOOTH EXTRACTION/);
   const outDir = path.join(__dirname, "..", "..", "screenshots", "prescription-management");
