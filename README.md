@@ -23,9 +23,15 @@ outbound SMTP, so production should set `GMAIL_APPS_SCRIPT_URL` and
 npm start
 ```
 
+On Render, set `NODE_ENV=production` (or leave `RENDER=true`) so rate limits
+use `trust proxy` = 1 and read the real client IP from the proxy’s
+`X-Forwarded-For` hop. Do not set `trust proxy` to `true`.
+
 `GET /api/auth/otp-mail-status` reports whether SMTP or the HTTPS relay is
-configured. Add `?sendTest=1` to send a test message to `EMAIL_USER` through
-the Apps Script relay.
+configured. `?sendTest=1` can send a test message to `EMAIL_USER` in local
+development. In production that send is disabled unless
+`OTP_MAIL_STATUS_SECRET` is set and the request includes the matching
+`x-otp-mail-status-secret` header.
 
 ## Patient OTP API contract
 

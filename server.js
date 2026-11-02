@@ -13,8 +13,10 @@ const {
   probeGmailHttpsRelay,
   sendEmailOtp,
 } = require("./services/emailDelivery");
+const { applyTrustedProxy } = require("./lib/httpSecurity");
 
 const app = express();
+applyTrustedProxy(app);
 const JWT_SECRET = process.env.JWT_SECRET || "your_super_secret_key_here";
 const OTP_SECRET =
   process.env.OTP_SECRET ||

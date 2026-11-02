@@ -19,7 +19,7 @@ async function startServer(app) {
   };
 }
 
-function mountAuth(otpService) {
+function mountAuth(otpService, env) {
   const app = express();
   app.use(express.json());
   app.use(
@@ -29,6 +29,7 @@ function mountAuth(otpService) {
       otpService,
       authenticateToken: (_req, _res, next) => next(),
       jwtSecret: "test-jwt-secret",
+      env,
     })
   );
   return app;
@@ -171,3 +172,44 @@ test("wrong OTP codes report remaining attempts and then lock out", async (t) =>
   assert.equal(lockedBody.attemptsRemaining, 0);
   assert.equal(lockedBody.retryAfterSeconds, 300);
 });
+
+test("patient registration shares the OTP send rate limit", async (t) => {
+  const app = mountAuth({
+    async issueOtp() {
+      return { requestId: REQUEST_ID, expiresAt: new Date().toISOString() };
+    },
+  });
+  const server = await startServer(app);
+  t.after(server.close);
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const response = await fetch(`${server.baseUrl}/api/auth/register`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    assert.equal(response.status, 400);
+  }
+
+  const limited = await fetch(`${server.baseUrl}/api/auth/register`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  const body = await limited.json();
+  assert.equal(limited.status, 429);
+  assert.match(body.message, /verification code requests/i);
+});
+
+test("production otp-mail-status does not send a test email without the secret header", async (t) => {
+  const app = mountAuth({}, { NODE_ENV: "production" });
+  const server = await startServer(app);
+  t.after(server.close);
+
+  const response = await fetch(`${server.baseUrl}/api/auth/otp-mail-status?sendTest=1`);
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.testSend?.ok, false);
+  assert.match(body.testSend?.error || "", /disabled in production/i);
+});
+

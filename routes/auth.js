@@ -12,6 +12,7 @@ const {
   probeGmailHttpsRelay,
   sendEmailOtp,
 } = require("../services/emailDelivery");
+const { isOtpMailTestAllowed } = require("../lib/httpSecurity");
 
 function formatUserPayload(user) {
   const firstName = user.first_name || (user.full_name ? user.full_name.split(" ")[0] : "");
@@ -59,7 +60,13 @@ function normalizePhone(value) {
   return digits;
 }
 
-function createAuthRouter({ db, otpService, authenticateToken, jwtSecret }) {
+function createAuthRouter({
+  db,
+  otpService,
+  authenticateToken,
+  jwtSecret,
+  env = process.env,
+}) {
   const router = express.Router();
   const otpSendRateLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -96,20 +103,29 @@ function createAuthRouter({ db, otpService, authenticateToken, jwtSecret }) {
             }
           : null,
       };
-      if (String(req.query.sendTest || "") === "1" && mail.httpsRelayConfigured && mail.user) {
-        try {
-          await sendEmailOtp({
-            to: mail.user,
-            otp: "000000",
-            expiresAt: new Date(Date.now() + 5 * 60 * 1000),
-          });
+      if (String(req.query.sendTest || "") === "1") {
+        if (!isOtpMailTestAllowed(req, env)) {
           payload.testSend = {
-            ok: true,
-            to: mail.user,
-            message: "A test OTP email was sent to EMAIL_USER. Check that Gmail inbox and Spam.",
+            ok: false,
+            error:
+              "Test OTP email is disabled in production without OTP_MAIL_STATUS_SECRET.",
           };
-        } catch (error) {
-          payload.testSend = { ok: false, error: error.message };
+        } else if (mail.httpsRelayConfigured && mail.user) {
+          try {
+            await sendEmailOtp({
+              to: mail.user,
+              otp: "000000",
+              expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+            });
+            payload.testSend = {
+              ok: true,
+              to: mail.user,
+              message:
+                "A test OTP email was sent to EMAIL_USER. Check that Gmail inbox and Spam.",
+            };
+          } catch (error) {
+            payload.testSend = { ok: false, error: error.message };
+          }
         }
       }
       return res.json(payload);
@@ -121,7 +137,7 @@ function createAuthRouter({ db, otpService, authenticateToken, jwtSecret }) {
     }
   });
 
-  router.post("/register", async (req, res) => {
+  router.post("/register", otpSendRateLimiter, async (req, res) => {
     const { firstName, lastName, fullName, email, phone, password, role } = req.body;
     const normalizedEmail = normalizeEmail(email);
     const normalizedPhone = normalizePhone(phone);
