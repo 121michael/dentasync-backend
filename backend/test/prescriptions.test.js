@@ -107,7 +107,8 @@ test("PDF lists multiple medications from the supplied snapshot only", async () 
   const text = parsed.text;
   assert.match(text, /Amoxicillin/);
   assert.match(text, /#21/);
-  assert.match(text, /Dosage:\s*500 mg/);
+  assert.match(text, /500 mg/);
+  assert.doesNotMatch(text, /Dosage:/);
   assert.match(text, /Sig:\s*Take 1 cap every 8 hrs for 7 days/);
   assert.match(text, /Mefenamic acid/);
   assert.match(text, /Synthetic Test/);
@@ -245,9 +246,11 @@ test("PDF keeps a short medicine compact and a long name clear of its quantity",
   assert.match(parsed.text, /#8/);
   assert.match(parsed.text, /Amoxicillin/);
   assert.match(parsed.text, /clavulanate/);
-  assert.match(parsed.text, /extended-release/);
+  assert.match(parsed.text, /extended-/);
+  assert.match(parsed.text, /release/);
   assert.match(parsed.text, /#14/);
-  assert.match(parsed.text, /Dosage:\s*400 mg/);
+  assert.match(parsed.text, /400 mg/);
+  assert.doesNotMatch(parsed.text, /Dosage:/);
   const { rasterizePrescriptionPdf } = require("../services/prescriptionPdf");
   const pages = await rasterizePrescriptionPdf(buffer);
   const evidenceDir = path.join(__dirname, "..", "..", "screenshots", "prescription-pad");
