@@ -98,7 +98,7 @@ test("PDF lists multiple medications from the supplied snapshot only", async () 
   for (const box of boxes) {
     assert.ok(Math.abs(box.width - PAGE_WIDTH) < 0.6, `width ${box.width}`);
     assert.ok(Math.abs(box.height - PAGE_HEIGHT) < 0.6, `height ${box.height}`);
-    assert.ok(box.width < box.height, "portrait A4");
+    assert.ok(box.width < box.height, "portrait A5");
   }
   const { PDFParse } = require("pdf-parse");
   const parser = new PDFParse({ data: buffer });
@@ -107,10 +107,11 @@ test("PDF lists multiple medications from the supplied snapshot only", async () 
   const text = parsed.text;
   assert.match(text, /Amoxicillin/);
   assert.match(text, /#21/);
-  assert.match(text, /500 mg/);
+  assert.match(text, /Dosage:\s*500 mg/);
   assert.match(text, /Sig:\s*Take 1 cap every 8 hrs for 7 days/);
   assert.match(text, /Mefenamic acid/);
-  assert.match(text, /Synthetic Test Patient/);
+  assert.match(text, /Synthetic Test/);
+  assert.match(text, /Patient/);
   assert.match(text, /Patient's Name/);
   assert.match(text, /Sarah Cruz/i);
   assert.match(text, /DMD/);
@@ -134,14 +135,14 @@ test("PDF lists multiple medications from the supplied snapshot only", async () 
   fs.writeFileSync(path.join(outDir, "generated-prescription-page-1.jpg"), pages[0]);
   const evidenceDir = path.join(__dirname, "..", "..", "screenshots", "prescription-pad");
   fs.mkdirSync(evidenceDir, { recursive: true });
-  fs.writeFileSync(path.join(evidenceDir, "a4-two-meds.pdf"), buffer);
-  fs.writeFileSync(path.join(evidenceDir, "a4-page-1.jpg"), pages[0]);
-  if (pages[1]) fs.writeFileSync(path.join(evidenceDir, "a4-page-2.jpg"), pages[1]);
+  fs.writeFileSync(path.join(evidenceDir, "a5-two-meds.pdf"), buffer);
+  fs.writeFileSync(path.join(evidenceDir, "a5-page-1.jpg"), pages[0]);
+  if (pages[1]) fs.writeFileSync(path.join(evidenceDir, "a5-page-2.jpg"), pages[1]);
   const meta = await require("sharp")(pages[0]).metadata();
   assert.ok(meta.width < meta.height, "raster is portrait");
 });
 
-test("prescription PDF is ISO A4 portrait and paginates extra medications onto more A4 pages", async () => {
+test("prescription PDF is ISO A5 portrait and paginates extra medications onto more A5 pages", async () => {
   const many = Array.from({ length: 12 }, (_, index) => ({
     medicationName: `Long named dental analgesic compound ${index + 1} with extended label`,
     dosage: "500mg",
@@ -149,7 +150,7 @@ test("prescription PDF is ISO A4 portrait and paginates extra medications onto m
     sig: longSig,
   }));
   const buffer = await generatePrescriptionPdf({
-    prescriptionNumber: "RX-TEST-A4-MULTI",
+    prescriptionNumber: "RX-TEST-A5-MULTI",
     version: 2,
     contentHash: "ffffffffffffffff",
     authorizedAt: "2026-10-30T04:00:00.000Z",
@@ -165,19 +166,19 @@ test("prescription PDF is ISO A4 portrait and paginates extra medications onto m
     items: many,
   });
   const boxes = readPdfMediaBoxes(buffer);
-  assert.ok(boxes.length >= 2, "overflow must create additional A4 pages");
+  assert.ok(boxes.length >= 2, "overflow must create additional A5 pages");
   for (const box of boxes) {
-    assert.ok(Math.abs(box.width - 595.28) < 0.6);
-    assert.ok(Math.abs(box.height - 841.89) < 0.6);
+    assert.ok(Math.abs(box.width - 419.53) < 0.6, `width ${box.width}`);
+    assert.ok(Math.abs(box.height - 595.28) < 0.6, `height ${box.height}`);
   }
   const { rasterizePrescriptionPdf } = require("../services/prescriptionPdf");
   const pages = await rasterizePrescriptionPdf(buffer);
   assert.ok(pages.length >= 2);
   const evidenceDir = path.join(__dirname, "..", "..", "screenshots", "prescription-pad");
   fs.mkdirSync(evidenceDir, { recursive: true });
-  fs.writeFileSync(path.join(evidenceDir, "a4-multi.pdf"), buffer);
-  pages.forEach((page, index) => {
-    fs.writeFileSync(path.join(evidenceDir, `a4-multi-page-${index + 1}.jpg`), page);
+  fs.writeFileSync(path.join(evidenceDir, "a5-multi.pdf"), buffer);
+  pages.slice(0, 3).forEach((page, index) => {
+    fs.writeFileSync(path.join(evidenceDir, `a5-multi-page-${index + 1}.jpg`), page);
   });
 });
 
@@ -203,13 +204,56 @@ test("extraction aftercare prints clinic pad wording only when flagged", async (
   const { rasterizePrescriptionPdf } = require("../services/prescriptionPdf");
   const pages = await rasterizePrescriptionPdf(buffer);
   assert.ok(pages.length >= 1);
-  assert.ok(pages.length <= 2, "short extraction Rx should not spill past a second A4 page");
+  assert.ok(pages.length <= 2, "short extraction Rx should not spill past a second A5 page");
   const outDir = path.join(__dirname, "..", "..", "screenshots", "prescription-management");
   fs.mkdirSync(outDir, { recursive: true });
   fs.writeFileSync(path.join(outDir, "generated-rx-pad.jpg"), pages[0]);
   const evidenceDir = path.join(__dirname, "..", "..", "screenshots", "prescription-pad");
   fs.mkdirSync(evidenceDir, { recursive: true });
-  fs.writeFileSync(path.join(evidenceDir, "a4-extraction-aftercare.jpg"), pages[0]);
+  fs.writeFileSync(path.join(evidenceDir, "a5-extraction-aftercare.jpg"), pages[0]);
+});
+
+test("PDF keeps a short medicine compact and a long name clear of its quantity", async () => {
+  const buffer = await generatePrescriptionPdf({
+    prescriptionNumber: "RX-TEST-A5-ALIGN",
+    version: 1,
+    contentHash: "alignhash",
+    authorizedAt: "2026-11-03T08:00:00.000Z",
+    snapshot: {
+      patient: { fullName: "Alignment Patient", age: 28, sex: "Male", address: "Mandaluyong" },
+      dentist: { fullName: "Dr. Sarah Cruz", ptrNumber: "998877", professionalDesignation: "DMD" },
+    },
+    items: [
+      { medicationName: "Ibuprofen", dosage: "400 mg", quantity: "8", sig: "Take 1 tablet as prescribed." },
+      {
+        medicationName: "Amoxicillin clavulanate extended-release",
+        dosage: "875 mg",
+        quantity: "14",
+        sig: "Take 1 tablet every 12 hours with food. Finish the course unless the dentist instructs otherwise.",
+      },
+    ],
+  });
+  const boxes = readPdfMediaBoxes(buffer);
+  assert.ok(boxes.length >= 1 && boxes.length <= 2);
+  assert.ok(Math.abs(boxes[0].width - PAGE_WIDTH) < 0.6);
+  assert.ok(Math.abs(boxes[0].height - PAGE_HEIGHT) < 0.6);
+  const { PDFParse } = require("pdf-parse");
+  const parser = new PDFParse({ data: buffer });
+  const parsed = await parser.getText();
+  await parser.destroy();
+  assert.match(parsed.text, /Ibuprofen/);
+  assert.match(parsed.text, /#8/);
+  assert.match(parsed.text, /Amoxicillin/);
+  assert.match(parsed.text, /clavulanate/);
+  assert.match(parsed.text, /extended-release/);
+  assert.match(parsed.text, /#14/);
+  assert.match(parsed.text, /Dosage:\s*400 mg/);
+  const { rasterizePrescriptionPdf } = require("../services/prescriptionPdf");
+  const pages = await rasterizePrescriptionPdf(buffer);
+  const evidenceDir = path.join(__dirname, "..", "..", "screenshots", "prescription-pad");
+  fs.mkdirSync(evidenceDir, { recursive: true });
+  fs.writeFileSync(path.join(evidenceDir, "a5-alignment.pdf"), buffer);
+  fs.writeFileSync(path.join(evidenceDir, "a5-alignment-page-1.jpg"), pages[0]);
 });
 
 async function applySqlFile(fileName) {
