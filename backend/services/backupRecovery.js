@@ -966,9 +966,41 @@ function createBackupRecoveryService({ db, env = process.env, notifyAdmin = noti
       const remote = await offsite.store.getObject(row.offsite_object_key);
       if (remote) return remote;
     }
+    if (row?.id && offsite.store) {
+      const remote = await loadIndependentArchive(row.id);
+      if (remote) return remote;
+    }
     const error = new Error("Backup file is empty or missing.");
     error.status = 400;
     throw error;
+  }
+
+  async function listIndependentBackups() {
+    if (!offsite.store) {
+      const error = new Error("Independent backup storage is not configured.");
+      error.status = 400;
+      throw error;
+    }
+    const prefix = objectPrefix(env);
+    const listed = await offsite.store.listObjects(`${prefix}/`);
+    const manifests = [];
+    for (const obj of listed) {
+      if (!String(obj.key).endsWith("manifest.json")) continue;
+      const raw = await offsite.store.getObject(obj.key);
+      if (!raw) continue;
+      manifests.push(JSON.parse(raw.toString("utf8")));
+    }
+    return manifests;
+  }
+
+  async function loadIndependentArchive(backupId) {
+    if (!offsite.store) {
+      const error = new Error("Independent backup storage is not configured.");
+      error.status = 400;
+      throw error;
+    }
+    const key = `${objectPrefix(env)}/${backupId}/archive.dsb`;
+    return offsite.store.getObject(key);
   }
 
   async function validateBackup({ backupId, actor }) {
@@ -979,7 +1011,8 @@ function createBackupRecoveryService({ db, env = process.env, notifyAdmin = noti
       throw error;
     }
     const buffer = await loadArchiveBuffer(row);
-    const parsed = parseAndValidatePayload(buffer, row.checksum_sha256);
+    const expectedChecksum = row.payload && row.payload.length ? row.checksum_sha256 : null;
+    const parsed = parseAndValidatePayload(buffer, expectedChecksum);
     const fileCount = (parsed.files?.included || []).length;
     await recordOperation({
       backupId: row.id,
@@ -1378,10 +1411,34 @@ function createBackupRecoveryService({ db, env = process.env, notifyAdmin = noti
     deleteBackup,
     transferLegacyBackup,
     loadArchiveBuffer,
+    listIndependentBackups,
+    loadIndependentArchive,
     scheduleIsDue,
     runDueScheduledBackup,
     applyRetention,
     applySecretPolicy,
+  };
+}
+
+function createInternalBackupCronHandler({ runOnce, env = process.env }) {
+  return async function internalBackupCron(req, res) {
+    const expected = String(env.BACKUP_CRON_SECRET || "").trim();
+    const provided = String(req.get?.("x-backup-cron-secret") || req.headers?.["x-backup-cron-secret"] || req.body?.secret || "").trim();
+    if (!expected || provided !== expected) {
+      return res.status(401).json({ message: "Unauthorized backup scheduler." });
+    }
+    try {
+      const result = await runOnce();
+      return res.json({
+        message: result.ran ? "Scheduled backup ran." : "No backup was due.",
+        ran: result.ran,
+        slot: result.slot || null,
+        error: result.error || null,
+        backup: result.backup || null,
+      });
+    } catch (error) {
+      return res.status(500).json({ message: "Scheduled backup failed." });
+    }
   };
 }
 
@@ -1431,5 +1488,6 @@ module.exports = {
   unwrapArchive,
   createBackupRecoveryService,
   createBackupScheduleJob,
+  createInternalBackupCronHandler,
   productionRestoreAllowed,
 };

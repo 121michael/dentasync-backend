@@ -99,7 +99,7 @@ const { createCleaningReminderJob } = require("./services/cleaningReminders");
 const { createAppointmentReminderJob } = require("./services/appointmentReminderJob");
 const { createUnproceededAppointmentCancelJob } = require("./services/unproceededAppointmentCancelJob");
 const { createDocumentSyncCleanupJob } = require("./services/documentSyncCleanupJob");
-const { createBackupScheduleJob } = require("./services/backupRecovery");
+const { createBackupScheduleJob, createInternalBackupCronHandler } = require("./services/backupRecovery");
 const path = require("path");
 
 const clinicSms = createClinicSmsService({
@@ -426,26 +426,13 @@ const documentSyncCleanupJob = createDocumentSyncCleanupJob({
 const backupScheduleJob = createBackupScheduleJob({ db });
 const unproceededAppointmentJob = createUnproceededAppointmentCancelJob({ db });
 
-app.post("/api/internal/backups/run", async (req, res) => {
-  const expected = String(process.env.BACKUP_CRON_SECRET || "").trim();
-  const provided = String(req.get("x-backup-cron-secret") || req.body?.secret || "").trim();
-  if (!expected || provided !== expected) {
-    return res.status(401).json({ message: "Unauthorized backup scheduler." });
-  }
-  try {
-    const result = await backupScheduleJob.runOnce();
-    return res.json({
-      message: result.ran ? "Scheduled backup ran." : "No backup was due.",
-      ran: result.ran,
-      slot: result.slot || null,
-      error: result.error || null,
-      backup: result.backup || null,
-    });
-  } catch (error) {
-    console.error("Internal backup cron failed:", error.message);
-    return res.status(500).json({ message: "Scheduled backup failed." });
-  }
-});
+app.post(
+  "/api/internal/backups/run",
+  createInternalBackupCronHandler({
+    runOnce: () => backupScheduleJob.runOnce(),
+    env: process.env,
+  })
+);
 
 if (require.main === module) {
   app.listen(PORT, () => {

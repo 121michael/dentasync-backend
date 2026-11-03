@@ -70,39 +70,51 @@ function createS3Store(env) {
     throw new Error("S3 off-site storage is missing bucket or credentials.");
   }
 
-  function objectUrl(key) {
-    const encodedKey = key.split("/").map(encodeRfc3986).join("/");
-    if (endpoint) {
-      const base = endpoint.replace(/\/$/, "");
-      return forcePathStyle ? `${base}/${bucket}/${encodedKey}` : `${base}/${encodedKey}`;
-    }
-    return forcePathStyle
-      ? `https://s3.${region}.amazonaws.com/${bucket}/${encodedKey}`
-      : `https://${bucket}.s3.${region}.amazonaws.com/${encodedKey}`;
+  function objectUrl(key, query = "") {
+    const encodedKey = String(key || "")
+      .split("/")
+      .filter(Boolean)
+      .map(encodeRfc3986)
+      .join("/");
+    const origin = endpoint ? endpoint.replace(/\/$/, "") : `https://s3.${region}.amazonaws.com`;
+    const path =
+      forcePathStyle || endpoint
+        ? encodedKey
+          ? `${origin}/${bucket}/${encodedKey}`
+          : `${origin}/${bucket}`
+        : encodedKey
+          ? `https://${bucket}.s3.${region}.amazonaws.com/${encodedKey}`
+          : `https://${bucket}.s3.${region}.amazonaws.com`;
+    return query ? `${path}?${query}` : path;
   }
 
-  async function signedRequest(method, key, body, extraHeaders = {}) {
-    const url = new URL(objectUrl(key));
+  async function signedRequest(method, href, body, extraHeaders = {}) {
+    const url = new URL(href);
     const { date, datetime } = isoDateParts();
-    const payloadHash = sha256Hex(body || Buffer.alloc(0));
+    const payload = method === "GET" || method === "HEAD" ? Buffer.alloc(0) : body || Buffer.alloc(0);
+    const payloadHash = sha256Hex(payload);
     const headers = {
       host: url.host,
       "x-amz-date": datetime,
       "x-amz-content-sha256": payloadHash,
       ...extraHeaders,
     };
-    if (body) {
-      headers["content-length"] = String(body.length);
+    if (method !== "GET" && method !== "HEAD") {
+      headers["content-length"] = String(payload.length);
     }
     const signedHeaderNames = Object.keys(headers)
       .map((name) => name.toLowerCase())
       .sort();
     const canonicalHeaders = signedHeaderNames.map((name) => `${name}:${headers[name]}\n`).join("");
     const signedHeaders = signedHeaderNames.join(";");
+    const canonicalQuery = [...url.searchParams.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([name, value]) => `${encodeRfc3986(name)}=${encodeRfc3986(value)}`)
+      .join("&");
     const canonical = [
       method,
       url.pathname,
-      url.searchParams.toString(),
+      canonicalQuery,
       canonicalHeaders,
       signedHeaders,
       payloadHash,
@@ -113,11 +125,15 @@ function createS3Store(env) {
     const signature = crypto.createHmac("sha256", signingKey).update(stringToSign).digest("hex");
     headers.authorization = `AWS4-HMAC-SHA256 Credential=${accessKey}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
 
-    const response = await fetch(url, { method, headers, body: body && method !== "GET" ? body : undefined });
+    const response = await fetch(url, {
+      method,
+      headers,
+      body: method === "GET" || method === "HEAD" ? undefined : payload,
+    });
     const buffer = Buffer.from(await response.arrayBuffer());
     if (!response.ok) {
       const error = new Error(`Off-site storage ${method} failed (${response.status}).`);
-      error.status = 502;
+      error.status = response.status === 404 ? 404 : 502;
       error.detail = buffer.toString("utf8").slice(0, 300);
       throw error;
     }
@@ -125,7 +141,7 @@ function createS3Store(env) {
   }
 
   async function putObject(key, body, contentType = "application/octet-stream") {
-    await signedRequest("PUT", key, body, {
+    await signedRequest("PUT", objectUrl(key), body, {
       "content-type": contentType,
       "x-amz-server-side-encryption": "AES256",
     });
@@ -134,18 +150,16 @@ function createS3Store(env) {
 
   async function getObject(key) {
     try {
-      return await signedRequest("GET", key, Buffer.alloc(0));
+      return await signedRequest("GET", objectUrl(key));
     } catch (error) {
-      if (error.status === 502 && /404|NoSuchKey/i.test(error.detail || "")) return null;
+      if (error.status === 404 || /NoSuchKey/i.test(error.detail || "")) return null;
       throw error;
     }
   }
 
   async function listObjects(prefix = "") {
-    const url = new URL(objectUrl(""));
-    url.searchParams.set("list-type", "2");
-    url.searchParams.set("prefix", prefix);
-    const xml = (await signedRequest("GET", `?${url.searchParams.toString()}`, Buffer.alloc(0))).toString("utf8");
+    const query = `list-type=2&prefix=${encodeRfc3986(prefix)}`;
+    const xml = (await signedRequest("GET", objectUrl("", query))).toString("utf8");
     const keys = [...xml.matchAll(/<Key>([^<]+)<\/Key>/g)].map((match) => match[1]);
     return keys.map((key) => ({ key, byteSize: null }));
   }

@@ -114,5 +114,42 @@ test("live PostgreSQL backup and disposable restore preserve clinic records", { 
   assert.equal(String(queue.rows[0].appointment_id), String(appointmentId));
   void createdAt;
 
+  await t.test("off-site S3 copy remains after the database payload is cleared", async () => {
+    const { createS3CompatMock } = require("../services/s3CompatMock");
+    const mock = createS3CompatMock({ bucket: "dentasync-backups" });
+    const listening = await mock.listen();
+    try {
+      const offsiteService = createBackupRecoveryService({
+        db,
+        env: {
+          ...process.env,
+          BACKUP_SKIP_PG_DUMP: "true",
+          BACKUP_S3_BUCKET: "dentasync-backups",
+          BACKUP_S3_REGION: "us-east-1",
+          BACKUP_S3_ENDPOINT: listening.url,
+          BACKUP_S3_FORCE_PATH_STYLE: "true",
+          BACKUP_S3_ACCESS_KEY_ID: "test-access-key-id12",
+          BACKUP_S3_SECRET_ACCESS_KEY: "test-secret-access-key-value",
+          BACKUP_S3_PREFIX: "dentasync-live",
+        },
+        notifyAdmin: async () => 0,
+      });
+      const stored = await offsiteService.createBackup({
+        type: "manual",
+        actor: { id: "live-admin", first_name: "Live" },
+      });
+      assert.equal(stored.offsiteProtected, true);
+      await db.query(`UPDATE admin_portal_backups SET payload = NULL WHERE id = $1`, [stored.id]);
+      const row = await offsiteService.getBackupRow(stored.id, { includePayload: true });
+      const remote = await offsiteService.loadArchiveBuffer(row);
+      const parsed = offsiteService.parseAndValidatePayload(remote);
+      assert.ok(parsed.tables.users);
+      const listed = await offsiteService.listIndependentBackups();
+      assert.ok(listed.some((item) => item.id === stored.id));
+    } finally {
+      await mock.close();
+    }
+  });
+
   await db.end();
 });

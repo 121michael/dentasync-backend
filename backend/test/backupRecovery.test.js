@@ -17,9 +17,11 @@ const {
   applySecretPolicy,
   normalizeSettings,
   createBackupRecoveryService,
+  createInternalBackupCronHandler,
   BACKUP_MAGIC,
   FORMAT_VERSION,
 } = require("../services/backupRecovery");
+const { createS3CompatMock } = require("../services/s3CompatMock");
 
 function createMemoryDb() {
   const tables = {
@@ -610,5 +612,93 @@ test("backup routes reject non-admin accounts and allow administrators", async (
     assert.ok((await download.arrayBuffer()).byteLength > 0);
   } finally {
     await admin.close();
+  }
+});
+
+function s3TestEnv(endpoint) {
+  return {
+    BACKUP_SKIP_PG_DUMP: "true",
+    BACKUP_S3_BUCKET: "dentasync-backups",
+    BACKUP_S3_REGION: "us-east-1",
+    BACKUP_S3_ENDPOINT: endpoint,
+    BACKUP_S3_FORCE_PATH_STYLE: "true",
+    BACKUP_S3_ACCESS_KEY_ID: "test-access-key-id12",
+    BACKUP_S3_SECRET_ACCESS_KEY: "test-secret-access-key-value",
+    BACKUP_S3_PREFIX: "dentasync-backups",
+  };
+}
+
+test("S3-compatible off-site storage uploads, lists, and survives deleting the database payload", async () => {
+  const mock = createS3CompatMock({ bucket: "dentasync-backups" });
+  const listening = await mock.listen();
+  try {
+    const db = createMemoryDb();
+    const service = createBackupRecoveryService({
+      db,
+      env: s3TestEnv(listening.url),
+      notifyAdmin: async () => 0,
+    });
+    const backup = await service.createBackup({ type: "manual", actor: { id: "admin-1" } });
+    assert.equal(backup.offsiteProtected, true);
+    assert.equal(backup.storageClass, "both");
+    const overview = await service.getOverview();
+    assert.equal(overview.offsite.status, "verified");
+    assert.equal(overview.storage.survivesDestroyedDatabase, true);
+
+    const manifests = await service.listIndependentBackups();
+    assert.equal(manifests.length, 1);
+    assert.equal(manifests[0].id, backup.id);
+
+    db.backups[0].payload = null;
+    const row = await service.getBackupRow(backup.id, { includePayload: true });
+    const remote = await service.loadArchiveBuffer(row);
+    const parsed = service.parseAndValidatePayload(remote);
+    assert.equal(parsed.tables.users.rows[0].id, "p1");
+
+    db.backups.splice(0, db.backups.length);
+    const independent = await service.loadIndependentArchive(backup.id);
+    assert.ok(independent.length > 0);
+    assert.equal(service.parseAndValidatePayload(independent).magic, BACKUP_MAGIC);
+  } finally {
+    await mock.close();
+  }
+});
+
+test("scheduled backup worker runs without a browser session", async () => {
+  const db = createMemoryDb();
+  const env = { BACKUP_SKIP_PG_DUMP: "true", BACKUP_CRON_SECRET: "cron-secret-value-12" };
+  const service = createBackupRecoveryService({ db, env, notifyAdmin: async () => 0 });
+  await service.saveSettings({ schedule: "automatic" });
+  const dueAt = new Date("2026-11-05T18:30:00.000Z");
+  const result = await service.runDueScheduledBackup(dueAt);
+  assert.equal(result.ran, true);
+  assert.equal(result.slot, "daily");
+  assert.equal(result.backup.status, "success");
+
+  const app = express();
+  app.use(express.json());
+  app.post(
+    "/api/internal/backups/run",
+    createInternalBackupCronHandler({
+      env,
+      runOnce: () => service.runDueScheduledBackup(new Date("2026-11-06T18:30:00.000Z")),
+    })
+  );
+  const server = await new Promise((resolve) => {
+    const listener = app.listen(0, "127.0.0.1", () => resolve(listener));
+  });
+  const url = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const denied = await fetch(`${url}/api/internal/backups/run`, { method: "POST" });
+    assert.equal(denied.status, 401);
+    const allowed = await fetch(`${url}/api/internal/backups/run`, {
+      method: "POST",
+      headers: { "x-backup-cron-secret": "cron-secret-value-12" },
+    });
+    assert.equal(allowed.status, 200);
+    const body = await allowed.json();
+    assert.equal(body.ran, true);
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   }
 });
