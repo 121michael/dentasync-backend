@@ -128,9 +128,10 @@ function attachAdminBackupRoutes(router, { db }) {
       if (!row) {
         return res.status(404).json({ message: "Backup not found." });
       }
-      if (row.status !== "success" || !row.payload) {
+      if (row.status !== "success") {
         return res.status(400).json({ message: "Only a completed backup can be downloaded." });
       }
+      const payload = await backups.loadArchiveBuffer(row);
       await audit(db, req, {
         action: "download_backup",
         targetType: "backup",
@@ -146,9 +147,65 @@ function attachAdminBackupRoutes(router, { db }) {
         `attachment; filename="${String(row.file_name || "dentasync-backup.dsb").replace(/"/g, "")}"`
       );
       res.setHeader("Cache-Control", "no-store");
-      return res.send(row.payload);
+      return res.send(payload);
     } catch (error) {
       return sendServiceError(res, error, "Unable to download backup.");
+    }
+  });
+
+  router.post("/backups/:id/validate", async (req, res) => {
+    try {
+      const result = await backups.validateBackup({
+        backupId: stringValue(req.params.id, 80),
+        actor: req.admin,
+      });
+      await audit(db, req, {
+        action: "validate_backup",
+        targetType: "backup",
+        targetId: result.backup.id,
+        result: "success",
+        detail: "Administrator validated backup integrity.",
+      });
+      return res.json({ message: "Backup archive passed integrity checks.", ...result });
+    } catch (error) {
+      return sendServiceError(res, error, "Unable to validate backup.");
+    }
+  });
+
+  router.post("/backups/:id/isolated-restore", async (req, res) => {
+    try {
+      const result = await backups.isolatedRestore({
+        backupId: stringValue(req.params.id, 80),
+        actor: req.admin,
+      });
+      await audit(db, req, {
+        action: "isolated_restore_backup",
+        targetType: "backup",
+        targetId: stringValue(req.params.id, 80),
+        result: "success",
+        detail: "Isolated restore test rolled back without changing production data.",
+      });
+      return res.json({
+        message: "Isolated restore test completed. Production data was not changed.",
+        ...result,
+      });
+    } catch (error) {
+      return sendServiceError(res, error, "Unable to run isolated restore test.");
+    }
+  });
+
+  router.post("/backups/:id/transfer", async (req, res) => {
+    try {
+      const backup = await backups.transferLegacyBackup({
+        backupId: stringValue(req.params.id, 80),
+        actor: req.admin,
+      });
+      return res.json({
+        message: "Legacy archive copied to independent storage. The original database copy was kept.",
+        backup,
+      });
+    } catch (error) {
+      return sendServiceError(res, error, "Unable to transfer legacy backup.");
     }
   });
 
@@ -190,21 +247,29 @@ function attachAdminBackupRoutes(router, { db }) {
     try {
       const id = stringValue(req.params.id, 80);
       const confirmation = stringValue(req.body?.confirmation, 20);
+      const mode = String(req.body?.mode || "isolated").toLowerCase() === "production" ? "production" : "isolated";
       const result = await backups.restoreBackup({
         backupId: id,
         confirmation,
         actor: req.admin,
         createSafety: true,
+        mode,
       });
       await audit(db, req, {
-        action: "restore_backup",
+        action: mode === "production" ? "restore_backup" : "isolated_restore_backup",
         targetType: "backup",
         targetId: id,
         result: "success",
-        detail: `Restored ${result.restoredTables.length} tables.`,
+        detail:
+          mode === "production"
+            ? `Restored ${result.restoredTables?.length || 0} tables.`
+            : "Isolated restore test; production data unchanged.",
       });
       return res.json({
-        message: "Database restored and verified from the selected backup.",
+        message:
+          mode === "production"
+            ? "Database restored and verified from the selected backup."
+            : "Isolated restore test completed. Production data was not changed.",
         ...result,
       });
     } catch (error) {
@@ -212,7 +277,7 @@ function attachAdminBackupRoutes(router, { db }) {
         action: "restore_backup",
         targetType: "backup",
         targetId: stringValue(req.params.id, 80),
-        result: error.status === 400 ? "blocked" : "failed",
+        result: error.status === 400 || error.status === 403 ? "blocked" : "failed",
         detail: error.message,
       });
       return sendServiceError(res, error, "Unable to restore backup.");
@@ -222,7 +287,11 @@ function attachAdminBackupRoutes(router, { db }) {
   router.delete("/backups/:id", async (req, res) => {
     try {
       const id = stringValue(req.params.id, 80);
-      const result = await backups.deleteBackup({ backupId: id, actor: req.admin });
+      const result = await backups.deleteBackup({
+        backupId: id,
+        actor: req.admin,
+        confirmation: stringValue(req.body?.confirmation || req.query?.confirmation, 20),
+      });
       await audit(db, req, {
         action: "delete_backup",
         targetType: "backup",

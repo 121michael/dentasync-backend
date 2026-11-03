@@ -572,7 +572,14 @@ export const api = {
   updateAdminBackupSettings: (body) => request("/admin/backups/settings", { method: "PUT", body }),
   restoreAdminBackup: (id, body) =>
     request(`/admin/backups/${encodeURIComponent(id)}/restore`, { method: "POST", body }),
-  deleteAdminBackup: (id) => request(`/admin/backups/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  validateAdminBackup: (id) =>
+    request(`/admin/backups/${encodeURIComponent(id)}/validate`, { method: "POST" }),
+  isolatedRestoreAdminBackup: (id) =>
+    request(`/admin/backups/${encodeURIComponent(id)}/isolated-restore`, { method: "POST" }),
+  transferAdminBackup: (id) =>
+    request(`/admin/backups/${encodeURIComponent(id)}/transfer`, { method: "POST" }),
+  deleteAdminBackup: (id, body) =>
+    request(`/admin/backups/${encodeURIComponent(id)}`, { method: "DELETE", body }),
   downloadAdminBackup: (id, filename) =>
     download(`/admin/backups/${encodeURIComponent(id)}/download`, filename || "dentasync-backup.dsb"),
   uploadAdminBackup: (file) => {

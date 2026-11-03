@@ -67,6 +67,7 @@ const {
 } = require("./services/emailDelivery");
 const { authenticateToken } = require("./middleware/authMiddleware");
 const { applyPrescriptionSchema } = require("./services/prescriptionSchema");
+const { applyAdminBackupSchema } = require("./services/backupSchema");
 
 const app = express();
 const { jwtSecret: JWT_SECRET, otpSecret: OTP_SECRET, passwordResetSecret: PASSWORD_RESET_SECRET } =
@@ -99,7 +100,7 @@ const { createCleaningReminderJob } = require("./services/cleaningReminders");
 const { createAppointmentReminderJob } = require("./services/appointmentReminderJob");
 const { createUnproceededAppointmentCancelJob } = require("./services/unproceededAppointmentCancelJob");
 const { createDocumentSyncCleanupJob } = require("./services/documentSyncCleanupJob");
-const { createBackupScheduleJob } = require("./services/backupRecovery");
+const { createBackupScheduleJob, createInternalBackupCronHandler } = require("./services/backupRecovery");
 const path = require("path");
 
 const clinicSms = createClinicSmsService({
@@ -425,6 +426,15 @@ const documentSyncCleanupJob = createDocumentSyncCleanupJob({
 });
 const backupScheduleJob = createBackupScheduleJob({ db });
 const unproceededAppointmentJob = createUnproceededAppointmentCancelJob({ db });
+
+app.post(
+  "/api/internal/backups/run",
+  createInternalBackupCronHandler({
+    runOnce: () => backupScheduleJob.runOnce(),
+    env: process.env,
+  })
+);
+
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`✅ DentaSync server running on http://localhost:${PORT}`);
@@ -473,10 +483,19 @@ if (require.main === module) {
       .catch((error) => {
         console.error("Prescription schema apply failed:", error.message);
       });
+    applyAdminBackupSchema(db)
+      .then((result) => console.log(`Backup catalog columns ready (${result.file}).`))
+      .catch((error) => {
+        console.error("Backup schema apply failed:", error.message);
+      });
     console.log("Cleaning reminder SMS job scheduled (every 4–6 months based on last visit).");
     console.log("Appointment reminder SMS job scheduled (24h and 10h before confirmed visits).");
     console.log("Document sync temporary scans expire after 24 hours (server clock).");
-    console.log("Backup scheduler checks daily/weekly settings while this API process is running.");
+    console.log(
+      process.env.BACKUP_EXTERNAL_SCHEDULER === "true"
+        ? "Backup scheduler: external cron is marked active (BACKUP_EXTERNAL_SCHEDULER=true)."
+        : "Backup scheduler: in-process timer only. Render Free sleep can skip jobs unless a Cron Job calls /api/internal/backups/run."
+    );
     console.log("Unproceeded same-day appointments are cancelled after 6:00 PM clinic time.");
   });
 }
