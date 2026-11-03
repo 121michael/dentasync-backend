@@ -425,6 +425,28 @@ const documentSyncCleanupJob = createDocumentSyncCleanupJob({
 });
 const backupScheduleJob = createBackupScheduleJob({ db });
 const unproceededAppointmentJob = createUnproceededAppointmentCancelJob({ db });
+
+app.post("/api/internal/backups/run", async (req, res) => {
+  const expected = String(process.env.BACKUP_CRON_SECRET || "").trim();
+  const provided = String(req.get("x-backup-cron-secret") || req.body?.secret || "").trim();
+  if (!expected || provided !== expected) {
+    return res.status(401).json({ message: "Unauthorized backup scheduler." });
+  }
+  try {
+    const result = await backupScheduleJob.runOnce();
+    return res.json({
+      message: result.ran ? "Scheduled backup ran." : "No backup was due.",
+      ran: result.ran,
+      slot: result.slot || null,
+      error: result.error || null,
+      backup: result.backup || null,
+    });
+  } catch (error) {
+    console.error("Internal backup cron failed:", error.message);
+    return res.status(500).json({ message: "Scheduled backup failed." });
+  }
+});
+
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`✅ DentaSync server running on http://localhost:${PORT}`);
@@ -476,7 +498,11 @@ if (require.main === module) {
     console.log("Cleaning reminder SMS job scheduled (every 4–6 months based on last visit).");
     console.log("Appointment reminder SMS job scheduled (24h and 10h before confirmed visits).");
     console.log("Document sync temporary scans expire after 24 hours (server clock).");
-    console.log("Backup scheduler checks daily/weekly settings while this API process is running.");
+    console.log(
+      process.env.BACKUP_EXTERNAL_SCHEDULER === "true"
+        ? "Backup scheduler: external cron is marked active (BACKUP_EXTERNAL_SCHEDULER=true)."
+        : "Backup scheduler: in-process timer only. Render Free sleep can skip jobs unless a Cron Job calls /api/internal/backups/run."
+    );
     console.log("Unproceeded same-day appointments are cancelled after 6:00 PM clinic time.");
   });
 }

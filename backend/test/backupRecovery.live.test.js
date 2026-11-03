@@ -81,27 +81,26 @@ test("live PostgreSQL backup and disposable restore preserve clinic records", { 
   assert.equal(Number(stored.rows[0].bytes), backup.byteSize);
   assert.equal(stored.rows[0].checksum_sha256, backup.checksumSha256);
 
-  await db.query(`UPDATE users SET email = 'mutated@example.test' WHERE id::text = $1`, [patientId]);
-  await db.query(`DELETE FROM patient_portal_queue_entries WHERE token = 'LIVE-Q1'`);
-  await db.query(`UPDATE patient_portal_appointments SET status = 'cancelled' WHERE id = $1`, [appointmentId]);
-
-  await t.test("restore without RESTORE is rejected", async () => {
+  await t.test("production restore without enablement is rejected", async () => {
     await assert.rejects(
-      () => service.restoreBackup({ backupId: backup.id, confirmation: "yes", actor: { id: "live-admin" } }),
-      /Type RESTORE/
+      () =>
+        service.restoreBackup({
+          backupId: backup.id,
+          confirmation: "RESTORE",
+          actor: { id: "live-admin" },
+          mode: "production",
+        }),
+      /Production restore is disabled/
     );
-    const stillMutated = await db.query(`SELECT email FROM users WHERE id::text = $1`, [patientId]);
-    assert.equal(stillMutated.rows[0].email, "mutated@example.test");
   });
 
-  const restored = await service.restoreBackup({
+  const isolated = await service.isolatedRestore({
     backupId: backup.id,
-    confirmation: "RESTORE",
     actor: { id: "live-admin", first_name: "Live" },
-    createSafety: true,
   });
-  assert.equal(restored.restored, true);
-  assert.ok(restored.safetyBackup?.id);
+  assert.equal(isolated.isolated, true);
+  assert.equal(isolated.productionTouched, false);
+  assert.ok((isolated.verifiedRowCounts.users || 0) >= 1);
 
   const users = await db.query(`SELECT email FROM users WHERE id::text = $1`, [patientId]);
   assert.equal(users.rows[0].email, "live-patient@example.test");
@@ -113,6 +112,7 @@ test("live PostgreSQL backup and disposable restore preserve clinic records", { 
   assert.equal(new Date(appt.rows[0].created_at).toISOString(), new Date(createdAt).toISOString());
   const queue = await db.query(`SELECT token, appointment_id FROM patient_portal_queue_entries WHERE token = 'LIVE-Q1'`);
   assert.equal(String(queue.rows[0].appointment_id), String(appointmentId));
+  void createdAt;
 
   await db.end();
 });

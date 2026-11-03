@@ -2,17 +2,33 @@
 
 const crypto = require("crypto");
 const zlib = require("zlib");
+const { notifyActiveAdmins } = require("./adminNotifications");
+const { collectUploadFiles, restoreUploadFiles, stripFileBytes } = require("./backupFiles");
+const { createOffsiteStore, objectPrefix } = require("./backupOffsite");
+const { tryPgDump } = require("./backupPgDump");
 
 const BACKUP_MAGIC = "DENTASYNC_BACKUP";
-const FORMAT_VERSION = 1;
+const FORMAT_VERSION = 2;
+const SUPPORTED_FORMATS = new Set([1, 2]);
 const BACKUP_LOCK = 87412001;
 const RESTORE_LOCK = 87412002;
 const MAX_BACKUP_BYTES = 80 * 1024 * 1024;
 const EXCLUDED_TABLES = new Set(["admin_portal_backups"]);
+const ENVELOPE = Buffer.from("DSBENC1");
 const DEFAULT_SETTINGS = {
   schedule: "manual",
+  automatic: false,
+  dailyEnabled: true,
+  weeklyEnabled: true,
+  monthlyEnabled: true,
+  dailyHour: 2,
   retentionCount: 12,
+  retentionDaily: 30,
+  retentionWeekly: 8,
+  retentionMonthly: 12,
+  retentionManual: 12,
   timezone: "Asia/Manila",
+  alertsEnabled: true,
 };
 
 function quoteIdent(name) {
@@ -40,28 +56,108 @@ function actorName(admin) {
   return `${admin?.first_name || ""} ${admin?.last_name || ""}`.trim() || admin?.email || "Administrator";
 }
 
-function normalizeSettings(value) {
+function manilaParts(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "short",
+    hour: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const get = (type) => parts.find((part) => part.type === type)?.value;
+  return {
+    year: get("year"),
+    month: get("month"),
+    day: get("day"),
+    weekday: get("weekday"),
+    hour: Number(get("hour")),
+    dateKey: `${get("year")}-${get("month")}-${get("day")}`,
+  };
+}
+
+function dateKeyFromIso(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return manilaParts(date).dateKey;
+}
+
+function schedulerCapabilities(env = process.env) {
+  const external = String(env.BACKUP_EXTERNAL_SCHEDULER || "").toLowerCase() === "true";
+  const cronSecret = Boolean(String(env.BACKUP_CRON_SECRET || "").trim());
+  return {
+    externalScheduler: external,
+    cronEndpointConfigured: cronSecret,
+    inProcessTimer: true,
+    reliableAutomation: external,
+  };
+}
+
+function normalizeSettings(value, env = process.env) {
   const source = value && typeof value === "object" ? value : {};
-  const schedule = ["manual", "daily", "weekly"].includes(source.schedule) ? source.schedule : "manual";
-  const retentionCount = Math.min(50, Math.max(1, Number(source.retentionCount) || DEFAULT_SETTINGS.retentionCount));
+  const schedule = ["manual", "daily", "weekly", "automatic"].includes(source.schedule)
+    ? source.schedule
+    : "manual";
+  const automatic = source.automatic === true || schedule === "automatic" || schedule === "daily" || schedule === "weekly";
+  const caps = schedulerCapabilities(env);
+  const schedulerNote = !automatic
+    ? "Manual backups only. Automatic runs are not enabled."
+    : caps.reliableAutomation
+      ? "External scheduler is configured (Render Cron or BACKUP_EXTERNAL_SCHEDULER=true). Daily default is 2:00 AM Asia/Manila."
+      : "Automatic times are stored, but this host only runs them while the API process is awake. Render Free sleep skips jobs. Add a Render Cron Job to POST /api/internal/backups/run with BACKUP_CRON_SECRET to make automation independent of the web server.";
   return {
     schedule,
-    retentionCount,
+    automatic,
+    dailyEnabled: source.dailyEnabled !== false,
+    weeklyEnabled: source.weeklyEnabled !== false,
+    monthlyEnabled: source.monthlyEnabled !== false,
+    dailyHour: Math.min(23, Math.max(0, Number(source.dailyHour ?? 2))),
+    retentionCount: Math.min(50, Math.max(1, Number(source.retentionCount) || DEFAULT_SETTINGS.retentionCount)),
+    retentionDaily: Math.min(90, Math.max(1, Number(source.retentionDaily) || 30)),
+    retentionWeekly: Math.min(52, Math.max(1, Number(source.retentionWeekly) || 8)),
+    retentionMonthly: Math.min(36, Math.max(1, Number(source.retentionMonthly) || 12)),
+    retentionManual: Math.min(50, Math.max(1, Number(source.retentionManual) || 12)),
     timezone: "Asia/Manila",
+    alertsEnabled: source.alertsEnabled !== false,
     lastScheduledAt: source.lastScheduledAt || null,
     lastScheduledError: source.lastScheduledError || null,
-    scheduler: schedule === "manual"
-      ? "Manual backups only. Render does not provide a guaranteed OS cron; daily/weekly runs while the API process is awake."
-      : "Server-side interval while the API service is running. Render Free may skip runs during sleep.",
+    lastDailyAt: source.lastDailyAt || null,
+    lastWeeklyAt: source.lastWeeklyAt || null,
+    lastMonthlyAt: source.lastMonthlyAt || null,
+    lastCronAt: source.lastCronAt || null,
+    scheduler: schedulerNote,
+    schedulerActive: automatic && caps.reliableAutomation,
+    schedulerCapabilities: caps,
+  };
+}
+
+function pitrStatus(env = process.env) {
+  if (String(env.BACKUP_PITR_AVAILABLE || "").toLowerCase() === "true") {
+    return {
+      available: true,
+      window: env.BACKUP_PITR_WINDOW || "Provider recovery window",
+      note: "Point-in-time recovery is provided by the PostgreSQL host, not by DentaSync .dsb archives.",
+    };
+  }
+  return {
+    available: false,
+    window: null,
+    note: "Point-in-time recovery is unavailable on this plan. Daily archives are logical snapshots, not arbitrary PITR.",
   };
 }
 
 function publicBackup(row) {
   if (!row) return null;
+  const pipeline = row.pipeline_status || (row.status === "success" ? "completed" : row.status === "failed" ? "failed" : row.status);
+  const storageClass = row.storage_class || "legacy_database";
+  const offsiteVerified = row.offsite_verified === true || row.offsite_verified === "t";
   return {
     id: row.id,
     backupType: row.backup_type,
     status: row.status,
+    pipelineStatus: pipeline,
     fileName: row.file_name,
     byteSize: Number(row.byte_size || 0),
     checksumSha256: row.checksum_sha256 || null,
@@ -74,7 +170,23 @@ function publicBackup(row) {
     createdByName: row.created_by_name || null,
     createdAt: row.created_at,
     finishedAt: row.finished_at,
+    startedAt: row.started_at || row.created_at,
+    durationMs: row.duration_ms == null ? null : Number(row.duration_ms),
     notes: row.notes || null,
+    storageClass,
+    storageLocation: storageClass,
+    offsiteObjectKey: row.offsite_object_key || null,
+    offsiteVerified,
+    offsiteProtected: offsiteVerified && storageClass !== "legacy_database",
+    verifiedAt: row.verified_at || null,
+    verificationDetail: row.verification_detail || null,
+    verificationStatus: row.verified_at ? "verified" : row.status === "success" ? "checksum_only" : "unverified",
+    excludedFields: row.excluded_fields || [],
+    fileManifest: row.file_manifest || [],
+    pgDumpStatus: row.pg_dump_status || null,
+    encryption: row.encryption || "none",
+    scheduleSlot: row.schedule_slot || null,
+    legacyDatabaseStored: Boolean(row.payload) || storageClass === "legacy_database" || storageClass === "both",
     downloadable: row.status === "success" && Number(row.byte_size || 0) > 0,
     restorable: row.status === "success" && Number(row.byte_size || 0) > 0 && Boolean(row.checksum_sha256),
   };
@@ -92,6 +204,10 @@ const SECRET_ENV_KEYS = [
   "GEMINI_API_KEY",
   "GOOGLE_CLOUD_API_KEY",
   "GOOGLE_VISION_API_KEY",
+  "BACKUP_S3_SECRET_ACCESS_KEY",
+  "BACKUP_ENCRYPTION_KEY",
+  "BACKUP_CRON_SECRET",
+  "RFID_DEVICE_SECRET",
 ];
 
 function isPlaceholderSecret(value) {
@@ -116,10 +232,86 @@ function payloadContainsSecrets(payload, env = process.env) {
   return collectEnvSecretValues(env).some((value) => text.includes(value));
 }
 
-function createBackupRecoveryService({ db } = {}) {
+function redactSecrets(value, secrets, path, hits) {
+  if (typeof value === "string") {
+    if (secrets.some((secret) => secret && value.includes(secret))) {
+      const table = path.split(".")[0] || "unknown";
+      const column = path.split(".").slice(1).join(".") || "(value)";
+      hits.push({ table, column, path, reason: "environment_secret_value" });
+      return null;
+    }
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item, index) => redactSecrets(item, secrets, `${path}[${index}]`, hits));
+  }
+  if (value && typeof value === "object") {
+    const copy = {};
+    for (const [key, nested] of Object.entries(value)) {
+      copy[key] = redactSecrets(nested, secrets, path ? `${path}.${key}` : key, hits);
+    }
+    return copy;
+  }
+  return value;
+}
+
+function applySecretPolicy(tables, env = process.env) {
+  const secrets = collectEnvSecretValues(env);
+  const hits = [];
+  const redacted = redactSecrets(tables, secrets, "", hits);
+  if (payloadContainsSecrets({ tables: redacted }, env)) {
+    const error = new Error(
+      "Backup aborted because a configured environment secret value remained in table data after the reviewed redaction policy."
+    );
+    error.status = 500;
+    error.excludedFields = hits;
+    throw error;
+  }
+  return { tables: redacted, excludedFields: hits };
+}
+
+function wrapArchive(buffer, env = process.env) {
+  const keyMaterial = String(env.BACKUP_ENCRYPTION_KEY || "").trim();
+  if (!keyMaterial || isPlaceholderSecret(keyMaterial)) {
+    return { buffer, encryption: "none" };
+  }
+  const key = crypto.scryptSync(keyMaterial, "dentasync-backup-v2", 32);
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const enc = Buffer.concat([cipher.update(buffer), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return { buffer: Buffer.concat([ENVELOPE, iv, tag, enc]), encryption: "aes-256-gcm" };
+}
+
+function unwrapArchive(buffer, env = process.env) {
+  if (!Buffer.isBuffer(buffer)) buffer = Buffer.from(buffer);
+  if (buffer.length > 35 && buffer.subarray(0, 7).equals(ENVELOPE)) {
+    const keyMaterial = String(env.BACKUP_ENCRYPTION_KEY || "").trim();
+    if (!keyMaterial) {
+      const error = new Error("This archive is encrypted. Set BACKUP_ENCRYPTION_KEY to download or restore it.");
+      error.status = 400;
+      throw error;
+    }
+    const key = crypto.scryptSync(keyMaterial, "dentasync-backup-v2", 32);
+    const iv = buffer.subarray(7, 19);
+    const tag = buffer.subarray(19, 35);
+    const enc = buffer.subarray(35);
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(enc), decipher.final()]);
+  }
+  return buffer;
+}
+
+function productionRestoreAllowed(env = process.env) {
+  return String(env.BACKUP_ALLOW_PRODUCTION_RESTORE || "").toLowerCase() === "true";
+}
+
+function createBackupRecoveryService({ db, env = process.env, notifyAdmin = notifyActiveAdmins } = {}) {
   if (!db || typeof db.query !== "function") {
     throw new Error("Backup recovery requires a database connection.");
   }
+  const offsite = createOffsiteStore(env);
 
   async function withLock(key, fn) {
     const client = typeof db.connect === "function" ? await db.connect() : db;
@@ -163,6 +355,20 @@ function createBackupRecoveryService({ db } = {}) {
     }
   }
 
+  async function alertAdmins(title, body, backupId = null) {
+    try {
+      await notifyAdmin(db, {
+        type: "backup_alert",
+        title,
+        body,
+        entityType: "backup",
+        entityId: backupId,
+      });
+    } catch (error) {
+      console.warn("Backup admin notice failed:", error.message);
+    }
+  }
+
   async function listPublicTables() {
     const result = await db.query(
       `SELECT c.relname AS name
@@ -199,17 +405,21 @@ function createBackupRecoveryService({ db } = {}) {
       const result = await db.query(
         `SELECT setting_value FROM admin_portal_settings WHERE setting_key = 'backup' LIMIT 1`
       );
-      return normalizeSettings(result.rows[0]?.setting_value);
+      return normalizeSettings(result.rows[0]?.setting_value, env);
     } catch (error) {
       if (error?.code === "42P01") {
-        return normalizeSettings(DEFAULT_SETTINGS);
+        return normalizeSettings(DEFAULT_SETTINGS, env);
       }
       throw error;
     }
   }
 
   async function saveSettings(next, actor) {
-    const settings = normalizeSettings(next);
+    const settings = normalizeSettings(next, env);
+    const persisted = { ...settings };
+    delete persisted.scheduler;
+    delete persisted.schedulerActive;
+    delete persisted.schedulerCapabilities;
     await db.query(
       `INSERT INTO admin_portal_settings (setting_key, setting_value, updated_at, updated_by)
        VALUES ('backup', $1::jsonb, CURRENT_TIMESTAMP, $2)
@@ -217,52 +427,136 @@ function createBackupRecoveryService({ db } = {}) {
        SET setting_value = EXCLUDED.setting_value,
            updated_at = CURRENT_TIMESTAMP,
            updated_by = EXCLUDED.updated_by`,
-      [JSON.stringify(settings), actor?.id ? String(actor.id) : null]
+      [JSON.stringify(persisted), actor?.id ? String(actor.id) : null]
     );
-    return settings;
+    return normalizeSettings(persisted, env);
   }
 
-  async function applyRetention(keepCount) {
+  async function applyRetention() {
     const settings = await loadSettings();
-    const limit = Math.max(1, Number(keepCount || settings.retentionCount || 12));
-    const successful = await db.query(
-      `SELECT id
+    const groups = [
+      { slot: "daily", keep: settings.retentionDaily },
+      { slot: "weekly", keep: settings.retentionWeekly },
+      { slot: "monthly", keep: settings.retentionMonthly },
+      { slot: null, keep: settings.retentionManual },
+    ];
+    let removed = 0;
+    const verified = await db.query(
+      `SELECT COUNT(*)::int AS count
        FROM admin_portal_backups
-       WHERE status = 'success'
-         AND backup_type <> 'safety'
-       ORDER BY created_at DESC`
+       WHERE status = 'success'`
     );
-    const extras = successful.rows.slice(limit);
-    if (!extras.length) return 0;
-    if (successful.rows.length - extras.length < 1) return 0;
-    const ids = extras.map((row) => row.id);
-    await db.query(
-      `DELETE FROM admin_portal_backups
-       WHERE id = ANY($1::uuid[])
-         AND status = 'success'`,
-      [ids]
-    );
-    return ids.length;
+    const verifiedCount = Number(verified.rows[0]?.count || 0);
+    for (const group of groups) {
+      const successful = await db.query(
+        group.slot
+          ? `SELECT id, offsite_verified FROM admin_portal_backups
+             WHERE status = 'success' AND backup_type <> 'safety' AND schedule_slot = $1
+             ORDER BY created_at DESC`
+          : `SELECT id, offsite_verified FROM admin_portal_backups
+             WHERE status = 'success' AND backup_type <> 'safety' AND (schedule_slot IS NULL OR schedule_slot = '')
+             ORDER BY created_at DESC`,
+        group.slot ? [group.slot] : []
+      );
+      const extras = successful.rows.slice(group.keep);
+      for (const extra of extras) {
+        if (verifiedCount - removed <= 1) break;
+        await db.query(
+          `DELETE FROM admin_portal_backups
+           WHERE id = $1 AND status = 'success'`,
+          [extra.id]
+        );
+        removed += 1;
+      }
+    }
+    return removed;
   }
 
-  async function createBackup({ type = "manual", actor = null, notes = null } = {}) {
-    return withLock(BACKUP_LOCK, async () => {
-      const inserted = await db.query(
-        `INSERT INTO admin_portal_backups (
-           backup_type, status, file_name, created_by_id, created_by_name, notes
-         ) VALUES ($1, 'in_progress', $2, $3, $4, $5)
-         RETURNING *`,
-        [
-          type,
-          `dentasync-backup-pending.dsb`,
-          actor?.id ? String(actor.id) : null,
-          actor ? actorName(actor) : "System",
-          notes ? String(notes).slice(0, 500) : null,
-        ]
+  async function setPipeline(id, pipelineStatus) {
+    try {
+      await db.query(
+        `UPDATE admin_portal_backups SET pipeline_status = $2 WHERE id = $1`,
+        [id, pipelineStatus]
       );
+    } catch (error) {
+      if (error?.code !== "42703") throw error;
+    }
+  }
+
+  async function putOffsite(backupId, packed, publicMeta) {
+    if (!offsite.store) return { storageClass: "legacy_database", offsiteVerified: false, key: null };
+    const prefix = objectPrefix(env);
+    const key = `${prefix}/${backupId}/archive.dsb`;
+    const manifestKey = `${prefix}/${backupId}/manifest.json`;
+    await offsite.store.putObject(key, packed, "application/octet-stream");
+    const manifest = Buffer.from(
+      JSON.stringify({
+        ...publicMeta,
+        independentOfDatabase: true,
+        createdAt: new Date().toISOString(),
+      }),
+      "utf8"
+    );
+    await offsite.store.putObject(manifestKey, manifest, "application/json");
+    const downloaded = await offsite.store.getObject(key);
+    const verified = Boolean(downloaded) && sha256(downloaded) === sha256(packed);
+    if (!verified) {
+      throw new Error("Off-site upload could not be verified by re-reading the archive.");
+    }
+    return {
+      storageClass: offsite.configured ? "offsite" : "independent_disk",
+      offsiteVerified: offsite.configured && verified,
+      independentVerified: verified,
+      key,
+    };
+  }
+
+  async function createBackup({ type = "manual", actor = null, notes = null, scheduleSlot = null } = {}) {
+    return withLock(BACKUP_LOCK, async () => {
+      const started = Date.now();
+      let inserted;
+      try {
+        inserted = await db.query(
+          `INSERT INTO admin_portal_backups (
+             backup_type, status, file_name, created_by_id, created_by_name, notes, pipeline_status, started_at, schedule_slot
+           ) VALUES ($1, 'in_progress', $2, $3, $4, $5, 'running', CURRENT_TIMESTAMP, $6)
+           RETURNING *`,
+          [
+            type,
+            `dentasync-backup-pending.dsb`,
+            actor?.id ? String(actor.id) : null,
+            actor ? actorName(actor) : "System",
+            notes ? String(notes).slice(0, 500) : null,
+            scheduleSlot,
+          ]
+        );
+      } catch (error) {
+        if (error?.code !== "42703") throw error;
+        inserted = await db.query(
+          `INSERT INTO admin_portal_backups (
+             backup_type, status, file_name, created_by_id, created_by_name, notes
+           ) VALUES ($1, 'in_progress', $2, $3, $4, $5)
+           RETURNING *`,
+          [
+            type,
+            `dentasync-backup-pending.dsb`,
+            actor?.id ? String(actor.id) : null,
+            actor ? actorName(actor) : "System",
+            notes ? String(notes).slice(0, 500) : null,
+          ]
+        );
+      }
       const record = inserted.rows[0];
       try {
         const dump = await dumpTables();
+        const policy = applySecretPolicy(dump.tables, env);
+        const files = collectUploadFiles({ cwd: process.cwd() });
+        let pgDump = { status: "skipped", reason: "not attempted" };
+        try {
+          pgDump = await tryPgDump(env);
+        } catch (error) {
+          pgDump = { status: "failed", reason: error.message };
+        }
         const payloadObject = {
           magic: BACKUP_MAGIC,
           formatVersion: FORMAT_VERSION,
@@ -271,62 +565,165 @@ function createBackupRecoveryService({ db } = {}) {
           app: { name: "DentaSync" },
           tableOrder: dump.names,
           rowCounts: dump.rowCounts,
-          tables: dump.tables,
+          tables: policy.tables,
+          excludedFields: policy.excludedFields,
+          files: {
+            included: files.included,
+            omitted: files.omitted,
+          },
+          pgDump: {
+            status: pgDump.status,
+            reason: pgDump.reason || null,
+            postgresVersion: pgDump.postgresVersion || null,
+            sqlGzipBase64: pgDump.sqlGzipBase64 || null,
+          },
         };
-        if (payloadContainsSecrets(payloadObject)) {
+        if (payloadContainsSecrets({ tables: payloadObject.tables, excludedFields: payloadObject.excludedFields }, env)) {
           throw new Error(
             "Backup aborted because a configured environment secret value was found in table data."
           );
         }
-        const packed = gzipJson(payloadObject);
-        if (packed.length > MAX_BACKUP_BYTES) {
-          throw new Error("Backup exceeds the 80 MB storage limit.");
+        let packedInner = gzipJson(payloadObject);
+        let postgresInner = packedInner;
+        if (packedInner.length > MAX_BACKUP_BYTES) {
+          const slimmer = {
+            ...payloadObject,
+            files: { included: stripFileBytes(files.included), omitted: files.omitted },
+            pgDump: { ...payloadObject.pgDump, sqlGzipBase64: null },
+          };
+          postgresInner = gzipJson(slimmer);
+          if (postgresInner.length > MAX_BACKUP_BYTES) {
+            throw new Error("Backup exceeds the 80 MB storage limit.");
+          }
         }
+        const wrappedOffsite = wrapArchive(packedInner, env);
+        const wrappedPostgres = wrapArchive(postgresInner, env);
         const fileName = `dentasync-backup-${record.id}.dsb`;
-        const saved = await db.query(
-          `UPDATE admin_portal_backups
-           SET status = 'success',
-               file_name = $2,
-               byte_size = $3,
-               checksum_sha256 = $4,
-               format_version = $5,
-               table_count = $6,
-               row_count = $7,
-               table_names = $8,
-               payload = $9,
-               error_detail = NULL,
-               finished_at = CURRENT_TIMESTAMP
-           WHERE id = $1
-           RETURNING *`,
-          [
-            record.id,
+        await setPipeline(record.id, "uploading");
+        let offsiteResult = { storageClass: "legacy_database", offsiteVerified: false, key: null };
+        try {
+          offsiteResult = await putOffsite(record.id, wrappedOffsite.buffer, {
+            id: record.id,
             fileName,
-            packed.length,
-            sha256(packed),
-            FORMAT_VERSION,
-            dump.names.length,
-            dump.totalRows,
-            dump.names,
-            packed,
-          ]
-        );
+            checksumSha256: sha256(wrappedOffsite.buffer),
+            byteSize: wrappedOffsite.buffer.length,
+            tableCount: dump.names.length,
+            rowCount: dump.totalRows,
+            formatVersion: FORMAT_VERSION,
+            encryption: wrappedOffsite.encryption,
+          });
+        } catch (error) {
+          if (offsite.store) {
+            await alertAdmins(
+              "Backup off-site upload failed",
+              "A clinic backup archive could not be stored independently of PostgreSQL.",
+              record.id
+            );
+            throw error;
+          }
+        }
+        await setPipeline(record.id, "verifying");
+        const storageClass = offsiteResult.key
+          ? offsite.configured
+            ? "both"
+            : "both"
+          : "legacy_database";
+        const successParams = [
+          record.id,
+          fileName,
+          wrappedPostgres.buffer.length,
+          sha256(wrappedPostgres.buffer),
+          FORMAT_VERSION,
+          dump.names.length,
+          dump.totalRows,
+          dump.names,
+          wrappedPostgres.buffer,
+          offsiteResult.key ? "both" : "legacy_database",
+          offsiteResult.key,
+          offsiteResult.offsiteVerified === true,
+          offsiteResult.offsiteVerified
+            ? "Off-site object re-read matched checksum."
+            : offsiteResult.independentVerified
+              ? "Independent disk copy verified. Cloud off-site is not configured."
+              : "Logical archive checksum stored in PostgreSQL only.",
+          Date.now() - started,
+          JSON.stringify(policy.excludedFields),
+          JSON.stringify(stripFileBytes([...files.included, ...files.omitted])),
+          pgDump.status,
+          wrappedPostgres.encryption,
+          scheduleSlot,
+        ];
+        let saved;
+        try {
+          saved = await db.query(
+            `UPDATE admin_portal_backups
+             SET status = 'success',
+                 file_name = $2,
+                 byte_size = $3,
+                 checksum_sha256 = $4,
+                 format_version = $5,
+                 table_count = $6,
+                 row_count = $7,
+                 table_names = $8,
+                 payload = $9,
+                 error_detail = NULL,
+                 finished_at = CURRENT_TIMESTAMP,
+                 pipeline_status = 'completed',
+                 storage_class = $10,
+                 offsite_object_key = $11,
+                 offsite_verified = $12,
+                 verified_at = CURRENT_TIMESTAMP,
+                 verification_detail = $13,
+                 duration_ms = $14,
+                 excluded_fields = $15::jsonb,
+                 file_manifest = $16::jsonb,
+                 pg_dump_status = $17,
+                 encryption = $18,
+                 schedule_slot = $19
+             WHERE id = $1
+             RETURNING *`,
+            successParams
+          );
+        } catch (error) {
+          if (error?.code !== "42703") throw error;
+          saved = await db.query(
+            `UPDATE admin_portal_backups
+             SET status = 'success',
+                 file_name = $2,
+                 byte_size = $3,
+                 checksum_sha256 = $4,
+                 format_version = $5,
+                 table_count = $6,
+                 row_count = $7,
+                 table_names = $8,
+                 payload = $9,
+                 error_detail = NULL,
+                 finished_at = CURRENT_TIMESTAMP
+             WHERE id = $1
+             RETURNING *`,
+            successParams.slice(0, 9)
+          );
+        }
+        void storageClass;
         await applyRetention();
         await recordOperation({
           backupId: record.id,
           operation: "create",
           status: "success",
           actor,
-          detail: `Stored ${dump.names.length} tables, ${dump.totalRows} rows.`,
+          detail: `Stored ${dump.names.length} tables, ${dump.totalRows} rows, ${files.fileCount} files. Excluded secret fields: ${policy.excludedFields.length}.`,
         });
         return publicBackup(saved.rows[0]);
       } catch (error) {
         await db.query(
           `UPDATE admin_portal_backups
            SET status = 'failed',
+               pipeline_status = 'failed',
                error_detail = $2,
-               finished_at = CURRENT_TIMESTAMP
+               finished_at = CURRENT_TIMESTAMP,
+               duration_ms = $3
            WHERE id = $1`,
-          [record.id, String(error.message || error).slice(0, 2000)]
+          [record.id, String(error.message || error).slice(0, 2000), Date.now() - started]
         );
         await recordOperation({
           backupId: record.id,
@@ -335,10 +732,19 @@ function createBackupRecoveryService({ db } = {}) {
           actor,
           detail: error.message,
         });
+        await alertAdmins("Backup failed", "A clinic backup job failed. Check Backup History for the error class.", record.id);
         error.status = error.status || 500;
         throw error;
       }
     });
+  }
+
+  function nextScheduledDescription(settings) {
+    if (!settings.automatic) return null;
+    if (!settings.schedulerActive) {
+      return "Not independently scheduled. Next in-process attempt runs while the API is awake.";
+    }
+    return `Daily ${String(settings.dailyHour).padStart(2, "0")}:00 Asia/Manila; weekly Sunday; monthly on the 1st.`;
   }
 
   async function getOverview() {
@@ -348,14 +754,26 @@ function createBackupRecoveryService({ db } = {}) {
       const listed = await db.query(
         `SELECT id, backup_type, status, file_name, byte_size, checksum_sha256, format_version,
                 table_count, row_count, table_names, error_detail, created_by_id, created_by_name,
-                created_at, finished_at, notes
+                created_at, finished_at, notes, pipeline_status, storage_class, offsite_object_key,
+                offsite_verified, verified_at, verification_detail, started_at, duration_ms,
+                excluded_fields, file_manifest, pg_dump_status, encryption, schedule_slot
          FROM admin_portal_backups
          ORDER BY created_at DESC
          LIMIT 50`
       );
       backups = listed.rows.map(publicBackup);
     } catch (error) {
-      if (error?.code === "42P01") {
+      if (error?.code === "42703") {
+        const listed = await db.query(
+          `SELECT id, backup_type, status, file_name, byte_size, checksum_sha256, format_version,
+                  table_count, row_count, table_names, error_detail, created_by_id, created_by_name,
+                  created_at, finished_at, notes
+           FROM admin_portal_backups
+           ORDER BY created_at DESC
+           LIMIT 50`
+        );
+        backups = listed.rows.map(publicBackup);
+      } else if (error?.code === "42P01") {
         return {
           status: "unavailable",
           message: "Backup storage is not installed. Run npm run migrate:admin-backups.",
@@ -368,41 +786,56 @@ function createBackupRecoveryService({ db } = {}) {
             persistentAcrossDeploys: true,
             survivesDestroyedDatabase: false,
           },
+          offsite: offsite,
+          pitr: pitrStatus(env),
         };
+      } else {
+        throw error;
       }
-      throw error;
     }
 
     const successful = backups.filter((item) => item.status === "success");
-    const latest = backups[0] || null;
-    const latestSuccess = successful[0] || null;
-    const inProgress = backups.find((item) => item.status === "in_progress");
-    const latestFailed = backups.find((item) => item.status === "failed");
+    const latestAttempted = backups[0] || null;
+    const latestCompleted = successful[0] || null;
+    const latestFailed = backups.find((item) => item.status === "failed") || null;
+    const latestVerified = backups.find((item) => item.verifiedAt) || latestCompleted;
+    const inProgress = backups.find((item) => item.status === "in_progress" || ["queued", "running", "uploading", "verifying"].includes(item.pipelineStatus));
+    const verifiedOffsite = backups.find((item) => item.offsiteProtected);
     let lastRestore = null;
+    let lastIsolated = null;
     try {
       const restore = await db.query(
-        `SELECT backup_id, status, actor_name, detail, created_at, finished_at
+        `SELECT backup_id, operation, status, actor_name, detail, created_at, finished_at
          FROM admin_portal_backup_operations
-         WHERE operation = 'restore'
+         WHERE operation IN ('restore', 'isolated_restore')
          ORDER BY created_at DESC
-         LIMIT 1`
+         LIMIT 5`
       );
-      lastRestore = restore.rows[0] || null;
+      lastRestore = restore.rows.find((row) => row.operation === "restore") || null;
+      lastIsolated = restore.rows.find((row) => row.operation === "isolated_restore") || null;
     } catch (error) {
       if (error?.code !== "42P01") throw error;
     }
 
     let status = "never_backed_up";
     if (inProgress) status = "in_progress";
-    else if (latestSuccess) status = "success";
+    else if (latestAttempted?.status === "failed") status = "failed";
+    else if (latestCompleted) status = "success";
     else if (latestFailed) status = "failed";
+
+    const storageBytes = successful.reduce((sum, item) => sum + Number(item.byteSize || 0), 0);
 
     return {
       status,
       availableCount: successful.length,
-      latestBackup: latest,
-      latestSuccessfulBackup: latestSuccess,
+      latestBackup: latestAttempted,
+      latestAttemptedBackup: latestAttempted,
+      latestSuccessfulBackup: latestCompleted,
+      latestCompletedBackup: latestCompleted,
+      latestFailedBackup: latestFailed,
+      latestVerifiedBackup: latestVerified,
       lastError: latestFailed?.errorDetail || null,
+      nextScheduledBackup: nextScheduledDescription(settings),
       lastRestore: lastRestore
         ? {
             backupId: lastRestore.backup_id,
@@ -411,16 +844,45 @@ function createBackupRecoveryService({ db } = {}) {
             detail: lastRestore.detail,
             createdAt: lastRestore.created_at,
             finishedAt: lastRestore.finished_at,
+            kind: "production",
+          }
+        : null,
+      lastIsolatedRestore: lastIsolated
+        ? {
+            backupId: lastIsolated.backup_id,
+            status: lastIsolated.status,
+            actorName: lastIsolated.actor_name,
+            detail: lastIsolated.detail,
+            createdAt: lastIsolated.created_at,
+            finishedAt: lastIsolated.finished_at,
           }
         : null,
       backups,
       settings,
+      productionRestoreEnabled: productionRestoreAllowed(env),
+      pitr: pitrStatus(env),
+      offsite: {
+        configured: offsite.configured,
+        provider: offsite.provider,
+        label: offsite.label,
+        status: verifiedOffsite
+          ? "verified"
+          : offsite.configured
+            ? "configured_unverified"
+            : "Off-site Backup Not Configured",
+        independentDisk: Boolean(offsite.independentDisk),
+      },
       storage: {
-        method: "postgresql",
-        location: "admin_portal_backups.payload",
+        method: offsite.configured ? "postgresql+s3" : "postgresql",
+        location: offsite.configured
+          ? "admin_portal_backups.payload + private object storage"
+          : "admin_portal_backups.payload",
         persistentAcrossDeploys: true,
-        survivesDestroyedDatabase: false,
-        note: "Download completed backups for off-site copies. Render disks are ephemeral; this catalog is stored in Postgres.",
+        survivesDestroyedDatabase: Boolean(verifiedOffsite),
+        usageBytes: storageBytes,
+        note: verifiedOffsite
+          ? "A verified independent object copy exists for at least one backup."
+          : "Download completed backups or configure BACKUP_S3_* credentials. Render disks are ephemeral; this catalog is stored in Postgres and does not survive destroying that database unless an off-site copy was verified.",
       },
     };
   }
@@ -430,15 +892,29 @@ function createBackupRecoveryService({ db } = {}) {
       ? "*"
       : `id, backup_type, status, file_name, byte_size, checksum_sha256, format_version,
          table_count, row_count, table_names, error_detail, created_by_id, created_by_name,
-         created_at, finished_at, notes`;
-    const result = await db.query(
-      `SELECT ${columns} FROM admin_portal_backups WHERE id::text = $1 LIMIT 1`,
-      [String(id)]
-    );
-    return result.rows[0] || null;
+         created_at, finished_at, notes, pipeline_status, storage_class, offsite_object_key,
+         offsite_verified, verified_at, verification_detail, started_at, duration_ms,
+         excluded_fields, file_manifest, pg_dump_status, encryption, schedule_slot`;
+    try {
+      const result = await db.query(
+        `SELECT ${columns} FROM admin_portal_backups WHERE id::text = $1 LIMIT 1`,
+        [String(id)]
+      );
+      return result.rows[0] || null;
+    } catch (error) {
+      if (error?.code !== "42703") throw error;
+      const result = await db.query(
+        `SELECT id, backup_type, status, file_name, byte_size, checksum_sha256, format_version,
+                table_count, row_count, table_names, error_detail, created_by_id, created_by_name,
+                created_at, finished_at, notes, payload
+         FROM admin_portal_backups WHERE id::text = $1 LIMIT 1`,
+        [String(id)]
+      );
+      return result.rows[0] || null;
+    }
   }
 
-  function parseAndValidatePayload(buffer, expectedChecksum) {
+  function parseAndValidatePayload(buffer, expectedChecksum, options = {}) {
     if (!buffer || !buffer.length) {
       const error = new Error("Backup file is empty or missing.");
       error.status = 400;
@@ -450,15 +926,21 @@ function createBackupRecoveryService({ db } = {}) {
       error.status = 400;
       throw error;
     }
+    let inner = buffer;
+    try {
+      inner = unwrapArchive(buffer, options.env || env);
+    } catch (error) {
+      if (error.status) throw error;
+    }
     let parsed;
     try {
-      parsed = gunzipJson(buffer);
+      parsed = gunzipJson(inner);
     } catch {
       const error = new Error("Backup file is not a valid DentaSync archive.");
       error.status = 400;
       throw error;
     }
-    if (parsed?.magic !== BACKUP_MAGIC || Number(parsed.formatVersion) !== FORMAT_VERSION) {
+    if (parsed?.magic !== BACKUP_MAGIC || !SUPPORTED_FORMATS.has(Number(parsed.formatVersion))) {
       const error = new Error("Backup format is incompatible with this DentaSync version.");
       error.status = 400;
       throw error;
@@ -468,13 +950,150 @@ function createBackupRecoveryService({ db } = {}) {
       error.status = 400;
       throw error;
     }
+    if (payloadContainsSecrets({ tables: parsed.tables, excludedFields: parsed.excludedFields }, options.env || env)) {
+      const error = new Error("Backup archive still contains environment secret values and cannot be restored.");
+      error.status = 400;
+      throw error;
+    }
     return parsed;
   }
 
-  async function restoreBackup({ backupId, confirmation, actor, createSafety = true }) {
+  async function loadArchiveBuffer(row) {
+    if (row?.payload && row.payload.length) {
+      return Buffer.isBuffer(row.payload) ? row.payload : Buffer.from(row.payload);
+    }
+    if (row?.offsite_object_key && offsite.store) {
+      const remote = await offsite.store.getObject(row.offsite_object_key);
+      if (remote) return remote;
+    }
+    const error = new Error("Backup file is empty or missing.");
+    error.status = 400;
+    throw error;
+  }
+
+  async function validateBackup({ backupId, actor }) {
+    const row = await getBackupRow(backupId, { includePayload: true });
+    if (!row) {
+      const error = new Error("Backup not found.");
+      error.status = 404;
+      throw error;
+    }
+    const buffer = await loadArchiveBuffer(row);
+    const parsed = parseAndValidatePayload(buffer, row.checksum_sha256);
+    const fileCount = (parsed.files?.included || []).length;
+    await recordOperation({
+      backupId: row.id,
+      operation: "validate",
+      status: "success",
+      actor,
+      detail: `Checksum matched. ${Object.keys(parsed.tables).length} tables, ${fileCount} packed files.`,
+    });
+    return {
+      valid: true,
+      backup: publicBackup(row),
+      tableCount: Object.keys(parsed.tables).length,
+      fileCount,
+      pgDumpStatus: parsed.pgDump?.status || row.pg_dump_status || null,
+      excludedFields: parsed.excludedFields || row.excluded_fields || [],
+      formatVersion: parsed.formatVersion,
+      legacy: Number(parsed.formatVersion) === 1 || (row.storage_class || "legacy_database") === "legacy_database",
+    };
+  }
+
+  async function applyParsedTables(client, parsed) {
+    const currentTables = new Set(await listPublicTables());
+    const restoreNames = (parsed.tableOrder || Object.keys(parsed.tables)).filter((name) => currentTables.has(name));
+    if (restoreNames.length) {
+      await client.query(`TRUNCATE ${restoreNames.map(quoteIdent).join(", ")} RESTART IDENTITY CASCADE`);
+    }
+    for (const name of restoreNames) {
+      const rows = parsed.tables[name]?.rows || [];
+      if (!rows.length) continue;
+      await client.query(
+        `INSERT INTO ${quoteIdent(name)}
+         SELECT * FROM json_populate_recordset(NULL::${quoteIdent(name)}, $1::json)`,
+        [JSON.stringify(rows)]
+      );
+    }
+    const verified = {};
+    for (const name of restoreNames) {
+      const count = await client.query(`SELECT COUNT(*)::int AS count FROM ${quoteIdent(name)}`);
+      verified[name] = count.rows[0].count;
+    }
+    return { restoreNames, verified };
+  }
+
+  async function isolatedRestore({ backupId, actor }) {
+    return withLock(RESTORE_LOCK, async () => {
+      const row = await getBackupRow(backupId, { includePayload: true });
+      if (!row || row.status !== "success") {
+        const error = new Error("Only a completed backup can be restore-tested.");
+        error.status = 400;
+        throw error;
+      }
+      const parsed = parseAndValidatePayload(await loadArchiveBuffer(row), row.checksum_sha256);
+      const client = typeof db.connect === "function" ? await db.connect() : db;
+      const shouldRelease = client !== db;
+      try {
+        await client.query("BEGIN");
+        await client.query("SET LOCAL session_replication_role = replica");
+        const applied = await applyParsedTables(client, parsed);
+        const sample = {
+          users: applied.verified.users ?? null,
+          clinic_patient_records: applied.verified.clinic_patient_records ?? null,
+          prescriptions: applied.verified.prescriptions ?? null,
+          patient_portal_appointments: applied.verified.patient_portal_appointments ?? null,
+        };
+        const files = restoreUploadFiles(parsed.files?.included || [], { cwd: process.cwd(), dryRun: true });
+        await client.query("ROLLBACK");
+        await recordOperation({
+          backupId: row.id,
+          operation: "isolated_restore",
+          status: "success",
+          actor,
+          detail: `Isolated restore rolled back after verifying ${applied.restoreNames.length} tables and ${files.length} files.`,
+        });
+        return {
+          isolated: true,
+          productionTouched: false,
+          backup: publicBackup(row),
+          restoredTables: applied.restoreNames,
+          verifiedRowCounts: applied.verified,
+          sampleCounts: sample,
+          filesChecked: files.length,
+        };
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => {});
+        await recordOperation({
+          backupId: row.id,
+          operation: "isolated_restore",
+          status: "failed",
+          actor,
+          detail: error.message,
+        });
+        await alertAdmins("Isolated recovery test failed", "A non-destructive restore test did not complete.", row.id);
+        error.status = error.status || 500;
+        throw error;
+      } finally {
+        if (shouldRelease) client.release();
+      }
+    });
+  }
+
+  async function restoreBackup({ backupId, confirmation, actor, createSafety = true, mode = "isolated" }) {
+    if (mode !== "production") {
+      return isolatedRestore({ backupId, actor });
+    }
     if (String(confirmation || "").trim() !== "RESTORE") {
-      const error = new Error('Type RESTORE to confirm this destructive recovery.');
+      const error = new Error("Type RESTORE to confirm this destructive recovery.");
       error.status = 400;
+      throw error;
+    }
+    if (!productionRestoreAllowed(env)) {
+      const error = new Error(
+        "Production restore is disabled. Run an isolated restore test, then set BACKUP_ALLOW_PRODUCTION_RESTORE=true only for a supervised recovery window."
+      );
+      error.status = 403;
       throw error;
     }
     return withLock(RESTORE_LOCK, async () => {
@@ -484,12 +1103,12 @@ function createBackupRecoveryService({ db } = {}) {
         error.status = 404;
         throw error;
       }
-      if (row.status !== "success" || !row.payload) {
+      if (row.status !== "success") {
         const error = new Error("Only a completed backup can be restored.");
         error.status = 400;
         throw error;
       }
-      const parsed = parseAndValidatePayload(row.payload, row.checksum_sha256);
+      const parsed = parseAndValidatePayload(await loadArchiveBuffer(row), row.checksum_sha256);
       let safety = null;
       if (createSafety) {
         try {
@@ -506,38 +1125,34 @@ function createBackupRecoveryService({ db } = {}) {
             actor,
             detail: `Safety backup failed: ${error.message}`,
           });
-          const blocked = new Error(
-            `Restore stopped because the safety backup failed: ${error.message}`
-          );
+          const blocked = new Error(`Restore stopped because the safety backup failed: ${error.message}`);
           blocked.status = 500;
           throw blocked;
         }
       }
 
-      const currentTables = new Set(await listPublicTables());
-      const restoreNames = (parsed.tableOrder || Object.keys(parsed.tables)).filter((name) =>
-        currentTables.has(name)
-      );
       const client = typeof db.connect === "function" ? await db.connect() : db;
       const shouldRelease = client !== db;
       try {
         await client.query("BEGIN");
         await client.query("SET LOCAL session_replication_role = replica");
-        if (restoreNames.length) {
-          await client.query(
-            `TRUNCATE ${restoreNames.map(quoteIdent).join(", ")} RESTART IDENTITY CASCADE`
-          );
-        }
-        for (const name of restoreNames) {
-          const rows = parsed.tables[name]?.rows || [];
-          if (!rows.length) continue;
-          await client.query(
-            `INSERT INTO ${quoteIdent(name)}
-             SELECT * FROM json_populate_recordset(NULL::${quoteIdent(name)}, $1::json)`,
-            [JSON.stringify(rows)]
-          );
-        }
+        const applied = await applyParsedTables(client, parsed);
+        restoreUploadFiles(parsed.files?.included || [], { cwd: process.cwd(), dryRun: false });
         await client.query("COMMIT");
+        await recordOperation({
+          backupId: row.id,
+          operation: "restore",
+          status: "success",
+          actor,
+          detail: `Restored ${applied.restoreNames.length} tables. Safety backup: ${safety?.id || "skipped"}.`,
+        });
+        return {
+          restored: true,
+          backup: publicBackup(row),
+          safetyBackup: safety,
+          verifiedRowCounts: applied.verified,
+          restoredTables: applied.restoreNames,
+        };
       } catch (error) {
         await client.query("ROLLBACK").catch(() => {});
         await recordOperation({
@@ -552,26 +1167,6 @@ function createBackupRecoveryService({ db } = {}) {
       } finally {
         if (shouldRelease) client.release();
       }
-
-      const verified = {};
-      for (const name of restoreNames) {
-        const count = await db.query(`SELECT COUNT(*)::int AS count FROM ${quoteIdent(name)}`);
-        verified[name] = count.rows[0].count;
-      }
-      await recordOperation({
-        backupId: row.id,
-        operation: "restore",
-        status: "success",
-        actor,
-        detail: `Restored ${restoreNames.length} tables. Safety backup: ${safety?.id || "skipped"}.`,
-      });
-      return {
-        restored: true,
-        backup: publicBackup(row),
-        safetyBackup: safety,
-        verifiedRowCounts: verified,
-        restoredTables: restoreNames,
-      };
     });
   }
 
@@ -588,26 +1183,28 @@ function createBackupRecoveryService({ db } = {}) {
     }
     const parsed = parseAndValidatePayload(buffer);
     const packed = gzipJson(parsed);
+    const wrapped = wrapArchive(packed, env);
     const inserted = await db.query(
       `INSERT INTO admin_portal_backups (
          backup_type, status, file_name, byte_size, checksum_sha256, format_version,
          table_count, row_count, table_names, payload, created_by_id, created_by_name,
-         finished_at, notes
+         finished_at, notes, pipeline_status, storage_class, encryption
        ) VALUES (
-         'upload', 'success', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP, $11
+         'upload', 'success', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP, $11, 'completed', 'legacy_database', $12
        ) RETURNING *`,
       [
         `dentasync-upload-${Date.now()}.dsb`,
-        packed.length,
-        sha256(packed),
-        FORMAT_VERSION,
+        wrapped.buffer.length,
+        sha256(wrapped.buffer),
+        Number(parsed.formatVersion || FORMAT_VERSION),
         Object.keys(parsed.tables || {}).length,
         Object.values(parsed.rowCounts || {}).reduce((sum, value) => sum + Number(value || 0), 0),
         parsed.tableOrder || Object.keys(parsed.tables || {}),
-        packed,
+        wrapped.buffer,
         actor?.id ? String(actor.id) : null,
         actor ? actorName(actor) : "Administrator",
         `Uploaded ${String(originalName || "backup.dsb").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80)}`,
+        wrapped.encryption,
       ]
     );
     await recordOperation({
@@ -620,7 +1217,12 @@ function createBackupRecoveryService({ db } = {}) {
     return publicBackup(inserted.rows[0]);
   }
 
-  async function deleteBackup({ backupId, actor }) {
+  async function deleteBackup({ backupId, actor, confirmation }) {
+    if (String(confirmation || "").trim() !== "DELETE") {
+      const error = new Error("Type DELETE to confirm removing this backup record.");
+      error.status = 400;
+      throw error;
+    }
     const row = await getBackupRow(backupId);
     if (!row) {
       const error = new Error("Backup not found.");
@@ -646,32 +1248,116 @@ function createBackupRecoveryService({ db } = {}) {
     return { deleted: true, id: row.id };
   }
 
-  function scheduleIsDue(settings, now = new Date()) {
-    if (settings.schedule === "manual") return false;
-    const last = settings.lastScheduledAt ? new Date(settings.lastScheduledAt) : null;
-    if (!last || Number.isNaN(last.getTime())) return true;
-    const elapsed = now.getTime() - last.getTime();
-    if (settings.schedule === "daily") return elapsed >= 20 * 60 * 60 * 1000;
-    if (settings.schedule === "weekly") return elapsed >= 6 * 24 * 60 * 60 * 1000;
-    return false;
+  async function transferLegacyBackup({ backupId, actor }) {
+    if (!offsite.store) {
+      const error = new Error("Off-site storage is not configured.");
+      error.status = 400;
+      throw error;
+    }
+    const row = await getBackupRow(backupId, { includePayload: true });
+    if (!row?.payload) {
+      const error = new Error("This backup has no stored payload to transfer.");
+      error.status = 400;
+      throw error;
+    }
+    const packed = Buffer.isBuffer(row.payload) ? row.payload : Buffer.from(row.payload);
+    const uploaded = await putOffsite(row.id, packed, {
+      id: row.id,
+      fileName: row.file_name,
+      checksumSha256: sha256(packed),
+      byteSize: packed.length,
+      transferredFromLegacy: true,
+    });
+    const saved = await db.query(
+      `UPDATE admin_portal_backups
+       SET storage_class = 'both',
+           offsite_object_key = $2,
+           offsite_verified = $3,
+           verified_at = CURRENT_TIMESTAMP,
+           verification_detail = $4
+       WHERE id = $1
+       RETURNING *`,
+      [
+        row.id,
+        uploaded.key,
+        uploaded.offsiteVerified === true,
+        uploaded.offsiteVerified
+          ? "Legacy payload copied off-site and re-read."
+          : "Legacy payload copied to independent disk.",
+      ]
+    );
+    await recordOperation({
+      backupId: row.id,
+      operation: "transfer",
+      status: "success",
+      actor,
+      detail: "Legacy database payload copied without deleting the original.",
+    });
+    return publicBackup(saved.rows[0]);
   }
 
-  async function runDueScheduledBackup() {
-    const settings = await loadSettings();
-    if (!scheduleIsDue(settings)) {
-      return { ran: false, settings };
+  function dueSlots(settings, now = new Date()) {
+    if (!settings.automatic && settings.schedule === "manual") return [];
+    const manila = manilaParts(now);
+    const due = [];
+    if (settings.dailyEnabled || settings.schedule === "daily" || settings.schedule === "automatic") {
+      if (manila.hour >= Number(settings.dailyHour || 2) && dateKeyFromIso(settings.lastDailyAt) !== manila.dateKey) {
+        due.push("daily");
+      }
     }
+    if (settings.weeklyEnabled && manila.weekday === "Sun" && dateKeyFromIso(settings.lastWeeklyAt) !== manila.dateKey) {
+      due.push("weekly");
+    }
+    if (settings.monthlyEnabled && manila.day === "01" && dateKeyFromIso(settings.lastMonthlyAt) !== manila.dateKey) {
+      due.push("monthly");
+    }
+    if (!due.length && (settings.schedule === "daily" || settings.schedule === "weekly")) {
+      const last = settings.lastScheduledAt ? new Date(settings.lastScheduledAt) : null;
+      if (!last || Number.isNaN(last.getTime())) due.push(settings.schedule === "weekly" ? "weekly" : "daily");
+      else {
+        const elapsed = now.getTime() - last.getTime();
+        if (settings.schedule === "daily" && elapsed >= 20 * 60 * 60 * 1000) due.push("daily");
+        if (settings.schedule === "weekly" && elapsed >= 6 * 24 * 60 * 60 * 1000) due.push("weekly");
+      }
+    }
+    return due;
+  }
+
+  function scheduleIsDue(settings, now = new Date()) {
+    return dueSlots(settings, now).length > 0;
+  }
+
+  async function runDueScheduledBackup(now = new Date()) {
+    const settings = await loadSettings();
+    const due = dueSlots(settings, now);
+    if (!due.length) {
+      return { ran: false, settings, due };
+    }
+    const slot = due[0];
     try {
-      const backup = await createBackup({ type: "scheduled", actor: null, notes: "Scheduled backup" });
-      await saveSettings({ ...settings, lastScheduledAt: new Date().toISOString(), lastScheduledError: null });
-      return { ran: true, backup };
+      const backup = await createBackup({
+        type: slot,
+        actor: null,
+        notes: `Scheduled ${slot} backup`,
+        scheduleSlot: slot,
+      });
+      const stamp = new Date().toISOString();
+      await saveSettings({
+        ...settings,
+        lastScheduledAt: stamp,
+        lastScheduledError: null,
+        lastDailyAt: slot === "daily" ? stamp : settings.lastDailyAt,
+        lastWeeklyAt: slot === "weekly" ? stamp : settings.lastWeeklyAt,
+        lastMonthlyAt: slot === "monthly" ? stamp : settings.lastMonthlyAt,
+      });
+      return { ran: true, backup, slot };
     } catch (error) {
       await saveSettings({
         ...settings,
         lastScheduledAt: new Date().toISOString(),
         lastScheduledError: error.message,
       });
-      return { ran: false, error: error.message };
+      return { ran: false, error: error.message, slot };
     }
   }
 
@@ -685,17 +1371,22 @@ function createBackupRecoveryService({ db } = {}) {
     getBackupRow,
     publicBackup,
     parseAndValidatePayload,
+    validateBackup,
+    isolatedRestore,
     restoreBackup,
     storeUploadedBackup,
     deleteBackup,
+    transferLegacyBackup,
+    loadArchiveBuffer,
     scheduleIsDue,
     runDueScheduledBackup,
     applyRetention,
+    applySecretPolicy,
   };
 }
 
-function createBackupScheduleJob({ db, intervalMs = 30 * 60 * 1000 } = {}) {
-  const service = createBackupRecoveryService({ db });
+function createBackupScheduleJob({ db, intervalMs = 30 * 60 * 1000, env = process.env } = {}) {
+  const service = createBackupRecoveryService({ db, env });
   let timer = null;
 
   async function runOnce() {
@@ -726,6 +1417,7 @@ function createBackupScheduleJob({ db, intervalMs = 30 * 60 * 1000 } = {}) {
 module.exports = {
   BACKUP_MAGIC,
   FORMAT_VERSION,
+  SUPPORTED_FORMATS,
   MAX_BACKUP_BYTES,
   gzipJson,
   gunzipJson,
@@ -734,6 +1426,10 @@ module.exports = {
   SECRET_ENV_KEYS,
   collectEnvSecretValues,
   payloadContainsSecrets,
+  applySecretPolicy,
+  wrapArchive,
+  unwrapArchive,
   createBackupRecoveryService,
   createBackupScheduleJob,
+  productionRestoreAllowed,
 };
