@@ -18,6 +18,7 @@ const {
 const { markQueueServingStarted, recordTreatmentComplete } = require("../services/treatmentDuration");
 const { attachDentalAuthorizationRoutes } = require("./dentalAuthorization");
 const { attachPrescriptionRoutes } = require("./prescriptions");
+const { updatePasswordHash } = require("../services/sessionRevocation");
 
 const QUEUE_STATUS_MAP = {
   checked_in: "checked_in",
@@ -1889,14 +1890,11 @@ function createStaffPortalRouter({
         return res.status(401).json({ message: "Current password is incorrect." });
       }
       const passwordHash = await bcrypt.hash(newPassword, 10);
-      await db.query(`UPDATE users SET password_hash = $1 WHERE id = $2`, [passwordHash, String(req.staff.id)]);
-      if (passwordResetService?.revokeSessions) {
-        try {
-          await passwordResetService.revokeSessions(String(req.staff.id));
-        } catch {
-          // Optional helper.
-        }
-      }
+      await updatePasswordHash(db, {
+        userId: req.staff.id,
+        passwordHash,
+        whereSql: "AND LOWER(role) = 'staff'",
+      });
       return res.json({ message: "Password updated successfully." });
     } catch (error) {
       console.error("Staff password update error:", error.message);

@@ -443,10 +443,15 @@ async function ensureDentistPadCredentials(database) {
   if (!padCredentialsReady) {
     const sqlPath = path.join(__dirname, "..", "migrations", "046_dentist_pad_credentials.sql");
     const sql = fs.readFileSync(sqlPath, "utf8");
-    padCredentialsReady = database.query(sql).catch((error) => {
-      padCredentialsReady = null;
-      throw error;
-    });
+    padCredentialsReady = Promise.resolve(database.query(sql))
+      .then(() => true)
+      .catch((error) => {
+        padCredentialsReady = null;
+        if (error?.code === "42P01" || error?.code === "42703" || !error?.code) {
+          return false;
+        }
+        throw error;
+      });
   }
   await padCredentialsReady;
 }
@@ -459,35 +464,69 @@ function requireDentistAccount(db) {
     }
 
     try {
-      await ensureDentistPadCredentials(db);
-      const result = await db.query(
-        `SELECT
-           account.id,
-           account.first_name,
-           account.last_name,
-           account.email,
-           account.phone,
-           account.role,
-           account.status,
-           account.is_verified,
-           account.created_at,
-           profile.specialization,
-           profile.schedule_notes,
-           profile.catalog_dentist_id,
-           profile.license_number,
-           profile.ptr_number,
-           profile.professional_designation
-         FROM users AS account
-         LEFT JOIN admin_portal_dentist_profiles AS profile
-           ON profile.user_id = account.id::text
-         WHERE account.id = $1
-           AND LOWER(account.role) = 'dentist'
-           AND account.is_verified = TRUE
-           AND COALESCE(account.is_archived, FALSE) = FALSE
-           AND LOWER(COALESCE(account.status, 'active')) NOT IN ('inactive', 'disabled', 'suspended')
-         LIMIT 1`,
-        [String(tokenUserId)]
-      );
+      try {
+        await ensureDentistPadCredentials(db);
+      } catch (schemaError) {
+        console.warn("Dentist pad credential schema apply skipped:", schemaError.message);
+      }
+      let result;
+      try {
+        result = await db.query(
+          `SELECT
+             account.id,
+             account.first_name,
+             account.last_name,
+             account.email,
+             account.phone,
+             account.role,
+             account.status,
+             account.is_verified,
+             account.created_at,
+             profile.specialization,
+             profile.schedule_notes,
+             profile.catalog_dentist_id,
+             profile.license_number,
+             profile.ptr_number,
+             profile.professional_designation
+           FROM users AS account
+           LEFT JOIN admin_portal_dentist_profiles AS profile
+             ON profile.user_id = account.id::text
+           WHERE account.id = $1
+             AND LOWER(account.role) = 'dentist'
+             AND account.is_verified = TRUE
+             AND COALESCE(account.is_archived, FALSE) = FALSE
+             AND LOWER(COALESCE(account.status, 'active')) NOT IN ('inactive', 'disabled', 'suspended')
+           LIMIT 1`,
+          [String(tokenUserId)]
+        );
+      } catch (error) {
+        if (error?.code !== "42703") throw error;
+        result = await db.query(
+          `SELECT
+             account.id,
+             account.first_name,
+             account.last_name,
+             account.email,
+             account.phone,
+             account.role,
+             account.status,
+             account.is_verified,
+             account.created_at,
+             profile.specialization,
+             profile.schedule_notes,
+             profile.catalog_dentist_id
+           FROM users AS account
+           LEFT JOIN admin_portal_dentist_profiles AS profile
+             ON profile.user_id = account.id::text
+           WHERE account.id = $1
+             AND LOWER(account.role) = 'dentist'
+             AND account.is_verified = TRUE
+             AND COALESCE(account.is_archived, FALSE) = FALSE
+             AND LOWER(COALESCE(account.status, 'active')) NOT IN ('inactive', 'disabled', 'suspended')
+           LIMIT 1`,
+          [String(tokenUserId)]
+        );
+      }
 
       if (!result.rows.length) {
         return res.status(403).json({

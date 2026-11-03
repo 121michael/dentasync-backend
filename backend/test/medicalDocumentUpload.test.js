@@ -192,6 +192,9 @@ async function startDentistPortal({
     createDentistPortalRouter({
       db: {
         async query(sql, params = []) {
+          if (sql.includes("ALTER TABLE admin_portal_dentist_profiles")) {
+            return { rows: [] };
+          }
           if (sql.includes("FROM users AS account") && sql.includes("LOWER(account.role) = 'dentist'")) {
             if (databaseRole !== "dentist") return { rows: [] };
             return { rows: [dentistAccountRow()] };

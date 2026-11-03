@@ -15,6 +15,8 @@ const clinicalPatients = require("../services/clinicalPatients");
 const { insertPatientNotification } = require("../services/patientPortalNotifications");
 const { loadAdminAnalytics, isMissingRelation: analyticsMissingRelation } = require("../services/adminAnalytics");
 const { renderAdminAnalyticsExport } = require("../services/adminAnalyticsExport");
+const { buildAdminOtpMailStatus } = require("../services/otpMailStatus");
+const { updatePasswordHash } = require("../services/sessionRevocation");
 
 const APPOINTMENT_ACTIONS = new Set([
   "approve",
@@ -2278,6 +2280,18 @@ function createAdminPortalRouter({
     }
   });
 
+  router.get("/otp-mail-status", async (req, res) => {
+    try {
+      const payload = await buildAdminOtpMailStatus({
+        sendTest: String(req.query.sendTest || "") === "1",
+      });
+      return res.json(payload);
+    } catch (error) {
+      console.error("Admin OTP mail status error:", error.message);
+      return res.status(500).json({ message: "Unable to load mail delivery status." });
+    }
+  });
+
   router.get("/sync", async (_req, res) => {
     try {
       const health = await buildHealthSnapshot();
@@ -2558,13 +2572,11 @@ function createAdminPortalRouter({
       }
 
       const passwordHash = await bcrypt.hash(newPassword, 12);
-      await db.query(
-        `UPDATE users
-         SET password_hash = $1
-         WHERE id = $2
-           AND LOWER(role) = 'admin'`,
-        [passwordHash, String(req.admin.id)]
-      );
+      await updatePasswordHash(db, {
+        userId: req.admin.id,
+        passwordHash,
+        whereSql: "AND LOWER(role) = 'admin'",
+      });
       req.admin.password_hash = passwordHash;
       return res.json({ message: "Password updated successfully." });
     } catch (error) {

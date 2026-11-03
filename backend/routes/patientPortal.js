@@ -8,6 +8,7 @@ const patientData = require("../services/patientData");
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
+const { updatePasswordHash } = require("../services/sessionRevocation");
 const { linkClinicalRecordsToUser, listTreatmentsForVisit } = require("../services/clinicalPatients");
 const { publicWaitEstimate, waitEstimateFromRow } = require("../services/queueWaitPrediction");
 const {
@@ -3071,10 +3072,10 @@ function createPatientPortalRouter({
       }
 
       const passwordHash = await bcrypt.hash(newPassword, 12);
-      await db.query(
-        "UPDATE users SET password_hash = $1 WHERE id = $2",
-        [passwordHash, principalUserIdFor(req)]
-      );
+      await updatePasswordHash(db, {
+        userId: principalUserIdFor(req),
+        passwordHash,
+      });
       return res.json({ message: "Your password has been updated." });
     } catch (error) {
       console.error("Password update error:", error.message);

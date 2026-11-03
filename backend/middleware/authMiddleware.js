@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const pool = require('../db'); // Your PostgreSQL pg pool instance
 const { resolveAppSecrets } = require('../lib/securityConfig');
+const { isTokenRevokedByPasswordChange } = require('../services/sessionRevocation');
 
 const { jwtSecret: JWT_SECRET } = resolveAppSecrets(process.env);
 
@@ -24,29 +25,36 @@ function isInactiveStatus(status) {
 
 async function loadActiveUser(userId) {
   const id = String(userId);
-  try {
-    const userQuery = await pool.query(
-      `SELECT id, first_name, last_name, email, phone, role, status
+  const statements = [
+    `SELECT id, first_name, last_name, email, phone, role, status, password_changed_at
        FROM users
        WHERE id::text = $1
          AND COALESCE(is_archived, FALSE) = FALSE
        LIMIT 1`,
-      [id]
-    );
-    return userQuery.rows[0] || null;
-  } catch (error) {
-    if (error?.code !== '42703') {
-      throw error;
-    }
-    const userQuery = await pool.query(
-      `SELECT id, first_name, last_name, email, phone, role, status
+    `SELECT id, first_name, last_name, email, phone, role, status
+       FROM users
+       WHERE id::text = $1
+         AND COALESCE(is_archived, FALSE) = FALSE
+       LIMIT 1`,
+    `SELECT id, first_name, last_name, email, phone, role, status
        FROM users
        WHERE id::text = $1
        LIMIT 1`,
-      [id]
-    );
-    return userQuery.rows[0] || null;
+  ];
+  let lastError = null;
+  for (const sql of statements) {
+    try {
+      const userQuery = await pool.query(sql, [id]);
+      return userQuery.rows[0] || null;
+    } catch (error) {
+      if (error?.code !== '42703') {
+        throw error;
+      }
+      lastError = error;
+    }
   }
+  if (lastError) throw lastError;
+  return null;
 }
 
 async function guardianLinkedToDependent(guardianId, dependentId) {
@@ -89,6 +97,10 @@ const authenticateToken = async (req, res, next) => {
       return res.status(403).json({
         message: 'Your account has been disabled or suspended. Please contact the administrator.'
       });
+    }
+
+    if (isTokenRevokedByPasswordChange(decoded, principal.password_changed_at)) {
+      return res.status(401).json({ message: 'Session expired. Please sign in again.' });
     }
 
     req.authUser = mapAuthUser(principal);

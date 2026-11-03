@@ -9,6 +9,9 @@ async function startDentistPortal({ tokenRole, databaseRole, catalogDentistId = 
   const app = express();
   const db = {
     async query(sql, params = []) {
+      if (sql.includes("ALTER TABLE admin_portal_dentist_profiles") || sql.includes("046_dentist_pad")) {
+        return { rows: [] };
+      }
       if (sql.includes("FROM users AS account") && sql.includes("LOWER(account.role) = 'dentist'")) {
         if (databaseRole !== "dentist") {
           return { rows: [] };
