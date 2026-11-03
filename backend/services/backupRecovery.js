@@ -1217,29 +1217,45 @@ function createBackupRecoveryService({ db, env = process.env, notifyAdmin = noti
     const parsed = parseAndValidatePayload(buffer);
     const packed = gzipJson(parsed);
     const wrapped = wrapArchive(packed, env);
-    const inserted = await db.query(
-      `INSERT INTO admin_portal_backups (
-         backup_type, status, file_name, byte_size, checksum_sha256, format_version,
-         table_count, row_count, table_names, payload, created_by_id, created_by_name,
-         finished_at, notes, pipeline_status, storage_class, encryption
-       ) VALUES (
-         'upload', 'success', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP, $11, 'completed', 'legacy_database', $12
-       ) RETURNING *`,
-      [
-        `dentasync-upload-${Date.now()}.dsb`,
-        wrapped.buffer.length,
-        sha256(wrapped.buffer),
-        Number(parsed.formatVersion || FORMAT_VERSION),
-        Object.keys(parsed.tables || {}).length,
-        Object.values(parsed.rowCounts || {}).reduce((sum, value) => sum + Number(value || 0), 0),
-        parsed.tableOrder || Object.keys(parsed.tables || {}),
-        wrapped.buffer,
-        actor?.id ? String(actor.id) : null,
-        actor ? actorName(actor) : "Administrator",
-        `Uploaded ${String(originalName || "backup.dsb").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80)}`,
-        wrapped.encryption,
-      ]
-    );
+    const uploadValues = [
+      `dentasync-upload-${Date.now()}.dsb`,
+      wrapped.buffer.length,
+      sha256(wrapped.buffer),
+      Number(parsed.formatVersion || FORMAT_VERSION),
+      Object.keys(parsed.tables || {}).length,
+      Object.values(parsed.rowCounts || {}).reduce((sum, value) => sum + Number(value || 0), 0),
+      parsed.tableOrder || Object.keys(parsed.tables || {}),
+      wrapped.buffer,
+      actor?.id ? String(actor.id) : null,
+      actor ? actorName(actor) : "Administrator",
+      `Uploaded ${String(originalName || "backup.dsb").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80)}`,
+      wrapped.encryption,
+    ];
+    let inserted;
+    try {
+      inserted = await db.query(
+        `INSERT INTO admin_portal_backups (
+           backup_type, status, file_name, byte_size, checksum_sha256, format_version,
+           table_count, row_count, table_names, payload, created_by_id, created_by_name,
+           finished_at, notes, pipeline_status, storage_class, encryption
+         ) VALUES (
+           'upload', 'success', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP, $11, 'completed', 'legacy_database', $12
+         ) RETURNING *`,
+        uploadValues
+      );
+    } catch (error) {
+      if (error?.code !== "42703") throw error;
+      inserted = await db.query(
+        `INSERT INTO admin_portal_backups (
+           backup_type, status, file_name, byte_size, checksum_sha256, format_version,
+           table_count, row_count, table_names, payload, created_by_id, created_by_name,
+           finished_at, notes
+         ) VALUES (
+           'upload', 'success', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP, $11
+         ) RETURNING *`,
+        uploadValues.slice(0, 11)
+      );
+    }
     await recordOperation({
       backupId: inserted.rows[0].id,
       operation: "upload",

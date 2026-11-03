@@ -23,7 +23,7 @@ const {
 } = require("../services/backupRecovery");
 const { createS3CompatMock } = require("../services/s3CompatMock");
 
-function createMemoryDb() {
+function createMemoryDb(options = {}) {
   const tables = {
     users: [{ id: "p1", email: "patient@example.test", role: "patient" }],
     appointments: [{ id: "a1", user_id: "p1", status: "confirmed", created_at: "2026-10-01T00:00:00.000Z" }],
@@ -138,6 +138,11 @@ function createMemoryDb() {
       return { rows: [] };
     }
     if (text.includes("INSERT INTO admin_portal_backups")) {
+      if (options.rejectPipelineStatus && text.includes("pipeline_status")) {
+        const error = new Error('column "pipeline_status" of relation "admin_portal_backups" does not exist');
+        error.code = "42703";
+        throw error;
+      }
       const row = {
         id: crypto.randomUUID(),
         backup_type: params[0],
@@ -159,6 +164,7 @@ function createMemoryDb() {
         ...extraBackupFields({ pipeline_status: "running", schedule_slot: params[5] || null }),
       };
       if (text.includes("'upload'")) {
+        row.backup_type = "upload";
         row.byte_size = params[1];
         row.file_name = params[0];
         row.checksum_sha256 = params[2];
@@ -701,4 +707,31 @@ test("scheduled backup worker runs without a browser session", async () => {
   } finally {
     await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   }
+});
+
+test("upload of a v1 .dsb works when pipeline_status is missing and does not restore", async () => {
+  const db = createMemoryDb({ rejectPipelineStatus: true });
+  db.tables.users = [{ id: "live", email: "unchanged@example.test" }];
+  const service = createBackupRecoveryService({
+    db,
+    env: { BACKUP_SKIP_PG_DUMP: "true" },
+    notifyAdmin: async () => 0,
+  });
+  const fixture = gzipJson({
+    magic: BACKUP_MAGIC,
+    formatVersion: 1,
+    tableOrder: ["users"],
+    rowCounts: { users: 1 },
+    tables: { users: { rows: [{ id: "p1", email: "patient@example.test" }] } },
+  });
+  const uploaded = await service.storeUploadedBackup({
+    buffer: fixture,
+    originalName: "clinic-v1.dsb",
+    actor: { id: "admin-1", first_name: "Ada" },
+  });
+  assert.equal(uploaded.status, "success");
+  assert.equal(uploaded.backupType, "upload");
+  assert.equal(uploaded.restored, undefined);
+  assert.equal(db.tables.users[0].id, "live");
+  assert.equal(db.backups.filter((row) => row.backup_type === "upload").length, 1);
 });

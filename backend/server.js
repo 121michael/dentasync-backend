@@ -67,6 +67,7 @@ const {
 } = require("./services/emailDelivery");
 const { authenticateToken } = require("./middleware/authMiddleware");
 const { applyPrescriptionSchema } = require("./services/prescriptionSchema");
+const { applyAdminBackupSchema } = require("./services/backupSchema");
 
 const app = express();
 const { jwtSecret: JWT_SECRET, otpSecret: OTP_SECRET, passwordResetSecret: PASSWORD_RESET_SECRET } =
@@ -481,6 +482,11 @@ if (require.main === module) {
       .then(() => console.log("Prescription tables ready (CREATE IF NOT EXISTS)."))
       .catch((error) => {
         console.error("Prescription schema apply failed:", error.message);
+      });
+    applyAdminBackupSchema(db)
+      .then((result) => console.log(`Backup catalog columns ready (${result.file}).`))
+      .catch((error) => {
+        console.error("Backup schema apply failed:", error.message);
       });
     console.log("Cleaning reminder SMS job scheduled (every 4–6 months based on last visit).");
     console.log("Appointment reminder SMS job scheduled (24h and 10h before confirmed visits).");
