@@ -8,6 +8,7 @@ const patientData = require("../services/patientData");
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
+const { accessTokenPayload, updatePasswordHash } = require("../services/sessionRevocation");
 const { linkClinicalRecordsToUser, listTreatmentsForVisit } = require("../services/clinicalPatients");
 const { publicWaitEstimate, waitEstimateFromRow } = require("../services/queueWaitPrediction");
 const {
@@ -466,15 +467,17 @@ function createPatientPortalRouter({
   fs.mkdirSync(uploadDirectory, { recursive: true });
   const sessionJwtSecret = jwtSecret || resolveAppSecrets(process.env).jwtSecret;
 
-  function signPatientSessionToken(principalId, actAsUserId = null) {
-    const payload = {
-      id: String(principalId),
-      role: "patient",
-    };
-    if (actAsUserId) {
-      payload.actAsUserId = String(actAsUserId);
-    }
-    return jwt.sign(payload, sessionJwtSecret, { expiresIn: "8h" });
+  function signPatientSessionToken(principalId, actAsUserId = null, passwordChangedAt = null) {
+    return jwt.sign(
+      accessTokenPayload({
+        id: String(principalId),
+        role: "patient",
+        passwordChangedAt,
+        actAsUserId,
+      }),
+      sessionJwtSecret,
+      { expiresIn: "8h" }
+    );
   }
 
   async function recordGuardianSessionEvent(principalId, eventType, detail, req) {
@@ -695,12 +698,12 @@ function createPatientPortalRouter({
       }
 
       const principalResult = await db.query(
-        `SELECT id, first_name, last_name, email, phone, role, status, is_verified
+        `SELECT id, first_name, last_name, email, phone, role, status, is_verified, password_changed_at
          FROM users WHERE id::text = $1 LIMIT 1`,
         [principalId]
       );
       const principal = principalResult.rows[0] || req.authUser || req.user;
-      const token = signPatientSessionToken(principalId, dependentUserId);
+      const token = signPatientSessionToken(principalId, dependentUserId, principal.password_changed_at);
       await recordGuardianSessionEvent(
         principalId,
         "act_as_start",
@@ -733,7 +736,7 @@ function createPatientPortalRouter({
     const principalId = principalUserIdFor(req);
     try {
       const principalResult = await db.query(
-        `SELECT id, first_name, last_name, email, phone, role, status, is_verified
+        `SELECT id, first_name, last_name, email, phone, role, status, is_verified, password_changed_at
          FROM users WHERE id::text = $1 LIMIT 1`,
         [principalId]
       );
@@ -742,7 +745,7 @@ function createPatientPortalRouter({
       }
 
       const principal = principalResult.rows[0];
-      const token = signPatientSessionToken(principalId, null);
+      const token = signPatientSessionToken(principalId, null, principal.password_changed_at);
       if (isActingAsDependent(req)) {
         await recordGuardianSessionEvent(
           principalId,
@@ -2098,8 +2101,11 @@ function createPatientPortalRouter({
   });
 
   router.post("/uploads/hmo-authorization", upload.single("file"), async (req, res) => {
-    if (!req.file) {
-      return res.status(400).json({ message: "Choose a PDF, JPG, or PNG authorization document." });
+    try {
+      medicalDocuments.validateMedicalUpload(req.file);
+    } catch (validationError) {
+      if (req.file?.path) fs.unlink(req.file.path, () => {});
+      return res.status(validationError.status || 400).json({ message: validationError.message });
     }
 
     try {
@@ -3071,10 +3077,10 @@ function createPatientPortalRouter({
       }
 
       const passwordHash = await bcrypt.hash(newPassword, 12);
-      await db.query(
-        "UPDATE users SET password_hash = $1 WHERE id = $2",
-        [passwordHash, principalUserIdFor(req)]
-      );
+      await updatePasswordHash(db, {
+        userId: principalUserIdFor(req),
+        passwordHash,
+      });
       return res.json({ message: "Your password has been updated." });
     } catch (error) {
       console.error("Password update error:", error.message);

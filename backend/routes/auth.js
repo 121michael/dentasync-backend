@@ -8,6 +8,7 @@ const {
   normalizeOtp,
 } = require("../services/otpService");
 const { linkClinicalRecordsToUser } = require("../services/clinicalPatients");
+const { accessTokenPayload } = require("../services/sessionRevocation");
 const patientIds = require("../services/patientIds");
 
 const RESETTABLE_ROLES = ["admin", "dentist", "staff", "patient"];
@@ -118,6 +119,15 @@ function createAuthRouter({
     legacyHeaders: false,
     message: {
       message: "Too many password reset requests. Please wait 15 minutes and try again.",
+    },
+  });
+  const resetPasswordRateLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 8,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+    message: {
+      message: "Too many password reset attempts. Please wait 15 minutes and try again.",
     },
   });
 
@@ -577,7 +587,11 @@ function createAuthRouter({
       }
 
       const token = jwt.sign(
-        { id: user.id, role: user.role },
+        accessTokenPayload({
+          id: user.id,
+          role: user.role,
+          passwordChangedAt: user.password_changed_at,
+        }),
         jwtSecret,
         { expiresIn: "8h" }
       );
@@ -671,7 +685,7 @@ function createAuthRouter({
   });
 
   // --- 6. COMPLETE A PASSWORD RESET ---
-  router.post("/reset-password", async (req, res) => {
+  router.post("/reset-password", resetPasswordRateLimiter, async (req, res) => {
     const { token, newPassword, password } = req.body || {};
     const submittedPassword = newPassword || password;
 
@@ -703,6 +717,12 @@ function createAuthRouter({
         message: "Your password has been reset. You can now sign in.",
       });
     } catch (error) {
+      if (error?.status === 503 || error?.code === "SCHEMA_PASSWORD_CHANGED_AT") {
+        return res.status(503).json({
+          message: error.message,
+          code: "SCHEMA_PASSWORD_CHANGED_AT",
+        });
+      }
       console.error("Password reset completion error:", error.message);
       return res.status(500).json({
         message: "Unable to reset your password. Please request a new link.",

@@ -1,6 +1,11 @@
 const jwt = require('jsonwebtoken');
 const pool = require('../db'); // Your PostgreSQL pg pool instance
 const { resolveAppSecrets } = require('../lib/securityConfig');
+const {
+  isMissingPasswordChangedAtColumn,
+  isTokenRevokedByPasswordChange,
+  schemaPasswordChangedAtError,
+} = require('../services/sessionRevocation');
 
 const { jwtSecret: JWT_SECRET } = resolveAppSecrets(process.env);
 
@@ -22,50 +27,72 @@ function isInactiveStatus(status) {
   );
 }
 
-async function loadActiveUser(userId) {
+async function loadActiveUser(userId, database = pool) {
   const id = String(userId);
-  try {
-    const userQuery = await pool.query(
-      `SELECT id, first_name, last_name, email, phone, role, status
+  const statements = [
+    `SELECT id, first_name, last_name, email, phone, role, status, password_changed_at
        FROM users
        WHERE id::text = $1
          AND COALESCE(is_archived, FALSE) = FALSE
        LIMIT 1`,
-      [id]
-    );
-    return userQuery.rows[0] || null;
-  } catch (error) {
-    if (error?.code !== '42703') {
-      throw error;
-    }
-    const userQuery = await pool.query(
-      `SELECT id, first_name, last_name, email, phone, role, status
+    `SELECT id, first_name, last_name, email, phone, role, status, password_changed_at
        FROM users
        WHERE id::text = $1
        LIMIT 1`,
-      [id]
-    );
-    return userQuery.rows[0] || null;
+  ];
+  let lastError = null;
+  for (const sql of statements) {
+    try {
+      const userQuery = await database.query(sql, [id]);
+      return userQuery.rows[0] || null;
+    } catch (error) {
+      if (isMissingPasswordChangedAtColumn(error)) {
+        throw schemaPasswordChangedAtError();
+      }
+      if (error?.code !== '42703') {
+        throw error;
+      }
+      lastError = error;
+    }
   }
+  if (lastError) throw lastError;
+  return null;
 }
 
-async function guardianLinkedToDependent(guardianId, dependentId) {
-  try {
-    const link = await pool.query(
-      `SELECT 1
-       FROM patient_portal_dependents
-       WHERE guardian_user_id::text = $1
-         AND dependent_user_id::text = $2
-       LIMIT 1`,
-      [String(guardianId), String(dependentId)]
-    );
-    return link.rows.length > 0;
-  } catch (error) {
-    if (error?.code === '42P01') {
-      return false;
+async function guardianLinkedToDependent(guardianId, dependentId, database = pool) {
+  const params = [String(guardianId), String(dependentId)];
+  const statements = [
+    `SELECT 1
+     FROM patient_portal_dependents
+     WHERE guardian_user_id::text = $1
+       AND dependent_user_id::text = $2
+       AND LOWER(COALESCE(approval_status, 'approved')) = 'approved'
+       AND removed_at IS NULL
+     LIMIT 1`,
+    `SELECT 1
+     FROM patient_portal_dependents
+     WHERE guardian_user_id::text = $1
+       AND dependent_user_id::text = $2
+       AND LOWER(COALESCE(approval_status, 'approved')) = 'approved'
+     LIMIT 1`,
+  ];
+  let lastError = null;
+  for (const sql of statements) {
+    try {
+      const link = await database.query(sql, params);
+      return link.rows.length > 0;
+    } catch (error) {
+      if (error?.code === '42P01') {
+        return false;
+      }
+      if (error?.code !== '42703') {
+        throw error;
+      }
+      lastError = error;
     }
-    throw error;
   }
+  if (lastError) throw lastError;
+  return false;
 }
 
 // Verify JWT Token & Load Authenticated User
@@ -91,6 +118,10 @@ const authenticateToken = async (req, res, next) => {
       });
     }
 
+    if (isTokenRevokedByPasswordChange(decoded, principal.password_changed_at)) {
+      return res.status(401).json({ message: 'Session expired. Please sign in again.' });
+    }
+
     req.authUser = mapAuthUser(principal);
     req.user = mapAuthUser(principal);
     req.actingAs = false;
@@ -104,16 +135,24 @@ const authenticateToken = async (req, res, next) => {
       }
 
       const linked = await guardianLinkedToDependent(principal.id, actAsUserId);
-      const dependent = linked ? await loadActiveUser(actAsUserId) : null;
+      if (!linked) {
+        return res.status(403).json({
+          message: 'Guardian access to this dependent has been revoked. Switch back to your account.',
+          code: 'ACT_AS_LINK_REVOKED',
+        });
+      }
+
+      const dependent = await loadActiveUser(actAsUserId);
       const dependentOk =
         dependent &&
         String(dependent.role || '').toLowerCase() === 'patient' &&
         !isInactiveStatus(dependent.status);
 
       if (!dependentOk) {
-        // Link removed or dependent unavailable — stay on principal account.
-        req.actAsDropped = true;
-        return next();
+        return res.status(403).json({
+          message: 'Guardian access to this dependent has been revoked. Switch back to your account.',
+          code: 'ACT_AS_LINK_REVOKED',
+        });
       }
 
       req.user = mapAuthUser(dependent);
@@ -125,6 +164,12 @@ const authenticateToken = async (req, res, next) => {
   } catch (error) {
     if (error?.name === 'JsonWebTokenError' || error?.name === 'TokenExpiredError' || error?.name === 'NotBeforeError') {
       return res.status(403).json({ message: 'Invalid or expired token.' });
+    }
+    if (error?.status === 503 || error?.code === 'SCHEMA_PASSWORD_CHANGED_AT') {
+      return res.status(503).json({
+        message: error.message || 'Session revocation schema is missing. Run npm run migrate:password-reset.',
+        code: 'SCHEMA_PASSWORD_CHANGED_AT',
+      });
     }
     console.error('Auth token validation error:', error.message);
     return res.status(500).json({ message: 'Unable to validate your session.' });
@@ -143,4 +188,10 @@ const authorizeRoles = (...allowedRoles) => {
   };
 };
 
-module.exports = { authenticateToken, authorizeRoles, JWT_SECRET };
+module.exports = {
+  authenticateToken,
+  authorizeRoles,
+  guardianLinkedToDependent,
+  loadActiveUser,
+  JWT_SECRET,
+};

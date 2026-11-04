@@ -460,6 +460,61 @@ test("reset-password hashes the submitted password before consuming a reset toke
   );
 });
 
+test("reset-password throttles repeated completion attempts and still accepts a normal reset", async (t) => {
+  let completed = 0;
+  const app = express();
+  app.use(express.json());
+  app.use(
+    "/api/auth",
+    createAuthRouter({
+      db: {
+        async query() {
+          return { rows: [] };
+        },
+      },
+      otpService: {},
+      passwordResetService: {
+        async resetPassword() {
+          completed += 1;
+          return {
+            status: "reset",
+            user: { id: 42, email: "patient@example.test" },
+          };
+        },
+      },
+      authenticateToken: (_req, _res, next) => next(),
+      jwtSecret: "test-jwt-secret",
+    })
+  );
+  const server = await startServer(app);
+  t.after(server.close);
+
+  const payload = {
+    token: "b".repeat(43),
+    newPassword: "another-secure-password",
+  };
+  const first = await fetch(`${server.baseUrl}/api/auth/reset-password`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  assert.equal(first.status, 200);
+
+  const responses = [];
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    responses.push(
+      await fetch(`${server.baseUrl}/api/auth/reset-password`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+    );
+  }
+  assert.ok(responses.some((response) => response.status === 429));
+  assert.ok(completed >= 1);
+  assert.ok(completed <= 8);
+});
+
 test("login rejects archived clinic accounts without deleting credentials", async (t) => {
   const passwordHash = await bcrypt.hash("SecurePass123", 4);
   const app = express();

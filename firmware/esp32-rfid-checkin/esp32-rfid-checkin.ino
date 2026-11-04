@@ -24,7 +24,7 @@
 #define WIFI_SSID        "YOUR_2_4GHZ_SSID"
 #define WIFI_PASSWORD    "YOUR_WIFI_PASSWORD"
 #define SERVER_HOST      "dentasync-hg2x.onrender.com"
-#define DEVICE_KEY       "dentasync-esp32-desk"
+#define DEVICE_KEY       "SET_ME_TO_RFID_DEVICE_SECRET"
 #define RST_PIN          22
 #define SS_PIN           5
 

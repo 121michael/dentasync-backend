@@ -5,6 +5,7 @@ const bcrypt = require("bcrypt");
 const { writeAdminAudit } = require("../services/adminAudit");
 const { insertPatientNotification } = require("../services/patientPortalNotifications");
 const { PasswordResetDeliveryError } = require("../services/passwordResetService");
+const { updatePasswordHash } = require("../services/sessionRevocation");
 const { linkClinicalRecordsToUser } = require("../services/clinicalPatients");
 const {
   canPermanentlyDeleteAccount,
@@ -208,21 +209,12 @@ async function isManagedDependentAccount(db, accountId) {
 }
 
 async function updatePatientPasswordHash(db, accountId, passwordHash) {
-  const statement = (withChangedAt) =>
-    `UPDATE users
-     SET password_hash = $1${withChangedAt ? ",\n         password_changed_at = CURRENT_TIMESTAMP" : ""}
-     WHERE id::text = $2
-       AND LOWER(role) = 'patient'
-       AND COALESCE(is_archived, FALSE) = FALSE
-     RETURNING id`;
-  try {
-    const result = await db.query(statement(true), [passwordHash, accountId]);
-    return result.rows.length > 0;
-  } catch (error) {
-    if (error?.code !== "42703") throw error;
-    const result = await db.query(statement(false), [passwordHash, accountId]);
-    return result.rows.length > 0;
-  }
+  const result = await updatePasswordHash(db, {
+    userId: accountId,
+    passwordHash,
+    whereSql: "AND LOWER(role) = 'patient' AND COALESCE(is_archived, FALSE) = FALSE",
+  });
+  return result.rows.length > 0;
 }
 
 async function invalidatePendingResetLinks(db, accountId) {

@@ -4,11 +4,8 @@ const crypto = require("crypto");
 const staffCheckIn = require("./staffCheckIn");
 const staffRfidEvents = require("./staffRfidEvents");
 
-// Used when Render has no RFID_DEVICE_SECRET. Firmware DEVICE_KEY must match.
-const DEFAULT_RFID_DEVICE_SECRET = "dentasync-esp32-desk";
-
 function resolvedDeviceSecret(env = process.env) {
-  return String(env.RFID_DEVICE_SECRET || "").trim() || DEFAULT_RFID_DEVICE_SECRET;
+  return String(env.RFID_DEVICE_SECRET || "").trim();
 }
 
 function deviceSecretConfigured(env = process.env) {
@@ -26,6 +23,26 @@ function deviceKeyMatches(provided, env = process.env) {
 
 function readProvidedDeviceKey(req) {
   return req.get("x-rfid-device-key") || req.get("x-device-key") || req.body?.deviceKey || req.body?.secret;
+}
+
+function authorizePublicRfidRequest(req, env = process.env) {
+  if (!deviceSecretConfigured(env)) {
+    return {
+      ok: false,
+      status: 503,
+      body: {
+        message: "RFID device check-in is not configured. Set RFID_DEVICE_SECRET on the API service.",
+      },
+    };
+  }
+  if (!deviceKeyMatches(readProvidedDeviceKey(req), env)) {
+    return {
+      ok: false,
+      status: 403,
+      body: { message: "RFID reader is not authorized." },
+    };
+  }
+  return { ok: true };
 }
 
 function mapSuccess(appointment, checkIn, walkInCreated) {
@@ -179,10 +196,10 @@ async function checkInByRfidTag(db, { rfidTag, notifyClinicStaff, notifyClinicDe
 }
 
 module.exports = {
-  DEFAULT_RFID_DEVICE_SECRET,
   resolvedDeviceSecret,
   deviceSecretConfigured,
   deviceKeyMatches,
   readProvidedDeviceKey,
+  authorizePublicRfidRequest,
   checkInByRfidTag,
 };
