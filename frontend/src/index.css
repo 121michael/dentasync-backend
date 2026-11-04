@@ -8037,7 +8037,7 @@ body.is-queue-display .staff-mobile-nav {
   overflow-y: auto;
   padding: 0.55rem 0.2rem 0.2rem;
   background:
-    radial-gradient(circle at 8% 0%, rgba(216, 196, 241, 0.35), transparent 12rem),
+    radial-gradient(circle at 8% 0%, color-mix(in srgb, var(--amethyst-300) 32%, transparent), transparent 12rem),
     transparent;
 }
 .assistant-bubble {
@@ -8046,6 +8046,7 @@ body.is-queue-display .staff-mobile-nav {
   max-width: min(92%, 540px);
   padding: 0.85rem 1rem;
   border-radius: 18px;
+  color: var(--text);
   font-size: 0.84rem;
   line-height: 1.5;
 }
@@ -8064,6 +8065,7 @@ body.is-queue-display .staff-mobile-nav {
 }
 .assistant-bubble--assistant {
   justify-self: start;
+  color: var(--text);
   border: 1px solid var(--border);
   background: var(--surface-solid);
   border-bottom-left-radius: 8px;
@@ -8149,13 +8151,26 @@ body.is-queue-display .staff-mobile-nav {
   font-size: 0.75rem;
   font-weight: 700;
   cursor: pointer;
-  transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease;
+}
+.assistant-suggestion svg {
+  color: var(--amethyst-700);
 }
 .assistant-suggestion:hover,
 .assistant-suggestion:focus-visible {
   border-color: var(--amethyst-500);
   background: var(--amethyst-100);
+  color: var(--amethyst-800);
   transform: translateY(-1px);
+}
+.assistant-suggestion:focus-visible {
+  outline: 2px solid var(--amethyst-500);
+  outline-offset: 2px;
+}
+.assistant-suggestion:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none;
 }
 .assistant-composer {
   display: flex;
@@ -8172,6 +8187,27 @@ body.is-queue-display .staff-mobile-nav {
   min-width: 48px;
   justify-content: center;
   font-weight: 800;
+}
+.assistant-attach-button:hover:not(:disabled),
+.assistant-attach-button:focus-visible {
+  border-color: var(--amethyst-500);
+  background: var(--amethyst-100);
+  color: var(--amethyst-800);
+}
+.assistant-attach-button:focus-visible,
+.assistant-composer .button--primary:focus-visible {
+  outline: 2px solid var(--amethyst-500);
+  outline-offset: 2px;
+}
+.assistant-composer__field input::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+.assistant-composer .button--primary:disabled,
+.assistant-attach-button:disabled {
+  opacity: 0.55;
+  box-shadow: none;
+  transform: none;
 }
 .assistant-attachment-chip {
   display: inline-flex;
@@ -8355,8 +8391,12 @@ body.is-queue-display .staff-mobile-nav {
   overflow: hidden;
   border-radius: 22px;
   background:
-    linear-gradient(180deg, rgba(248, 241, 255, 0.96), #fff 18%),
-    #fff;
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--amethyst-100) 78%, var(--surface-solid)),
+      var(--surface-solid) 22%
+    ),
+    var(--surface-solid);
   box-shadow:
     0 24px 54px rgba(42, 16, 72, 0.24),
     0 0 0 1px color-mix(in srgb, var(--amethyst-500) 18%, transparent);
@@ -8462,7 +8502,11 @@ body.is-queue-display .staff-mobile-nav {
   gap: 0.7rem;
   padding: 0.15rem 0.05rem;
   background:
-    linear-gradient(180deg, rgba(244, 234, 252, 0.55), transparent 28%);
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--amethyst-100) 42%, transparent),
+      transparent 32%
+    );
 }
 
 .assistant-panel--widget .assistant-disclaimer {
@@ -8473,10 +8517,15 @@ body.is-queue-display .staff-mobile-nav {
 
 .assistant-panel--widget .assistant-bubble--assistant {
   max-width: 96%;
+  color: var(--text);
   border: 1px solid color-mix(in srgb, var(--amethyst-500) 22%, var(--border));
   border-left: 3px solid var(--amethyst-600);
   background:
-    linear-gradient(180deg, rgba(247, 240, 252, 0.95), #fff);
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--amethyst-100) 58%, var(--surface-solid)),
+      var(--surface-solid)
+    );
   border-radius: 16px 16px 16px 8px;
   box-shadow: 0 8px 18px rgba(74, 32, 112, 0.06);
 }
@@ -8588,6 +8637,90 @@ body.is-queue-display .staff-mobile-nav {
   .patient-assistant__bubble:focus-visible {
     filter: none;
   }
+}
+
+.portal-shell[data-theme="dark"] .patient-assistant__panel {
+  background: var(--surface-solid);
+  box-shadow:
+    0 24px 54px rgba(0, 0, 0, 0.48),
+    0 0 0 1px var(--border-strong);
+}
+
+.portal-shell[data-theme="dark"] .assistant-thread,
+.portal-shell[data-theme="dark"] .assistant-panel--widget .assistant-thread {
+  background: transparent;
+}
+
+.portal-shell[data-theme="dark"] .assistant-bubble--assistant,
+.portal-shell[data-theme="dark"] .assistant-panel--widget .assistant-bubble--assistant {
+  color: var(--text);
+  background: var(--surface-muted);
+  border-color: var(--border-strong);
+  box-shadow: none;
+}
+
+.portal-shell[data-theme="dark"] .assistant-bubble__name {
+  color: var(--amethyst-300);
+}
+
+.portal-shell[data-theme="dark"] .assistant-source {
+  color: var(--text-strong);
+  background: var(--amethyst-100);
+}
+
+.portal-shell[data-theme="dark"] .assistant-suggestion {
+  color: #f6f1fc;
+  background: color-mix(in srgb, var(--amethyst-600) 52%, var(--surface-solid));
+  border-color: color-mix(in srgb, var(--amethyst-300) 38%, transparent);
+}
+
+.portal-shell[data-theme="dark"] .assistant-suggestion svg {
+  color: var(--amethyst-300);
+}
+
+.portal-shell[data-theme="dark"] .assistant-suggestion:hover,
+.portal-shell[data-theme="dark"] .assistant-suggestion:focus-visible {
+  color: #fff;
+  background: color-mix(in srgb, var(--amethyst-500) 48%, var(--surface-solid));
+  border-color: var(--amethyst-500);
+}
+
+.portal-shell[data-theme="dark"] .assistant-composer .assistant-attach-button {
+  color: var(--text-strong);
+  background: var(--surface-muted);
+  border-color: var(--border-strong);
+}
+
+.portal-shell[data-theme="dark"] .assistant-composer .assistant-attach-button:hover:not(:disabled),
+.portal-shell[data-theme="dark"] .assistant-composer .assistant-attach-button:focus-visible {
+  color: var(--text-strong);
+  background: var(--amethyst-100);
+  border-color: var(--amethyst-500);
+}
+
+.portal-shell[data-theme="dark"] .assistant-composer .button--primary:hover:not(:disabled) {
+  box-shadow: 0 12px 24px rgba(152, 100, 215, 0.28);
+}
+
+.portal-shell[data-theme="dark"] .assistant-nav__new {
+  color: var(--text-strong);
+  background: var(--surface-solid);
+  border-color: var(--border-strong);
+}
+
+.portal-shell[data-theme="dark"] .assistant-nav__new:hover,
+.portal-shell[data-theme="dark"] .assistant-nav__new:focus-visible {
+  color: var(--text-strong);
+  background: var(--amethyst-100);
+  border-color: var(--amethyst-500);
+}
+
+.portal-shell[data-theme="dark"] .assistant-history__item:hover,
+.portal-shell[data-theme="dark"] .assistant-history__item:focus-visible,
+.portal-shell[data-theme="dark"] .assistant-history__item.is-active {
+  color: var(--text-strong);
+  background: var(--amethyst-100);
+  border-color: var(--border-strong);
 }
 
 /* —— X-ray uploads —— */
