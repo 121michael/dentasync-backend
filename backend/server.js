@@ -68,6 +68,10 @@ const {
 const { authenticateToken } = require("./middleware/authMiddleware");
 const { applyPrescriptionSchema } = require("./services/prescriptionSchema");
 const { applyAdminBackupSchema } = require("./services/backupSchema");
+const {
+  applyPasswordResetSchema,
+  assertPasswordChangedAtReady,
+} = require("./services/passwordResetSchema");
 
 const app = express();
 const { jwtSecret: JWT_SECRET, otpSecret: OTP_SECRET, passwordResetSecret: PASSWORD_RESET_SECRET } =
@@ -160,15 +164,9 @@ app.get("/", async (req, res) => {
 
 function authorizePublicRfidReader(req, res) {
   const rfidDeskCheckIn = require("./services/rfidDeskCheckIn");
-  if (!rfidDeskCheckIn.deviceSecretConfigured()) {
-    res.status(503).json({
-      message: "RFID device check-in is not configured. Set RFID_DEVICE_SECRET on the API service.",
-    });
-    return null;
-  }
-  const provided = rfidDeskCheckIn.readProvidedDeviceKey(req);
-  if (!rfidDeskCheckIn.deviceKeyMatches(provided)) {
-    res.status(403).json({ message: "RFID reader is not authorized." });
+  const decision = rfidDeskCheckIn.authorizePublicRfidRequest(req);
+  if (!decision.ok) {
+    res.status(decision.status).json(decision.body);
     return null;
   }
   return rfidDeskCheckIn;
@@ -395,9 +393,17 @@ app.post(
   })
 );
 
+async function assertRequiredAuthSchema() {
+  await applyPasswordResetSchema(db);
+  await assertPasswordChangedAtReady(db);
+  console.log("Password revocation column ready (migration 003).");
+}
+
 if (require.main === module) {
-  app.listen(PORT, () => {
-    console.log(`✅ DentaSync server running on http://localhost:${PORT}`);
+  assertRequiredAuthSchema()
+    .then(() => {
+      app.listen(PORT, () => {
+        console.log(`✅ DentaSync server running on http://localhost:${PORT}`);
     console.log("Mounted APIs: /api/auth, /api/patient, /api/staff, /api/dentist, /api/admin");
     console.log("If the patient dashboard returns 404, you are not running this backend.");
     if (process.env.SEMAPHORE_API_KEY) {
@@ -457,7 +463,12 @@ if (require.main === module) {
         : "Backup scheduler: in-process timer only. Render Free sleep can skip jobs unless a Cron Job calls /api/internal/backups/run."
     );
     console.log("Unproceeded same-day appointments are cancelled after 6:00 PM clinic time.");
-  });
+      });
+    })
+    .catch((error) => {
+      console.error("Refusing to serve traffic: password_changed_at schema is missing.", error.message);
+      process.exit(1);
+    });
 }
 
 module.exports = app;

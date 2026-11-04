@@ -1,21 +1,12 @@
 "use strict";
 
-const fs = require("fs");
-const path = require("path");
 const db = require("../db");
+const { applyPasswordResetSchema } = require("../services/passwordResetSchema");
 
 async function runMigration() {
-  const migrationPath = path.join(
-    __dirname,
-    "..",
-    "migrations",
-    "003_create_password_reset_requests.sql"
-  );
-  const migration = fs.readFileSync(migrationPath, "utf8");
-
   try {
-    await db.query(migration);
-    console.log("Password reset storage migration completed.");
+    const result = await applyPasswordResetSchema(db);
+    console.log(`Password reset storage migration completed (${result.file}).`);
   } finally {
     await db.end();
   }

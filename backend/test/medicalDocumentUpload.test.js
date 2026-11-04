@@ -89,8 +89,15 @@ async function startPatientPortal({ userId = "patient-1", role = "patient", docu
             throw missing;
           }
           if (sql.includes("INSERT INTO patient_portal_documents")) {
-            const [id, user_id, document_type, original_name, stored_name, mime_type, byte_size, category, status] =
-              params;
+            const hmoUpload = sql.includes("'hmo_authorization'");
+            const [id, user_id, third, fourth, fifth, sixth, seventh, eighth, ninth] = params;
+            const document_type = hmoUpload ? "hmo_authorization" : third;
+            const original_name = hmoUpload ? third : fourth;
+            const stored_name = hmoUpload ? fourth : fifth;
+            const mime_type = hmoUpload ? fifth : sixth;
+            const byte_size = hmoUpload ? sixth : seventh;
+            const category = hmoUpload ? null : eighth;
+            const status = hmoUpload ? "uploaded" : ninth;
             const row = {
               id,
               user_id,
@@ -419,6 +426,32 @@ test("patient medical upload rejects unsupported and tampered files", async () =
     assert.equal(spoofed.status, 400);
     assert.match((await spoofed.json()).message, /not a valid PDF/);
     assert.equal(portal.store.documents.length, 0);
+  } finally {
+    await portal.close();
+  }
+});
+
+test("HMO authorization upload accepts a valid PDF and rejects renamed mismatched contents", async () => {
+  const portal = await startPatientPortal();
+  try {
+    const valid = await postFile(`${portal.url}/uploads/hmo-authorization`, {
+      name: "hmo-letter.pdf",
+      type: "application/pdf",
+      bytes: PDF_BYTES,
+      category: "",
+    });
+    assert.equal(valid.status, 201);
+    assert.equal(portal.store.documents[0].document_type, "hmo_authorization");
+
+    const spoofed = await postFile(`${portal.url}/uploads/hmo-authorization`, {
+      name: "hmo-letter.pdf",
+      type: "application/pdf",
+      bytes: Buffer.from("PK\u0003\u0004not-a-pdf"),
+      category: "",
+    });
+    assert.equal(spoofed.status, 400);
+    assert.match((await spoofed.json()).message, /not a valid PDF/);
+    assert.equal(portal.store.documents.length, 1);
   } finally {
     await portal.close();
   }

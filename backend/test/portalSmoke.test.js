@@ -16,13 +16,15 @@ async function login(identifier, password) {
   return { status: response.status, body };
 }
 
-test("staff, dentist, admin, and patient logins still work", { skip: !enabled }, async (t) => {
+test("staff, dentist, admin, and patient logins still work", { skip: !enabled }, async () => {
+  let reachable = false;
   try {
     await fetch(base, { signal: AbortSignal.timeout(2000) });
-  } catch {
-    t.skip(`Portal smoke server is not reachable at ${base}`);
-    return;
+    reachable = true;
+  } catch (error) {
+    assert.fail(`Portal smoke is enabled but ${base} is not reachable: ${error.message}`);
   }
+  assert.equal(reachable, true);
 
   const staff = await login("staff@amethyst.com", "StaffPass123!");
   assert.equal(staff.status, 200, staff.body.message);

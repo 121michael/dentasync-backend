@@ -1,6 +1,10 @@
 "use strict";
 
 const crypto = require("crypto");
+const {
+  isMissingPasswordChangedAtColumn,
+  schemaPasswordChangedAtError,
+} = require("../services/sessionRevocation");
 
 const PASSWORD_RESET_REQUESTS_TABLE = "password_reset_requests";
 
@@ -214,18 +218,26 @@ function createPostgresPasswordResetStore(pool) {
         return { status: "inactive", ...auditDetails };
       }
 
-      const userResult = await client.query(
-        `UPDATE users
-         SET password_hash = $1,
-             password_changed_at = CURRENT_TIMESTAMP
-         WHERE id = $2
-           AND LOWER(role) IN ('admin', 'dentist', 'staff', 'patient')
-           AND is_verified = TRUE
-           AND COALESCE(is_archived, FALSE) = FALSE
-           AND LOWER(COALESCE(status, 'active')) NOT IN ('inactive', 'disabled', 'suspended')
-         RETURNING id, email, role`,
-        [passwordHash, record.user_id]
-      );
+      let userResult;
+      try {
+        userResult = await client.query(
+          `UPDATE users
+           SET password_hash = $1,
+               password_changed_at = CURRENT_TIMESTAMP
+           WHERE id = $2
+             AND LOWER(role) IN ('admin', 'dentist', 'staff', 'patient')
+             AND is_verified = TRUE
+             AND COALESCE(is_archived, FALSE) = FALSE
+             AND LOWER(COALESCE(status, 'active')) NOT IN ('inactive', 'disabled', 'suspended')
+           RETURNING id, email, role`,
+          [passwordHash, record.user_id]
+        );
+      } catch (error) {
+        if (isMissingPasswordChangedAtColumn(error)) {
+          throw schemaPasswordChangedAtError();
+        }
+        throw error;
+      }
       if (userResult.rows.length === 0) {
         throw new Error("Password reset request refers to an unavailable account.");
       }
