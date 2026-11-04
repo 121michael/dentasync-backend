@@ -17,6 +17,13 @@
       content="Amethyst Dental Premium Care Portal"
     />
     <title>Amethyst Dental — Premium Care Portal</title>
+    <script>
+      try {
+        if (localStorage.getItem("amethyst_theme") === "dark") {
+          document.documentElement.dataset.theme = "dark";
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

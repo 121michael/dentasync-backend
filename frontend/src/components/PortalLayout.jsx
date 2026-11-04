@@ -123,9 +123,7 @@ function PortalLayoutShell({ theme, onToggleTheme, onThemeChange }) {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    return () => {
-      delete document.documentElement.dataset.theme;
-    };
+    localStorage.setItem("amethyst_theme", theme);
   }, [theme]);
 
   return (

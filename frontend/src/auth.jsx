@@ -27,7 +27,9 @@ export function AuthProvider({ children }) {
     let cancelled = false;
 
     async function hydrate() {
-      delete document.documentElement.dataset.theme;
+      const savedTheme = localStorage.getItem(PATIENT_THEME_KEY);
+      if (savedTheme === "dark") document.documentElement.dataset.theme = "dark";
+      else delete document.documentElement.dataset.theme;
       if (!token) {
         resetPatientThemePreference();
         setUser(null);

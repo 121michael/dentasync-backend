@@ -88,7 +88,7 @@ function RequireAuthenticated() {
 
 function PatientPortal() {
   const { user } = useAuth();
-  const [theme, setTheme] = useState("light");
+  const [theme, setTheme] = useState(() => (localStorage.getItem("amethyst_theme") === "dark" ? "dark" : "light"));
   if (roleFor(user) !== "patient") return <Navigate to={landingRoute(user)} replace />;
   return (
     <PortalLayout

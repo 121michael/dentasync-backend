@@ -3,23 +3,23 @@ import { useEffect, useId, useState } from "react";
 const TOOTH_SHAPES = {
   central: {
     crown:
-      "M-23 7C-24.2-6-23.6-26-21.2-42C-19.2-52-13.8-58.5-6.2-59.6H6.2C13.8-58.5 19.2-52 21.2-42C23.6-26 24.2-6 23 7C13.5 12.5-13.5 12.5-23 7Z",
+      "M-23 8C-24.2-4-23.8-24-21.6-44C-19.6-56-13.2-62-5.6-63.2H5.6C13.2-62 19.6-56 21.6-44C23.8-24 24.2-4 23 8C13.2 13.2-13.2 13.2-23 8Z",
   },
   lateral: {
     crown:
-      "M-14.6 7C-15.6-5-15.2-24-13.6-40C-12.2-50-8.4-55.6-4.2-56.8C-1.5-57.4 1.5-57.4 4.2-56.8C8.4-55.6 12.2-50 13.6-40C15.2-24 15.6-5 14.6 7C8.8 12-8.8 12-14.6 7Z",
+      "M-18.5 8C-19.6-4-19.2-22-17.4-40C-15.6-52-10.2-57.4-4.8-58.6H4.8C10.2-57.4 15.6-52 17.4-40C19.2-22 19.6-4 18.5 8C11.2 12.8-11.2 12.8-18.5 8Z",
   },
   canine: {
     crown:
-      "M-12.4 7C-13.6-6-13-25-10.4-42C-8.4-51.5-5-57.8-1.8-60.4C-0.6-61.2 0.6-61.2 1.8-60.4C5-57.8 8.4-51.5 10.4-42C13-25 13.6-6 12.4 7C7.6 12-7.6 12-12.4 7Z",
+      "M-17.4 8C-18.6-5-18-24-14.4-42C-11.6-54-6.6-60.5-2.2-63C-0.7-63.8 0.7-63.8 2.2-63C6.6-60.5 11.6-54 14.4-42C18-24 18.6-5 17.4 8C10.4 12.8-10.4 12.8-17.4 8Z",
   },
   premolar: {
     crown:
-      "M-12.8 8C-13.8-4-13.4-22-11.6-37C-10.2-46-7.2-50.8-3.8-51.8C-1.3-52.4 1.3-52.4 3.8-51.8C7.2-50.8 10.2-46 11.6-37C13.4-22 13.8-4 12.8 8C7.8 12.4-7.8 12.4-12.8 8Z",
+      "M-21 8C-22.2-3-21.8-20-19.2-36C-17.2-47-11.8-52-5.8-53.2H5.8C11.8-52 17.2-47 19.2-36C21.8-20 22.2-3 21 8C12.4 13.2-12.4 13.2-21 8Z",
   },
   molar: {
     crown:
-      "M-13.2 9C-14.2-2-13.8-18-12-32C-10.6-40.5-7.6-44.8-4-45.6C-1.4-46.2 1.4-46.2 4-45.6C7.6-44.8 10.6-40.5 12-32C13.8-18 14.2-2 13.2 9C8 13-8 13-13.2 9Z",
+      "M-23.5 9C-24.8-1-24.4-16-21.4-31C-19-41-13.2-46-6.6-47.2H6.6C13.2-46 19-41 21.4-31C24.4-16 24.8-1 23.5 9C14 14.4-14 14.4-23.5 9Z",
   },
 };
 
@@ -36,49 +36,40 @@ const ARCH_TEETH = [
   { kind: "molar", x: 414, y: 162, angle: 7, delay: "1.08s" },
 ];
 
-const BITE_PLANE = 62;
-const ART_OFFSET_Y = 58;
-
 const GUM_PAD =
-  "M20 166C12 148 28 140 50 148C70 134 84 132 96 146C114 132 126 128 136 142C154 128 166 124 174 138C192 124 204 120 211 134C224 122 232 120 232 128C232 120 240 122 253 134C262 120 272 124 290 138C304 124 316 128 328 142C342 128 354 132 368 146C382 132 396 134 414 148C436 140 452 148 444 166C436 188 400 206 320 214C280 220 248 216 232 222C216 216 184 220 144 214C64 206 28 188 20 166Z";
+  "M16 180Q32 162 50 174Q72 150 96 168Q114 142 136 158Q154 132 174 148Q190 124 211 140Q232 116 253 140Q274 124 290 148Q310 132 328 158Q350 142 368 168Q392 150 414 174Q432 162 448 180L450 204C418 232 332 244 232 240C132 244 46 232 14 204Z";
 
-const GUM_INNER =
-  "M50 152C68 140 82 138 96 150C114 138 126 134 136 146C152 134 164 130 174 142C190 130 202 126 211 138C222 128 230 126 232 134C234 126 242 128 253 138C264 126 274 130 290 142C304 130 316 134 328 146C342 134 354 138 368 150C384 138 398 140 414 152";
-
-function ToothSlot({ tooth, enamelId, flipped }) {
-  const shape = TOOTH_SHAPES[tooth.kind];
-  const crown = (
-    <g className="tooth-loader__tooth" style={{ "--tooth-delay": tooth.delay }}>
-      <path
-        className="tooth-loader__crown"
-        d={shape.crown}
-        fill={`url(#${enamelId})`}
-        stroke="var(--tooth-stroke)"
-        strokeWidth="1.7"
-        strokeLinejoin="round"
-      />
-    </g>
-  );
-
-  if (!flipped) {
-    return (
-      <g transform={`translate(${tooth.x} ${tooth.y}) rotate(${tooth.angle})`}>
-        {crown}
-      </g>
-    );
-  }
-
+function ToothRow({ enamelId, flipped }) {
   return (
-    <g transform={`translate(${tooth.x} ${BITE_PLANE * 2 - tooth.y}) rotate(${-tooth.angle})`}>
-      <g transform="scale(1,-1)">{crown}</g>
+    <g className="tooth-loader__teeth">
+      {ARCH_TEETH.map((tooth) => {
+        const shape = TOOTH_SHAPES[tooth.kind];
+        const anchor = flipped
+          ? `translate(${tooth.x} ${124 - tooth.y}) rotate(${-tooth.angle}) scale(1,-1)`
+          : `translate(${tooth.x} ${tooth.y}) rotate(${tooth.angle})`;
+        return (
+          <g key={`${flipped ? "u" : "l"}-${tooth.kind}-${tooth.x}`} transform={anchor}>
+            <g className="tooth-loader__tooth" style={{ "--tooth-delay": tooth.delay }}>
+              <path
+                className="tooth-loader__crown"
+                d={shape.crown}
+                fill={`url(#${enamelId})`}
+                stroke="var(--tooth-stroke)"
+                strokeWidth="1.35"
+                strokeLinejoin="round"
+              />
+            </g>
+          </g>
+        );
+      })}
     </g>
   );
 }
 
 function GumPad({ gumId, flipped }) {
   const pad = <path className="tooth-loader__gumline" d={GUM_PAD} fill={`url(#${gumId})`} />;
-  if (!flipped) return <g>{pad}</g>;
-  return <g transform={`translate(0 ${BITE_PLANE * 2}) scale(1,-1)`}>{pad}</g>;
+  if (!flipped) return pad;
+  return <g transform="translate(0 124) scale(1,-1)">{pad}</g>;
 }
 
 function DentalArch() {
@@ -88,7 +79,7 @@ function DentalArch() {
 
   return (
     <div className="tooth-loader__arch" aria-hidden="true">
-      <svg className="tooth-loader__svg" viewBox="0 0 464 300" focusable="false" aria-hidden="true">
+      <svg className="tooth-loader__svg" viewBox="0 0 464 340" focusable="false" aria-hidden="true">
         <defs>
           <linearGradient id={enamelId} x1="0" y1="1" x2="0" y2="0">
             <stop offset="0%" stopColor="var(--tooth-enamel-deep)" />
@@ -101,39 +92,11 @@ function DentalArch() {
           </linearGradient>
         </defs>
 
-        <g transform={`translate(0 ${ART_OFFSET_Y})`}>
+        <g transform="translate(0 8)">
           <GumPad gumId={gumId} flipped />
-          <g className="tooth-loader__teeth">
-            {ARCH_TEETH.map((tooth) => (
-              <ToothSlot key={`upper-${tooth.kind}-${tooth.x}`} tooth={tooth} enamelId={enamelId} flipped />
-            ))}
-          </g>
-          <path
-            className="tooth-loader__gum-highlight"
-            d={GUM_INNER}
-            fill="none"
-            stroke="var(--tooth-gum-line)"
-            strokeWidth="3.2"
-            strokeLinecap="round"
-            opacity="0.85"
-            transform={`translate(0 ${BITE_PLANE * 2}) scale(1,-1)`}
-          />
-
+          <ToothRow enamelId={enamelId} flipped />
           <GumPad gumId={gumId} />
-          <g className="tooth-loader__teeth">
-            {ARCH_TEETH.map((tooth) => (
-              <ToothSlot key={`lower-${tooth.kind}-${tooth.x}`} tooth={tooth} enamelId={enamelId} />
-            ))}
-          </g>
-          <path
-            className="tooth-loader__gum-highlight"
-            d={GUM_INNER}
-            fill="none"
-            stroke="var(--tooth-gum-line)"
-            strokeWidth="3.2"
-            strokeLinecap="round"
-            opacity="0.85"
-          />
+          <ToothRow enamelId={enamelId} />
         </g>
       </svg>
     </div>
