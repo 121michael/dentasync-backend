@@ -1,10 +1,10 @@
-import { useEffect } from "react";
+import { useLayoutEffect } from "react";
 import { AlertCircle, ArrowRight, Sparkles } from "lucide-react";
 import { beginPageLoader, endPageLoader } from "../loadingStore";
 import { ToothLoader } from "./ToothLoader";
 
 export function LoadingState({ label = "Preparing your care overview", inline = false }) {
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (inline) return undefined;
     beginPageLoader(label);
     return () => endPageLoader();
@@ -12,6 +12,7 @@ export function LoadingState({ label = "Preparing your care overview", inline = 
 
   return (
     <ToothLoader
+      overlay={!inline}
       compact={inline}
       label={label}
       className={inline ? "loading-state loading-state--inline" : "loading-state tooth-loader--page"}

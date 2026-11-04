@@ -3,47 +3,47 @@ import { useEffect, useId, useState } from "react";
 const TOOTH_SHAPES = {
   central: {
     crown:
-      "M-17 8C-19-7-18-24-14-42C-11-52-8-58-5-61H5C8-58 11-52 14-42C18-24 19-7 17 8C10 10-10 10-17 8Z",
-    details: ["M-11-54Q0-57 11-54", "M-10-13Q0-8 10-13"],
-    sheen: "M-10-45C-12-30-11-13-8-2",
+      "M-16 12C-18.2-6-17.2-26-14.2-44C-12-54-8.4-61-4.2-64.2C-1.6-66 1.6-66 4.2-64.2C8.4-61 12-54 14.2-44C17.2-26 18.2-6 16 12C10 14.6-10 14.6-16 12Z",
+    details: ["M-7.5-54Q-2.5-56.5 0-54Q2.5-56.5 7.5-54", "M-8-14Q0-9 8-14"],
+    sheen: "M-8.2-48C-10.4-34-9.4-18-6.2-5",
   },
   lateral: {
     crown:
-      "M-14 8C-16-6-15-22-12-39C-9-49-5-55-3-58H4C7-55 10-49 12-39C15-22 16-6 14 8C8 10-8 10-14 8Z",
-    details: ["M-8-50Q0-53 8-50", "M-8-12Q0-8 8-12"],
-    sheen: "M-8-42C-10-28-9-13-6-2",
+      "M-13.2 12C-15-5-14.2-23-11.4-40C-9.2-50-5.6-56-2.8-58.4C-1.1-59.6 1.1-59.6 2.8-58.4C5.6-56 9.2-50 11.4-40C14.2-23 15-5 13.2 12C8.2 14.4-8.2 14.4-13.2 12Z",
+    details: ["M-6-51Q0-53.4 6-51", "M-6.4-14Q0-9.5 6.4-14"],
+    sheen: "M-7-44C-8.8-30-8-16-5.2-4",
   },
   canine: {
     crown:
-      "M-14 8C-16-8-15-25-10-41L0-61L10-41C15-25 16-8 14 8C8 10-8 10-14 8Z",
-    details: ["M0-55V-11", "M-9-12Q0-8 9-12"],
-    sheen: "M-8-38C-10-25-8-12-5-2",
+      "M-13.8 12C-16-6-14.8-26-10.2-44C-6.8-54-3.2-61 0-66.5C3.2-61 6.8-54 10.2-44C14.8-26 16-6 13.8 12C8.4 14.6-8.4 14.6-13.8 12Z",
+    details: ["M0-56V-14", "M-7.2-14Q0-9 7.2-14"],
+    sheen: "M-6.4-42C-8.4-28-7.2-15-4.6-4",
   },
   premolar: {
     crown:
-      "M-20 8C-23-7-21-28-15-43C-10-53-6-56-2-50Q0-57 3-50C7-56 11-53 15-43C21-28 23-7 20 8C12 11-12 11-20 8Z",
-    details: ["M-10-46Q0-38 10-46", "M-12-11Q0-6 12-11", "M0-42V-12"],
-    sheen: "M-12-39C-14-25-12-11-8-1",
+      "M-18.8 12C-21.6-6-20.2-26-15.2-43C-12.2-51-8.4-55-4.6-52C-2.4-58.5 2.4-58.5 4.6-52C8.4-55 12.2-51 15.2-43C20.2-26 21.6-6 18.8 12C12 15.2-12 15.2-18.8 12Z",
+    details: ["M-8.5-47Q0-40 8.5-47", "M-10.5-14Q0-8 10.5-14", "M0-44V-14"],
+    sheen: "M-10.5-40C-12.6-26-11.2-13-8-3",
   },
   molar: {
     crown:
-      "M-26 8C-28-8-27-27-20-43C-16-52-11-55-6-49C-3-57 3-57 6-49C11-55 16-52 20-43C27-27 28-8 26 8C16 12-16 12-26 8Z",
-    details: ["M-14-45Q-7-36 0-45Q7-36 14-45", "M-16-11Q0-5 16-11", "M0-42V-10"],
-    sheen: "M-15-38C-17-25-14-11-10-1",
+      "M-24.5 12C-27.4-6-26.2-25-20.2-42C-16.4-51-12-55-7.2-50C-4.4-57.5 0-59 0-50C0-59 4.4-57.5 7.2-50C12-55 16.4-51 20.2-42C26.2-25 27.4-6 24.5 12C15.6 16.2-15.6 16.2-24.5 12Z",
+    details: ["M-12.5-46Q-6.5-38 0-46Q6.5-38 12.5-46", "M-14.5-14Q0-7.5 14.5-14", "M0-43V-13"],
+    sheen: "M-13.5-38C-15.6-25-13.2-13-9.4-3",
   },
 };
 
 const ARCH_TEETH = [
-  { kind: "molar", x: 50, y: 162, angle: -7, delay: "0s" },
-  { kind: "premolar", x: 96, y: 150, angle: -4, delay: "0.12s" },
-  { kind: "canine", x: 136, y: 136, angle: -2, delay: "0.24s" },
-  { kind: "lateral", x: 174, y: 126, angle: -1, delay: "0.36s" },
-  { kind: "central", x: 211, y: 120, angle: 0, delay: "0.48s" },
-  { kind: "central", x: 253, y: 120, angle: 0, delay: "0.6s" },
-  { kind: "lateral", x: 290, y: 126, angle: 1, delay: "0.72s" },
-  { kind: "canine", x: 328, y: 136, angle: 2, delay: "0.84s" },
-  { kind: "premolar", x: 368, y: 150, angle: 4, delay: "0.96s" },
-  { kind: "molar", x: 414, y: 162, angle: 7, delay: "1.08s" },
+  { kind: "molar", x: 48, y: 158, angle: -8, delay: "0s" },
+  { kind: "premolar", x: 94, y: 144, angle: -5, delay: "0.1s" },
+  { kind: "canine", x: 134, y: 130, angle: -2.5, delay: "0.2s" },
+  { kind: "lateral", x: 172, y: 120, angle: -1, delay: "0.3s" },
+  { kind: "central", x: 210, y: 114, angle: 0, delay: "0.4s" },
+  { kind: "central", x: 254, y: 114, angle: 0, delay: "0.5s" },
+  { kind: "lateral", x: 292, y: 120, angle: 1, delay: "0.6s" },
+  { kind: "canine", x: 330, y: 130, angle: 2.5, delay: "0.7s" },
+  { kind: "premolar", x: 370, y: 144, angle: 5, delay: "0.8s" },
+  { kind: "molar", x: 416, y: 158, angle: 8, delay: "0.9s" },
 ];
 
 function DentalArch() {
@@ -57,18 +57,18 @@ function DentalArch() {
       <svg className="tooth-loader__svg" viewBox="0 0 464 210" focusable="false" aria-hidden="true">
         <defs>
           <linearGradient id={enamelId} x1="0" y1="1" x2="0" y2="0">
-            <stop offset="0%" stopColor="#ece3f2" />
-            <stop offset="28%" stopColor="#fffdfa" />
-            <stop offset="66%" stopColor="#ffffff" />
-            <stop offset="100%" stopColor="#f3edf8" />
+            <stop offset="0%" stopColor="var(--tooth-enamel-deep)" />
+            <stop offset="32%" stopColor="var(--tooth-enamel-mid)" />
+            <stop offset="70%" stopColor="var(--tooth-enamel-hi)" />
+            <stop offset="100%" stopColor="var(--tooth-enamel-tip)" />
           </linearGradient>
           <linearGradient id={gumId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#f7d7df" />
-            <stop offset="48%" stopColor="#ebb1c2" />
-            <stop offset="100%" stopColor="#d287a1" />
+            <stop offset="0%" stopColor="var(--tooth-gum-hi)" />
+            <stop offset="48%" stopColor="var(--tooth-gum-mid)" />
+            <stop offset="100%" stopColor="var(--tooth-gum-deep)" />
           </linearGradient>
-          <filter id={shadowId} x="-20%" y="-20%" width="140%" height="145%">
-            <feDropShadow dx="0" dy="3" stdDeviation="2.4" floodColor="#72508f" floodOpacity="0.16" />
+          <filter id={shadowId} x="-18%" y="-18%" width="136%" height="140%">
+            <feDropShadow dx="0" dy="2" stdDeviation="1.6" floodColor="var(--tooth-shadow)" floodOpacity="0.35" />
           </filter>
         </defs>
 
@@ -85,8 +85,8 @@ function DentalArch() {
                     className="tooth-loader__crown"
                     d={shape.crown}
                     fill={`url(#${enamelId})`}
-                    stroke="#b09ac8"
-                    strokeWidth="1.1"
+                    stroke="var(--tooth-stroke)"
+                    strokeWidth="1.15"
                     strokeLinejoin="round"
                     filter={`url(#${shadowId})`}
                   />
@@ -94,8 +94,8 @@ function DentalArch() {
                     d={shape.sheen}
                     className="tooth-loader__sheen"
                     fill="none"
-                    stroke="#ffffff"
-                    strokeWidth="1.6"
+                    stroke="var(--tooth-sheen)"
+                    strokeWidth="1.45"
                     strokeLinecap="round"
                   />
                   {shape.details.map((detail) => (
@@ -104,8 +104,8 @@ function DentalArch() {
                       d={detail}
                       className="tooth-loader__detail"
                       fill="none"
-                      stroke="#cfc0df"
-                      strokeWidth="0.78"
+                      stroke="var(--tooth-detail)"
+                      strokeWidth="0.72"
                       strokeLinecap="round"
                     />
                   ))}
@@ -117,26 +117,26 @@ function DentalArch() {
 
         <path
           className="tooth-loader__gumline"
-          d="M22 159C40 149 57 145 76 148C90 151 101 141 112 136C126 128 137 130 148 132C159 123 171 118 185 119C198 112 211 109 232 116C253 109 266 112 279 119C293 118 305 123 316 132C328 130 339 128 352 136C363 141 374 151 388 148C407 145 424 149 442 159L442 180C402 195 62 195 22 180Z"
+          d="M18 158C40 145 58 142 78 148C96 153 108 140 122 134C136 126 148 129 162 134C176 124 190 116 208 118C222 110 228 108 232 114C236 108 242 110 256 118C274 116 288 124 302 134C316 129 328 126 342 134C356 140 368 153 386 148C406 142 424 145 446 158L446 188C402 206 62 206 18 188Z"
           fill={`url(#${gumId})`}
         />
         <path
           className="tooth-loader__gum-highlight"
-          d="M28 160C47 153 62 152 77 155C93 157 103 147 115 142C128 136 138 138 149 140C162 131 173 127 186 128C200 121 212 119 232 125C252 119 264 121 278 128C291 127 302 131 315 140C326 138 337 136 349 142C361 147 372 157 388 155C403 152 418 153 436 160"
+          d="M28 160C50 150 66 148 82 154C100 159 110 144 124 138C138 130 150 133 164 138C178 128 192 120 210 122C224 114 228 112 232 118C236 112 240 114 254 122C272 120 286 128 300 138C314 133 326 130 340 138C354 144 364 159 382 154C398 148 414 150 436 160"
           fill="none"
-          stroke="#fbe2e9"
-          strokeWidth="1.35"
+          stroke="var(--tooth-gum-line)"
+          strokeWidth="1.2"
           strokeLinecap="round"
-          opacity="0.72"
+          opacity="0.7"
         />
         <path
           className="tooth-loader__gum-shadow"
-          d="M32 177C98 190 366 190 432 177"
+          d="M34 176C102 190 362 190 430 176"
           fill="none"
-          stroke="#be6f8d"
-          strokeWidth="1.1"
+          stroke="var(--tooth-gum-shade)"
+          strokeWidth="1.05"
           strokeLinecap="round"
-          opacity="0.24"
+          opacity="0.28"
         />
       </svg>
     </div>
@@ -154,7 +154,7 @@ export function ToothLoader({
   active = true,
 }) {
   const [mounted, setMounted] = useState(active);
-  const [shown, setShown] = useState(false);
+  const [shown, setShown] = useState(active);
 
   useEffect(() => {
     if (active) {

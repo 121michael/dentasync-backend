@@ -121,6 +121,13 @@ function PortalLayoutShell({ theme, onToggleTheme, onThemeChange }) {
 
   const hasUnread = unreadCount > 0;
 
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    return () => {
+      delete document.documentElement.dataset.theme;
+    };
+  }, [theme]);
+
   return (
     <div className="portal-shell" data-theme={theme}>
       <aside className={`portal-sidebar ${isMenuOpen ? "is-open" : ""}`}>
