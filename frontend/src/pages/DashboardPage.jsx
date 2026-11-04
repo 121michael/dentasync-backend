@@ -94,7 +94,7 @@ export function DashboardPage() {
   }, [loadDashboard]);
 
   if (error) return <ErrorState message={error} onRetry={loadDashboard} />;
-  if (!dashboard) return <LoadingState />;
+  if (!dashboard) return <LoadingState label="Loading" />;
 
   const appointment = dashboard.nextAppointment;
   const firstName = dashboard.patient?.firstName || "there";

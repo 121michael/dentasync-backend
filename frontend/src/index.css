@@ -1458,17 +1458,20 @@ strong {
 .tooth-loader__ellipsis span:nth-child(3) { animation-delay: 0.56s; }
 
 @keyframes tooth-arch-erupt {
-  0%, 8% {
-    transform: translateY(16px) scaleY(0.78);
-    opacity: 0.45;
+  0%, 7% {
+    transform: translateY(5px) scaleY(0.04);
+    opacity: 0;
   }
-  28%, 64% {
+  25% {
+    opacity: 1;
+  }
+  34%, 66% {
     transform: translateY(0) scaleY(1);
     opacity: 1;
   }
-  88%, 100% {
-    transform: translateY(12px) scaleY(0.86);
-    opacity: 0.62;
+  92%, 100% {
+    transform: translateY(5px) scaleY(0.04);
+    opacity: 0;
   }
 }
 
