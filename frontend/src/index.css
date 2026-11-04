@@ -33,19 +33,19 @@
   --danger: #bb4d64;
   --danger-wash: #fff0f3;
   --sidebar-width: 250px;
-  --tooth-enamel-deep: #ead9e4;
-  --tooth-enamel-mid: #f4e8f1;
-  --tooth-enamel-hi: #fbf3f8;
-  --tooth-enamel-tip: #fff9fc;
-  --tooth-stroke: #c9b0c4;
+  --tooth-enamel-deep: #ffffff;
+  --tooth-enamel-mid: #ffffff;
+  --tooth-enamel-hi: #ffffff;
+  --tooth-enamel-tip: #ffffff;
+  --tooth-stroke: #c5c5c5;
   --tooth-sheen: rgba(255, 255, 255, 0.78);
   --tooth-detail: #c3a4bc;
   --tooth-shadow: #8c4268;
-  --tooth-gum-hi: #f3b4c5;
-  --tooth-gum-mid: #e189a2;
-  --tooth-gum-deep: #c45d7c;
-  --tooth-gum-line: #f8cdd8;
-  --tooth-gum-shade: #9b3d5c;
+  --tooth-gum-hi: #f8c5cf;
+  --tooth-gum-mid: #f4a8b7;
+  --tooth-gum-deep: #ef93a7;
+  --tooth-gum-line: #fbe0e6;
+  --tooth-gum-shade: #e0899c;
   --tooth-label: #3b3348;
 }
 
@@ -69,19 +69,19 @@ html[data-theme="dark"],
   --emerald-wash: #153d36;
   --amber-wash: #4a3417;
   --danger-wash: #482330;
-  --tooth-enamel-deep: #b9a4b8;
-  --tooth-enamel-mid: #d0bdd0;
-  --tooth-enamel-hi: #e2d3e2;
-  --tooth-enamel-tip: #eaddea;
-  --tooth-stroke: #7d657c;
-  --tooth-sheen: rgba(255, 236, 248, 0.42);
-  --tooth-detail: #8f748d;
-  --tooth-shadow: #1a1018;
-  --tooth-gum-hi: #c97a90;
-  --tooth-gum-mid: #a3506c;
-  --tooth-gum-deep: #7a334c;
-  --tooth-gum-line: #e4a3b4;
-  --tooth-gum-shade: #4a1d2c;
+  --tooth-enamel-deep: #ffffff;
+  --tooth-enamel-mid: #ffffff;
+  --tooth-enamel-hi: #ffffff;
+  --tooth-enamel-tip: #ffffff;
+  --tooth-stroke: #c5c5c5;
+  --tooth-sheen: rgba(255, 255, 255, 0.78);
+  --tooth-detail: #c3c3c3;
+  --tooth-shadow: transparent;
+  --tooth-gum-hi: #f8c5cf;
+  --tooth-gum-mid: #f4a8b7;
+  --tooth-gum-deep: #ef93a7;
+  --tooth-gum-line: #fbe0e6;
+  --tooth-gum-shade: #e0899c;
   --tooth-label: #ded6e8;
 }
 
@@ -1371,11 +1371,12 @@ strong {
 
 .tooth-loader__arch {
   position: relative;
-  width: min(460px, calc(100% - 1.25rem));
+  width: min(420px, calc(100% - 1.25rem));
   max-width: calc(100vw - 2rem);
   box-sizing: border-box;
-  padding: 0.25rem 0.15rem 0;
+  padding: 0;
   line-height: 0;
+  background: transparent;
 }
 
 .tooth-loader__svg {
@@ -1383,6 +1384,7 @@ strong {
   width: 100%;
   height: auto;
   overflow: visible;
+  background: transparent;
 }
 
 .tooth-loader--compact .tooth-loader__arch {
@@ -1397,7 +1399,7 @@ strong {
 }
 
 .tooth-loader__crown {
-  paint-order: stroke fill;
+  fill: var(--tooth-enamel-tip);
 }
 
 .tooth-loader__detail {
@@ -1409,7 +1411,7 @@ strong {
 }
 
 .tooth-loader__gumline {
-  filter: drop-shadow(0 4px 7px rgba(140, 66, 104, 0.11));
+  filter: none;
 }
 
 .tooth-loader__gum-highlight,
