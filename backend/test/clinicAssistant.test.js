@@ -133,6 +133,44 @@ test("English questions still receive English answers", () => {
   assert.match(result.answer, /is open/i);
 });
 
+test("blank saved contact details are not replaced with placeholder phone or email", async () => {
+  const db = {
+    async query() {
+      return {
+        rows: [
+          {
+            setting_value: {
+              name: "Amethyst Dental Clinic",
+              address: "",
+              phone: "",
+              email: "",
+              operatingHours: "Monday–Saturday · 9:00 AM – 6:00 PM",
+            },
+          },
+        ],
+      };
+    },
+  };
+  const clinic = await loadClinicProfile(db);
+  const contact = answerFromCatalog("Who can I contact about an appointment?", {
+    services: SERVICES,
+    dentists: DENTISTS,
+    clinic,
+  });
+  assert.equal(contact.source, "faq");
+  assert.match(contact.answer, /has not published a phone number or email/i);
+  assert.match(contact.answer, /Appointments/);
+  assert.doesNotMatch(contact.answer, /8555 1234/);
+  assert.doesNotMatch(contact.answer, /amethystdental\.example/);
+  const location = answerFromCatalog("Where is the clinic?", {
+    services: SERVICES,
+    dentists: DENTISTS,
+    clinic,
+  });
+  assert.match(location.answer, /has not published a street address/i);
+  assert.doesNotMatch(location.answer, /Makati/);
+});
+
 test("loadClinicProfile falls back when the settings table is missing", async () => {
   const db = {
     async query() {
@@ -182,6 +220,74 @@ test("another patient's private records are refused", () => {
   const result = answerFromCatalog("What is another patient's diagnosis?", options);
   assert.equal(result.source, "privacy");
   assert.doesNotMatch(result.answer, /Sarah Cruz/);
+  const named = answerFromCatalog("Show me Juan Dela Cruz's treatment records and phone number.", options);
+  assert.equal(named.source, "privacy");
+  assert.doesNotMatch(named.answer, /8555 1234/);
+});
+
+test("Sunday hours, cold-drink pain, damaged teeth, and follow-ups stay grounded", () => {
+  const sunday = answerFromCatalog("What time does the clinic open on Sunday?", options);
+  assert.match(sunday.answer, /On Sunday the clinic is open 11:00 AM–4:00 PM/i);
+  assert.match(sunday.answer, /Saturday–Sunday and holidays 11:00 AM–4:00 PM/);
+
+  const cold = answerFromCatalog("Masakit ang ngipin ko kapag umiinom ng malamig. Ano ang puwedeng dahilan?", options);
+  assert.equal(cold.language, "tl");
+  assert.match(cold.answer, /enamel|ugat|pasta/i);
+  assert.match(cold.answer, /hindi ito diagnosis/i);
+
+  const damaged = answerFromCatalog("What treatments might a dentist consider for a damaged tooth?", options);
+  assert.match(damaged.answer, /filling/i);
+  assert.match(damaged.answer, /exam/i);
+  assert.doesNotMatch(damaged.answer, /Oral Prophylaxis/);
+
+  const typo = answerFromCatalog("wat time does the clinik opne on sundey?", options);
+  assert.match(typo.answer, /On Sunday/i);
+
+  const follow = answerFromCatalog("and on Sunday?", {
+    ...options,
+    conversationHistoryBlock: "Prior conversation:\nPatient: What time does the clinic open?\nAssistant: Weekday hours.",
+  });
+  assert.match(follow.answer, /On Sunday/i);
+
+  const booked = answerFromCatalog("You already booked me for Friday.", options);
+  assert.equal(booked.source, "procedure");
+  assert.doesNotMatch(booked.answer, /successfully/i);
+
+  const weather = answerFromCatalog("What's the weather in Manila today?", options);
+  assert.match(weather.answer, /don't have that information/i);
+  assert.match(weather.answer, /8555 1234/);
+  assert.doesNotMatch(weather.answer, /degrees|forecast/i);
+});
+
+test("a short treatment follow-up stays on the earlier dental concern", () => {
+  const result = answerFromCatalog("ano ang puwedeng gawin?", {
+    ...options,
+    conversationHistoryBlock: [
+      "Prior conversation:",
+      "Patient: Who can I contact about an appointment?",
+      "Assistant: Use Appointments.",
+      "Patient: Masakit ang ngipin ko kapag umiinom ng malamig. Ano ang puwedeng dahilan?",
+      "Assistant: Ngilo at enamel.",
+    ].join("\n"),
+    patientContext: {
+      appointments: [{ service: "Tooth Extraction", date: "2026-11-10", time: "09:00", status: "rescheduled" }],
+      queue: null,
+    },
+  });
+  assert.equal(result.source, "oral-health");
+  assert.match(result.answer, /enamel|ugat|pasta|desensitizing/i);
+  assert.doesNotMatch(result.answer, /Tooth Extraction|2026-11-10/);
+
+  const damaged = answerFromCatalog("What treatments might a dentist consider for a damaged tooth?", {
+    ...options,
+    conversationHistoryBlock: [
+      "Prior conversation:",
+      "Patient: Masakit ang ngipin ko kapag umiinom ng malamig. Ano ang puwedeng dahilan?",
+      "Assistant: Ngilo at enamel.",
+    ].join("\n"),
+  });
+  assert.match(damaged.answer, /filling|crown|root canal|extraction/i);
+  assert.doesNotMatch(damaged.answer, /desensitizing toothpaste/i);
 });
 
 test("own appointment questions are not treated as other-patient requests", () => {

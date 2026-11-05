@@ -255,14 +255,15 @@ const CLINIC_TOPICS = [
       "sarado",
       "anong oras kayo nag oopen",
     ],
-    build: (clinic, _dentists, _services, lang) => {
+    build: (clinic, _dentists, _services, lang, extras = {}) => {
       const today = clinic.todayHoursLabel
         ? pick(lang, `Today: ${clinic.todayHoursLabel}. `, `Ngayon: ${clinic.todayHoursLabel}. `)
         : "";
+      const askedDay = namedDayHours(clinic, extras.question || "", lang);
       return pick(
         lang,
-        `${today}${clinic.name} is open ${clinic.operatingHours}. Appointments are booked from the Appointments page. Portal messages are reviewed during clinic hours.`,
-        `${today}Bukas ang ${clinic.name} ayon sa iskedyul: ${clinic.operatingHours}. Mag-book ng appointment sa page na Appointments. Sinusuri ang mga mensahe sa portal sa oras ng klinika.`
+        `${askedDay}${today}${clinic.name} is open ${clinic.operatingHours}. Appointments are booked from the Appointments page. Portal messages are reviewed during clinic hours.`,
+        `${askedDay}${today}Bukas ang ${clinic.name} ayon sa iskedyul: ${clinic.operatingHours}. Mag-book ng appointment sa page na Appointments. Sinusuri ang mga mensahe sa portal sa oras ng klinika.`
       );
     },
   },
@@ -284,12 +285,21 @@ const CLINIC_TOPICS = [
       "saan ang klinika",
       "saan ang clinic",
     ],
-    build: (clinic, _dentists, _services, lang) =>
-      pick(
+    build: (clinic, _dentists, _services, lang) => {
+      const address = publishedClinicField(clinic, "address");
+      if (!address) {
+        return pick(
+          lang,
+          `${clinic.name} has not published a street address in DentaSync. Use Appointments in the patient portal, or ask the front desk during clinic hours (${clinic.operatingHours}).`,
+          `Walang naka-publish na street address ang ${clinic.name} sa DentaSync. Gamitin ang Appointments sa patient portal, o tanungin ang front desk habang bukas ang klinika (${clinic.operatingHours}).`
+        );
+      }
+      return pick(
         lang,
-        `${clinic.name} is at ${clinic.address}. Confirm the location on your appointment details if staff has noted a different visit site.`,
-        `Nasa ${clinic.address} ang ${clinic.name}. Tingnan ang detalye ng appointment kung may ibang lokasyon na nakalagay mula sa staff.`
-      ),
+        `${clinic.name} is at ${address}. Confirm the location on your appointment details if staff has noted a different visit site.`,
+        `Nasa ${address} ang ${clinic.name}. Tingnan ang detalye ng appointment kung may ibang lokasyon na nakalagay mula sa staff.`
+      );
+    },
   },
   {
     id: "contact",
@@ -306,13 +316,15 @@ const CLINIC_TOPICS = [
       "telepono",
       "numero",
       "contact number",
+      "kontakin",
+      "kuntakin",
+      "kausapin",
+      "makipag-ugnayan",
+      "who can i contact",
+      "who do i contact",
+      "who should i contact",
     ],
-    build: (clinic, _dentists, _services, lang) =>
-      pick(
-        lang,
-        `You can call ${clinic.name} at ${clinic.phone} or email ${clinic.email}. For a dental emergency during clinic hours, call the clinic directly.`,
-        `Tumawag sa ${clinic.name} sa ${clinic.phone} o mag-email sa ${clinic.email}. Kung emergency sa ngipin habang bukas ang klinika, tumawag mismo sa clinic.`
-      ),
+    build: (clinic, _dentists, _services, lang) => contactAnswer(clinic, lang),
   },
   {
     id: "hmo",
@@ -459,8 +471,8 @@ const CLINIC_TOPICS = [
     build: (_clinic, _dentists, _services, lang, extras = {}) =>
       pick(
         lang,
-        `${extras.factsEn || APPROVED_SERVICE_FACTS_EN} Listed fees and case-based costs are confirmed at a FREE consultation / oral examination. Mag-book sa Appointments.`,
-        `${extras.factsTl || APPROVED_SERVICE_FACTS_TL} Mag-book ng FREE consultation / oral examination. Mag-book sa Appointments.`
+        `A final treatment cost needs a dentist's assessment. Consultation / oral examination is FREE, and listed fees are not a personalized total. ${extras.factsEn || APPROVED_SERVICE_FACTS_EN} Book from Appointments.`,
+        `Kailangan ng assessment ng dentista ang final na bayad. Libre ang consultation / oral examination, at ang nakalistang presyo ay hindi personalized na total. ${extras.factsTl || APPROVED_SERVICE_FACTS_TL} Mag-book sa Appointments.`
       ),
   },
   {
@@ -479,8 +491,8 @@ const CLINIC_TOPICS = [
     build: (clinic, _dentists, _services, lang) =>
       pick(
         lang,
-        `For urgent dental pain or swelling during clinic hours, call ${clinic.name} at ${clinic.phone}. The clinic does not offer Emergency Dental Care as a bookable service. This assistant cannot diagnose emergencies — seek in-person care for severe symptoms.`,
-        `Kung matindi ang sakit ng ngipin o may pamamaga habang bukas ang klinika, tumawag sa ${clinic.name} sa ${clinic.phone}. Hindi nag-aalok ang klinika ng Emergency Dental Care bilang bookable na serbisyo. Hindi makakapag-diagnose ang assistant na ito — magpatingin mismo kung malala ang sintomas.`
+        `Facial swelling, fever, or bleeding that will not stop needs urgent in-person care. ${contactDirective(clinic, "en")} If the clinic is closed or symptoms are severe, seek urgent medical or dental care rather than waiting for a routine slot. The clinic does not offer Emergency Dental Care as a bookable service, and this assistant cannot diagnose emergencies.`,
+        `Ang pamamaga ng mukha, lagnat, o pagdurugong hindi tumitigil ay kailangang ipatingin agad. ${contactDirective(clinic, "tl")} Kung sarado ang klinika o malala ang sintomas, humingi ng urgent medical o dental care sa halip na maghintay ng routine slot. Hindi nag-aalok ang klinika ng Emergency Dental Care bilang bookable na serbisyo, at hindi makakapag-diagnose ang assistant na ito.`
       ),
   },
   {
@@ -575,12 +587,30 @@ const ORAL_HEALTH_TOPICS = [
       "sensitivity",
       "hurt when i drink",
       "cold water",
+      "cold drink",
+      "cold drinks",
+      "malamig",
+      "lamig",
+      "umiinom ng malamig",
       "ngilo",
       "nangingilo",
       "sensitibo ang ngipin",
     ],
-    en: "Tooth sensitivity to cold, heat, or sweets is common and can come from worn enamel, exposed roots, or a cracked filling. A desensitizing toothpaste and a dental exam can help identify the cause. Avoid guessing home treatments for sharp or lingering pain — see your dentist.",
-    tl: "Karaniwan ang ngilo sa lamig, init, o matamis, at puwedeng galing sa pagkasira ng enamel, nakalitaw na ugat, o basag na pasta. Makakatulong ang desensitizing toothpaste at dental exam para alamin ang dahilan. Huwag hulaan ang gamot sa bahay kung matalim o tuloy-tuloy ang sakit — magpatingin sa dentista.",
+    en: "Pain when drinking something cold is general tooth sensitivity. Possible causes include worn enamel, an exposed root, a cracked tooth, or a cracked filling. A dentist may consider desensitizing toothpaste, fluoride, a filling, or other care after an exam. This is not a diagnosis — book an oral examination if the pain is sharp, lingers, or comes with swelling.",
+    tl: "Ang sakit kapag umiinom ng malamig ay karaniwang ngilo. Puwedeng dahilan ang manipis na enamel, nakalitaw na ugat, basag na ngipin, o basag na pasta. Pagkatapos ng exam, puwedeng isaalang-alang ng dentista ang desensitizing toothpaste, fluoride, pasta, o ibang alaga. Hindi ito diagnosis — magpa-oral examination kung matalim, tuloy-tuloy, o may kasamang pamamaga.",
+  },
+  {
+    keywords: [
+      "damaged tooth",
+      "broken tooth",
+      "chipped tooth",
+      "cracked tooth",
+      "basag na ngipin",
+      "nabasag ang ngipin",
+      "sirang ngipin",
+    ],
+    en: "For a damaged tooth, a dentist may consider a filling, a crown, root canal treatment, or extraction. Which option fits depends on how deep the crack or break is, and only an in-person exam can decide. The clinic lists official fees for those services, and a FREE consultation / oral examination confirms the plan and cost. This is general information, not a diagnosis.",
+    tl: "Para sa sirang ngipin, puwedeng isaalang-alang ng dentista ang pasta, crown, root canal, o bunot. Depende sa lalim ng sira kung alin ang akma, at exam lang ang makakapagdesisyon. May opisyal na bayad ang klinika para sa mga serbisyong iyon, at libre ang consultation / oral examination para kumpirmahin ang plano at presyo. Pangkalahatang impormasyon ito, hindi diagnosis.",
   },
   {
     keywords: ["wisdom", "third molar", "wisdom tooth", "wisdom teeth", "ngiping wisdom"],
@@ -689,10 +719,134 @@ function normalizeQuestion(value) {
     .trim();
 }
 
+function correctCommonTypos(normalized) {
+  return String(normalized || "")
+    .replace(/\bopne\b/g, "open")
+    .replace(/\bopning\b/g, "opening")
+    .replace(/\bsundey\b|\bsundae\b|\bsundy\b/g, "sunday")
+    .replace(/\bclinik\b|\bclinc\b/g, "clinic")
+    .replace(/\bcontct\b/g, "contact")
+    .replace(/\bkuntakin\b/g, "kontakin")
+    .replace(/\bwat time\b/g, "what time")
+    .replace(/\bappoinment\b|\bapointment\b/g, "appointment");
+}
+
+function recentDentalPatientLine(historyBlock) {
+  const lines = String(historyBlock || "")
+    .split(/\n/)
+    .filter((line) => /^Patient:/i.test(line))
+    .map((line) => line.replace(/^Patient:\s*/i, "").trim());
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const normalized = normalizeQuestion(lines[index]);
+    if (
+      /(malamig|lamig|ngilo|sakit|ngipin|damaged|broken|chipped|basag|sensitivity|tooth|gum|enamel|treatment)/.test(
+        normalized
+      )
+    ) {
+      return lines[index];
+    }
+  }
+  return "";
+}
+
+function contextualQuestion(question, historyBlock) {
+  const history = normalizeQuestion(historyBlock);
+  const normalized = normalizeQuestion(question);
+  if (!history || !normalized || normalized.length > 90) return question;
+  const dayAsk = /\b(sunday|saturday|monday|tuesday|wednesday|thursday|friday|weekend|weekday|linggo|sabado)\b/.test(
+    normalized
+  );
+  const priorHours = /\b(hour|hours|open|opens|operating|sunday|saturday|iskedyul|oras)\b/.test(history);
+  const priorVisit = /\b(appointment|queue|pila)\b/.test(history);
+  if (dayAsk && priorHours && !priorVisit) {
+    return `${question} clinic opening hours`;
+  }
+  const treatmentFollowUp =
+    normalized.split(" ").length <= 6 &&
+    /^(ano(ng)?( ang)? puwedeng gawin|ano ang gagawin|what can (i |be )?done?|what should i do|what treatment)\b/.test(
+      normalized
+    );
+  const priorDental = treatmentFollowUp ? recentDentalPatientLine(historyBlock) : "";
+  if (priorDental) return `${question} ${priorDental}`;
+  return question;
+}
+
+function namedDayHours(clinic, normalized, lang) {
+  const label = String(clinic?.operatingHours || "");
+  const weekend = label.match(/Saturday[–-]Sunday(?: and holidays)?\s+([^·]+)/i);
+  const weekday = label.match(/Monday[–-]Friday\s+([^·]+)/i);
+  const holiday = label.match(/holidays\s+([^·]+)/i);
+  if (/\b(sunday|linggo)\b/.test(normalized) && weekend) {
+    const hours = weekend[1].trim();
+    return pick(lang, `On Sunday the clinic is open ${hours}. `, `Tuwing Linggo, bukas ang klinika nang ${hours}. `);
+  }
+  if (/\b(saturday|sabado)\b/.test(normalized) && weekend) {
+    const hours = weekend[1].trim();
+    return pick(lang, `On Saturday the clinic is open ${hours}. `, `Tuwing Sabado, bukas ang klinika nang ${hours}. `);
+  }
+  if (/\b(monday|tuesday|wednesday|thursday|friday|weekday)\b/.test(normalized) && weekday) {
+    const hours = weekday[1].trim();
+    return pick(
+      lang,
+      `On weekdays the clinic is open ${hours}. `,
+      `Tuwing Lunes hanggang Biyernes, bukas ang klinika nang ${hours}. `
+    );
+  }
+  if (/\bholiday\b/.test(normalized) && holiday) {
+    const hours = holiday[1].trim();
+    return pick(lang, `On holidays the clinic is open ${hours}. `, `Tuwing holiday, bukas ang klinika nang ${hours}. `);
+  }
+  return "";
+}
+
 function detectLanguage(question) {
   const padded = ` ${normalizeQuestion(question)} `;
   const hits = TAGALOG_MARKERS.filter((marker) => padded.includes(` ${marker} `)).length;
   return hits >= 1 ? "tl" : "en";
+}
+
+function publishedClinicField(clinic, field) {
+  if (clinic?.[`${field}Published`] === false) return "";
+  return String(clinic?.[field] || "").trim();
+}
+
+function contactDirective(clinic, lang) {
+  const phone = publishedClinicField(clinic, "phone");
+  const email = publishedClinicField(clinic, "email");
+  if (phone && email) {
+    return pick(
+      lang,
+      `Call ${clinic.name} at ${phone} or email ${email} during clinic hours (${clinic.operatingHours}).`,
+      `Tumawag sa ${clinic.name} sa ${phone} o mag-email sa ${email} habang bukas ang klinika (${clinic.operatingHours}).`
+    );
+  }
+  if (phone) {
+    return pick(
+      lang,
+      `Call ${clinic.name} at ${phone} during clinic hours (${clinic.operatingHours}).`,
+      `Tumawag sa ${clinic.name} sa ${phone} habang bukas ang klinika (${clinic.operatingHours}).`
+    );
+  }
+  if (email) {
+    return pick(
+      lang,
+      `Email ${clinic.name} at ${email}.`,
+      `Mag-email sa ${clinic.name} sa ${email}.`
+    );
+  }
+  return pick(
+    lang,
+    `${clinic.name} has not published a phone number or email in DentaSync. Use Appointments in the patient portal, or ask the front desk during clinic hours (${clinic.operatingHours}).`,
+    `Walang naka-publish na telepono o email ang ${clinic.name} sa DentaSync. Gamitin ang Appointments sa patient portal, o tanungin ang front desk habang bukas ang klinika (${clinic.operatingHours}).`
+  );
+}
+
+function contactAnswer(clinic, lang) {
+  return pick(
+    lang,
+    `${contactDirective(clinic, "en")} For an appointment, submit the visit from the Appointments page. I cannot book it from chat.`,
+    `${contactDirective(clinic, "tl")} Para sa appointment, i-submit ang bisita sa page na Appointments. Hindi ako makakapag-book mula sa chat.`
+  );
 }
 
 function clinicFrom(value) {
@@ -707,6 +861,9 @@ function clinicFrom(value) {
       DEFAULT_CLINIC.operatingHours,
     todayHoursLabel: String(incoming.todayHoursLabel || "").trim() || null,
     todayClosed: Boolean(incoming.todayClosed),
+    phonePublished: incoming.phonePublished !== false,
+    emailPublished: incoming.emailPublished !== false,
+    addressPublished: incoming.addressPublished !== false,
   };
 }
 
@@ -985,7 +1142,7 @@ function looksLikeOtherPatientRequest(question) {
   ) {
     return false;
   }
-  return /(another patient|other patient|someone else|ibang pasyente|their diagnosis|his diagnosis|her diagnosis|patient named|list all patients|all patients|admin password|internal admin|phone number of|treatment history of)/.test(
+  return /(another patient|other patient|someone else|ibang pasyente|their diagnosis|his diagnosis|her diagnosis|his records|her records|their records|patient named|list all patients|all patients|admin password|internal admin|phone number of|treatment history of|treatment records|medical records|dental records|records of|ibang rekord)/.test(
     normalized
   );
 }
@@ -1145,13 +1302,16 @@ function isShortVisitFollowUp(normalized, historyBlock) {
   if (!normalized || normalized.length > 80) return false;
   const history = String(historyBlock || "");
   if (!/Patient:.*(appointment|queue|pila|wait|check-?in)/i.test(history)) return false;
+  if (/\b(gawin|dahilan|treatment|gamot|ngipin|sakit|ngilo|malamig|cost|magkano|presyo)\b/.test(normalized)) {
+    return false;
+  }
   return /^(and )?(tomorrow|bukas|the wait|how long|ano po|ano|and then|status|yung pila|my number)\b/.test(
     normalized
   );
 }
 
 function looksLikeUnsupportedAction(normalized) {
-  return /(book me|book it for me|please book|i want you to book|cancel it for me|cancel my appointment now|please cancel|reschedule me|check me in|you booked|appointment is booked|has been cancelled|already cancelled|mark me (as )?(called|done))/.test(
+  return /(book me|book it for me|please book|i want you to book|can you book|cancel it for me|cancel my appointment now|please cancel|reschedule me|check me in|you (already )?booked|appointment is booked|has been cancelled|already cancelled|mark me (as )?(called|done))/.test(
     normalized
   );
 }
@@ -1316,7 +1476,8 @@ function answerFromCatalog(question, servicesOrOptions) {
     approvedFactsEn,
     approvedFactsTl,
   } = normalizeOptions(servicesOrOptions);
-  const normalized = normalizeQuestion(question);
+  const expanded = contextualQuestion(question, conversationHistoryBlock);
+  const normalized = correctCommonTypos(normalizeQuestion(expanded));
   const lang = detectLanguage(question);
   if (looksLikeOtherPatientRequest(question)) {
     return { answer: privacyRefusal(lang), source: "privacy", language: lang };
@@ -1424,6 +1585,17 @@ function answerFromCatalog(question, servicesOrOptions) {
     };
   }
 
+  const asksPriceOrMenu =
+    /\b(how much|magkano|presyo|price|cost|fee|bayad|gastos|what do you offer|anong serbisyo|mga serbisyo|services do you)\b/.test(
+      normalized
+    );
+  if (clinicTopic?.id === "services" && oralTopic && !asksPriceOrMenu) {
+    if (knowledgeMode === "restricted") {
+      return { answer: restrictedRefusal(lang), source: "restricted", language: lang };
+    }
+    return { answer: pick(lang, oralTopic.en, oralTopic.tl), source: "oral-health", language: lang };
+  }
+
   if (
     clinicTopic &&
     (!oralTopic || keywordHits(normalized, clinicTopic.keywords) >= keywordHits(normalized, oralTopic.keywords))
@@ -1432,6 +1604,7 @@ function answerFromCatalog(question, servicesOrOptions) {
       answer: clinicTopic.build(clinic, dentists, services, lang, {
         factsEn: approvedFactsEn,
         factsTl: approvedFactsTl,
+        question: normalized,
       }),
       source: "faq",
       language: lang,
@@ -1463,8 +1636,8 @@ function answerFromCatalog(question, servicesOrOptions) {
   return {
     answer: pick(
       lang,
-      `I can help with ${clinic.name} hours, location, services, booking, HMO, queue check-in, and general questions about teeth and oral care. For personal medical advice or a diagnosis, please speak with your dentist or staff.`,
-      `Makakatulong ako sa oras, lokasyon, serbisyo, booking, HMO, pila, at pangkalahatang tanong tungkol sa ngipin at oral care sa ${clinic.name}. Para sa personal na payong medikal o diagnosis, kausapin ang dentista o staff.`
+      `I don't have that information. I can help with ${clinic.name} hours, services, booking, and oral care. ${contactDirective(clinic, "en")}`,
+      `Wala akong impormasyon tungkol diyan. Makakatulong ako sa oras, serbisyo, booking, at oral care ng ${clinic.name}. ${contactDirective(clinic, "tl")}`
     ),
     source: "faq",
     language: lang,
@@ -1478,14 +1651,15 @@ function clinicContextBlock(clinic, services, dentists, factsEn = APPROVED_SERVI
     .join("\n");
   return `Clinic facts (use these; do not invent different hours or contact details):
 Name: ${clinic.name}
-Address: ${clinic.address}
-Phone: ${clinic.phone}
-Email: ${clinic.email}
+Address: ${publishedClinicField(clinic, "address") || "not published in DentaSync"}
+Phone: ${publishedClinicField(clinic, "phone") || "not published in DentaSync"}
+Email: ${publishedClinicField(clinic, "email") || "not published in DentaSync"}
 Hours: ${clinic.operatingHours}
 Patients book a service and time; the clinic assigns an available dentist.
 
 Services:
 ${serviceLines || "(see Appointments in the patient portal)"}
+When quoting prices, use only the official list above. Do not invent discounts, extras, or totals, and do not present a listed amount as a guaranteed final price. If the patient asks which material, denture type, or treatment is best for them, say that it depends on an exam and invite a FREE consultation. Do not claim a dentist has evaluated the patient unless an assessment is recorded.
 
 Dentists:
 ${dentistLines || "(assigned by the clinic)"}
@@ -1503,7 +1677,14 @@ async function loadClinicProfile(db) {
     const result = await db.query(
       `SELECT setting_value FROM admin_portal_settings WHERE setting_key = 'clinic' LIMIT 1`
     );
-    return clinicFrom(result.rows[0]?.setting_value);
+    const raw = result.rows[0]?.setting_value;
+    if (!raw || typeof raw !== "object") return { ...DEFAULT_CLINIC };
+    return {
+      ...clinicFrom(raw),
+      phonePublished: Boolean(String(raw.phone || "").trim()),
+      emailPublished: Boolean(String(raw.email || "").trim()),
+      addressPublished: Boolean(String(raw.address || "").trim()),
+    };
   } catch (error) {
     if (error?.code === "42P01" || error?.code === "42703") {
       return { ...DEFAULT_CLINIC };

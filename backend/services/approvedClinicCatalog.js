@@ -111,15 +111,18 @@ function chatbotServicesFrom(catalog) {
 function buildFacts(catalog, lang = "en") {
   const lines = catalog.services
     .filter((service) => (lang === "tl" ? service.factLineTl : service.factLineEn))
-    .map((service) => `- ${lang === "tl" ? service.factLineTl : service.factLineEn}`);
+    .map((service) => {
+      const line = lang === "tl" ? service.factLineTl : service.factLineEn;
+      return `- ${String(line).replace(/\s*Do not invent[^.]*\./gi, "").trim()}`;
+    });
   const header =
     lang === "tl"
-      ? "Opisyal na serbisyo at presyo ng Amethyst Dental Clinic (huwag imbento ng discount, extra, o total):"
-      : "Official Amethyst Dental Clinic services and prices (quote exactly; do not invent discounts, extras, or totals):";
+      ? "Opisyal na serbisyo at presyo ng Amethyst Dental Clinic:"
+      : "Official Amethyst Dental Clinic services and prices:";
   const footer =
     lang === "tl"
-      ? "Huwag ituring na guaranteed final price ang listed amount. Kung tinanong kung anong material, denture type, o treatment ang best, huwag humula. Ipaliwanag na depende ito sa pangangailangan at mag-imbita ng FREE consultation / oral examination. Huwag sabihing na-evaluate na ng dentista ang pasyente kung walang recorded assessment."
-      : "Never present a listed amount as a guaranteed final price. If the patient asks which material, denture type, or treatment is best for them, do not guess. Explain that it depends on their needs and invite a FREE consultation / oral examination. Do not claim a dentist has evaluated the patient unless an assessment is recorded.";
+      ? "Hindi guaranteed total ang mga presyong ito. Ang tamang treatment ay nakadepende sa personal na exam. Kinukumpirma ng FREE consultation / oral examination ang plano at bayad."
+      : "These listed fees are not a guaranteed total. The right treatment depends on an in-person exam. A FREE consultation / oral examination confirms the plan and cost.";
   return `${header}\n${lines.join("\n")}\n${footer}`;
 }
 
