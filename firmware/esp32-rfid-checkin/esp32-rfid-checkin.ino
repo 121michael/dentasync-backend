@@ -21,10 +21,24 @@
 #include <SPI.h>
 #include <MFRC522.h>
 
+// Copy secrets.h.example to secrets.h and put the private Render value there.
+// secrets.h is gitignored. Do not commit the real DEVICE_KEY.
+#if __has_include("secrets.h")
+#include "secrets.h"
+#endif
+
+#ifndef WIFI_SSID
 #define WIFI_SSID        "YOUR_2_4GHZ_SSID"
+#endif
+#ifndef WIFI_PASSWORD
 #define WIFI_PASSWORD    "YOUR_WIFI_PASSWORD"
+#endif
+#ifndef SERVER_HOST
 #define SERVER_HOST      "dentasync-hg2x.onrender.com"
+#endif
+#ifndef DEVICE_KEY
 #define DEVICE_KEY       "SET_ME_TO_RFID_DEVICE_SECRET"
+#endif
 #define RST_PIN          22
 #define SS_PIN           5
 

@@ -21,11 +21,12 @@ Staff RFID lookup in the portal still uses a staff session, not this device key.
 
 ## Flash steps
 
-1. In `esp32-rfid-checkin.ino`, set `WIFI_SSID` / `WIFI_PASSWORD` (2.4 GHz only).
-2. Keep `SERVER_HOST` as `dentasync-hg2x.onrender.com` unless the API host changed.
-3. Set `DEVICE_KEY` to the same value as `RFID_DEVICE_SECRET` on the API service.
-4. Flash the sketch (ESP32 Dev Module, 115200 baud).
-5. Serial should show `Render RFID connected. Tap a patient card.`
-6. Admin must assign that card UID under RFID Tags.
+1. Copy `secrets.h.example` to `secrets.h` in the same folder. `secrets.h` is gitignored.
+2. In `secrets.h`, set `WIFI_SSID` / `WIFI_PASSWORD` (2.4 GHz only).
+3. Keep `SERVER_HOST` in the sketch as `dentasync-hg2x.onrender.com` unless the API host changed.
+4. Set `DEVICE_KEY` in `secrets.h` to the same value as `RFID_DEVICE_SECRET` on the API service. Do not commit that file.
+5. Flash the sketch (ESP32 Dev Module, 115200 baud).
+6. Serial should show `Render RFID connected. Tap a patient card.`
+7. Admin must assign that card UID under RFID Tags.
 
 The reader does not need a staff password. Staff Check-In shows the same success panel as a QR scan.

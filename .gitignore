@@ -1,6 +1,7 @@
 node_modules/
 .env
 .env.local
+firmware/esp32-rfid-checkin/secrets.h
 uploads/
 frontend/dist/
 backend/uploads/
