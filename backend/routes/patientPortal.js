@@ -17,6 +17,8 @@ const {
   loadAuthorizedPatientContext,
   detectLanguage,
   consumeAssistantRateLimit,
+  looksLikeImageFollowUp,
+  normalizeQuestion,
   APPROVED_HMO_PROVIDERS,
 } = require("../services/clinicAssistant");
 const {
@@ -25,7 +27,11 @@ const {
   isAiFeatureEnabled,
   chatbotUnavailableMessage,
 } = require("../services/aiSettings");
-const { analyzeDentalImageBuffer, DISCLAIMER: IMAGE_ANALYSIS_DISCLAIMER } = require("../services/dentalImageAnalysis");
+const {
+  analyzeDentalImageBuffer,
+  readOwnedPatientImage,
+  DISCLAIMER: IMAGE_ANALYSIS_DISCLAIMER,
+} = require("../services/dentalImageAnalysis");
 const staffCheckIn = require("../services/staffCheckIn");
 const { insertPatientNotification, mapPatientNotification } = require("../services/patientPortalNotifications");
 const dentalWellness = require("../services/dentalWellness");
@@ -2424,12 +2430,67 @@ function createPatientPortalRouter({
           assistantContent: payload.answer,
           source: payload.source || payload.model || null,
           analysis: payload.analysis || null,
-          attachmentName: req.file?.originalname || null,
-          attachmentDocumentId: payload.analysis?.documentId || null,
+          attachmentName: payload.attachmentName || req.file?.originalname || null,
+          attachmentDocumentId: payload.attachmentDocumentId || payload.analysis?.documentId || null,
         });
         return res.json({
           ...payload,
           conversationId: saved.conversation?.id || ownedConversation?.id || null,
+        });
+      }
+
+      if (!req.file && looksLikeImageFollowUp(normalizeQuestion(question)) && assistantOptions.priorImage?.documentId) {
+        const owned = await readOwnedPatientImage(
+          db,
+          uploadDirectory,
+          userId,
+          assistantOptions.priorImage.documentId
+        );
+        if (!owned.ok) {
+          const unavailable =
+            owned.reason === "forbidden"
+              ? "That image is not available on this account, so I cannot examine it."
+              : "The earlier image is still listed on this conversation, but the file could not be read. I did not examine it.";
+          return persistAndRespond({
+            answer: `${unavailable} ${IMAGE_ANALYSIS_DISCLAIMER}`,
+            source: "image-follow-up",
+            model: "none",
+            analysis: null,
+          });
+        }
+        const diagnosticsEnabled =
+          isAiFeatureEnabled(settings, "predictiveDiagnostics") &&
+          settings.chatbotKnowledgeMode !== "restricted";
+        const analysis = diagnosticsEnabled
+          ? await analyzeDentalImageBuffer({
+              buffer: owned.buffer,
+              mimeType: owned.mimeType,
+              question,
+              diagnosticsSensitivity: settings.diagnosticsSensitivity,
+              db,
+              usageUserId: userId,
+              usageUserRole: "patient",
+            })
+          : {
+              status: "unavailable",
+              summary:
+                "Your dental image is still attached, but preliminary image analysis is turned off in clinic AI settings. I did not examine it again.",
+              model: "disabled",
+              disclaimer: IMAGE_ANALYSIS_DISCLAIMER,
+            };
+        return persistAndRespond({
+          answer: analysis.summary || "I could not examine the attached image again.",
+          source: analysis.model || "image-analysis",
+          model: analysis.model || "none",
+          attachmentName: owned.originalName || null,
+          attachmentDocumentId: assistantOptions.priorImage.documentId,
+          analysis: {
+            status: analysis.status,
+            documentId: assistantOptions.priorImage.documentId,
+            possibleToothNumber: analysis.possibleToothNumber || null,
+            possibleSurface: analysis.possibleSurface || null,
+            disclaimer: analysis.disclaimer || IMAGE_ANALYSIS_DISCLAIMER,
+          },
         });
       }
 

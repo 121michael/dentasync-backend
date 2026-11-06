@@ -1918,11 +1918,11 @@ function slimPatientContext(patientContext) {
 }
 
 async function generateGeminiText(apiKey, prompt) {
-  const { resolvedGeminiModel, geminiGenerateUrl } = require("./geminiModel");
+  const { resolvedGeminiModel, geminiGenerateUrl, geminiRequestTimeoutMs } = require("./geminiModel");
   const model = resolvedGeminiModel();
   const { parseGeminiUsage, trackAiUsage } = require("./aiUsage");
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 12000);
+  const timer = setTimeout(() => controller.abort(), geminiRequestTimeoutMs());
   let recorded = false;
   const record = (event) => {
     if (recorded) return;
@@ -2044,7 +2044,16 @@ Patient question: ${question}`;
       }
     );
   } catch {
-    return { ...local, model: "clinic-faq-fallback" };
+    const notice = pick(
+      local.language,
+      "The live assistant did not answer this turn. This is saved general information, not a live model reply.",
+      "Hindi sumagot ang live assistant sa turn na ito. Naka-save na pangkalahatang impormasyon ito, hindi isang live na sagot."
+    );
+    return {
+      ...local,
+      answer: `${notice}\n\n${local.answer}`,
+      model: "clinic-faq-fallback",
+    };
   }
 }
 
@@ -2066,4 +2075,6 @@ module.exports = {
   matchApprovedHmo,
   matchApprovedClinicService,
   detectLanguage,
+  looksLikeImageFollowUp,
+  normalizeQuestion,
 };

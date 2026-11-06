@@ -26,9 +26,16 @@ function geminiGenerateUrl(apiKey, model = resolvedGeminiModel()) {
   return `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
 }
 
+function geminiRequestTimeoutMs() {
+  const requested = Number(process.env.GEMINI_REQUEST_TIMEOUT_MS);
+  if (Number.isFinite(requested) && requested >= 200 && requested <= 60000) return requested;
+  return 12000;
+}
+
 module.exports = {
   DEFAULT_GEMINI_MODEL,
   ALLOWED_GEMINI_MODELS,
   resolvedGeminiModel,
   geminiGenerateUrl,
+  geminiRequestTimeoutMs,
 };

@@ -125,8 +125,10 @@ ${sensitivityPrompt(diagnosticsSensitivity)}
 
 Always end with: ${DISCLAIMER}`;
 
-  const { resolvedGeminiModel, geminiGenerateUrl } = require("./geminiModel");
+  const { resolvedGeminiModel, geminiGenerateUrl, geminiRequestTimeoutMs } = require("./geminiModel");
   const model = resolvedGeminiModel();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), geminiRequestTimeoutMs());
   const { parseGeminiUsage, trackAiUsage, withAiUsageContext } = require("./aiUsage");
   return withAiUsageContext(
     {
@@ -141,6 +143,7 @@ Always end with: ${DISCLAIMER}`;
           geminiGenerateUrl(apiKey, model),
           {
             method: "POST",
+            signal: controller.signal,
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               contents: [
@@ -226,15 +229,47 @@ Always end with: ${DISCLAIMER}`;
           model,
         });
         return unavailableResult(
-          "I could not examine this image because the provider request failed. Your upload was saved. I will not describe findings from an image I could not access."
+          "I could not examine this image because the provider request failed or timed out. Your upload was saved. I will not describe findings from an image I could not access."
         );
+      } finally {
+        clearTimeout(timer);
       }
     }
   );
 }
 
+async function readOwnedPatientImage(db, uploadDirectory, userId, documentId) {
+  const path = require("path");
+  const fs = require("fs");
+  if (!db || !documentId || !userId) return { ok: false, reason: "missing" };
+  let row = null;
+  try {
+    const result = await db.query(
+      `SELECT original_name, stored_name, mime_type
+       FROM patient_portal_documents
+       WHERE id = $1 AND user_id = $2 AND document_type = 'xray'`,
+      [documentId, String(userId)]
+    );
+    row = result.rows[0] || null;
+  } catch {
+    return { ok: false, reason: "missing" };
+  }
+  if (!row) return { ok: false, reason: "forbidden" };
+  const filePath = path.resolve(uploadDirectory, row.stored_name);
+  if (path.dirname(filePath) !== path.resolve(uploadDirectory) || !fs.existsSync(filePath)) {
+    return { ok: false, reason: "missing-file" };
+  }
+  return {
+    ok: true,
+    buffer: fs.readFileSync(filePath),
+    mimeType: row.mime_type,
+    originalName: row.original_name,
+  };
+}
+
 module.exports = {
   analyzeDentalImageBuffer,
   prepareImageForProvider,
+  readOwnedPatientImage,
   DISCLAIMER,
 };
