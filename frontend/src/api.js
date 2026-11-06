@@ -167,6 +167,7 @@ export const api = {
       const body = new FormData();
       body.append("message", message || question || "");
       body.append("question", question || message || "");
+      body.append("image", image);
       if (conversationId) body.append("conversationId", conversationId);
       return request("/patient/assistant/chat", { method: "POST", body });
     }

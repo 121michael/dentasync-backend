@@ -260,10 +260,11 @@ const CLINIC_TOPICS = [
         ? pick(lang, `Today: ${clinic.todayHoursLabel}. `, `Ngayon: ${clinic.todayHoursLabel}. `)
         : "";
       const askedDay = namedDayHours(clinic, extras.question || "", lang);
+      const closures = closureSentence(clinic, extras.question || "", lang);
       return pick(
         lang,
-        `${askedDay}${today}${clinic.name} is open ${clinic.operatingHours}. Appointments are booked from the Appointments page. Portal messages are reviewed during clinic hours.`,
-        `${askedDay}${today}Bukas ang ${clinic.name} ayon sa iskedyul: ${clinic.operatingHours}. Mag-book ng appointment sa page na Appointments. Sinusuri ang mga mensahe sa portal sa oras ng klinika.`
+        `${askedDay}${closures}${today}${clinic.name} is open ${clinic.operatingHours}. Appointments are booked from the Appointments page. Portal messages are reviewed during clinic hours.`,
+        `${askedDay}${closures}${today}Bukas ang ${clinic.name} ayon sa iskedyul: ${clinic.operatingHours}. Mag-book ng appointment sa page na Appointments. Sinusuri ang mga mensahe sa portal sa oras ng klinika.`
       );
     },
   },
@@ -841,6 +842,29 @@ function contactDirective(clinic, lang) {
   );
 }
 
+function closureSentence(clinic, normalized, lang) {
+  if (!/\b(holiday|holidays|closed|closure|closures|sarado)\b/.test(String(normalized || ""))) {
+    return "";
+  }
+  const dates = Array.isArray(clinic?.closureDates) ? clinic.closureDates : [];
+  if (!dates.length) {
+    return pick(
+      lang,
+      "No specific closure dates are saved in DentaSync. A holiday uses the holiday hours unless that date is marked closed. ",
+      "Walang naka-save na partikular na araw ng pagsasara sa DentaSync. Ang holiday ay sumusunod sa holiday hours maliban kung minarkahang sarado ang petsa. "
+    );
+  }
+  const list = dates
+    .slice(0, 8)
+    .map((item) => `${item.date}${item.note ? ` (${item.note})` : ""}`)
+    .join(", ");
+  return pick(
+    lang,
+    `Saved closure dates: ${list}. `,
+    `Mga araw na sarado ayon sa naka-save na iskedyul: ${list}. `
+  );
+}
+
 function contactAnswer(clinic, lang) {
   return pick(
     lang,
@@ -864,6 +888,7 @@ function clinicFrom(value) {
     phonePublished: incoming.phonePublished !== false,
     emailPublished: incoming.emailPublished !== false,
     addressPublished: incoming.addressPublished !== false,
+    closureDates: Array.isArray(incoming.closureDates) ? incoming.closureDates : [],
   };
 }
 
@@ -901,6 +926,7 @@ function normalizeOptions(servicesOrOptions) {
       : APPROVED_CLINIC_SERVICES,
     approvedFactsEn: options.approvedFactsEn || APPROVED_SERVICE_FACTS_EN,
     approvedFactsTl: options.approvedFactsTl || APPROVED_SERVICE_FACTS_TL,
+    priorImage: options.priorImage && typeof options.priorImage === "object" ? options.priorImage : null,
   };
 }
 
@@ -1310,6 +1336,40 @@ function isShortVisitFollowUp(normalized, historyBlock) {
   );
 }
 
+function looksLikeImageFollowUp(normalized) {
+  return /\b(that|the|this|yung|iyong) (x ray|xray|image|photo|picture|larawan|radiograph)\b|\buploaded (image|x ray|xray)\b/.test(
+    String(normalized || "")
+  );
+}
+
+function answerStoredImageFollowUp(priorImage, lang) {
+  const summary = String(priorImage?.summary || "").replace(/\s+/g, " ").trim();
+  const examined = summary && !/could not|unavailable|not configured|was saved/i.test(summary);
+  if (!priorImage?.documentId && !summary) {
+    return pick(
+      lang,
+      "No dental image is attached to this conversation, so I cannot describe one. You can attach a JPG, PNG, or WEBP photo. I will not invent findings, and a dentist still needs to review any image.",
+      "Walang dental image na naka-attach sa usapang ito, kaya hindi ko ito mailalarawan. Puwede kang mag-attach ng JPG, PNG, o WEBP. Hindi ako mag-iimbento ng findings, at kailangan pa ring tingnan ito ng dentista."
+    );
+  }
+  const earlier = examined
+    ? pick(
+        lang,
+        `Earlier preliminary note: ${summary.slice(0, 700)}`,
+        `Naunang paunang tala: ${summary.slice(0, 700)}`
+      )
+    : pick(
+        lang,
+        "The earlier upload was saved, but I could not examine the image, so I will not describe findings from it.",
+        "Nai-save ang naunang upload, pero hindi ko masuri ang image, kaya hindi ako maglalarawan ng findings mula rito."
+      );
+  return pick(
+    lang,
+    `The dental image is still attached to this conversation. This reply does not look at the image again. ${earlier} This is not a diagnosis or a treatment decision. Ask your dentist to review the image and these questions: what they see, whether any area needs treatment, and what the next step would be.`,
+    `Naka-attach pa rin ang dental image sa usapang ito. Hindi ko tinitingnan ulit ang image sa sagot na ito. ${earlier} Hindi ito diagnosis o desisyon sa treatment. Ipasuri sa dentista ang image at itanong kung ano ang nakikita nila, kung may bahaging kailangan ng treatment, at ano ang susunod na hakbang.`
+  );
+}
+
 function looksLikeUnsupportedAction(normalized) {
   return /(book me|book it for me|please book|i want you to book|can you book|cancel it for me|cancel my appointment now|please cancel|reschedule me|check me in|you (already )?booked|appointment is booked|has been cancelled|already cancelled|mark me (as )?(called|done))/.test(
     normalized
@@ -1465,6 +1525,7 @@ function languageInstruction(question) {
 }
 
 function answerFromCatalog(question, servicesOrOptions) {
+  const options = normalizeOptions(servicesOrOptions);
   const {
     services,
     dentists,
@@ -1475,7 +1536,7 @@ function answerFromCatalog(question, servicesOrOptions) {
     approvedServices,
     approvedFactsEn,
     approvedFactsTl,
-  } = normalizeOptions(servicesOrOptions);
+  } = options;
   const expanded = contextualQuestion(question, conversationHistoryBlock);
   const normalized = correctCommonTypos(normalizeQuestion(expanded));
   const lang = detectLanguage(question);
@@ -1526,6 +1587,14 @@ function answerFromCatalog(question, servicesOrOptions) {
       language: lang,
     };
   }
+  if (looksLikeImageFollowUp(normalized) && !looksLikeFeeQuestion(normalized)) {
+    return {
+      answer: answerStoredImageFollowUp(options.priorImage, lang),
+      source: "image-follow-up",
+      language: lang,
+    };
+  }
+
   if (!normalized) {
     return {
       answer: pick(
@@ -1698,11 +1767,18 @@ async function loadClinicKnowledge(db) {
   try {
     const clinicSchedule = require("./clinicSchedule");
     const hours = await clinicSchedule.summarizeOperatingHours(db);
+    let closureDates = [];
+    try {
+      closureDates = await clinicSchedule.loadUpcomingClosures(db);
+    } catch {
+      closureDates = [];
+    }
     return {
       ...clinic,
       operatingHours: hours.weekLabel || clinic.operatingHours,
       todayHoursLabel: hours.todayLabel,
       todayClosed: hours.todayClosed,
+      closureDates,
     };
   } catch {
     return clinic;
@@ -1842,6 +1918,8 @@ function slimPatientContext(patientContext) {
 }
 
 async function generateGeminiText(apiKey, prompt) {
+  const { resolvedGeminiModel, geminiGenerateUrl } = require("./geminiModel");
+  const model = resolvedGeminiModel();
   const { parseGeminiUsage, trackAiUsage } = require("./aiUsage");
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 12000);
@@ -1851,13 +1929,13 @@ async function generateGeminiText(apiKey, prompt) {
     recorded = true;
     trackAiUsage({
       feature: "patient_assistant",
-      model: "gemini-1.5-flash",
+      model,
       ...event,
     });
   };
   try {
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
+      geminiGenerateUrl(apiKey, model),
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1904,7 +1982,7 @@ async function answerWithOptionalGemini(question, servicesOrOptions) {
   const oralIntent =
     Boolean(matchTopic(normalized, ORAL_HEALTH_TOPICS)) || ORAL_FALLBACK_RE.test(normalized);
 
-  if (["privacy", "restricted", "patient-own", "safety", "procedure", "hmo", "catalog"].includes(local.source)) {
+  if (["privacy", "restricted", "patient-own", "safety", "procedure", "hmo", "catalog", "image-follow-up"].includes(local.source)) {
     return { ...local, model: "clinic-faq" };
   }
 
@@ -1960,7 +2038,7 @@ Patient question: ${question}`;
     return {
       answer: alreadyNoted ? text : `${text}\n\n${note}`,
       source: "gemini",
-      model: "gemini-1.5-flash",
+      model: require("./geminiModel").resolvedGeminiModel(),
       language: local.language,
     };
       }

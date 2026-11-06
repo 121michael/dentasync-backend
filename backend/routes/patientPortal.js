@@ -2407,6 +2407,7 @@ function createPatientPortalRouter({
         diagnosticsSensitivity: settings.diagnosticsSensitivity,
         patientContext,
         conversationHistoryBlock: patientAiConversations.formatConversationHistoryBlock(priorMessages),
+        priorImage: patientAiConversations.priorImageContext(priorMessages),
         db,
         usageUserId: userId,
         usageUserRole: "patient",

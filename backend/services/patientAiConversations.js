@@ -60,8 +60,29 @@ function conversationContextForPrompt(messages) {
   return messages.slice(-CONTEXT_MESSAGE_LIMIT).map((item) => {
     const role = item.role === "user" || item.sender === "patient" ? "Patient" : "Assistant";
     const text = String(item.text || item.content || "").slice(0, CONTEXT_CHAR_LIMIT);
-    return { role, text };
+    const attached = item.attachmentDocumentId || item.attachmentName
+      ? " [a dental image remains attached to this message]"
+      : "";
+    return { role, text: `${text}${attached}`.slice(0, CONTEXT_CHAR_LIMIT + 48) };
   });
+}
+
+function priorImageContext(messages) {
+  const list = Array.isArray(messages) ? messages : [];
+  for (let index = list.length - 1; index >= 0; index -= 1) {
+    const message = list[index];
+    if (!message?.attachmentDocumentId && !message?.attachmentName) continue;
+    const following = list[index + 1];
+    const summary =
+      following && (following.role === "assistant" || following.sender === "ai")
+        ? String(following.text || following.content || "")
+        : "";
+    return {
+      documentId: message.attachmentDocumentId || null,
+      summary: summary.slice(0, 800),
+    };
+  }
+  return null;
 }
 
 function formatConversationHistoryBlock(messages) {
@@ -218,6 +239,7 @@ module.exports = {
   mapMessage,
   mapConversation,
   conversationContextForPrompt,
+  priorImageContext,
   formatConversationHistoryBlock,
   historyEnabled,
   getOwnedConversation,

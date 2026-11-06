@@ -9,6 +9,54 @@
 const DISCLAIMER =
   "AI-generated information is preliminary and does not replace examination or diagnosis by a licensed dentist.";
 
+const IMAGE_MIME = {
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+  gif: "image/gif",
+};
+
+async function prepareImageForProvider(buffer, mimeType) {
+  const allowed = new Set(Object.values(IMAGE_MIME));
+  if (!allowed.has(mimeType)) {
+    return {
+      ok: false,
+      message:
+        "This file type cannot be examined here. JPG, PNG, WEBP, and GIF images can be reviewed. PDF and other files are stored for your dentist, and I will not pretend to have seen them.",
+    };
+  }
+  if (!buffer || !Buffer.isBuffer(buffer) || !buffer.length) {
+    return { ok: false, message: "No image data was received, so I cannot examine an image." };
+  }
+  try {
+    const sharp = require("sharp");
+    const source = sharp(buffer, { failOn: "error", animated: false });
+    const meta = await source.metadata();
+    const format = meta.format;
+    if (!IMAGE_MIME[format]) {
+      return {
+        ok: false,
+        message:
+          "I could not read this file as an image, so I did not examine it. Please upload a clear JPG, PNG, or WEBP dental photo or X-ray.",
+      };
+    }
+    const cleaned = await source.rotate().toFormat(format).toBuffer();
+    if (!cleaned.length) {
+      return {
+        ok: false,
+        message: "I could not read this image, so I did not examine it.",
+      };
+    }
+    return { ok: true, buffer: cleaned, mimeType: IMAGE_MIME[format] };
+  } catch {
+    return {
+      ok: false,
+      message:
+        "This file looks corrupted or is not a readable image. I did not examine it. Please upload a clear JPG, PNG, or WEBP dental photo or X-ray.",
+    };
+  }
+}
+
 function unavailableResult(reason) {
   return {
     status: "unavailable",
@@ -43,44 +91,42 @@ async function analyzeDentalImageBuffer({
   usageUserRole = "patient",
   db = null,
 } = {}) {
+  const prepared = await prepareImageForProvider(buffer, mimeType);
+  if (!prepared.ok) {
+    return unavailableResult(prepared.message);
+  }
+
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return unavailableResult(
-      "Your image was saved securely. Automated preliminary analysis is not configured on this server (GEMINI_API_KEY). Please share the image with your dentist for professional review."
-    );
-  }
-
-  if (!buffer || !Buffer.isBuffer(buffer) || !buffer.length) {
-    return unavailableResult("No image data was received for analysis.");
-  }
-
-  const allowed = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
-  if (!allowed.has(mimeType)) {
-    return unavailableResult(
-      "Preliminary image analysis supports JPG, PNG, or WEBP photos/X-rays. PDF or other formats are stored for your dentist but are not auto-analyzed here."
+      "Your image was saved securely. Automated preliminary analysis is not configured on this server. I could not examine the image. Please share it with your dentist for professional review."
     );
   }
 
   const prompt = `You are Amethyst Dental's patient AI assistant inside DentaSync.
-The patient uploaded a dental photo or X-ray${fileName ? ` named "${fileName}"` : ""}.
+The patient uploaded a dental photo or X-ray. Do not repeat names, chart numbers, or dates that look like patient identifiers.
 Patient note: ${question || "(none)"}
 
 Reply in the same language the patient used (English, Filipino/Tagalog, or mixed Taglish). If the note is empty, use English.
 
-Provide PRELIMINARY observations only. You MUST NOT claim a diagnosis, prescribe treatment, or sound certain.
-If image quality is poor, say so and avoid guessing.
+Provide PRELIMINARY observations only. You MUST NOT diagnose, prescribe medication, or decide treatment from the image alone.
+If the image is blurry, dark, or too small to see tooth shapes, say you cannot identify features and do not invent them.
+If the image is not a dental photo or X-ray, say so and do not describe teeth.
+Suggest questions the patient can ask their dentist. Do not sound certain.
 
 Respond in plain text with short sections:
 1) Image quality
 2) Possible FDI tooth number(s) if reasonably visible (examples: 11, 16, 26, 36, 46). Say "uncertain" if unclear.
 3) Possible visible tooth surface if applicable (occlusal, incisal, buccal, facial, lingual, palatal, mesial, distal) or "uncertain"
-4) Possible visible abnormality area requiring professional attention (preliminary only)
-5) Recommendation to see a licensed dentist
+4) Possible visible feature a dentist should review (preliminary only)
+5) Questions to ask the dentist
 
 ${sensitivityPrompt(diagnosticsSensitivity)}
 
 Always end with: ${DISCLAIMER}`;
 
+  const { resolvedGeminiModel, geminiGenerateUrl } = require("./geminiModel");
+  const model = resolvedGeminiModel();
   const { parseGeminiUsage, trackAiUsage, withAiUsageContext } = require("./aiUsage");
   return withAiUsageContext(
     {
@@ -92,7 +138,7 @@ Always end with: ${DISCLAIMER}`;
     async () => {
       try {
         const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
+          geminiGenerateUrl(apiKey, model),
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -103,8 +149,8 @@ Always end with: ${DISCLAIMER}`;
                     { text: prompt },
                     {
                       inline_data: {
-                        mime_type: mimeType,
-                        data: buffer.toString("base64"),
+                        mime_type: prepared.mimeType,
+                        data: prepared.buffer.toString("base64"),
                       },
                     },
                   ],
@@ -119,10 +165,10 @@ Always end with: ${DISCLAIMER}`;
             feature: "patient_image_analysis",
             outcome: "failed",
             httpStatus: response.status,
-            model: "gemini-1.5-flash",
+            model,
           });
           return unavailableResult(
-            "Preliminary image analysis could not be completed right now. Your upload was saved for your care team. Please try again later or consult your dentist."
+            "I could not examine this image because the provider did not accept it. Your upload was saved. I will not describe findings from an image I could not access."
           );
         }
 
@@ -137,11 +183,11 @@ Always end with: ${DISCLAIMER}`;
             feature: "patient_image_analysis",
             outcome: "failed",
             httpStatus: 200,
-            model: "gemini-1.5-flash",
+            model,
             usage,
           });
           return unavailableResult(
-            "No preliminary findings could be generated from this image. Please consult your dentist for professional evaluation."
+            "I could not examine this image because the provider returned no description. Your upload was saved. I will not invent findings."
           );
         }
 
@@ -149,7 +195,7 @@ Always end with: ${DISCLAIMER}`;
           feature: "patient_image_analysis",
           outcome: "success",
           httpStatus: 200,
-          model: "gemini-1.5-flash",
+          model,
           usage,
         });
 
@@ -170,17 +216,17 @@ Always end with: ${DISCLAIMER}`;
           possibleToothNumber: toothMatch ? toothMatch[1] : null,
           possibleSurface: surfaceMatch ? surfaceMatch[1].toLowerCase() : null,
           disclaimer: DISCLAIMER,
-          model: "gemini-1.5-flash",
+          model,
         };
       } catch (error) {
-        console.warn("Dental image analysis failed:", error.message);
+        console.warn("Dental image analysis failed.");
         trackAiUsage({
           feature: "patient_image_analysis",
           outcome: "failed",
-          model: "gemini-1.5-flash",
+          model,
         });
         return unavailableResult(
-          "Preliminary image analysis failed unexpectedly. Your upload was saved. Please consult your dentist."
+          "I could not examine this image because the provider request failed. Your upload was saved. I will not describe findings from an image I could not access."
         );
       }
     }
@@ -189,5 +235,6 @@ Always end with: ${DISCLAIMER}`;
 
 module.exports = {
   analyzeDentalImageBuffer,
+  prepareImageForProvider,
   DISCLAIMER,
 };

@@ -330,6 +330,30 @@ function isSlotBookable(hours, defaults, savedSlots, bookedTimes, appointmentTim
   return Boolean(slot?.bookable);
 }
 
+function addDaysYmd(ymd, days) {
+  const [year, month, day] = String(ymd).split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+async function loadUpcomingClosures(db, now = new Date(), horizonDays = 366) {
+  const start = clinicTodayYmd(now);
+  const end = addDaysYmd(start, horizonDays);
+  const dayMap = await loadDayMap(db, start, end);
+  const closures = [];
+  for (const [date, row] of dayMap.entries()) {
+    if (String(row?.mode || "").toLowerCase() !== "closed") continue;
+    const note = String(row?.notes || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 80);
+    closures.push({ date, note });
+  }
+  closures.sort((left, right) => left.date.localeCompare(right.date));
+  return closures;
+}
+
 async function summarizeOperatingHours(db, now = new Date()) {
   const defaults = await loadDefaults(db);
   const today = clinicTodayYmd(now);
@@ -378,5 +402,6 @@ module.exports = {
   formatClock,
   formatHourRange,
   clinicTodayYmd,
+  loadUpcomingClosures,
   summarizeOperatingHours,
 };
