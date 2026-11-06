@@ -845,11 +845,36 @@ function createAdminPortalRouter({
         };
       });
 
+      let sourceDocuments = [];
+      try {
+        const sources = await db.query(
+          `SELECT id, original_name, mime_type, synced_at, approved_by_name
+           FROM admin_portal_document_sync_jobs
+           WHERE linked_patient_id = $1
+             AND status = 'synced'
+             AND stored_name IS NOT NULL
+           ORDER BY synced_at DESC NULLS LAST, id DESC`,
+          [String(recordId)]
+        );
+        sourceDocuments = sources.rows.map((row) => ({
+          id: row.id,
+          originalName: row.original_name,
+          mimeType: row.mime_type,
+          syncedAt: row.synced_at,
+          approvedByName: row.approved_by_name || "",
+        }));
+      } catch (sourceError) {
+        if (sourceError.code !== "42P01" && sourceError.code !== "42703") {
+          console.warn("Clinical source document lookup failed:", sourceError.message);
+        }
+      }
+
       return res.json({
         ...detail,
         treatments,
         appointments,
         nextAppointment: patientNextAppointment,
+        sourceDocuments,
       });
     } catch (error) {
       if (clinicalPatients.isMissingRelation(error)) {

@@ -168,6 +168,10 @@ export function AdminSyncPage() {
   const [conflictIndex, setConflictIndex] = useState(0);
   const [fieldResolutions, setFieldResolutions] = useState({});
   const [manualFields, setManualFields] = useState({});
+  const [reviewFields, setReviewFields] = useState([]);
+  const [previewZoom, setPreviewZoom] = useState(1);
+  const [previewPage, setPreviewPage] = useState(1);
+  const [mobilePane, setMobilePane] = useState("fields");
   const focusHandledRef = useRef("");
 
   const clearPreviews = useCallback(() => {
@@ -450,6 +454,15 @@ export function AdminSyncPage() {
 
       setActiveJob(response.job);
       setPayload(nextPayload);
+      setReviewFields(
+        response.job?.reviewFields?.length
+          ? response.job.reviewFields
+          : Object.entries(response.fieldStatuses || {})
+              .filter(([, status]) => status === "unable_to_read")
+              .map(([field]) => field)
+      );
+      setPreviewZoom(1);
+      setPreviewPage(1);
       setEditing(true);
       const autoMessage =
         response.message ||
@@ -643,6 +656,10 @@ export function AdminSyncPage() {
       setPayload(
         normalizePayload(response.job.editedPayload || response.job.extractedPayload || emptyPayload)
       );
+      setReviewFields(response.job.reviewFields || []);
+      setPreviewZoom(1);
+      setPreviewPage(1);
+      setMobilePane("fields");
       setEditing(response.job.status !== "synced");
       setStep(response.job.status === "synced" ? "done" : response.job.status === "failed" ? "choose" : "review");
       clearPreviews();
@@ -654,7 +671,9 @@ export function AdminSyncPage() {
       }
       if (response.job.status === "synced") {
         setMessage(
-          "Import complete. The original source document was discarded; only confirmed structured data is retained."
+          response.job.sourceDocumentRetained
+            ? "Import complete. The source document stays on the selected patient record."
+            : "Import complete. Structured data was saved. This older import no longer has a source file."
         );
       }
     } catch (openError) {
@@ -689,6 +708,10 @@ export function AdminSyncPage() {
   const isPdfPreview =
     activeJob?.mimeType === "application/pdf" ||
     /\.pdf$/i.test(activeJob?.originalName || "");
+  const pageCount = Math.max(1, Number(activeJob?.pageCount) || 1);
+  function needsReview(field) {
+    return reviewFields.includes(field);
+  }
 
   return (
     <div className="admin-page">
@@ -701,8 +724,9 @@ export function AdminSyncPage() {
           <h2>Document Data Extraction</h2>
           <p>
             Scan a hard-copy paper or upload a PDF / PNG / JPEG. The system reads what it can from the document
-            (name, date of birth, age, cellphone, procedure, treatment date, amount), lets you correct mistakes,
-            then saves only that structured text to the database. Face photos and non-documents are rejected.
+            (name, date of birth, age, cellphone, procedure, treatment date, amount, and notes), lets you correct
+            mistakes, then saves the approved fields to the patient you select. The source file stays on that
+            record. Face photos and non-documents are rejected.
           </p>
           <div className="admin-heading-actions" style={{ marginTop: "0.85rem" }}>
             <button type="button" className="button button--secondary" onClick={load}>
@@ -872,31 +896,99 @@ export function AdminSyncPage() {
             </div>
           </div>
 
-          <div className="admin-doc-layout">
+          <div className="admin-doc-switch" role="tablist" aria-label="Review panes">
+            <button
+              type="button"
+              className={mobilePane === "original" ? "is-active" : ""}
+              onClick={() => setMobilePane("original")}
+            >
+              Original
+            </button>
+            <button
+              type="button"
+              className={mobilePane === "fields" ? "is-active" : ""}
+              onClick={() => setMobilePane("fields")}
+            >
+              Extracted fields
+            </button>
+          </div>
+
+          <div className={`admin-doc-layout is-showing-${mobilePane}`}>
             <div className="admin-doc-preview">
-              <span className="eyebrow">Document preview</span>
+              <div className="admin-doc-preview__toolbar">
+                <span className="eyebrow">Document preview</span>
+                <div className="admin-doc-preview__controls">
+                  {isPdfPreview && pageCount > 1 ? (
+                    <>
+                      <button
+                        type="button"
+                        className="button button--secondary button--compact"
+                        onClick={() => setPreviewPage((page) => Math.max(1, page - 1))}
+                        disabled={previewPage <= 1}
+                      >
+                        Previous page
+                      </button>
+                      <span>
+                        Page {previewPage} of {pageCount}
+                      </span>
+                      <button
+                        type="button"
+                        className="button button--secondary button--compact"
+                        onClick={() => setPreviewPage((page) => Math.min(pageCount, page + 1))}
+                        disabled={previewPage >= pageCount}
+                      >
+                        Next page
+                      </button>
+                    </>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="button button--secondary button--compact"
+                    onClick={() => setPreviewZoom((value) => Math.max(1, Math.round((value - 0.25) * 100) / 100))}
+                    disabled={previewZoom <= 1}
+                  >
+                    Zoom out
+                  </button>
+                  <span>{Math.round(previewZoom * 100)}%</span>
+                  <button
+                    type="button"
+                    className="button button--secondary button--compact"
+                    onClick={() => setPreviewZoom((value) => Math.min(2.5, Math.round((value + 0.25) * 100) / 100))}
+                  >
+                    Zoom in
+                  </button>
+                </div>
+              </div>
               {previewUrl ? (
-                isPdfPreview ? (
-                  <iframe title="Document preview" src={previewUrl} className="admin-doc-preview__frame" />
-                ) : (
-                  <img
-                    src={previewUrl}
-                    alt="Uploaded or scanned document"
-                    onError={() => {
-                      if (!previewBroken && localPreviewUrl && serverPreviewUrl && previewUrl === localPreviewUrl) {
+                <div className="admin-doc-preview__stage">
+                  {isPdfPreview ? (
+                    <iframe
+                      key={`${previewUrl}-${previewPage}-${previewZoom}`}
+                      title={`Document preview page ${previewPage}`}
+                      src={`${previewUrl}#page=${previewPage}&zoom=${Math.round(previewZoom * 100)}`}
+                      className="admin-doc-preview__frame"
+                    />
+                  ) : (
+                    <img
+                      src={previewUrl}
+                      alt="Uploaded or scanned document"
+                      style={{ transform: `scale(${previewZoom})`, transformOrigin: "top center" }}
+                      onError={() => {
+                        if (!previewBroken && localPreviewUrl && serverPreviewUrl && previewUrl === localPreviewUrl) {
+                          setPreviewBroken(true);
+                          return;
+                        }
                         setPreviewBroken(true);
-                        return;
-                      }
-                      setPreviewBroken(true);
-                      if (previewUrl === localPreviewUrl) setLocalPreviewUrl("");
-                      if (previewUrl === serverPreviewUrl) setServerPreviewUrl("");
-                    }}
-                  />
-                )
+                        if (previewUrl === localPreviewUrl) setLocalPreviewUrl("");
+                        if (previewUrl === serverPreviewUrl) setServerPreviewUrl("");
+                      }}
+                    />
+                  )}
+                </div>
               ) : (
                 <p className="muted-copy">
                   {activeJob.status === "synced"
-                    ? "Source document discarded after import. Only confirmed structured data was saved."
+                    ? "This import has no source file to preview."
                     : "Temporary preview unavailable. Keep the upload selected or re-upload the photo."}
                 </p>
               )}
@@ -914,8 +1006,8 @@ export function AdminSyncPage() {
               <section className="doc-table-card__patient" aria-label="Patient information">
                 <span className="doc-table-card__section-label">Patient Information</span>
                 <div className="doc-table-card__patient-grid">
-                  <label className="doc-table-field doc-table-field--wide">
-                    <span>Name</span>
+                  <label className={`doc-table-field doc-table-field--wide${needsReview("fullName") ? " is-needs-review" : ""}`}>
+                    <span>Name{needsReview("fullName") ? " · needs review" : ""}</span>
                     <input
                       value={payload.patient.fullName}
                       placeholder={placeholderFor(payload.patient.fullName, "")}
@@ -923,8 +1015,8 @@ export function AdminSyncPage() {
                       onChange={(event) => updatePatient("fullName", event.target.value)}
                     />
                   </label>
-                  <label className="doc-table-field doc-table-field--age">
-                    <span>Age</span>
+                  <label className={`doc-table-field doc-table-field--age${needsReview("age") ? " is-needs-review" : ""}`}>
+                    <span>Age{needsReview("age") ? " · needs review" : ""}</span>
                     <input
                       value={payload.patient.age}
                       placeholder={placeholderFor(payload.patient.age, "")}
@@ -942,8 +1034,8 @@ export function AdminSyncPage() {
                       onChange={(event) => updatePatient("gender", event.target.value)}
                     />
                   </label>
-                  <label className="doc-table-field">
-                    <span>Phone / Cellphone</span>
+                  <label className={`doc-table-field${needsReview("phone") ? " is-needs-review" : ""}`}>
+                    <span>Phone / Cellphone{needsReview("phone") ? " · needs review" : ""}</span>
                     <input
                       value={payload.patient.phone}
                       placeholder={placeholderFor(payload.patient.phone, "")}
@@ -960,8 +1052,17 @@ export function AdminSyncPage() {
                       onChange={(event) => updatePatient("dateOfBirth", event.target.value)}
                     />
                   </label>
-                  <label className="doc-table-field doc-table-field--wide">
-                    <span>Address</span>
+                  <label className={`doc-table-field doc-table-field--wide${needsReview("notes") ? " is-needs-review" : ""}`}>
+                    <span>Clinical notes{needsReview("notes") ? " · needs review" : ""}</span>
+                    <textarea
+                      value={payload.procedure.notes || ""}
+                      placeholder={needsReview("notes") ? "Unclear handwriting — leave blank or type the written note" : ""}
+                      disabled={!editing || activeJob.status === "synced"}
+                      onChange={(event) => updateProcedure("notes", event.target.value)}
+                    />
+                  </label>
+                  <label className={`doc-table-field doc-table-field--wide${needsReview("address") ? " is-needs-review" : ""}`}>
+                    <span>Address{needsReview("address") ? " · needs review" : ""}</span>
                     <input
                       value={payload.patient.address}
                       placeholder={placeholderFor(payload.patient.address, "")}
@@ -1015,7 +1116,7 @@ export function AdminSyncPage() {
                               onChange={(event) => updateVisit(index, "treatmentDate", event.target.value)}
                             />
                           </td>
-                          <td>
+                          <td className={needsReview("toothNos") ? "is-needs-review" : undefined}>
                             <input
                               value={visit.toothNos || ""}
                               disabled={!editing || activeJob.status === "synced"}
@@ -1107,7 +1208,8 @@ export function AdminSyncPage() {
                     <p className="inline-alert inline-alert--success doc-table-card__saved">
                       Saved to clinical record #{activeJob.linkedPatientId}
                       {activeJob.linkedTreatmentId ? ` · treatment #${activeJob.linkedTreatmentId}` : ""} ·{" "}
-                      {formatAdminDateTime(activeJob.syncedAt)}. Original document deleted.
+                      {formatAdminDateTime(activeJob.syncedAt)}
+                      {activeJob.approvedByName ? ` · approved by ${activeJob.approvedByName}` : ""}. Source document kept.
                     </p>
                   )}
                 </div>
@@ -1192,15 +1294,21 @@ export function AdminSyncPage() {
 
       {decision === "merge" && matchInfo?.match ? (
         <AdminModal title="Possible Existing Patient Found" onClose={() => setDecision(null)}>
+          <p>The name read from the document is a suggestion. Confirm the destination patient before saving.</p>
           <p>Extracted from document:</p>
           <p>
             <strong>{payload.patient.fullName || matchInfo.proposedPatient?.fullName}</strong>
+            <br />
+            Phone: {payload.patient.phone || "blank"} · Date of birth: {payload.patient.dateOfBirth || "blank"}
           </p>
           <p>Existing patient:</p>
           <p>
             <strong>{matchInfo.match.fullName}</strong>
             <br />
             Patient ID: {matchInfo.match.patientId || matchInfo.match.id}
+            <br />
+            Phone: {matchInfo.match.phone || "—"} · Date of birth:{" "}
+            {matchInfo.match.dateOfBirth ? String(matchInfo.match.dateOfBirth).slice(0, 10) : "—"}
           </p>
           <p>What would you like to do?</p>
           <div className="admin-modal__actions">
@@ -1216,7 +1324,10 @@ export function AdminSyncPage() {
 
       {decision === "multiple" && matchInfo?.matches?.length ? (
         <AdminModal title="Possible Matches" onClose={() => setDecision(null)} wide>
-          <p>Please select the correct patient:</p>
+          <p>
+            More than one patient looks similar. The extracted name is only a suggestion. Select the
+            destination record, or create a new patient.
+          </p>
           <div className="admin-table-wrap">
             <table className="admin-table">
               <thead>
@@ -1225,6 +1336,7 @@ export function AdminSyncPage() {
                   <th>Name</th>
                   <th>Patient ID</th>
                   <th>Birthdate</th>
+                  <th>Phone</th>
                 </tr>
               </thead>
               <tbody>
@@ -1241,6 +1353,7 @@ export function AdminSyncPage() {
                     <td>{row.fullName}</td>
                     <td>{row.patientId || row.id}</td>
                     <td>{row.dateOfBirth ? String(row.dateOfBirth).slice(0, 10) : "—"}</td>
+                    <td>{row.phone || "—"}</td>
                   </tr>
                 ))}
               </tbody>

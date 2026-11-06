@@ -4,7 +4,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { extractBestImageText, scoreDocumentText, extractTreatmentZoneText } = require("./documentImagePrep");
-const { extractFieldsWithGemini } = require("./documentVisionExtraction");
+const { extractFieldsWithGemini, applyUncertainFields } = require("./documentVisionExtraction");
 const { extractTextWithOcrSpace } = require("./cloudOcrExtraction");
 const { extractTextWithGoogleCloud, googleCloudOcrIsConfigured } = require("./googleCloudOcr");
 
@@ -3000,9 +3000,23 @@ async function extractTextFromFile(filePath, mimeType, originalName) {
     if (!buffer.length) {
       throw new DocumentValidationError(UNSUPPORTED_DOCUMENT_MESSAGE);
     }
-    const parser = new PDFParse({ data: buffer });
+    let parser;
     try {
-        const parsed = await parser.getText();
+      parser = new PDFParse({ data: buffer });
+    } catch {
+      throw new DocumentValidationError(
+        "This file could not be read. Upload a valid PDF, PNG, or JPEG. A damaged file was not saved."
+      );
+    }
+    try {
+      let parsed;
+      try {
+        parsed = await parser.getText();
+      } catch {
+        throw new DocumentValidationError(
+          "This PDF could not be read. Upload a valid PDF, PNG, or JPEG. A damaged file was not saved."
+        );
+      }
       // getText() returns every page, so multi-page records stay complete.
       const text = String(parsed?.text || "").trim();
       if (text && !pdfTextIsImageOnly(text)) {
@@ -3187,12 +3201,20 @@ async function extractDocumentDataUntracked(filePath, mimeType, originalName) {
 
   // Fast vision path for complex handwritten forms when configured.
   let vision = null;
-  if (isImage) {
+  let visionProviderNote = "";
+  if (isImage || mimeType === "application/pdf" || extension === ".pdf") {
     try {
-      vision = await extractFieldsWithGemini(filePath, mimeType || "image/png");
+      vision = await extractFieldsWithGemini(filePath, mimeType || (isImage ? "image/png" : "application/pdf"));
     } catch (error) {
       console.warn("Vision extraction skipped:", error.message);
     }
+  }
+
+  if (vision?.providerUnavailable) {
+    visionProviderNote = vision.timedOut
+      ? "The handwriting model timed out. Blank fields were left blank for staff review."
+      : "The handwriting model did not return a reading. Blank fields were left blank for staff review.";
+    vision = null;
   }
 
   if (vision && vision.isDocument === false) {
@@ -3357,13 +3379,22 @@ async function extractDocumentDataUntracked(filePath, mimeType, originalName) {
   mirrorPrimaryTreatmentIntoVisits(structured.payload);
   forceFillDentalChartTreatment(structured.payload, extracted.text, extracted.fields || {});
   filledCount = countReadableDocumentFields(structured.payload);
+  if (Array.isArray(vision?.uncertainFields) && vision.uncertainFields.length) {
+    structured.fieldStatuses = applyUncertainFields(
+      structured.payload,
+      structured.fieldStatuses,
+      vision.uncertainFields
+    );
+    filledCount = countReadableDocumentFields(structured.payload);
+  }
 
   const notes = [
     `Document read successfully — auto-filled ${filledCount} field${filledCount === 1 ? "" : "s"} from the scan. Review them, then Confirm & Save.`,
     "autofill-build: treatment-zone-v7",
     extracted.method ? `OCR engine: ${extracted.method}.` : "",
+    visionProviderNote,
     vision
-      ? "Vision assist: on."
+      ? `Vision assist: on (${vision.model || "gemini"}).`
       : process.env.GEMINI_API_KEY
         ? ""
         : googleCloudOcrIsConfigured()

@@ -9,6 +9,7 @@ async function runMigration() {
     "007_create_document_sync.sql",
     "018_document_sync_temp_files.sql",
     "030_document_sync_expiry.sql",
+    "049_document_sync_approval.sql",
   ];
 
   try {

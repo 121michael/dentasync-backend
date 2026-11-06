@@ -28,6 +28,7 @@ const {
   cleanupFinishedDocumentTemps,
   resolveTempDocumentPath,
 } = require("../services/documentSyncTempStorage");
+const { countPdfPages } = require("../services/documentVisionExtraction");
 
 const MAX_VISIT_ROWS = 500;
 
@@ -92,10 +93,10 @@ function mapJob(row) {
   const edited = row.edited_payload || emptyPayload();
   const expiresAt = row.expires_at || null;
   const expired = Boolean(expiresAt && new Date(expiresAt).getTime() <= Date.now());
+  const retained = row.status === "synced" && Boolean(row.stored_name);
   const previewable =
     Boolean(row.stored_name) &&
-    !expired &&
-    ["uploaded", "extracted", "reviewed"].includes(row.status);
+    (retained || (!expired && ["uploaded", "extracted", "reviewed"].includes(row.status)));
   return {
     id: row.id,
     originalName: row.original_name,
@@ -119,8 +120,16 @@ function mapJob(row) {
     expired,
     extractedName: extractedPatientName(edited) || extractedPatientName(extracted),
     needsReview: Boolean(extracted?.documentQuality?.needsReview),
+    reviewFields: Array.isArray(extracted?.documentQuality?.reviewFields)
+      ? extracted.documentQuality.reviewFields
+      : [],
+    pageCount: Number(extracted?.documentQuality?.pageCount) > 0
+      ? Number(extracted.documentQuality.pageCount)
+      : 1,
+    approvedBy: row.approved_by || null,
+    approvedByName: row.approved_by_name || null,
     hasPreview: previewable,
-    sourceDocumentRetained: previewable,
+    sourceDocumentRetained: Boolean(row.stored_name) && (retained || previewable),
   };
 }
 
@@ -347,13 +356,14 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
         return res.status(404).json({ message: "Document sync job not found." });
       }
       const job = result.rows[0];
-      if (job.expires_at && new Date(job.expires_at).getTime() <= Date.now()) {
+      const retained = job.status === "synced" && Boolean(job.stored_name);
+      if (!retained && job.expires_at && new Date(job.expires_at).getTime() <= Date.now()) {
         return res.status(410).json({
           message: "Document no longer available. This temporary scan expired after 24 hours.",
           code: "SCAN_EXPIRED",
         });
       }
-      if (!["uploaded", "extracted", "reviewed"].includes(job.status) || !job.stored_name) {
+      if (!retained && (!["uploaded", "extracted", "reviewed"].includes(job.status) || !job.stored_name)) {
         return res.status(410).json({
           message:
             "The source document was discarded after processing. Only extracted structured data is retained.",
@@ -458,11 +468,20 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
           () => extractDocumentData(req.file.path, req.file.mimetype, req.file.originalname)
         );
 
+        const reviewFields = Object.entries(extraction.fieldStatuses || {})
+          .filter(([, status]) => status === "unable_to_read")
+          .map(([field]) => field);
+        const pageCount =
+          req.file.mimetype === "application/pdf" || /\.pdf$/i.test(req.file.originalname || "")
+            ? await countPdfPages(req.file.path)
+            : 1;
         const storedPayload = {
           ...extraction.payload,
           documentQuality: {
             needsReview: Boolean(extraction.needsReview),
             reason: extraction.validation?.reason || "",
+            reviewFields,
+            pageCount,
           },
         };
         const updated = await db.query(
@@ -912,8 +931,7 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
         }
       }
 
-      const tempStoredName = job.stored_name;
-
+      const approverName = auditActor(req).actorName;
       await client.query(
         `UPDATE admin_portal_document_sync_jobs
          SET status = 'synced',
@@ -923,15 +941,17 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
              synced_at = CURRENT_TIMESTAMP,
              updated_at = CURRENT_TIMESTAMP,
              error_message = NULL,
-             stored_name = NULL,
-             raw_text = NULL,
-             byte_size = 0
+             expires_at = NULL,
+             approved_by = $5,
+             approved_by_name = $6
          WHERE id = $4`,
         [
           JSON.stringify(payload),
           String(clinicalRecordId),
           treatment?.id || null,
           job.id,
+          req.admin?.id ? String(req.admin.id) : null,
+          approverName,
         ]
       );
 
@@ -945,15 +965,12 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
             savedTreatments.length
               ? ` (${savedTreatments.length} treatment row${savedTreatments.length === 1 ? "" : "s"})`
               : ""
-          }${skippedDuplicates ? `; skipped ${skippedDuplicates} duplicate row(s)` : ""}. Source document discarded.`,
+          }${skippedDuplicates ? `; skipped ${skippedDuplicates} duplicate row(s)` : ""}. Source document kept on the selected patient. Approved by ${approverName}.`,
         ]
       );
 
       await client.query("COMMIT");
       transactionOpen = false;
-
-      // Delete temporary source after structured data is committed.
-      discardTemporaryDocumentFile(uploadDirectory, tempStoredName);
 
       await writeAdminAudit(db, {
         ...auditActor(req),
@@ -970,7 +987,8 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
           treatment?.id ? `Treatments saved: ${savedTreatments.length}` : "No treatment row (patient info only)",
           skippedDuplicates ? `Duplicates skipped: ${skippedDuplicates}` : null,
           matchReason ? `Match: ${matchReason}` : null,
-          "Temporary source document deleted; only structured data retained",
+          `Approved by ${approverName}`,
+          "Source document kept on the selected clinical patient",
         ]
           .filter(Boolean)
           .join(". "),
@@ -988,7 +1006,7 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
 
       return res.json({
         message: [
-          "Document successfully imported and data saved. The original source document was deleted.",
+          "Document successfully imported and data saved. The source document remains on the selected patient record.",
           ...skipNotes,
         ].join(" "),
         job: mapJob(refreshed.rows[0]),

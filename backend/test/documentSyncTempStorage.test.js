@@ -30,10 +30,12 @@ test("discardTemporaryDocumentFile removes the on-disk source", () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test("expired scans delete the temp file and unsaved job, not a linked patient", async () => {
+test("expired scans delete the unsaved file and keep an approved import", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "doc-sync-"));
   const stored = "expired-scan.jpg";
+  const kept = "approved-chart.png";
   fs.writeFileSync(path.join(dir, stored), "scan");
+  fs.writeFileSync(path.join(dir, kept), "approved");
   const calls = [];
   const db = {
     async query(sql, params) {
@@ -42,7 +44,7 @@ test("expired scans delete the temp file and unsaved job, not a linked patient",
         return {
           rows: [
             { id: 9, stored_name: stored, status: "extracted", linked_patient_id: null },
-            { id: 10, stored_name: null, status: "synced", linked_patient_id: "A202609_01" },
+            { id: 10, stored_name: kept, status: "synced", linked_patient_id: "A202609_01" },
           ],
         };
       }
@@ -50,10 +52,15 @@ test("expired scans delete the temp file and unsaved job, not a linked patient",
     },
   };
   const expired = await expireTemporaryDocumentScans(db, dir);
-  assert.equal(expired, 2);
+  assert.equal(expired, 1);
   assert.equal(temporaryDocumentExists(dir, stored), false);
+  assert.equal(temporaryDocumentExists(dir, kept), true);
   assert.ok(calls.some((item) => /DELETE FROM admin_portal_document_sync_jobs/.test(item.sql)));
-  assert.ok(calls.some((item) => /SET stored_name = NULL/.test(item.sql)));
+  assert.ok(!calls.some((item) => paramsInclude(item, kept)));
   assert.ok(!calls.some((item) => /clinic_patient/.test(item.sql)));
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+function paramsInclude(call, value) {
+  return Array.isArray(call.params) && call.params.includes(value);
+}

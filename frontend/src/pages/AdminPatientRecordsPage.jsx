@@ -124,6 +124,18 @@ export function AdminPatientRecordsPage() {
   const appointments = detail?.appointments || [];
   const treatments = detail?.treatments || [];
   const nextAppointment = detail?.nextAppointment || null;
+  const sourceDocuments = detail?.sourceDocuments || [];
+
+  async function openSourceDocument(document) {
+    try {
+      const blob = await api.getAdminDocumentSyncFileBlob(document.id);
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank", "noopener");
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (openError) {
+      pushToast(openError.message || "Unable to open the source document.", "error");
+    }
+  }
 
   return (
     <div className="admin-page">
@@ -313,6 +325,32 @@ export function AdminPatientRecordsPage() {
               )}
             </div>
           </section>
+
+          <h3 className="admin-subheading">Imported source documents</h3>
+          {sourceDocuments.length ? (
+            <div className="admin-history-list">
+              {sourceDocuments.map((document) => (
+                <article key={document.id}>
+                  <div>
+                    <strong>{document.originalName || "Source document"}</strong>
+                    <small>
+                      {document.syncedAt ? formatHistoryDate(document.syncedAt) : "Saved"}
+                      {document.approvedByName ? ` · approved by ${document.approvedByName}` : ""}
+                    </small>
+                  </div>
+                  <button
+                    type="button"
+                    className="button button--secondary button--compact"
+                    onClick={() => openSourceDocument(document)}
+                  >
+                    Open original
+                  </button>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="muted-copy">No imported source document is attached to this record.</p>
+          )}
 
           <ProcedureAuthorizationPanel
             portal="admin"

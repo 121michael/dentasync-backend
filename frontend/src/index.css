@@ -6740,6 +6740,48 @@ body.is-queue-display .staff-mobile-nav {
   border-radius: 10px;
   background: #fff;
 }
+.admin-doc-preview__toolbar,
+.admin-doc-preview__controls,
+.admin-doc-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+  align-items: center;
+}
+.admin-doc-preview__controls {
+  margin-left: auto;
+}
+.admin-doc-preview__stage {
+  overflow: auto;
+  max-height: 560px;
+  border-radius: 10px;
+  background: #fff;
+}
+.admin-doc-switch {
+  display: none;
+  margin-top: 1rem;
+}
+.admin-doc-switch button {
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  border-radius: 999px;
+  padding: .35rem .8rem;
+}
+.admin-doc-switch button.is-active {
+  background: var(--amethyst-700, #5b2d8e);
+  color: #fff;
+}
+.doc-table-field.is-needs-review input,
+.doc-table-field.is-needs-review textarea,
+.doc-table-card__table td.is-needs-review input {
+  border-color: #b45309;
+  background: #fff7ed;
+}
+.doc-table-field textarea {
+  width: 100%;
+  min-height: 4.5rem;
+  resize: vertical;
+}
 .admin-doc-fields,
 .admin-doc-fields.doc-table-card {
   min-width: 0;
@@ -7056,6 +7098,16 @@ body.is-queue-display .staff-mobile-nav {
   .admin-doc-layout,
   .admin-sync-steps {
     grid-template-columns: 1fr;
+  }
+  .admin-doc-switch {
+    display: flex;
+  }
+  .admin-doc-layout.is-showing-original .admin-doc-fields,
+  .admin-doc-layout.is-showing-fields .admin-doc-preview {
+    display: none;
+  }
+  .admin-doc-preview__controls {
+    margin-left: 0;
   }
   .doc-table-card__patient-grid {
     grid-template-columns: 1fr;

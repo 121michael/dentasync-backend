@@ -78,8 +78,9 @@ async function expireTemporaryDocumentScans(db, uploadDirectory) {
          )`
     );
     for (const row of due.rows) {
+      if (row.status === "synced") continue;
       discardTemporaryDocumentFile(uploadDirectory, row.stored_name);
-      if (row.status === "synced" || row.linked_patient_id) {
+      if (row.linked_patient_id) {
         await db.query(
           `UPDATE admin_portal_document_sync_jobs
            SET stored_name = NULL,
@@ -114,7 +115,7 @@ async function cleanupFinishedDocumentTemps(db, uploadDirectory) {
       `SELECT id, stored_name
        FROM admin_portal_document_sync_jobs
        WHERE stored_name IS NOT NULL
-         AND status IN ('synced', 'failed')`
+         AND status = 'failed'`
     );
     for (const row of leftover.rows) {
       await discardJobSourceDocument(db, uploadDirectory, row.id, row.stored_name);
@@ -131,7 +132,7 @@ async function cleanupFinishedDocumentTemps(db, uploadDirectory) {
       `SELECT stored_name
        FROM admin_portal_document_sync_jobs
        WHERE stored_name IS NOT NULL
-         AND status IN ('uploaded', 'extracted', 'reviewed')`
+         AND status IN ('uploaded', 'extracted', 'reviewed', 'synced')`
     );
     const keep = new Set(active.rows.map((row) => row.stored_name).filter(Boolean));
     for (const entry of fs.readdirSync(uploadDirectory)) {
