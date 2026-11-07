@@ -16,6 +16,43 @@ const {
   clinicalPayload,
   maskEmail,
 } = require("../services/prescriptions");
+const TEST_SIGNATURE_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  "base64"
+);
+
+function signBody() {
+  return JSON.stringify({
+    confirmation: "SIGN THIS PRESCRIPTION",
+    signaturePng: `data:image/png;base64,${TEST_SIGNATURE_PNG.toString("base64")}`,
+  });
+}
+
+async function createSigningDentist(label) {
+  const suffix = `${Date.now()}${Math.floor(Math.random() * 10000)}`;
+  const dentistRow = await db.query(
+    `INSERT INTO users (first_name, last_name, email, phone, password_hash, role, status, is_verified)
+     VALUES ('Sarah', 'Cruz', $1, $2, 'x', 'dentist', 'Active', TRUE)
+     RETURNING id`,
+    [`${label}.${suffix}@amethyst.test`, `639${String(suffix).slice(-9)}`]
+  );
+  const id = String(dentistRow.rows[0].id);
+  await db.query(
+    `ALTER TABLE admin_portal_dentist_profiles
+     ADD COLUMN IF NOT EXISTS license_verified BOOLEAN NOT NULL DEFAULT FALSE`
+  );
+  await db.query(
+    `INSERT INTO admin_portal_dentist_profiles (
+       user_id, license_number, license_verified, professional_designation
+     ) VALUES ($1, '12345', TRUE, 'DMD')
+     ON CONFLICT (user_id) DO UPDATE SET
+       license_number = EXCLUDED.license_number,
+       license_verified = TRUE`,
+    [id]
+  );
+  return id;
+}
+
 const {
   generatePrescriptionPdf,
   readPdfMediaBoxes,
@@ -45,6 +82,22 @@ test("medication items require explicit clinical fields and are hashed", () => {
   assert.equal(maskEmail("patient@amethyst.com"), "pa***@amethyst.com");
 });
 
+test("unsigned or unverified prescriptions are not released", async () => {
+  await assert.rejects(
+    () =>
+      generatePrescriptionPdf({
+        prescriptionNumber: "RX-BLOCK",
+        version: 1,
+        contentHash: "abc",
+        authorizedAt: "2026-10-30T04:00:00.000Z",
+        snapshot: { dentist: { fullName: "Dr. Sarah Cruz", licenseNumber: "12345", licenseVerified: false } },
+        items: [{ medicationName: "Amoxicillin", dosage: "500 mg", quantity: "21", sig: "As directed" }],
+        signaturePng: TEST_SIGNATURE_PNG,
+      }),
+    /license number is missing or not marked verified/
+  );
+});
+
 test("PDF lists multiple medications from the supplied snapshot only", async () => {
   const buffer = await generatePrescriptionPdf({
     prescriptionNumber: "RX-TEST-0001",
@@ -69,7 +122,8 @@ test("PDF lists multiple medications from the supplied snapshot only", async () 
         fullName: "Dr. Sarah Cruz",
         specialization: "Orthodontics",
         professionalDesignation: "DMD",
-        licenseNumber: "52384",
+        licenseNumber: "12345",
+        licenseVerified: true,
         ptrNumber: "998877",
       },
       includeExtractionAftercare: false,
@@ -91,6 +145,7 @@ test("PDF lists multiple medications from the supplied snapshot only", async () 
       },
     ],
     clinicalNotes: "Synthetic test prescription",
+    signaturePng: TEST_SIGNATURE_PNG,
   });
   assert.ok(buffer.slice(0, 5).toString() === "%PDF-");
   const boxes = readPdfMediaBoxes(buffer);
@@ -116,12 +171,15 @@ test("PDF lists multiple medications from the supplied snapshot only", async () 
   assert.match(text, /Patient's Name/);
   assert.match(text, /Sarah Cruz/i);
   assert.match(text, /DMD/);
-  assert.match(text, /PTR No\. 998877/);
+  assert.match(text, /License No\. 12345/);
+  assert.match(text, /electronic signature/i);
   assert.match(text, /Issued /);
-  assert.match(text, /This document is valid without signature, and valid 24hrs after the issuance/);
+  assert.match(text, /Valid until /);
+  assert.match(text, /Valid for 24 hours from the date and time of issuance/);
+  assert.doesNotMatch(text, /PTR No/);
+  assert.doesNotMatch(text, /valid without signature/i);
   assert.match(text, /Rx/);
   assert.match(text, /0965\.804\.5988/);
-  assert.doesNotMatch(text, /\bSignature\b/);
   assert.doesNotMatch(text, /Lic\. No\./);
   assert.doesNotMatch(text, /EVIE SUNGA/i);
   assert.doesNotMatch(text, /DO'S AND DONT'S AFTER A TOOTH EXTRACTION/);
@@ -162,9 +220,15 @@ test("prescription PDF is ISO A5 portrait and paginates extra medications onto m
         sex: "Male",
         address: "Unit 1204 Grand Central Residences, Highway Hills, Mandaluyong City",
       },
-      dentist: { fullName: "Dr. Sarah Cruz", specialization: "Orthodontics and Dentalofacial Orthopedics" },
+      dentist: {
+        fullName: "Dr. Sarah Cruz",
+        specialization: "Orthodontics and Dentalofacial Orthopedics",
+        licenseNumber: "12345",
+        licenseVerified: true,
+      },
     },
     items: many,
+    signaturePng: TEST_SIGNATURE_PNG,
   });
   const boxes = readPdfMediaBoxes(buffer);
   assert.ok(boxes.length >= 2, "overflow must create additional A5 pages");
@@ -191,10 +255,11 @@ test("extraction aftercare prints clinic pad wording only when flagged", async (
     authorizedAt: "2026-10-30T04:00:00.000Z",
     snapshot: {
       patient: { fullName: "Synthetic Extraction Patient", age: 40, sex: "Male", address: "Test Street" },
-      dentist: { fullName: "Dr. Sarah Cruz" },
+      dentist: { fullName: "Dr. Sarah Cruz", licenseNumber: "12345", licenseVerified: true },
       includeExtractionAftercare: true,
     },
     items: [{ medicationName: "Mefenamic acid", dosage: "1 tablet", quantity: "10", sig: "After meals" }],
+    signaturePng: TEST_SIGNATURE_PNG,
   });
   const { PDFParse } = require("pdf-parse");
   const parser = new PDFParse({ data: buffer });
@@ -222,7 +287,13 @@ test("PDF keeps a short medicine compact and a long name clear of its quantity",
     authorizedAt: "2026-11-03T08:00:00.000Z",
     snapshot: {
       patient: { fullName: "Alignment Patient", age: 28, sex: "Male", address: "Mandaluyong" },
-      dentist: { fullName: "Dr. Sarah Cruz", ptrNumber: "998877", professionalDesignation: "DMD" },
+      dentist: {
+        fullName: "Dr. Sarah Cruz",
+        ptrNumber: "998877",
+        professionalDesignation: "DMD",
+        licenseNumber: "12345",
+        licenseVerified: true,
+      },
     },
     items: [
       { medicationName: "Ibuprofen", dosage: "400 mg", quantity: "8", sig: "Take 1 tablet as prescribed." },
@@ -233,6 +304,7 @@ test("PDF keeps a short medicine compact and a long name clear of its quantity",
         sig: "Take 1 tablet every 12 hours with food. Finish the course unless the dentist instructs otherwise.",
       },
     ],
+    signaturePng: TEST_SIGNATURE_PNG,
   });
   const boxes = readPdfMediaBoxes(buffer);
   assert.ok(boxes.length >= 1 && boxes.length <= 2);
@@ -247,6 +319,8 @@ test("PDF keeps a short medicine compact and a long name clear of its quantity",
   assert.match(parsed.text, /Amoxicillin/);
   assert.match(parsed.text, /clavulanate/);
   assert.match(parsed.text, /extended-/);
+  assert.match(parsed.text, /License No\. 12345/);
+  assert.doesNotMatch(parsed.text, /PTR No/);
   assert.match(parsed.text, /release/);
   assert.match(parsed.text, /#14/);
   assert.match(parsed.text, /400 mg/);
@@ -308,17 +382,7 @@ async function listen(app) {
 test("dentist-staff workflow authorizes a version and blocks staff clinical edits", async () => {
   await ensureSchema();
   const suffix = Date.now();
-  let dentistRow = await db.query(
-    `SELECT id FROM users WHERE LOWER(role) = 'dentist' AND is_verified = TRUE LIMIT 1`
-  );
-  if (!dentistRow.rows.length) {
-    dentistRow = await db.query(
-      `INSERT INTO users (first_name, last_name, email, phone, password_hash, role, status, is_verified)
-       VALUES ('Sarah', 'Cruz', $1, $2, 'x', 'dentist', 'Active', TRUE)
-       RETURNING id`,
-      [`sarah${suffix}@amethyst.test`, `63917${String(suffix).slice(-7)}`]
-    );
-  }
+  const liveDentistId = await createSigningDentist("workflow");
   let staffRow = await db.query(
     `SELECT id FROM users WHERE LOWER(role) = 'staff' AND is_verified = TRUE LIMIT 1`
   );
@@ -330,7 +394,6 @@ test("dentist-staff workflow authorizes a version and blocks staff clinical edit
       [`staff${suffix}@amethyst.test`, `63918${String(suffix).slice(-7)}`]
     );
   }
-  const liveDentistId = String(dentistRow.rows[0].id);
   const liveStaffId = String(staffRow.rows[0].id);
 
   const record = await db.query(
@@ -412,13 +475,38 @@ test("dentist-staff workflow authorizes a version and blocks staff clinical edit
       }),
     });
     assert.equal(unauthorizedSend.status, 409);
+    const missingConfirmation = await fetch(`${dentist.url}/api/dentist/prescriptions/${draft.id}/authorize`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: signBody().replace("SIGN THIS PRESCRIPTION", "not yet"),
+    });
+    assert.equal(missingConfirmation.status, 400);
+    const staffSign = await fetch(`${staff.url}/api/staff/prescriptions/${draft.id}/authorize`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: signBody(),
+    });
+    assert.equal(staffSign.status, 404);
     const authorized = await fetch(`${dentist.url}/api/dentist/prescriptions/${draft.id}/authorize`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: signBody(),
     });
     const authBody = await authorized.json();
     assert.equal(authorized.status, 200, authBody.message || JSON.stringify(authBody));
     assert.equal(authBody.prescription.workflowStatus, "authorized");
     assert.equal(authBody.prescription.emailStatus, "pending");
+    assert.ok(authBody.prescription.signedAt);
+    assert.equal(authBody.prescription.dentist.licenseNumber, "12345");
+    const issuedAt = authBody.prescription.authorizedAt;
+    const edited = await fetch(`${dentist.url}/api/dentist/prescriptions/${draft.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        items: [{ medicationName: "Changed", dosage: "1", quantity: "1", sig: "Changed" }],
+      }),
+    });
+    assert.equal(edited.status, 409);
 
     const prescriptionsMod = require("../services/prescriptions");
     const originalSend = prescriptionsMod.sendAuthorizedEmail;
@@ -429,6 +517,14 @@ test("dentist-staff workflow authorizes a version and blocks staff clinical edit
       prescriptionId: draft.id,
       uploadDirectory,
     });
+    const again = await prescriptionsMod.generateOrRetrievePdf(db, {
+      actorId: liveStaffId,
+      actorRole: "staff",
+      prescriptionId: draft.id,
+      uploadDirectory,
+      forceRegenerate: true,
+    });
+    assert.equal(new Date(again.prescription.authorized_at).toISOString(), new Date(issuedAt).toISOString());
     await prescriptionsMod.retrieveStoredPdf(db, {
       actorId: liveStaffId,
       actorRole: "staff",
@@ -489,6 +585,7 @@ test("dentist-staff workflow authorizes a version and blocks staff clinical edit
 test("missing prescription tables are created on first list request", async () => {
   await db.query(`
     DROP TABLE IF EXISTS
+      prescription_signatures,
       prescription_audit_events,
       prescription_email_attempts,
       prescription_pdfs,
@@ -533,10 +630,7 @@ test("missing prescription tables are created on first list request", async () =
 test("patient portal shows owned prescriptions and hides drafts from other patients", async () => {
   await ensureSchema();
   const suffix = Date.now();
-  const dentistRow = await db.query(
-    `SELECT id FROM users WHERE LOWER(role) = 'dentist' AND is_verified = TRUE LIMIT 1`
-  );
-  const liveDentistId = String(dentistRow.rows[0].id);
+  const liveDentistId = await createSigningDentist("patient");
   const patientRow = await db.query(
     `INSERT INTO users (first_name, last_name, email, phone, password_hash, role, status, is_verified)
      VALUES ('Lina', 'Reyes', $1, $2, 'x', 'patient', 'Active', TRUE)
@@ -646,6 +740,8 @@ test("patient portal shows owned prescriptions and hides drafts from other patie
 
     const authorized = await fetch(`${dentist.url}/api/dentist/prescriptions/${rxId}/authorize`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: signBody(),
     });
     assert.equal(authorized.status, 200);
 
@@ -677,14 +773,11 @@ test("patient portal shows owned prescriptions and hides drafts from other patie
 test("staff generate, view, review, and email the stored PDF in order", async () => {
   await ensureSchema();
   const suffix = `${Date.now()}${Math.floor(Math.random() * 1000)}`.slice(-8);
-  const dentistRow = await db.query(
-    `SELECT id FROM users WHERE LOWER(role) = 'dentist' AND is_verified = TRUE LIMIT 1`
-  );
   const staffRow = await db.query(
     `SELECT id FROM users WHERE LOWER(role) = 'staff' AND is_verified = TRUE LIMIT 1`
   );
-  assert.ok(dentistRow.rows[0]?.id && staffRow.rows[0]?.id);
-  const liveDentistId = String(dentistRow.rows[0].id);
+  assert.ok(staffRow.rows[0]?.id);
+  const liveDentistId = await createSigningDentist("review");
   const liveStaffId = String(staffRow.rows[0].id);
   const record = await db.query(
     `INSERT INTO clinic_patient_records (
@@ -749,7 +842,16 @@ test("staff generate, view, review, and email the stored PDF in order", async ()
     const viewUnauthorized = await fetch(`${staff.url}/api/staff/prescriptions/${id}/pdf?inline=1`);
     assert.equal(viewUnauthorized.status, 409);
 
-    assert.equal((await fetch(`${dentist.url}/api/dentist/prescriptions/${id}/authorize`, { method: "POST" })).status, 200);
+    assert.equal(
+      (
+        await fetch(`${dentist.url}/api/dentist/prescriptions/${id}/authorize`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: signBody(),
+        })
+      ).status,
+      200
+    );
 
     const viewBeforeGenerate = await fetch(`${staff.url}/api/staff/prescriptions/${id}/pdf?inline=1`);
     assert.equal(viewBeforeGenerate.status, 409);

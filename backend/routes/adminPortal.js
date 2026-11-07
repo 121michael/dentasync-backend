@@ -212,6 +212,10 @@ function mapAccount(row, extras = {}) {
   if (row.schedule_notes !== undefined || extras.scheduleNotes !== undefined) {
     payload.scheduleNotes = extras.scheduleNotes ?? row.schedule_notes ?? "";
   }
+  if (row.license_number !== undefined || extras.licenseNumber !== undefined) {
+    payload.licenseNumber = extras.licenseNumber ?? row.license_number ?? "";
+    payload.licenseVerified = Boolean(extras.licenseVerified ?? row.license_verified);
+  }
   if (row.catalog_dentist_id !== undefined || extras.catalogDentistId !== undefined) {
     payload.catalogDentistId = extras.catalogDentistId ?? row.catalog_dentist_id ?? null;
   }
@@ -589,7 +593,21 @@ function createAdminPortalRouter({
     }
   });
 
+  async function ensureLicenseVerifiedColumn() {
+    try {
+      await db.query(
+        `ALTER TABLE admin_portal_dentist_profiles
+         ADD COLUMN IF NOT EXISTS license_verified BOOLEAN NOT NULL DEFAULT FALSE`
+      );
+    } catch (error) {
+      if (error?.code !== "42P01") throw error;
+    }
+  }
+
   async function listAccountsByRole(req, res, role) {
+    if (role === "dentist") {
+      await ensureLicenseVerifiedColumn();
+    }
     const search = stringValue(req.query.search, 100);
     const { page, limit, offset } = parsePagination(req.query);
 
@@ -678,7 +696,9 @@ function createAdminPortalRouter({
             account.created_at,
             CONCAT_WS(' ', account.first_name, account.last_name) AS full_name,
             profile.specialization,
-            profile.schedule_notes
+            profile.schedule_notes,
+            profile.license_number,
+            profile.license_verified
           FROM users AS account
           LEFT JOIN admin_portal_dentist_profiles AS profile
             ON profile.user_id = account.id::text
@@ -1424,6 +1444,9 @@ function createAdminPortalRouter({
     const scheduleNotes = scheduleNotesProvided
       ? stringValue(req.body.scheduleNotes, 2000) || ""
       : undefined;
+    const licenseProvided = Object.prototype.hasOwnProperty.call(req.body || {}, "licenseNumber");
+    const verifiedProvided = Object.prototype.hasOwnProperty.call(req.body || {}, "licenseVerified");
+    const licenseNumber = licenseProvided ? stringValue(req.body.licenseNumber, 80) || "" : undefined;
 
     if (req.body?.email !== undefined && !email) {
       return res.status(400).json({ message: "Provide a valid email address." });
@@ -1458,9 +1481,10 @@ function createAdminPortalRouter({
       fields.push(`status = $${params.length}`);
     }
 
-    if (!fields.length && !specializationProvided && !scheduleNotesProvided) {
+    if (!fields.length && !specializationProvided && !scheduleNotesProvided && !licenseProvided && !verifiedProvided) {
       return res.status(400).json({ message: "Provide at least one dentist field to update." });
     }
+    await ensureLicenseVerifiedColumn();
 
     const client = await db.connect();
     let transactionOpen = false;
@@ -1504,24 +1528,52 @@ function createAdminPortalRouter({
         dentist = result.rows[0];
       }
 
-      if (specializationProvided || scheduleNotesProvided) {
+      if (specializationProvided || scheduleNotesProvided || licenseProvided || verifiedProvided) {
+        const currentProfile = await client.query(
+          `SELECT license_number, license_verified
+           FROM admin_portal_dentist_profiles
+           WHERE user_id = $1`,
+          [String(dentist.id)]
+        );
+        const previousLicense = currentProfile.rows[0]?.license_number || "";
+        const nextLicense = licenseProvided ? licenseNumber : previousLicense;
+        let nextVerified = currentProfile.rows[0]?.license_verified === true;
+        if (licenseProvided && nextLicense !== previousLicense) {
+          nextVerified = false;
+        }
+        if (verifiedProvided) {
+          nextVerified = Boolean(req.body.licenseVerified);
+        }
+        if (nextVerified && !String(nextLicense || "").trim()) {
+          await client.query("ROLLBACK");
+          transactionOpen = false;
+          return res.status(400).json({
+            message:
+              "Enter this dentist's own license number before marking it verified. Do not use another dentist's number.",
+          });
+        }
         await client.query(
-          `INSERT INTO admin_portal_dentist_profiles (user_id, specialization, schedule_notes)
-           VALUES ($1, $2, $3)
+          `INSERT INTO admin_portal_dentist_profiles (
+             user_id, specialization, schedule_notes, license_number, license_verified
+           ) VALUES ($1, $2, $3, $4, $5)
            ON CONFLICT (user_id) DO UPDATE SET
              specialization = COALESCE($2, admin_portal_dentist_profiles.specialization),
              schedule_notes = COALESCE($3, admin_portal_dentist_profiles.schedule_notes),
+             license_number = EXCLUDED.license_number,
+             license_verified = EXCLUDED.license_verified,
              updated_at = CURRENT_TIMESTAMP`,
           [
             String(dentist.id),
             specializationProvided ? specialization || null : null,
             scheduleNotesProvided ? scheduleNotes || null : null,
+            nextLicense || null,
+            nextVerified,
           ]
         );
       }
 
       const profileResult = await client.query(
-        `SELECT specialization, schedule_notes
+        `SELECT specialization, schedule_notes, license_number, license_verified
          FROM admin_portal_dentist_profiles
          WHERE user_id = $1`,
         [String(dentist.id)]
@@ -1534,6 +1586,8 @@ function createAdminPortalRouter({
         dentist: mapAccount(dentist, {
           specialization: profileResult.rows[0]?.specialization || "",
           scheduleNotes: profileResult.rows[0]?.schedule_notes || "",
+          licenseNumber: profileResult.rows[0]?.license_number || "",
+          licenseVerified: profileResult.rows[0]?.license_verified === true,
         }),
       });
     } catch (error) {

@@ -14758,3 +14758,56 @@ body.is-queue-display .fab-menu {
     flex: 1 1 100%;
   }
 }
+
+.rx-esign-panel {
+  display: grid;
+  gap: 12px;
+  margin: 8px 0 4px;
+}
+
+.rx-esign {
+  display: grid;
+  gap: 8px;
+}
+
+.rx-esign__label {
+  margin: 0;
+  font-weight: 700;
+}
+
+.rx-esign__pad {
+  width: 100%;
+  height: 160px;
+  touch-action: none;
+  background: #fff;
+  border: 1px dashed #6d28d9;
+  border-radius: 12px;
+  cursor: crosshair;
+}
+
+.rx-esign__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.rx-esign__preview {
+  display: grid;
+  gap: 6px;
+}
+
+.rx-esign__preview img {
+  width: min(280px, 100%);
+  height: 72px;
+  object-fit: contain;
+  object-position: left center;
+  background: #fff;
+  border: 1px solid rgba(109, 40, 217, 0.35);
+  border-radius: 8px;
+}
+
+.admin-license-verify {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}

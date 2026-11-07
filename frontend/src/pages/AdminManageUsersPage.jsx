@@ -23,6 +23,8 @@ const emptyForm = {
   position: "Senior Desk Administrator",
   specialization: "",
   scheduleNotes: "",
+  licenseNumber: "",
+  licenseVerified: false,
 };
 
 const PH_MOBILE_PATTERN = /^09[0-9]{9}$/;
@@ -246,6 +248,8 @@ export function AdminManageUsersPage() {
       position: user.operationalRole || user.position || "",
       specialization: user.specialization || "",
       scheduleNotes: user.scheduleNotes || "",
+      licenseNumber: user.licenseNumber || "",
+      licenseVerified: Boolean(user.licenseVerified),
     });
     setPhoneError("");
     setFormOpen(true);
@@ -963,6 +967,24 @@ export function AdminManageUsersPage() {
                   <label className="admin-form--manage-user__full">
                     Schedule notes
                     <textarea value={form.scheduleNotes} onChange={(e) => setForm({ ...form, scheduleNotes: e.target.value })} />
+                  </label>
+                  <label className="admin-form--manage-user__full">
+                    PRC license number
+                    <input
+                      value={form.licenseNumber || ""}
+                      onChange={(e) => setForm({ ...form, licenseNumber: e.target.value, licenseVerified: false })}
+                      placeholder="This dentist's own license number"
+                    />
+                  </label>
+                  <label className="admin-form--manage-user__full admin-license-verify">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(form.licenseVerified)}
+                      onChange={(e) => setForm({ ...form, licenseVerified: e.target.checked })}
+                    />
+                    <span>
+                      I verified this license number against this dentist's professional record. Prescriptions stay blocked until this is checked. Do not enter another dentist's number.
+                    </span>
                   </label>
                 </>
               ) : null}

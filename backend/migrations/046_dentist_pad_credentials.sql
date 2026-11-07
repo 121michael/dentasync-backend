@@ -9,3 +9,6 @@ ALTER TABLE admin_portal_dentist_profiles
 
 ALTER TABLE admin_portal_dentist_profiles
   ADD COLUMN IF NOT EXISTS professional_designation TEXT;
+
+ALTER TABLE admin_portal_dentist_profiles
+  ADD COLUMN IF NOT EXISTS license_verified BOOLEAN NOT NULL DEFAULT FALSE;

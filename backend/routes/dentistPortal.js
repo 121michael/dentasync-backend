@@ -487,7 +487,8 @@ function requireDentistAccount(db) {
              profile.catalog_dentist_id,
              profile.license_number,
              profile.ptr_number,
-             profile.professional_designation
+             profile.professional_designation,
+             profile.license_verified
            FROM users AS account
            LEFT JOIN admin_portal_dentist_profiles AS profile
              ON profile.user_id = account.id::text
@@ -2935,6 +2936,7 @@ function createDentistPortalRouter({
         scheduleNotes: req.dentist.schedule_notes || "",
         catalogDentistId: req.dentist.catalog_dentist_id || null,
         licenseNumber: req.dentist.license_number || "",
+        licenseVerified: req.dentist.license_verified === true,
         ptrNumber: req.dentist.ptr_number || "",
         professionalDesignation: req.dentist.professional_designation || "DMD",
         createdAt: req.dentist.created_at || null,
@@ -2985,6 +2987,10 @@ function createDentistPortalRouter({
            license_number = EXCLUDED.license_number,
            ptr_number = EXCLUDED.ptr_number,
            professional_designation = EXCLUDED.professional_designation,
+           license_verified = CASE
+             WHEN EXCLUDED.license_number IS DISTINCT FROM admin_portal_dentist_profiles.license_number THEN FALSE
+             ELSE admin_portal_dentist_profiles.license_verified
+           END,
            updated_at = CURRENT_TIMESTAMP`,
         [
           String(req.dentist.id),
@@ -3014,6 +3020,9 @@ function createDentistPortalRouter({
           scheduleNotes,
           catalogDentistId: req.dentist.catalog_dentist_id || null,
           licenseNumber,
+          licenseVerified: licenseNumber && req.dentist.license_number === licenseNumber
+            ? req.dentist.license_verified === true
+            : false,
           ptrNumber,
           professionalDesignation,
           createdAt: profile.created_at || null,

@@ -601,8 +601,8 @@ export const api = {
   updateDentistPrescription: (id, body) =>
     request(`/dentist/prescriptions/${id}`, { method: "PATCH", body }),
   submitDentistPrescription: (id) => request(`/dentist/prescriptions/${id}/submit`, { method: "POST" }),
-  authorizeDentistPrescription: (id) =>
-    request(`/dentist/prescriptions/${id}/authorize`, { method: "POST" }),
+  authorizeDentistPrescription: (id, body) =>
+    request(`/dentist/prescriptions/${id}/authorize`, { method: "POST", body }),
   cancelDentistPrescription: (id) => request(`/dentist/prescriptions/${id}/cancel`, { method: "POST" }),
   viewDentistPrescriptionPdf: (id) => fetchAuthorizedBlob(`/dentist/prescriptions/${id}/pdf?inline=1`),
   downloadDentistPrescriptionPdf: (id, filename) =>

@@ -145,10 +145,12 @@ function attachPrescriptionRoutes(router, { db, role, uploadDirectory }) {
         const prescription = await prescriptions.authorize(db, {
           dentist: req.dentist,
           prescriptionId: req.params.id,
+          confirmation: req.body?.confirmation,
+          signaturePng: req.body?.signaturePng,
         });
         return res.json({
           prescription,
-          message: "This version is authorized. Staff can generate and email only this version.",
+          message: "This version is signed and authorized. Staff can generate and email only this version.",
         });
       } catch (error) {
         return sendError(res, error);

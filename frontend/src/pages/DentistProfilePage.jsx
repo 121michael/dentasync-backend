@@ -132,8 +132,13 @@ export function DentistProfilePage() {
             <input
               value={form.licenseNumber || ""}
               onChange={(event) => setForm((current) => ({ ...current, licenseNumber: event.target.value }))}
-              placeholder="Lic. No. as printed on the pad"
+              placeholder="Your PRC license number"
             />
+            <small className="muted-copy">
+              {form.licenseVerified
+                ? "An administrator has marked this license verified for prescriptions."
+                : "Prescriptions stay blocked until an administrator verifies this license number. Changing the number clears that verification."}
+            </small>
           </label>
           <label className="field">
             <span>PTR number</span>

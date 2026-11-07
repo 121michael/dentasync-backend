@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ClipboardPlus, Plus, Search, Trash2 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
@@ -15,6 +15,112 @@ const emptyItem = {
 
 function statusLabel(status) {
   return String(status || "").replace(/_/g, " ");
+}
+
+const SIGN_CONFIRMATION = "SIGN THIS PRESCRIPTION";
+
+function SignaturePad({ onChange }) {
+  const canvasRef = useRef(null);
+  const drawing = useRef(false);
+  const [hasInk, setHasInk] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState("");
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return undefined;
+    const rect = canvas.getBoundingClientRect();
+    const ratio = window.devicePixelRatio || 1;
+    canvas.width = Math.max(1, Math.round((rect.width || 520) * ratio));
+    canvas.height = Math.max(1, Math.round(160 * ratio));
+    const context = canvas.getContext("2d");
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    context.lineWidth = 2.2;
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    context.strokeStyle = "#1b2a6b";
+    return undefined;
+  }, []);
+
+  function point(event) {
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+  }
+
+  function start(event) {
+    const canvas = canvasRef.current;
+    const context = canvas.getContext("2d");
+    const place = point(event);
+    drawing.current = true;
+    setPreviewUrl("");
+    onChange("");
+    canvas.setPointerCapture?.(event.pointerId);
+    context.beginPath();
+    context.moveTo(place.x, place.y);
+  }
+
+  function move(event) {
+    if (!drawing.current) return;
+    const place = point(event);
+    const context = canvasRef.current.getContext("2d");
+    context.lineTo(place.x, place.y);
+    context.stroke();
+    if (!hasInk) setHasInk(true);
+  }
+
+  function end() {
+    drawing.current = false;
+  }
+
+  function clearPad() {
+    const canvas = canvasRef.current;
+    const context = canvas.getContext("2d");
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    setHasInk(false);
+    setPreviewUrl("");
+    onChange("");
+  }
+
+  function preview() {
+    if (!hasInk) return;
+    const url = canvasRef.current.toDataURL("image/png");
+    setPreviewUrl(url);
+    onChange(url);
+  }
+
+  return (
+    <div className="rx-esign">
+      <p className="rx-esign__label">Electronic signature</p>
+      <canvas
+        ref={canvasRef}
+        className="rx-esign__pad"
+        aria-label="Draw your signature"
+        onPointerDown={start}
+        onPointerMove={move}
+        onPointerUp={end}
+        onPointerLeave={end}
+      />
+      <div className="rx-esign__actions">
+        <button type="button" className="button button--secondary" onClick={clearPad}>
+          Clear
+        </button>
+        <button type="button" className="button button--secondary" onClick={preview} disabled={!hasInk}>
+          Preview signature
+        </button>
+      </div>
+      {previewUrl ? (
+        <div className="rx-esign__preview">
+          <span>Signature preview</span>
+          <img src={previewUrl} alt="Preview of the signature before it is applied" />
+        </div>
+      ) : (
+        <p className="muted-copy">Draw your signature, then preview it before confirming this prescription.</p>
+      )}
+      <p className="muted-copy">
+        This drawn mark is a visual signature for the clinic workflow. It is not a cryptographic digital signature.
+      </p>
+    </div>
+  );
 }
 
 function statusTone(status) {
@@ -42,7 +148,31 @@ export function DentistPrescriptionsPage() {
   const [patientTreatments, setPatientTreatments] = useState([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
+  const [signaturePng, setSignaturePng] = useState("");
+  const [confirmPhrase, setConfirmPhrase] = useState("");
+  const [licenseVerified, setLicenseVerified] = useState(false);
+  const [licenseNumber, setLicenseNumber] = useState("");
   const [preview, setPreview] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getDentistProfile()
+      .then((data) => {
+        if (cancelled) return;
+        setLicenseVerified(Boolean(data.profile?.licenseVerified));
+        setLicenseNumber(data.profile?.licenseNumber || "");
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLicenseVerified(false);
+          setLicenseNumber("");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -129,8 +259,15 @@ export function DentistPrescriptionsPage() {
         kind === "submit"
           ? await api.submitDentistPrescription(selectedId)
           : kind === "authorize"
-            ? await api.authorizeDentistPrescription(selectedId)
+            ? await api.authorizeDentistPrescription(selectedId, {
+                confirmation: confirmPhrase.trim(),
+                signaturePng,
+              })
             : await api.cancelDentistPrescription(selectedId);
+      if (kind === "authorize") {
+        setSignaturePng("");
+        setConfirmPhrase("");
+      }
       setDetail(data.prescription);
       await load();
     } catch (actionError) {
@@ -439,8 +576,29 @@ export function DentistPrescriptionsPage() {
             {detail ? (
               <p className="muted-copy prescription-auth-meta">
                 Authorization: {detail.authorizedAt ? `${detail.authorizationMethod} at ${detail.authorizedAt}` : "not authorized"}
+                {detail.signedAt ? ` · signed ${detail.signedAt}` : ""}
                 {detail.contentHash ? ` · hash ${detail.contentHash.slice(0, 12)}` : ""}
               </p>
+            ) : null}
+            {detail && detail.workflowStatus !== "cancelled" && detail.workflowStatus !== "authorized" ? (
+              <div className="rx-esign-panel">
+                {licenseVerified && licenseNumber ? (
+                  <p className="muted-copy">Verified license on file: {licenseNumber}</p>
+                ) : (
+                  <p className="inline-alert inline-alert--error">
+                    This prescription cannot be signed yet. An administrator must verify your own license number on the dentist account before a signed prescription can be released.
+                  </p>
+                )}
+                <SignaturePad onChange={setSignaturePng} />
+                <label className="field">
+                  <span>Type SIGN THIS PRESCRIPTION to confirm this version</span>
+                  <input
+                    value={confirmPhrase}
+                    autoComplete="off"
+                    onChange={(event) => setConfirmPhrase(event.target.value)}
+                  />
+                </label>
+              </div>
             ) : null}
             <div className="dentist-form__actions">
               {editable ? (
@@ -454,8 +612,13 @@ export function DentistPrescriptionsPage() {
                 </button>
               ) : null}
               {detail && detail.workflowStatus !== "cancelled" && detail.workflowStatus !== "authorized" ? (
-                <button type="button" className="button button--primary" onClick={() => runAction("authorize")}>
-                  Authorize this version
+                <button
+                  type="button"
+                  className="button button--primary"
+                  disabled={!signaturePng || confirmPhrase.trim() !== SIGN_CONFIRMATION || Boolean(busy)}
+                  onClick={() => runAction("authorize")}
+                >
+                  Confirm and sign this version
                 </button>
               ) : null}
               {detail?.workflowStatus === "authorized" ? (

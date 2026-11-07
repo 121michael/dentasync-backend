@@ -6,6 +6,7 @@ const path = require("path");
 const SQL_PATHS = [
   path.join(__dirname, "..", "migrations", "045_prescriptions.sql"),
   path.join(__dirname, "..", "migrations", "047_prescription_pdf_review.sql"),
+  path.join(__dirname, "..", "migrations", "050_prescription_esignatures.sql"),
 ];
 let applying = null;
 

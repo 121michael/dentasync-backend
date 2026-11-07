@@ -8,6 +8,10 @@ const { sendMailMessage, emailDeliveryIsConfigured } = require("./emailDelivery"
 const { withPrescriptionSchema } = require("./prescriptionSchema");
 
 const DEFAULT_UPLOAD_DIR = path.join(process.cwd(), "uploads", "prescriptions");
+const SIGNATURE_DIR = path.join(process.cwd(), "uploads", "prescription-signatures");
+const SIGN_CONFIRMATION = "SIGN THIS PRESCRIPTION";
+const LICENSE_RELEASE_MESSAGE =
+  "This prescription cannot be released. The prescribing dentist's license number is missing or not marked verified. An administrator must confirm the license on the dentist profile before a signed prescription can be generated.";
 const WORKFLOW = {
   DRAFT: "draft",
   SENT_TO_STAFF: "sent_to_staff",
@@ -188,6 +192,7 @@ function serialize(row, extras = {}) {
     authorizedAt: extras.authorizedAt || row.authorized_at || null,
     authorizedBy: extras.authorizedBy || row.authorized_by || null,
     authorizationMethod: extras.authorizationMethod || row.authorization_method || null,
+    signedAt: extras.signedAt || null,
     contentHash: extras.contentHash || row.content_hash || null,
     items: extras.items || [],
     clinicalNotes: extras.clinicalNotes ?? row.clinical_notes ?? "",
@@ -366,6 +371,7 @@ async function insertVersion(client, {
       professionalDesignation:
         dentist.professional_designation || dentist.professionalDesignation || "DMD",
       licenseNumber: dentist.license_number || dentist.licenseNumber || "",
+      licenseVerified: Boolean(dentist.license_verified || dentist.licenseVerified),
       ptrNumber: dentist.ptr_number || dentist.ptrNumber || "",
       email: dentist.email || "",
     },
@@ -469,6 +475,7 @@ async function loadDetail(db, prescriptionId) {
     authorizedAt: row.authorized_at,
     authorizedBy: row.authorized_by,
     authorizationMethod: row.authorization_method,
+    signedAt: await signedAtForVersion(db, row.version_row_id, row.content_hash),
     versions: versions.rows.map((item) => ({
       id: item.id,
       version: item.version,
@@ -845,10 +852,67 @@ async function submitToStaff(db, { dentist, prescriptionId }) {
   return loadDetail(db, prescriptionId);
 }
 
-async function authorize(db, { dentist, prescriptionId }) {
+function signatureDirectory() {
+  fs.mkdirSync(SIGNATURE_DIR, { recursive: true });
+  return SIGNATURE_DIR;
+}
+
+function decodeSignaturePng(value) {
+  const raw = String(value || "").trim();
+  const match = raw.match(/^data:image\/png;base64,([A-Za-z0-9+/=\s]+)$/i);
+  const encoded = (match ? match[1] : raw).replace(/\s/g, "");
+  if (!encoded || !/^[A-Za-z0-9+/=]+$/.test(encoded)) {
+    throw httpError(400, "Draw a signature, preview it, then confirm this prescription version.");
+  }
+  const buffer = Buffer.from(encoded, "base64");
+  if (buffer.length < 32 || buffer.length > 500000) {
+    throw httpError(400, "Draw a signature, preview it, then confirm this prescription version.");
+  }
+  if (buffer[0] !== 0x89 || buffer.toString("ascii", 1, 4) !== "PNG") {
+    throw httpError(400, "The signature must be a PNG image from the signature pad.");
+  }
+  return buffer;
+}
+
+async function signedAtForVersion(db, versionId, contentHash) {
+  try {
+    const result = await db.query(
+      `SELECT signed_at, content_hash FROM prescription_signatures WHERE version_id = $1`,
+      [versionId]
+    );
+    const row = result.rows[0];
+    if (!row || row.content_hash !== contentHash) return null;
+    return row.signed_at;
+  } catch (error) {
+    if (error.code === "42P01") return null;
+    throw error;
+  }
+}
+
+function verifiedLicense(dentist) {
+  const license = String(dentist.license_number || dentist.licenseNumber || "").trim();
+  const verified = dentist.license_verified === true || dentist.licenseVerified === true;
+  if (!verified || !license) {
+    throw httpError(409, LICENSE_RELEASE_MESSAGE);
+  }
+  return license;
+}
+
+async function authorize(db, { dentist, prescriptionId, confirmation, signaturePng }) {
+  if (String(confirmation || "").trim() !== SIGN_CONFIRMATION) {
+    throw httpError(
+      400,
+      "Type SIGN THIS PRESCRIPTION to confirm this signature applies only to the current version."
+    );
+  }
+  const png = decodeSignaturePng(signaturePng);
+  const license = verifiedLicense(dentist);
   const result = await db.query(`SELECT * FROM prescriptions WHERE id = $1`, [prescriptionId]);
   const row = result.rows[0];
   if (!row) throw httpError(404, "That prescription was not found.");
+  if (String(row.created_by_dentist_id) !== String(dentist.id)) {
+    throw httpError(403, "Only the prescribing dentist can sign this prescription.");
+  }
   if (row.workflow_status === WORKFLOW.CANCELLED) {
     throw httpError(409, "A cancelled prescription cannot be authorized.");
   }
@@ -858,6 +922,7 @@ async function authorize(db, { dentist, prescriptionId }) {
     }
   }
   const client = await db.connect();
+  let storedPath = "";
   try {
     await client.query("BEGIN");
     const ver = await client.query(
@@ -870,13 +935,43 @@ async function authorize(db, { dentist, prescriptionId }) {
     if (versionRow.authorized_at) {
       throw httpError(409, "This version is already authorized.");
     }
+    const snapshot = versionRow.snapshot || {};
+    snapshot.dentist = {
+      ...(snapshot.dentist || {}),
+      id: dentist.id,
+      licenseNumber: license,
+      licenseVerified: true,
+      professionalDesignation:
+        dentist.professional_designation ||
+        dentist.professionalDesignation ||
+        snapshot.dentist?.professionalDesignation ||
+        "DMD",
+    };
     await client.query(
       `UPDATE prescription_versions
        SET authorized_at = CURRENT_TIMESTAMP,
            authorized_by = $2,
-           authorization_method = 'authenticated_dentist_account'
+           authorization_method = 'authenticated_dentist_visual_signature',
+           snapshot = $3::jsonb
        WHERE id = $1`,
-      [versionRow.id, String(dentist.id)]
+      [versionRow.id, String(dentist.id), JSON.stringify(snapshot)]
+    );
+    const storedName = `${versionRow.id}.png`;
+    storedPath = path.join(signatureDirectory(), storedName);
+    fs.writeFileSync(storedPath, png, { mode: 0o600 });
+    await client.query(
+      `INSERT INTO prescription_signatures (
+         id, prescription_id, version_id, content_hash, dentist_id, stored_name, confirmation_phrase
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        crypto.randomUUID(),
+        prescriptionId,
+        versionRow.id,
+        versionRow.content_hash,
+        String(dentist.id),
+        storedName,
+        SIGN_CONFIRMATION,
+      ]
     );
     await client.query(
       `UPDATE prescriptions
@@ -889,12 +984,20 @@ async function authorize(db, { dentist, prescriptionId }) {
       version: row.current_version,
       actorId: String(dentist.id),
       actorRole: "dentist",
-      action: "authorized",
-      detail: `hash:${versionRow.content_hash}`,
+      action: "signed",
+      detail: `visual-signature hash:${versionRow.content_hash} dentist:${dentist.id}`,
     });
     await client.query("COMMIT");
+    storedPath = "";
   } catch (error) {
     await client.query("ROLLBACK");
+    if (storedPath) {
+      try {
+        fs.unlinkSync(storedPath);
+      } catch (_unlinkError) {
+        /* the private file is removed when the signature row is not kept */
+      }
+    }
     throw error;
   } finally {
     client.release();
@@ -1028,6 +1131,20 @@ async function generateOrRetrievePdf(db, {
     `SELECT * FROM prescription_items WHERE version_id = $1 ORDER BY sort_order ASC`,
     [row.id]
   );
+  const signature = await db.query(
+    `SELECT stored_name, content_hash, signed_at
+     FROM prescription_signatures
+     WHERE version_id = $1`,
+    [row.id]
+  );
+  const signatureRow = signature.rows[0];
+  const signaturePath = signatureRow ? path.join(signatureDirectory(), signatureRow.stored_name) : "";
+  if (!signatureRow || signatureRow.content_hash !== row.content_hash || !fs.existsSync(signaturePath)) {
+    throw httpError(
+      409,
+      "This version has no approved dentist signature for the authorized content. The prescribing dentist must sign this version before a PDF can be generated."
+    );
+  }
   const storedName = `rx-${row.prescription_number.replace(/[^A-Za-z0-9-]/g, "")}-v${row.version}.pdf`;
   const filePath = path.join(directory, storedName);
   const buffer = await generatePrescriptionPdf({
@@ -1038,6 +1155,7 @@ async function generateOrRetrievePdf(db, {
     snapshot: row.snapshot,
     items: items.rows.map(mapItem),
     clinicalNotes: row.clinical_notes,
+    signaturePng: fs.readFileSync(signaturePath),
   });
   fs.writeFileSync(filePath, buffer);
   const pdfId = existing?.id || crypto.randomUUID();

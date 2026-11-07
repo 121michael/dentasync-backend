@@ -35,15 +35,15 @@ const FONT = {
   integrity: 8,
   continued: 10,
 };
-const VALIDITY_NOTE =
-  "This document is valid without signature, and valid 24hrs after the issuance";
+const VALIDITY_NOTE = "Valid for 24 hours from the date and time of issuance.";
 const LOGO_CANDIDATES = [
   path.join(__dirname, "..", "assets", "amethyst-logo-rx.png"),
   path.join(__dirname, "..", "assets", "amethyst-logo.png"),
   path.join(__dirname, "..", "..", "frontend", "public", "logo.png"),
 ];
 const AFTERCARE_BLOCK = 132;
-const DENTIST_BLOCK = 72;
+const DENTIST_BLOCK = 168;
+const SIGNATURE_IMAGE_HEIGHT = 46;
 const FOOTER_RESERVE = 42;
 
 function textOrDash(value) {
@@ -77,6 +77,26 @@ function formatDateTime(value) {
     hour12: true,
     timeZone: "Asia/Manila",
   }).format(date);
+}
+
+function formatExpiry(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return formatDateTime(new Date(date.getTime() + 24 * 60 * 60 * 1000));
+}
+
+const LICENSE_RELEASE_MESSAGE =
+  "This prescription cannot be released. The prescribing dentist's license number is missing or not marked verified. An administrator must confirm the license on the dentist profile before a signed prescription can be generated.";
+
+function releaseLicense(dentist) {
+  const license = String(dentist.licenseNumber || dentist.license_number || "").trim();
+  const verified = dentist.licenseVerified === true || dentist.license_verified === true;
+  if (!verified || !license) {
+    const error = new Error(LICENSE_RELEASE_MESSAGE);
+    error.status = 409;
+    throw error;
+  }
+  return license;
 }
 
 function findLogo() {
@@ -141,6 +161,7 @@ function generatePrescriptionPdf({
   authorizedAt,
   snapshot,
   items,
+  signaturePng,
 }) {
   const patient = snapshot?.patient || {};
   const dentist = snapshot?.dentist || {};
@@ -411,7 +432,15 @@ function generatePrescriptionPdf({
     }
 
     function drawDentistBlock() {
-      const blockWidth = Math.min(220, CONTENT_WIDTH * 0.72);
+      const license = releaseLicense(dentist);
+      if (!Buffer.isBuffer(signaturePng) || signaturePng.length < 32) {
+        const error = new Error(
+          "This version has no approved dentist signature for the authorized content. The prescribing dentist must sign this version before a PDF can be generated."
+        );
+        error.status = 409;
+        throw error;
+      }
+      const blockWidth = Math.min(230, CONTENT_WIDTH * 0.64);
       const blockX = PAGE_WIDTH - MARGIN - blockWidth;
       const aftercareReserve = showAftercare ? AFTERCARE_BLOCK + 8 : 0;
       if (doc.y + DENTIST_BLOCK + aftercareReserve > usableBottom) {
@@ -419,25 +448,45 @@ function generatePrescriptionPdf({
           startContinuationPage();
         }
       }
-      let blockY = doc.y + 14;
+      let blockY = doc.y + 10;
       if (!showAftercare) {
         blockY = Math.max(blockY, usableBottom - DENTIST_BLOCK);
       }
+      doc.font("Times-Italic").fontSize(9).fillColor(INK);
+      doc.text("Dentist's electronic signature", blockX, blockY, {
+        width: blockWidth,
+        align: "center",
+      });
+      const imageTop = doc.y + 2;
+      const imageWidth = blockWidth - 24;
+      doc.image(signaturePng, blockX + 12, imageTop, {
+        fit: [imageWidth, SIGNATURE_IMAGE_HEIGHT],
+        align: "center",
+        valign: "center",
+      });
+      let y = imageTop + SIGNATURE_IMAGE_HEIGHT + 4;
       doc.font("Times-Bold").fontSize(FONT.dentistName).fillColor(INK);
-      doc.text(padDentistLine(dentist), blockX, blockY, { width: blockWidth, align: "center" });
-      doc.font("Times-Roman").fontSize(FONT.dentistMeta);
-      doc.text(`PTR No. ${textOrDash(dentist.ptrNumber || dentist.ptr_number)}`, blockX, doc.y + 3, {
+      doc.text(padDentistLine(dentist), blockX, y, { width: blockWidth, align: "center" });
+      doc.font("Times-Roman").fontSize(FONT.dentistMeta).fillColor(INK);
+      doc.text(`License No. ${license}`, blockX, doc.y + 2, {
         width: blockWidth,
         align: "center",
       });
       if (authorizedAt) {
         doc.font("Times-Roman").fontSize(FONT.issued).fillColor(MUTED);
-        doc.text(`Issued ${formatDateTime(authorizedAt)}`, blockX, doc.y + 3, {
+        doc.text(`Issued ${formatDateTime(authorizedAt)}`, blockX, doc.y + 2, {
           width: blockWidth,
           align: "center",
         });
+        const expires = formatExpiry(authorizedAt);
+        if (expires) {
+          doc.text(`Valid until ${expires}`, blockX, doc.y + 1, {
+            width: blockWidth,
+            align: "center",
+          });
+        }
       }
-      doc.y = doc.y + 8;
+      doc.y = doc.y + 6;
     }
 
     function drawAftercare() {
