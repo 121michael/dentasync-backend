@@ -883,18 +883,22 @@ function createPatientPortalRouter({
       const counts = appointmentCountResult.rows[0];
       const smsPrefs = preferenceResult.rows[0] || {};
       let wellness = {
+        hasAssessment: false,
         oralHealthScore: null,
         lastCleaning: null,
         nextCheckup: null,
         assessmentDate: null,
+        clinicalNotes: "",
       };
       try {
         const snapshot = await dentalWellness.getPortalWellness(db, userId);
         wellness = {
+          hasAssessment: Boolean(snapshot.hasAssessment),
           oralHealthScore: snapshot.hasAssessment ? snapshot.oralHealthScore : null,
-          lastCleaning: snapshot.lastCleaning || null,
+          lastCleaning: snapshot.hasAssessment ? snapshot.lastCleaning || null : null,
           nextCheckup: snapshot.hasAssessment ? snapshot.nextCheckup : null,
           assessmentDate: snapshot.hasAssessment ? snapshot.assessmentDate : null,
+          clinicalNotes: snapshot.hasAssessment ? snapshot.clinicalNotes || "" : "",
         };
       } catch (wellnessError) {
         if (wellnessError?.code !== "42P01") {

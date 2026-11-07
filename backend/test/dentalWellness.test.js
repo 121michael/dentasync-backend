@@ -160,11 +160,13 @@ test("portal wellness is scoped to the authenticated patient's linked record", a
   assert.equal(own.oralHealthScore, 82);
   assert.equal(own.lastCleaning, "2026-10-10");
   assert.equal(own.nextCheckup, "2026-11-10");
+  assert.equal(own.clinicalNotes, "Gingiva healthy.");
 
   const other = await dentalWellness.getPortalWellness(db, "patient-2");
   assert.equal(other.hasAssessment, false);
   assert.equal(other.oralHealthScore, null);
   assert.equal(other.lastCleaning, null);
+  assert.equal(other.clinicalNotes, "");
 });
 
 test("patients without an assessment keep a pending score", async () => {

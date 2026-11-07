@@ -1789,6 +1789,53 @@ strong {
   font-size: 0.76rem;
 }
 
+.wellness-results__score {
+  display: grid;
+  gap: 0.55rem;
+  margin: 1rem 0 1.1rem;
+}
+
+.wellness-results__score > div:first-child {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.wellness-results__score span {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.wellness-results__score strong {
+  color: var(--amethyst-700, #5b2d8e);
+  font-size: 1.65rem;
+  letter-spacing: -0.04em;
+}
+
+.wellness-results__notes {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.wellness-results__notes small {
+  color: var(--text-muted);
+  font-size: 0.64rem;
+}
+
+.wellness-results__notes p {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.5;
+  font-size: 0.92rem;
+}
+
+@media (max-width: 640px) {
+  .wellness-card__facts {
+    grid-template-columns: 1fr;
+  }
+}
+
 .progress-track {
   height: 7px;
   overflow: hidden;

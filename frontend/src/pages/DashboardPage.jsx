@@ -62,6 +62,61 @@ function prettyTime(value) {
   }).format(new Date(2026, 0, 1, Number(hours), Number(minutes)));
 }
 
+function WellnessResults({ wellness }) {
+  const hasAssessment = Boolean(wellness?.hasAssessment) && wellness?.oralHealthScore != null;
+  const score = hasAssessment ? Math.min(100, Math.max(0, Number(wellness.oralHealthScore))) : 0;
+  return (
+    <section className="glass-card wellness-card" aria-label="Dental Wellness Assessment Results">
+      <div className="card-heading">
+        <div>
+          <span className="eyebrow">Preventive care</span>
+          <h2>Dental Wellness Assessment Results</h2>
+        </div>
+      </div>
+      {hasAssessment ? (
+        <>
+          <div className="wellness-results__score">
+            <div>
+              <span>Wellness Score</span>
+              <strong>{score}</strong>
+            </div>
+            <div
+              className="progress-track"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={score}
+              aria-label="Wellness score"
+            >
+              <span style={{ width: `${score}%` }} />
+            </div>
+          </div>
+          <div className="wellness-card__facts">
+            <span>
+              <small>Assessment Date</small>
+              <strong>{prettyDate(wellness.assessmentDate, "Not recorded")}</strong>
+            </span>
+            <span>
+              <small>Last Cleaning</small>
+              <strong>{prettyDate(wellness.lastCleaning, "Not recorded")}</strong>
+            </span>
+            <span>
+              <small>Next Recommended Checkup</small>
+              <strong>{prettyDate(wellness.nextCheckup, "Not recorded")}</strong>
+            </span>
+          </div>
+          <div className="wellness-results__notes">
+            <small>Clinical Assessment / Notes</small>
+            <p>{String(wellness.clinicalNotes || "").trim() || "No notes recorded."}</p>
+          </div>
+        </>
+      ) : (
+        <p className="muted-copy">Your dental wellness assessment is not yet available.</p>
+      )}
+    </section>
+  );
+}
+
 function MetricCard({ icon: Icon, label, value, tone, detail }) {
   return (
     <article className={`metric-card metric-card--${tone}`}>
@@ -179,6 +234,8 @@ export function DashboardPage() {
           </button>
         </div>
       </section>
+
+      <WellnessResults wellness={dashboard.wellness} />
 
       <section className="metrics-grid" aria-label="Patient care metrics">
         <MetricCard
