@@ -6,7 +6,6 @@ import { DentalChart } from "../components/DentalChart";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { StaffModal, StaffStatusBadge } from "../components/StaffUI";
 import { useStaffUi } from "../components/StaffLayout";
-import { formatStaffDate } from "../staffUtils";
 import { formatDentistDate } from "../dentistUtils";
 import { ProcedureAuthorizationPanel } from "../components/ProcedureAuthorizationPanel";
 import { PrescriptionsPanel } from "../components/PrescriptionsPanel";
@@ -27,11 +26,9 @@ function formatMoney(value) {
   return `₱${Number(value || 0).toFixed(2)}`;
 }
 
-function formatAgeSex(patient) {
-  if (patient?.ageSex) return patient.ageSex;
-  const age = patient?.age != null && patient.age !== "" ? patient.age : "—";
-  const sex = patient?.gender || patient?.profile?.gender || "—";
-  return `${age} / ${sex}`;
+function listValue(value) {
+  const text = value == null ? "" : String(value).trim();
+  return text || "—";
 }
 
 function isProfileLocked(patient) {
@@ -292,16 +289,12 @@ export function StaffPatientsPage() {
 
         {patients.length ? (
           <div className="staff-table-wrap">
-            <table className="staff-table">
+            <table className="staff-table staff-table--patient-list">
               <thead>
                 <tr>
-                  <th>Patient</th>
-                  <th>Age / Sex</th>
-                  <th>Treatment</th>
-                  <th>Treatment Date</th>
-                  <th>Amount Paid</th>
-                  <th>Next Appointment</th>
-                  <th>Record Type</th>
+                  <th>Patient ID</th>
+                  <th>Patient Name</th>
+                  <th>Sex</th>
                   <th>Action</th>
                 </tr>
               </thead>
@@ -309,35 +302,12 @@ export function StaffPatientsPage() {
                 {patients.map((patient) => (
                   <tr key={patient.id}>
                     <td>
-                      <strong>{patient.fullName || patient.patientName}</strong>
-                      <small>
-                        <code>{patient.patientId || patient.recordCode || patient.id}</code>
-                      </small>
-                    </td>
-                    <td>{formatAgeSex(patient)}</td>
-                    <td>{patient.lastTreatment || "—"}</td>
-                    <td>
-                      {patient.lastTreatmentDate || patient.lastVisit
-                        ? formatStaffDate(patient.lastTreatmentDate || patient.lastVisit)
-                        : "—"}
+                      <code>{listValue(patient.patientId || patient.recordCode || patient.id)}</code>
                     </td>
                     <td>
-                      {patient.amountPaid != null && patient.amountPaid !== ""
-                        ? formatMoney(patient.amountPaid)
-                        : "—"}
+                      <strong>{listValue(patient.fullName || patient.patientName)}</strong>
                     </td>
-                    <td>
-                      {patient.nextAppointmentDate
-                        ? `${formatStaffDate(patient.nextAppointmentDate)}${
-                            patient.nextAppointmentTime
-                              ? ` ${String(patient.nextAppointmentTime).slice(0, 5)}`
-                              : ""
-                          }`
-                        : "—"}
-                    </td>
-                    <td>
-                      <StaffStatusBadge status={recordStatus(patient)} />
-                    </td>
+                    <td>{listValue(patient.gender || patient.profile?.gender)}</td>
                     <td>
                       <div className="staff-row-actions">
                         <button

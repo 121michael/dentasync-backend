@@ -153,6 +153,11 @@ function ProcedureFields({ draft, onChange, requiredTooth }) {
   );
 }
 
+function listValue(value) {
+  const text = value == null ? "" : String(value).trim();
+  return text || "—";
+}
+
 function formatMoney(value) {
   return `₱${Number(value || 0).toFixed(2)}`;
 }
@@ -818,17 +823,13 @@ export function DentistRecordsPage() {
 
         {patients.length ? (
           <div className="dentist-table-wrap">
-            <table className="dentist-table">
+            <table className="dentist-table dentist-table--patient-list">
               <thead>
                 <tr>
-                  <th>Patient</th>
-                  <th>Age</th>
+                  <th>Patient ID</th>
+                  <th>Patient Name</th>
                   <th>Sex</th>
-                  <th>Treatment</th>
-                  <th>Treatment Date</th>
-                  <th>Amount Paid</th>
-                  <th>Next Appointment</th>
-                  <th>Actions</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -857,36 +858,16 @@ export function DentistRecordsPage() {
                     }
                   >
                     <td>
-                      <strong>{patient.fullName || patient.patientName}</strong>
-                      <small>
-                        <code>{patient.patientId || patient.recordCode || patient.profileCode || patient.id}</code>
-                      </small>
+                      <code>
+                        {listValue(
+                          patient.patientId || patient.recordCode || patient.profileCode || patient.id
+                        )}
+                      </code>
                     </td>
                     <td>
-                      {patient.age != null && patient.age !== "" ? patient.age : "—"}
+                      <strong>{listValue(patient.fullName || patient.patientName)}</strong>
                     </td>
-                    <td>{patient.gender || "—"}</td>
-                    <td>{patient.lastTreatment || patient.lastTreatmentName || "—"}</td>
-                    <td>
-                      {formatDentistDate(
-                        patient.lastTreatmentDate || patient.lastVisit || patient.lastTreatment,
-                        "—"
-                      )}
-                    </td>
-                    <td>
-                      {patient.amountPaid != null && patient.amountPaid !== ""
-                        ? formatMoney(patient.amountPaid)
-                        : "—"}
-                    </td>
-                    <td>
-                      {patient.nextAppointmentDate
-                        ? `${formatDentistDate(patient.nextAppointmentDate)}${
-                            patient.nextAppointmentTime
-                              ? ` ${String(patient.nextAppointmentTime).slice(0, 5)}`
-                              : ""
-                          }`
-                        : "—"}
-                    </td>
+                    <td>{listValue(patient.gender)}</td>
                     <td>
                       <button
                         className="button button--secondary button--compact"

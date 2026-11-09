@@ -5042,6 +5042,18 @@ body.is-queue-display .staff-mobile-nav {
 .staff-live-indicator > i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 14%, transparent); }
 .staff-table-wrap { overflow-x: auto; margin: 0 -1.4rem; }
 .staff-table { width: 100%; min-width: 760px; border-collapse: collapse; text-align: left; }
+.staff-table.staff-table--patient-list { min-width: 0; table-layout: fixed; }
+.staff-table.staff-table--patient-list th:nth-child(1),
+.staff-table.staff-table--patient-list td:nth-child(1) { width: 28%; overflow-wrap: anywhere; }
+.staff-table.staff-table--patient-list th:nth-child(2),
+.staff-table.staff-table--patient-list td:nth-child(2) { width: 34%; overflow-wrap: anywhere; }
+.staff-table.staff-table--patient-list th:nth-child(3),
+.staff-table.staff-table--patient-list td:nth-child(3) { width: 16%; white-space: nowrap; }
+.staff-table.staff-table--patient-list th:nth-child(4),
+.staff-table.staff-table--patient-list td:nth-child(4) { width: 22%; }
+.staff-table.staff-table--patient-list code { color: var(--text-strong); }
+.staff-table.staff-table--patient-list .button { white-space: nowrap; }
+.staff-panel:has(.staff-table--patient-list) .staff-table-wrap { margin-inline: 0; }
 .staff-table th {
   padding: .7rem 1.4rem;
   color: var(--text-muted);
@@ -7620,6 +7632,24 @@ body.is-queue-display .staff-mobile-nav {
 }
 .dentist-table-wrap { overflow-x: auto; margin: 0 -1.4rem; }
 .dentist-table { width: 100%; min-width: 760px; border-collapse: collapse; text-align: left; }
+.dentist-table.dentist-table--patient-list { min-width: 0; table-layout: fixed; }
+.dentist-table.dentist-table--patient-list th:nth-child(1),
+.dentist-table.dentist-table--patient-list td:nth-child(1) { width: 28%; overflow-wrap: anywhere; }
+.dentist-table.dentist-table--patient-list th:nth-child(2),
+.dentist-table.dentist-table--patient-list td:nth-child(2) { width: 34%; overflow-wrap: anywhere; }
+.dentist-table.dentist-table--patient-list th:nth-child(3),
+.dentist-table.dentist-table--patient-list td:nth-child(3) { width: 16%; white-space: nowrap; }
+.dentist-table.dentist-table--patient-list th:nth-child(4),
+.dentist-table.dentist-table--patient-list td:nth-child(4) { width: 22%; }
+.dentist-table.dentist-table--patient-list code { color: var(--text-strong); }
+.dentist-table.dentist-table--patient-list .button { white-space: nowrap; }
+.dentist-panel:has(.dentist-table--patient-list) .dentist-table-wrap { margin-inline: 0; }
+@media (max-width: 760px) {
+  .staff-table.staff-table--patient-list th,
+  .staff-table.staff-table--patient-list td,
+  .dentist-table.dentist-table--patient-list th,
+  .dentist-table.dentist-table--patient-list td { padding: .7rem .5rem; }
+}
 .dentist-table th {
   padding: .7rem 1.4rem;
   color: var(--text-muted);
