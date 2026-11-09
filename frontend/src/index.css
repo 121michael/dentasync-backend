@@ -14566,6 +14566,10 @@ body.is-queue-display .fab-menu {
   min-height: 44px;
 }
 
+.prescription-sign-actions .button {
+  flex: 1 1 0;
+}
+
 .prescription-status {
   display: inline-flex;
   align-items: center;
@@ -14789,21 +14793,6 @@ body.is-queue-display .fab-menu {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-}
-
-.rx-esign__preview {
-  display: grid;
-  gap: 6px;
-}
-
-.rx-esign__preview img {
-  width: min(280px, 100%);
-  height: 72px;
-  object-fit: contain;
-  object-position: left center;
-  background: #fff;
-  border: 1px solid rgba(109, 40, 217, 0.35);
-  border-radius: 8px;
 }
 
 .admin-license-verify {

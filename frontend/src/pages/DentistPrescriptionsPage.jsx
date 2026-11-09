@@ -3,7 +3,6 @@ import { ClipboardPlus, Plus, Search, Trash2 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, SectionHeading } from "../components/UI";
-import { DentalDocumentPreview } from "../components/DentalDocumentPreview";
 
 const emptyItem = {
   medicationName: "",
@@ -22,8 +21,7 @@ const SIGN_CONFIRMATION = "SIGN THIS PRESCRIPTION";
 function SignaturePad({ onChange }) {
   const canvasRef = useRef(null);
   const drawing = useRef(false);
-  const [hasInk, setHasInk] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState("");
+  const hasInk = useRef(false);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -52,7 +50,6 @@ function SignaturePad({ onChange }) {
     const context = canvas.getContext("2d");
     const place = point(event);
     drawing.current = true;
-    setPreviewUrl("");
     onChange("");
     canvas.setPointerCapture?.(event.pointerId);
     context.beginPath();
@@ -65,27 +62,26 @@ function SignaturePad({ onChange }) {
     const context = canvasRef.current.getContext("2d");
     context.lineTo(place.x, place.y);
     context.stroke();
-    if (!hasInk) setHasInk(true);
+    hasInk.current = true;
   }
 
   function end() {
+    if (!drawing.current) return;
     drawing.current = false;
+    if (!hasInk.current) {
+      onChange("");
+      return;
+    }
+    onChange(canvasRef.current.toDataURL("image/png"));
   }
 
   function clearPad() {
     const canvas = canvasRef.current;
     const context = canvas.getContext("2d");
     context.clearRect(0, 0, canvas.width, canvas.height);
-    setHasInk(false);
-    setPreviewUrl("");
+    drawing.current = false;
+    hasInk.current = false;
     onChange("");
-  }
-
-  function preview() {
-    if (!hasInk) return;
-    const url = canvasRef.current.toDataURL("image/png");
-    setPreviewUrl(url);
-    onChange(url);
   }
 
   return (
@@ -98,29 +94,43 @@ function SignaturePad({ onChange }) {
         onPointerDown={start}
         onPointerMove={move}
         onPointerUp={end}
-        onPointerLeave={end}
+        onPointerCancel={end}
       />
       <div className="rx-esign__actions">
         <button type="button" className="button button--secondary" onClick={clearPad}>
           Clear
         </button>
-        <button type="button" className="button button--secondary" onClick={preview} disabled={!hasInk}>
-          Preview signature
-        </button>
       </div>
-      {previewUrl ? (
-        <div className="rx-esign__preview">
-          <span>Signature preview</span>
-          <img src={previewUrl} alt="Preview of the signature before it is applied" />
-        </div>
-      ) : (
-        <p className="muted-copy">Draw your signature, then preview it before confirming this prescription.</p>
-      )}
       <p className="muted-copy">
-        This drawn mark is a visual signature for the clinic workflow. It is not a cryptographic digital signature.
+        The signature stays on this pad and is captured when you finish drawing. This drawn mark is a visual signature for the clinic workflow. It is not a cryptographic digital signature.
       </p>
     </div>
   );
+}
+
+function formSnapshot(form) {
+  return JSON.stringify({
+    clinicalRecordId: String(form.clinicalRecordId || ""),
+    treatmentId: String(form.treatmentId || ""),
+    clinicalNotes: form.clinicalNotes || "",
+    includeExtractionAftercare: Boolean(form.includeExtractionAftercare),
+    items: (form.items || []).map((item) => ({
+      medicationName: item.medicationName || "",
+      strength: item.strength || item.dosage || "",
+      quantity: item.quantity || "",
+      sig: item.sig || "",
+      additionalInstructions: item.additionalInstructions || "",
+    })),
+  });
+}
+
+function signedVersionSent(detail) {
+  if (!detail?.signedAt || !Array.isArray(detail.audit)) return false;
+  const signedAt = new Date(detail.signedAt).getTime();
+  return detail.audit.some((event) => {
+    if (event.action !== "submitted_to_staff" || event.version !== detail.currentVersion) return false;
+    return new Date(event.createdAt).getTime() >= signedAt - 1000;
+  });
 }
 
 function statusTone(status) {
@@ -152,7 +162,14 @@ export function DentistPrescriptionsPage() {
   const [confirmPhrase, setConfirmPhrase] = useState("");
   const [licenseVerified, setLicenseVerified] = useState(false);
   const [licenseNumber, setLicenseNumber] = useState("");
-  const [preview, setPreview] = useState(null);
+  const [signatureEpoch, setSignatureEpoch] = useState(0);
+  const [savedSnapshot, setSavedSnapshot] = useState(() => formSnapshot({
+    clinicalRecordId: searchParams.get("patientId") || "",
+    treatmentId: searchParams.get("treatmentId") || "",
+    clinicalNotes: "",
+    includeExtractionAftercare: false,
+    items: [{ ...emptyItem }],
+  }));
 
   useEffect(() => {
     let cancelled = false;
@@ -197,7 +214,7 @@ export function DentistPrescriptionsPage() {
     const data = await api.getDentistPrescription(id);
     const prescription = data.prescription;
     setDetail(prescription);
-    setForm({
+    const nextForm = {
       clinicalRecordId: String(prescription.clinicalRecordId),
       treatmentId: prescription.treatmentId ? String(prescription.treatmentId) : "",
       clinicalNotes: prescription.clinicalNotes || "",
@@ -205,19 +222,29 @@ export function DentistPrescriptionsPage() {
       items: prescription.items?.length
         ? prescription.items.map((item) => ({ ...emptyItem, ...item }))
         : [{ ...emptyItem }],
-    });
+    };
+    setForm(nextForm);
+    setSavedSnapshot(formSnapshot(nextForm));
+    setSignaturePng("");
+    setConfirmPhrase("");
+    setSignatureEpoch((current) => current + 1);
   }
 
   function startNew() {
-    setSelectedId("");
-    setDetail(null);
-    setForm({
+    const nextForm = {
       clinicalRecordId: searchParams.get("patientId") || "",
       treatmentId: searchParams.get("treatmentId") || "",
       clinicalNotes: "",
       includeExtractionAftercare: false,
       items: [{ ...emptyItem }],
-    });
+    };
+    setSelectedId("");
+    setDetail(null);
+    setForm(nextForm);
+    setSavedSnapshot(formSnapshot(nextForm));
+    setSignaturePng("");
+    setConfirmPhrase("");
+    setSignatureEpoch((current) => current + 1);
   }
 
   async function saveDraft(event) {
@@ -243,6 +270,7 @@ export function DentistPrescriptionsPage() {
         : await api.createDentistPrescription(body);
       setDetail(data.prescription);
       setSelectedId(data.prescription.id);
+      setSavedSnapshot(formSnapshot(form));
       await load();
     } catch (saveError) {
       setError(saveError.message);
@@ -277,20 +305,21 @@ export function DentistPrescriptionsPage() {
     }
   }
 
-  async function openPdf() {
-    if (!selectedId) return;
-    try {
-      const blob = await api.viewDentistPrescriptionPdf(selectedId);
-      setPreview({
-        document: { name: `${detail?.prescriptionNumber || "Prescription"}.pdf`, mimeType: "application/pdf" },
-        objectUrl: URL.createObjectURL(blob),
-      });
-    } catch (pdfError) {
-      setError(pdfError.message);
-    }
-  }
-
   const editable = !detail || ["draft", "returned_to_dentist"].includes(detail.workflowStatus);
+  const unsavedChanges = formSnapshot(form) !== savedSnapshot;
+  const signed = detail?.workflowStatus === "authorized" && Boolean(detail.signedAt);
+  const sentToStaff = signedVersionSent(detail);
+  const canSave = editable && unsavedChanges && !busy;
+  const canConfirm =
+    Boolean(detail) &&
+    editable &&
+    !unsavedChanges &&
+    Boolean(signaturePng) &&
+    confirmPhrase.trim() === SIGN_CONFIRMATION &&
+    licenseVerified &&
+    Boolean(licenseNumber) &&
+    !busy;
+  const canSend = Boolean(detail) && signed && !unsavedChanges && !sentToStaff && !busy;
   const patientOptions = useMemo(
     () =>
       patients.map((patient) => ({
@@ -589,7 +618,7 @@ export function DentistPrescriptionsPage() {
                     This prescription cannot be signed yet. An administrator must verify your own license number on the dentist account before a signed prescription can be released.
                   </p>
                 )}
-                <SignaturePad onChange={setSignaturePng} />
+                <SignaturePad key={signatureEpoch} onChange={setSignaturePng} />
                 <label className="field">
                   <span>Type SIGN THIS PRESCRIPTION to confirm this version</span>
                   <input
@@ -600,52 +629,25 @@ export function DentistPrescriptionsPage() {
                 </label>
               </div>
             ) : null}
-            <div className="dentist-form__actions">
-              {editable ? (
-                <button className="button button--primary" type="submit" disabled={Boolean(busy)}>
-                  {busy === "save" ? "Saving…" : "Save draft"}
+            {detail?.workflowStatus === "cancelled" ? null : (
+              <div className="dentist-form__actions prescription-sign-actions">
+                <button className="button button--primary" type="submit" disabled={!canSave}>
+                  {busy === "save" ? "Saving…" : "Save"}
                 </button>
-              ) : null}
-              {detail && editable ? (
-                <button type="button" className="button button--secondary" onClick={() => runAction("submit")}>
-                  Send to staff
+                <button type="button" className="button button--primary" disabled={!canConfirm} onClick={() => runAction("authorize")}>
+                  {busy === "authorize" ? "Confirming…" : "Confirm"}
                 </button>
-              ) : null}
-              {detail && detail.workflowStatus !== "cancelled" && detail.workflowStatus !== "authorized" ? (
-                <button
-                  type="button"
-                  className="button button--primary"
-                  disabled={!signaturePng || confirmPhrase.trim() !== SIGN_CONFIRMATION || Boolean(busy)}
-                  onClick={() => runAction("authorize")}
-                >
-                  Confirm and sign this version
+                <button type="button" className="button button--secondary" disabled={!canSend} onClick={() => runAction("submit")}>
+                  {busy === "submit" ? "Sending…" : "Send to Staff"}
                 </button>
-              ) : null}
-              {detail?.workflowStatus === "authorized" ? (
-                <button type="button" className="button button--secondary" onClick={openPdf}>
-                  View authorized PDF
-                </button>
-              ) : null}
-              {detail && detail.workflowStatus !== "cancelled" ? (
-                <button type="button" className="button button--secondary" onClick={() => runAction("cancel")}>
-                  Cancel
-                </button>
-              ) : null}
-            </div>
+              </div>
+            )}
+            {unsavedChanges && detail && editable ? (
+              <p className="muted-copy">Save this prescription before confirming or sending it.</p>
+            ) : null}
           </form>
         </section>
       </div>
-      {preview ? (
-        <DentalDocumentPreview
-          document={preview.document}
-          objectUrl={preview.objectUrl}
-          onClose={() => {
-            URL.revokeObjectURL(preview.objectUrl);
-            setPreview(null);
-          }}
-          onDownload={() => api.downloadDentistPrescriptionPdf(selectedId)}
-        />
-      ) : null}
     </div>
   );
 }

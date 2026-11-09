@@ -498,6 +498,21 @@ test("dentist-staff workflow authorizes a version and blocks staff clinical edit
     assert.equal(authBody.prescription.emailStatus, "pending");
     assert.ok(authBody.prescription.signedAt);
     assert.equal(authBody.prescription.dentist.licenseNumber, "12345");
+    const handedOff = await fetch(`${dentist.url}/api/dentist/prescriptions/${draft.id}/submit`, {
+      method: "POST",
+    });
+    const handedBody = await handedOff.json();
+    assert.equal(handedOff.status, 200, handedBody.message || JSON.stringify(handedBody));
+    assert.equal(handedBody.prescription.workflowStatus, "authorized");
+    assert.ok(
+      handedBody.prescription.audit.some(
+        (event) => event.action === "submitted_to_staff" && event.version === handedBody.prescription.currentVersion
+      )
+    );
+    const duplicateHandOff = await fetch(`${dentist.url}/api/dentist/prescriptions/${draft.id}/submit`, {
+      method: "POST",
+    });
+    assert.equal(duplicateHandOff.status, 409);
     const issuedAt = authBody.prescription.authorizedAt;
     const edited = await fetch(`${dentist.url}/api/dentist/prescriptions/${draft.id}`, {
       method: "PATCH",

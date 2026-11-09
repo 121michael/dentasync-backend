@@ -825,6 +825,47 @@ async function submitToStaff(db, { dentist, prescriptionId }) {
   const result = await db.query(`SELECT * FROM prescriptions WHERE id = $1`, [prescriptionId]);
   const row = result.rows[0];
   if (!row) throw httpError(404, "That prescription was not found.");
+  if (String(row.created_by_dentist_id) !== String(dentist.id)) {
+    throw httpError(403, "Only the prescribing dentist can send this prescription to staff.");
+  }
+  if (row.workflow_status === WORKFLOW.AUTHORIZED) {
+    const version = await db.query(
+      `SELECT id, version, content_hash, authorized_at
+       FROM prescription_versions
+       WHERE prescription_id = $1 AND version = $2`,
+      [prescriptionId, row.current_version]
+    );
+    const versionRow = version.rows[0];
+    const signature = await db.query(
+      `SELECT content_hash FROM prescription_signatures WHERE version_id = $1`,
+      [versionRow?.id]
+    );
+    if (!versionRow?.authorized_at || signature.rows[0]?.content_hash !== versionRow.content_hash) {
+      throw httpError(409, "Sign this saved version before sending it to staff.");
+    }
+    const alreadySent = await db.query(
+      `SELECT 1
+       FROM prescription_audit_events
+       WHERE prescription_id = $1
+         AND version = $2
+         AND action = 'submitted_to_staff'
+         AND created_at >= $3
+       LIMIT 1`,
+      [prescriptionId, row.current_version, versionRow.authorized_at]
+    );
+    if (alreadySent.rows.length) {
+      throw httpError(409, "This signed version was already sent to staff.");
+    }
+    await audit(db, {
+      prescriptionId,
+      version: row.current_version,
+      actorId: String(dentist.id),
+      actorRole: "dentist",
+      action: "submitted_to_staff",
+      detail: `signed hash:${versionRow.content_hash}`,
+    });
+    return loadDetail(db, prescriptionId);
+  }
   if (!CLINICAL_EDITABLE.has(row.workflow_status)) {
     throw httpError(409, "Only a draft or returned prescription can be sent to staff.");
   }
