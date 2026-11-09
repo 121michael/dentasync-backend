@@ -3,11 +3,16 @@ import { Eye, Search } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
-import { AdminModal, AdminStatusBadge } from "../components/AdminUI";
+import { AdminModal } from "../components/AdminUI";
 import { useAdminUi } from "../components/AdminLayout";
 import { formatAdminDate } from "../adminUtils";
 import { matchesNotificationFocus } from "../notificationFocus";
 import { ProcedureAuthorizationPanel } from "../components/ProcedureAuthorizationPanel";
+
+function listValue(value) {
+  const text = value == null ? "" : String(value).trim();
+  return text || "—";
+}
 
 function formatMoney(value) {
   return `₱${Number(value || 0).toFixed(2)}`;
@@ -174,15 +179,12 @@ export function AdminPatientRecordsPage() {
 
         {records.length ? (
           <div className="admin-table-wrap">
-            <table className="admin-table">
+            <table className="admin-table admin-table--patient-list">
               <thead>
                 <tr>
                   <th>Patient ID</th>
-                  <th>Full Name</th>
-                  <th>Contact Number</th>
-                  <th>Age / Sex</th>
-                  <th>Last Treatment</th>
-                  <th>Record Status</th>
+                  <th>Patient Name</th>
+                  <th>Sex</th>
                   <th>Action</th>
                 </tr>
               </thead>
@@ -201,17 +203,9 @@ export function AdminPatientRecordsPage() {
                         : undefined
                     }
                   >
-                    <td><code>{item.patientId || item.recordCode || item.id}</code></td>
-                    <td>
-                      <strong>{item.fullName}</strong>
-                      <small>{item.email || "No linked portal account"}</small>
-                    </td>
-                    <td>{item.phone || "—"}</td>
-                    <td>{[item.age ?? "—", item.gender || "—"].join(" / ")}</td>
-                    <td>{item.lastTreatment || "—"}</td>
-                    <td>
-                      <AdminStatusBadge status={item.linkedUserId ? "linked_account" : "clinical_record"} />
-                    </td>
+                    <td><code>{listValue(item.patientId || item.recordCode || item.id)}</code></td>
+                    <td><strong>{listValue(item.fullName || item.patientName)}</strong></td>
+                    <td>{listValue(item.gender)}</td>
                     <td>
                       <button className="button button--secondary button--compact" onClick={() => viewRecord(item)}>
                         <Eye size={14} /> View

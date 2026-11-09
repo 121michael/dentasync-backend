@@ -6379,6 +6379,22 @@ body.is-queue-display .staff-mobile-nav {
 
 .admin-table-wrap { overflow-x: auto; margin: 0 -1.4rem; }
 .admin-table { width: 100%; min-width: 820px; border-collapse: collapse; text-align: left; }
+.admin-table.admin-table--patient-list { min-width: 0; table-layout: fixed; }
+.admin-table.admin-table--patient-list th:nth-child(1),
+.admin-table.admin-table--patient-list td:nth-child(1) { width: 28%; overflow-wrap: anywhere; }
+.admin-table.admin-table--patient-list th:nth-child(2),
+.admin-table.admin-table--patient-list td:nth-child(2) { width: 34%; overflow-wrap: anywhere; }
+.admin-table.admin-table--patient-list th:nth-child(3),
+.admin-table.admin-table--patient-list td:nth-child(3) { width: 16%; white-space: nowrap; }
+.admin-table.admin-table--patient-list th:nth-child(4),
+.admin-table.admin-table--patient-list td:nth-child(4) { width: 22%; }
+.admin-table.admin-table--patient-list code { color: var(--text-strong); }
+.admin-table.admin-table--patient-list .button { white-space: nowrap; }
+.admin-panel:has(.admin-table--patient-list) .admin-table-wrap { margin-inline: 0; }
+@media (max-width: 760px) {
+  .admin-table.admin-table--patient-list th,
+  .admin-table.admin-table--patient-list td { padding: .7rem .5rem; }
+}
 .admin-table th {
   padding: .7rem 1.4rem;
   color: var(--text-muted);
