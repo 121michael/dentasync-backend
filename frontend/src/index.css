@@ -1272,7 +1272,7 @@ strong {
 
 .loading-state.tooth-loader--page {
   min-height: 100dvh;
-  background: var(--canvas);
+  background: transparent;
   border: 0;
   border-radius: 0;
   box-shadow: none;
@@ -1324,7 +1324,7 @@ strong {
   pointer-events: auto;
   opacity: 0;
   transition: opacity 220ms ease;
-  background: var(--canvas);
+  background: transparent;
   border: 0;
   box-shadow: none;
 }
@@ -1341,7 +1341,7 @@ strong {
 .tooth-loader__backdrop {
   position: absolute;
   inset: 0;
-  background: var(--canvas);
+  background: transparent;
   border: 0;
   box-shadow: none;
 }
@@ -1407,10 +1407,30 @@ strong {
 }
 
 .tooth-loader__sheen {
-  opacity: 0.54;
+  fill: #fff;
+  stroke: none;
+  opacity: 0.5;
+}
+
+.tooth-loader__depth {
+  fill: rgba(140, 66, 104, 0.08);
+  stroke: none;
+}
+
+.tooth-loader__gum-highlight {
+  fill: #fff;
+  stroke: none;
+  opacity: 0.28;
+  pointer-events: none;
 }
 
 .tooth-loader__gumline {
+  fill: none;
+  stroke: #d98396;
+  stroke-width: 1.35;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.55;
   filter: none;
 }
 
@@ -1440,15 +1460,22 @@ strong {
 }
 
 .tooth-loader__ellipsis {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
   width: 1.15em;
-  text-align: left;
-  overflow: hidden;
-  white-space: nowrap;
-  vertical-align: baseline;
+  height: 0.7em;
+  margin-left: 0.38em;
+  overflow: visible;
+  vertical-align: middle;
+  flex: 0 0 1.15em;
 }
 
 .tooth-loader__ellipsis span {
+  width: 0.26em;
+  height: 0.26em;
+  border-radius: 50%;
+  background: currentColor;
   opacity: 0;
   animation: tooth-ellipsis 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
