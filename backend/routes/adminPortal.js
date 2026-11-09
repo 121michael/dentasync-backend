@@ -2488,8 +2488,14 @@ function createAdminPortalRouter({
         `SELECT id, type, title, body, entity_type, entity_id, read_at, created_at
          FROM admin_portal_notifications
          WHERE user_id = $1
-         ORDER BY created_at DESC
-         LIMIT 100`,
+         ORDER BY CASE WHEN read_at IS NULL THEN 0 ELSE 1 END, created_at DESC
+         LIMIT 200`,
+        [String(req.admin.id)]
+      );
+      const unread = await db.query(
+        `SELECT COUNT(*)::int AS count
+         FROM admin_portal_notifications
+         WHERE user_id = $1 AND read_at IS NULL`,
         [String(req.admin.id)]
       );
       return res.json({
@@ -2503,6 +2509,7 @@ function createAdminPortalRouter({
           read: Boolean(notification.read_at),
           createdAt: notification.created_at,
         })),
+        unreadCount: Number(unread.rows[0]?.count || 0),
       });
     } catch (error) {
       if (isMissingRelation(error)) {

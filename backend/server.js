@@ -315,6 +315,7 @@ app.use(
     authenticateToken,
     clinicSms,
     notifyDentist: (notification) => notifyDentists(db, notification),
+    notifyStaff: (notification) => notifyActiveStaff(db, notification),
   })
 );
 

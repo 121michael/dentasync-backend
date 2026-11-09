@@ -3162,8 +3162,8 @@ function createPatientPortalRouter({
           `SELECT id, type, title, body, entity_type, entity_id, read_at, created_at
            FROM patient_portal_notifications
            WHERE user_id = $1
-           ORDER BY created_at DESC
-           LIMIT 50`,
+           ORDER BY CASE WHEN read_at IS NULL THEN 0 ELSE 1 END, created_at DESC
+           LIMIT 200`,
           [userIdFor(req)]
         );
       } catch (error) {
@@ -3172,13 +3172,20 @@ function createPatientPortalRouter({
           `SELECT id, type, title, body, read_at, created_at
            FROM patient_portal_notifications
            WHERE user_id = $1
-           ORDER BY created_at DESC
-           LIMIT 50`,
+           ORDER BY CASE WHEN read_at IS NULL THEN 0 ELSE 1 END, created_at DESC
+           LIMIT 200`,
           [userIdFor(req)]
         );
       }
+      const unread = await db.query(
+        `SELECT COUNT(*)::int AS count
+         FROM patient_portal_notifications
+         WHERE user_id = $1 AND read_at IS NULL`,
+        [userIdFor(req)]
+      );
       return res.json({
         notifications: result.rows.map((notification) => mapPatientNotification(notification)),
+        unreadCount: Number(unread.rows[0]?.count || 0),
       });
     } catch (error) {
       console.error("Patient notifications error:", error.message);

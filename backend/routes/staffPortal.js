@@ -104,6 +104,26 @@ function displayQueueStatus(status) {
   return status === "dentist" ? "in_chair" : status;
 }
 
+function schedulePart(value, length) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    if (length === 5) {
+      return `${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}`;
+    }
+    const month = String(value.getMonth() + 1).padStart(2, "0");
+    const day = String(value.getDate()).padStart(2, "0");
+    return `${value.getFullYear()}-${month}-${day}`;
+  }
+  return String(value ?? "").slice(0, length);
+}
+
+function appointmentNoticeChanged(previous, saved) {
+  return (
+    String(previous.status) !== String(saved.status) ||
+    schedulePart(previous.appointment_date, 10) !== schedulePart(saved.appointment_date, 10) ||
+    schedulePart(previous.appointment_time, 5) !== schedulePart(saved.appointment_time, 5)
+  );
+}
+
 function mapCheckIn(row) {
   const completed = row.status === "completed" || row.status === "no_show";
   return {
@@ -233,6 +253,26 @@ function mapPatient(row) {
 function csvCell(value) {
   const normalized = value === null || value === undefined ? "" : String(value);
   return `"${normalized.replaceAll('"', '""')}"`;
+}
+
+async function runWithoutAborting(client, work) {
+  await client.query("SAVEPOINT optional_side_effect");
+  try {
+    await work();
+    try {
+      await client.query("RELEASE SAVEPOINT optional_side_effect");
+    } catch (releaseError) {
+      await client.query("ROLLBACK TO SAVEPOINT optional_side_effect");
+      console.warn("Optional queue update was rolled back:", releaseError.message);
+    }
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK TO SAVEPOINT optional_side_effect");
+    } catch (rollbackError) {
+      console.warn("Optional queue update could not be isolated:", rollbackError.message);
+    }
+    console.warn("Optional queue update skipped:", error.message);
+  }
 }
 
 async function notifyPatient(client, payload) {
@@ -681,20 +721,23 @@ function createStaffPortalRouter({
         }
       }
 
-      const patientMessage =
-        databaseStatus === "completed"
-          ? "Your visit has been marked as completed. Thank you for visiting Amethyst Dental."
-          : databaseStatus === "no_show"
-            ? "Your appointment was marked as a no-show. Please contact the clinic if this is incorrect."
-            : `Your queue status is now ${displayQueueStatus(databaseStatus).replaceAll("_", " ")}.`;
-      await notifyPatient(client, {
-        userId: current.user_id,
-        type: "queue",
-        title: "Queue status updated",
-        body: patientMessage,
-        entityType: "queue",
-        entityId: current.id,
-      });
+      const savedQueueStatus = updatedResult.rows[0].status;
+      if (savedQueueStatus !== current.status) {
+        const patientMessage =
+          savedQueueStatus === "completed"
+            ? "Your visit has been marked as completed. Thank you for visiting Amethyst Dental."
+            : savedQueueStatus === "no_show"
+              ? "Your appointment was marked as a no-show. Please contact the clinic if this is incorrect."
+              : `Your queue status is now ${displayQueueStatus(savedQueueStatus).replaceAll("_", " ")}.`;
+        await notifyPatient(client, {
+          userId: current.user_id,
+          type: "queue",
+          title: "Queue status updated",
+          body: patientMessage,
+          entityType: "queue",
+          entityId: current.id,
+        });
+      }
 
       if (databaseStatus === "dentist") {
         await markQueueServingStarted(client, queueId);
@@ -706,7 +749,9 @@ function createStaffPortalRouter({
           queueEntryId: queueId,
         });
       }
-      await safeRecalculateQueueWaitEstimates(client, { fromPosition: current.position });
+      await runWithoutAborting(client, () =>
+        safeRecalculateQueueWaitEstimates(client, { fromPosition: current.position })
+      );
 
       await client.query("COMMIT");
       transactionOpen = false;
@@ -975,7 +1020,7 @@ function createStaffPortalRouter({
       if (action === "approve" || action === "confirm") {
         nextStatus = "confirmed";
         patientTitle = "Appointment confirmed";
-        patientBody = `Your ${current.service_name} appointment is confirmed for ${current.appointment_date} at ${String(current.appointment_time).slice(0, 5)}.`;
+        patientBody = `Your ${current.service_name} appointment is confirmed for ${schedulePart(current.appointment_date, 10)} at ${schedulePart(current.appointment_time, 5)}.`;
       } else if (action === "deny" || action === "cancel") {
         nextStatus = "cancelled";
         patientTitle = action === "deny" ? "Appointment request declined" : "Appointment cancelled";
@@ -1017,7 +1062,7 @@ function createStaffPortalRouter({
         nextDate = requestedDate;
         nextTime = requestedTime;
         patientTitle = "Appointment rescheduled";
-        patientBody = `Your ${current.service_name} appointment is now scheduled for ${requestedDate} at ${requestedTime}.`;
+        patientBody = `Your ${current.service_name} appointment is now scheduled for ${schedulePart(requestedDate, 10)} at ${schedulePart(requestedTime, 5)}.`;
       }
 
       const result = await client.query(
@@ -1030,14 +1075,17 @@ function createStaffPortalRouter({
          RETURNING *`,
         [nextStatus, nextDate, nextTime, appointmentId]
       );
-      await notifyPatient(client, {
-        userId: current.user_id,
-        type: "appointment",
-        title: patientTitle,
-        body: patientBody,
-        entityType: "appointment",
-        entityId: appointmentId,
-      });
+      const saved = result.rows[0];
+      if (appointmentNoticeChanged(current, saved)) {
+        await notifyPatient(client, {
+          userId: current.user_id,
+          type: "appointment",
+          title: patientTitle,
+          body: patientBody,
+          entityType: "appointment",
+          entityId: appointmentId,
+        });
+      }
 
       await client.query("COMMIT");
       transactionOpen = false;
@@ -1660,6 +1708,8 @@ function createStaffPortalRouter({
         normalizedType === "patient"
       ) {
         targetPage = "patient-records";
+      } else if (normalizedType === "prescription" || normalizedEntity === "prescription") {
+        targetPage = "prescriptions";
       }
 
       return {
@@ -1682,12 +1732,19 @@ function createStaffPortalRouter({
         `SELECT id, type, title, body, entity_type, entity_id, action_status, read_at, created_at
          FROM staff_portal_notifications
          WHERE user_id = $1
-         ORDER BY created_at DESC
-         LIMIT 100`,
+         ORDER BY CASE WHEN read_at IS NULL THEN 0 ELSE 1 END, created_at DESC
+         LIMIT 200`,
+        [String(req.staff.id)]
+      );
+      const unread = await db.query(
+        `SELECT COUNT(*)::int AS count
+         FROM staff_portal_notifications
+         WHERE user_id = $1 AND read_at IS NULL`,
         [String(req.staff.id)]
       );
       return res.json({
         notifications: result.rows.map(mapNotification),
+        unreadCount: Number(unread.rows[0]?.count || 0),
       });
     } catch (error) {
       if (isMissingRelation(error)) {
@@ -1696,14 +1753,21 @@ function createStaffPortalRouter({
             `SELECT id, type, title, body, entity_type, entity_id, read_at, created_at
              FROM staff_portal_notifications
              WHERE user_id = $1
-             ORDER BY created_at DESC
-             LIMIT 100`,
+             ORDER BY CASE WHEN read_at IS NULL THEN 0 ELSE 1 END, created_at DESC
+             LIMIT 200`,
+            [String(req.staff.id)]
+          );
+          const unread = await db.query(
+            `SELECT COUNT(*)::int AS count
+             FROM staff_portal_notifications
+             WHERE user_id = $1 AND read_at IS NULL`,
             [String(req.staff.id)]
           );
           return res.json({
             notifications: fallback.rows.map((notification) =>
               mapNotification({ ...notification, action_status: "pending" })
             ),
+            unreadCount: Number(unread.rows[0]?.count || 0),
           });
         } catch (fallbackError) {
           console.error("Staff notifications fallback error:", fallbackError.message);
@@ -2758,4 +2822,5 @@ module.exports = {
   createStaffPortalRouter,
   displayQueueStatus,
   requireStaffAccount,
+  appointmentNoticeChanged,
 };

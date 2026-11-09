@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { NavLink, Outlet } from "react-router-dom";
 import {
   Bell,
   CalendarDays,
@@ -36,7 +36,6 @@ const navigation = [
 export function DentistLayout() {
   const { user } = useAuth();
   const { requestLogout, logoutDialogProps } = useLogoutConfirm();
-  const location = useLocation();
   const [isOpen, setIsOpen] = useState(false);
   const [profile, setProfile] = useState(null);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
@@ -73,15 +72,11 @@ export function DentistLayout() {
         if (!active) return;
       }
     }
-    if (location.pathname.startsWith("/dentist/notifications")) {
-      setUnreadNotifications(0);
-    } else {
-      loadAlerts();
-    }
+    loadAlerts();
     const timer = window.setInterval(loadAlerts, 20000);
     const stopListening = onNotificationsChanged((detail) => {
-      if (detail?.source === "dentist" && detail.unread === 0) {
-        setUnreadNotifications(0);
+      if (detail?.source === "dentist" && typeof detail.unread === "number") {
+        setUnreadNotifications(detail.unread);
         return;
       }
       loadAlerts();
@@ -91,7 +86,7 @@ export function DentistLayout() {
       window.clearInterval(timer);
       stopListening();
     };
-  }, [location.pathname]);
+  }, []);
 
   const displayName =
     profile?.fullName ||
@@ -118,9 +113,6 @@ export function DentistLayout() {
               to={to}
               onClick={() => {
                 setIsOpen(false);
-                if (to === "/dentist/notifications") {
-                  setUnreadNotifications(0);
-                }
               }}
               className={({ isActive }) => `dentist-nav__link ${isActive ? "is-active" : ""}`}
             >
@@ -163,7 +155,7 @@ export function DentistLayout() {
             <NavLink
               to="/dentist/notifications"
               className="icon-button"
-              onClick={() => setUnreadNotifications(0)}
+              onClick={() => setIsOpen(false)}
               aria-label={hasUnread ? `Notifications, ${unreadNotifications} unread` : "Notifications"}
             >
               <Bell size={19} />
@@ -203,11 +195,8 @@ export function DentistLayout() {
               ],
             },
           ]}
-          onNavigate={(to) => {
+          onNavigate={() => {
             setIsOpen(false);
-            if (to === "/dentist/notifications") {
-              setUnreadNotifications(0);
-            }
           }}
         />
       </RoleBottomDock>

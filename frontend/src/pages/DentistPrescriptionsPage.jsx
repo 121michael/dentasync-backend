@@ -297,6 +297,7 @@ export function DentistPrescriptionsPage() {
         setConfirmPhrase("");
       }
       setDetail(data.prescription);
+      setError(data.notificationWarning || "");
       await load();
     } catch (actionError) {
       setError(actionError.message);

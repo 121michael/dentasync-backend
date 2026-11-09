@@ -16,7 +16,7 @@ function notificationValue(value, maxLength = 500) {
  */
 async function notifyActiveStaff(
   db,
-  { type, title, body, entityType = null, entityId = null }
+  { type, title, body, entityType = null, entityId = null, dedupe = false }
 ) {
   const safeType = notificationValue(type, 80);
   const safeTitle = notificationValue(title, 180);
@@ -41,16 +41,32 @@ async function notifyActiveStaff(
       return 0;
     }
 
+    const safeEntityType = entityType ? String(entityType) : null;
+    const safeEntityId = entityId ? String(entityId) : null;
+    const dedupeSql = dedupe
+      ? `WHERE NOT EXISTS (
+           SELECT 1
+           FROM staff_portal_notifications AS existing
+           WHERE existing.user_id = staff_id
+             AND existing.type = $2
+             AND existing.title = $3
+             AND existing.body = $4
+             AND existing.entity_type IS NOT DISTINCT FROM $5
+             AND existing.entity_id IS NOT DISTINCT FROM $6
+         )`
+      : "";
     const result = await db.query(
       `INSERT INTO staff_portal_notifications (
          user_id, type, title, body, entity_type, entity_id
        )
        SELECT staff_id, $2, $3, $4, $5, $6
-       FROM UNNEST($1::text[]) AS staff_id`,
-      [staffIds, safeType, safeTitle, safeBody, entityType, entityId ? String(entityId) : null]
+       FROM UNNEST($1::text[]) AS staff_id
+       ${dedupeSql}`,
+      [staffIds, safeType, safeTitle, safeBody, safeEntityType, safeEntityId]
     );
 
-    return result.rowCount || staffIds.length;
+    if (Number.isInteger(result.rowCount)) return result.rowCount;
+    return dedupe ? 0 : staffIds.length;
   } catch (error) {
     // Allow a rolling deployment to keep patient-facing workflows available
     // until the staff portal migration has run.

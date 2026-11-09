@@ -20,7 +20,7 @@ export function StaffNotificationsPage() {
   const [smsLogs, setSmsLogs] = useState([]);
   const [appointments, setAppointments] = useState([]);
 
-  const load = useCallback(async ({ markSeen = false } = {}) => {
+  const load = useCallback(async () => {
     try {
       const [response, logsResponse, today, confirmed] = await Promise.all([
         api.getStaffNotifications(),
@@ -33,24 +33,18 @@ export function StaffNotificationsPage() {
       setSmsLogs(logsResponse.logs || []);
       setAppointments([...(today.appointments || []), ...(confirmed.appointments || [])]);
       setError("");
-      if (markSeen) {
-        const unread = items.filter((item) => !item.read);
-        if (unread.length) {
-          await api.markAllStaffNotificationsRead();
-          setNotifications((current) =>
-            (current || []).map((item) => ({ ...item, read: true }))
-          );
-        }
-        notifyNotificationsChanged({ source: "staff", unread: 0 });
-      }
+      const unread = Number.isFinite(Number(response.unreadCount))
+        ? Number(response.unreadCount)
+        : items.filter((item) => !item.read).length;
+      notifyNotificationsChanged({ source: "staff", unread });
     } catch (loadError) {
       setError(loadError.message);
     }
   }, []);
 
   useEffect(() => {
-    load({ markSeen: true });
-    const timer = window.setInterval(() => load({ markSeen: false }), 20000);
+    load();
+    const timer = window.setInterval(() => load(), 20000);
     return () => window.clearInterval(timer);
   }, [load]);
 
@@ -58,12 +52,16 @@ export function StaffNotificationsPage() {
     setBusy(`read-${notificationId}`);
     try {
       await api.markStaffNotificationRead(notificationId);
-      setNotifications((current) =>
-        (current || []).map((notification) =>
+      setNotifications((current) => {
+        const next = (current || []).map((notification) =>
           notification.id === notificationId ? { ...notification, read: true } : notification
-        )
-      );
-      notifyNotificationsChanged({ source: "staff" });
+        );
+        notifyNotificationsChanged({
+          source: "staff",
+          unread: next.filter((item) => !item.read).length,
+        });
+        return next;
+      });
     } catch (markError) {
       pushToast(markError.message, "error");
     } finally {
@@ -76,12 +74,16 @@ export function StaffNotificationsPage() {
     if (!notification.read) {
       try {
         await api.markStaffNotificationRead(notification.id);
-        setNotifications((current) =>
-          (current || []).map((item) =>
+        setNotifications((current) => {
+          const next = (current || []).map((item) =>
             item.id === notification.id ? { ...item, read: true } : item
-          )
-        );
-        notifyNotificationsChanged({ source: "staff" });
+          );
+          notifyNotificationsChanged({
+            source: "staff",
+            unread: next.filter((item) => !item.read).length,
+          });
+          return next;
+        });
       } catch (markError) {
         pushToast(markError.message, "error");
       }
@@ -98,10 +100,15 @@ export function StaffNotificationsPage() {
   async function markAll() {
     setBusy("all");
     try {
-      await api.markAllStaffNotificationsRead();
-      pushToast("All notifications marked as read.");
-      await load();
+      const result = await api.markAllStaffNotificationsRead();
+      setNotifications((current) => (current || []).map((item) => ({ ...item, read: true })));
       notifyNotificationsChanged({ source: "staff", unread: 0 });
+      pushToast(
+        Number(result?.markedRead) > 0
+          ? "All notifications marked as read."
+          : "There are no unread notifications."
+      );
+      await load();
     } catch (markError) {
       pushToast(markError.message, "error");
     } finally {
@@ -109,7 +116,7 @@ export function StaffNotificationsPage() {
     }
   }
 
-  if (error && !notifications) return <ErrorState message={error} onRetry={() => load({ markSeen: false })} />;
+  if (error && !notifications) return <ErrorState message={error} onRetry={load} />;
   if (!notifications) return <LoadingState label="Loading notification center…" />;
 
   return (
@@ -124,7 +131,7 @@ export function StaffNotificationsPage() {
             <p>Track appointment requests, check-ins, queue updates, and SMS delivery status.</p>
           </div>
           <div className="staff-heading-actions">
-            <button className="button button--secondary" onClick={() => load({ markSeen: false })}>
+            <button className="button button--secondary" onClick={() => load()}>
               <RefreshCw size={16} /> Refresh
             </button>
             <button className="button button--secondary" onClick={markAll} disabled={Boolean(busy)}>
@@ -235,7 +242,7 @@ export function StaffNotificationsPage() {
         <SendSmsModal
           appointments={appointments}
           onClose={() => setSmsOpen(false)}
-          onSent={() => load({ markSeen: false })}
+          onSent={() => load()}
           pushToast={pushToast}
         />
       ) : null}

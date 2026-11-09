@@ -21,51 +21,44 @@ function displayTime(value) {
 export function NotificationsPage() {
   const navigate = useNavigate();
   const [notifications, setNotifications] = useState(null);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async ({ markSeen = false } = {}) => {
+  const publishUnread = useCallback((count) => {
+    const unread = Number(count) || 0;
+    setUnreadCount(unread);
+    notifyNotificationsChanged({ source: "patient", unread });
+  }, []);
+
+  const load = useCallback(async () => {
     setError("");
     try {
       const response = await api.getNotifications();
       const items = response.notifications || [];
       setNotifications(items);
-
-      if (markSeen) {
-        const unread = items.filter((item) => !item.read);
-        if (unread.length) {
-          try {
-            await api.markAllNotificationsRead();
-          } catch {
-            await Promise.all(
-              unread.map((item) => api.markNotificationRead(item.id).catch(() => null))
-            );
-          }
-          setNotifications((current) =>
-            (current || []).map((notification) => ({ ...notification, read: true }))
-          );
-        }
-        notifyNotificationsChanged({ source: "patient", unread: 0 });
-      }
+      const unread = Number.isFinite(Number(response.unreadCount))
+        ? Number(response.unreadCount)
+        : items.filter((item) => !item.read).length;
+      publishUnread(unread);
     } catch (loadError) {
       setError(loadError.message);
     }
-  }, []);
+  }, [publishUnread]);
 
   useEffect(() => {
-    load({ markSeen: true });
+    load();
   }, [load]);
 
   async function markRead(notificationId) {
     try {
       await api.markNotificationRead(notificationId);
-      setNotifications((current) => {
-        const next = current.map((notification) =>
+      setNotifications((current) =>
+        current.map((notification) =>
           notification.id === notificationId ? { ...notification, read: true } : notification
-        );
-        const unread = next.filter((item) => !item.read).length;
-        notifyNotificationsChanged({ source: "patient", unread });
-        return next;
-      });
+        )
+      );
+      publishUnread(Math.max(0, unreadCount - 1));
     } catch (markError) {
       setError(markError.message);
     }
@@ -81,7 +74,7 @@ export function NotificationsPage() {
             item.id === notification.id ? { ...item, read: true } : item
           )
         );
-        notifyNotificationsChanged({ source: "patient" });
+        publishUnread(Math.max(0, unreadCount - 1));
       } catch (markError) {
         setError(markError.message);
       }
@@ -89,7 +82,21 @@ export function NotificationsPage() {
     if (target?.path) navigate(target.path);
   }
 
-  if (error && !notifications) return <ErrorState message={error} onRetry={() => load({ markSeen: true })} />;
+  async function markAll() {
+    setBusy(true);
+    setError("");
+    try {
+      await api.markAllNotificationsRead();
+      setNotifications((current) => (current || []).map((notification) => ({ ...notification, read: true })));
+      publishUnread(0);
+    } catch (markError) {
+      setError(markError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (error && !notifications) return <ErrorState message={error} onRetry={load} />;
   if (!notifications) return <LoadingState label="Loading care updates" />;
 
   return (
@@ -97,7 +104,12 @@ export function NotificationsPage() {
       <SectionHeading
         eyebrow="Care updates, when they matter"
         title="Notifications"
-        detail="Appointment confirmations and portal updates appear here."
+        detail={`${unreadCount} unread ${unreadCount === 1 ? "update" : "updates"}`}
+        action={
+          <button type="button" className="button button--primary" onClick={markAll} disabled={!unreadCount || busy}>
+            <CheckCheck size={16} /> Mark all as read
+          </button>
+        }
       />
       {error && <p className="inline-alert inline-alert--error">{error}</p>}
       {notifications.length ? (

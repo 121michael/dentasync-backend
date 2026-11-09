@@ -62,6 +62,14 @@ export function getStaffNotificationTarget(notification) {
     };
   }
 
+  if (type === "prescription" || entityType === "prescription") {
+    return {
+      targetPage: "prescriptions",
+      path: focus ? `/staff/prescriptions?focus=${encodeURIComponent(focus)}` : "/staff/prescriptions",
+      label: "View prescription",
+    };
+  }
+
   if (type === "document" || entityType === "document") {
     return {
       targetPage: "appointments",

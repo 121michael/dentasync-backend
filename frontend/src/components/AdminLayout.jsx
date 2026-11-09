@@ -121,9 +121,13 @@ export function AdminLayout() {
           api.getAdminNotifications({ silent: true }).catch(() => null),
         ]);
         if (!active) return;
-        const unread = Array.isArray(notifications?.notifications)
-          ? notifications.notifications.filter((item) => !item.read).length
-          : 0;
+        const listedUnread = Number(notifications?.unreadCount);
+        const dashboardUnread = Number(dashboard?.metrics?.systemAlerts);
+        const unread = Number.isFinite(listedUnread)
+          ? listedUnread
+          : Number.isFinite(dashboardUnread)
+            ? dashboardUnread
+            : 0;
         setAlerts({
           pendingAccounts: Number(dashboard?.metrics?.pendingAccountApprovals || 0),
           pendingAppointments: Number(dashboard?.metrics?.pendingRequests || 0),
@@ -136,8 +140,8 @@ export function AdminLayout() {
     loadStatus();
     const timer = window.setInterval(loadStatus, 20000);
     const stopListening = onNotificationsChanged((detail) => {
-      if (detail?.source === "admin" && detail.unread === 0) {
-        setAlerts((current) => ({ ...current, unreadNotifications: 0 }));
+      if (detail?.source === "admin" && typeof detail.unread === "number") {
+        setAlerts((current) => ({ ...current, unreadNotifications: detail.unread }));
         return;
       }
       loadStatus();
@@ -189,9 +193,6 @@ export function AdminLayout() {
                   to={to}
                   onClick={() => {
                     setIsOpen(false);
-                    if (to === "/admin/notifications") {
-                      setAlerts((current) => ({ ...current, unreadNotifications: 0 }));
-                    }
                   }}
                   className={({ isActive }) => `admin-nav__link ${isActive ? "is-active" : ""}`}
                 >
@@ -236,7 +237,7 @@ export function AdminLayout() {
               <NavLink
                 to="/admin/notifications"
                 className="icon-button"
-                onClick={() => setAlerts((current) => ({ ...current, unreadNotifications: 0 }))}
+                onClick={() => setIsOpen(false)}
                 aria-label={
                   hasUnread
                     ? `Notifications, ${alerts.unreadNotifications} unread`
@@ -289,11 +290,8 @@ export function AdminLayout() {
                 items: [{ label: "Logout", icon: LogOut, onSelect: requestLogout }],
               },
             ]}
-            onNavigate={(to) => {
+            onNavigate={() => {
               setIsOpen(false);
-              if (to === "/admin/notifications") {
-                setAlerts((current) => ({ ...current, unreadNotifications: 0 }));
-              }
             }}
           />
         </RoleBottomDock>

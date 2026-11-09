@@ -13,31 +13,24 @@ export function DentistNotificationsPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async ({ markSeen = false } = {}) => {
+  const load = useCallback(async () => {
     try {
       const response = await api.getDentistNotifications();
       const items = response.notifications || [];
       setNotifications(items);
       setError("");
-
-      if (markSeen) {
-        const unread = items.filter((item) => !item.read);
-        if (unread.length) {
-          await api.markAllDentistNotificationsRead();
-          setNotifications((current) =>
-            (current || []).map((item) => ({ ...item, read: true }))
-          );
-        }
-        notifyNotificationsChanged({ source: "dentist", unread: 0 });
-      }
+      const unread = Number.isFinite(Number(response.unreadCount))
+        ? Number(response.unreadCount)
+        : items.filter((item) => !item.read).length;
+      notifyNotificationsChanged({ source: "dentist", unread });
     } catch (loadError) {
       setError(loadError.message);
     }
   }, []);
 
   useEffect(() => {
-    load({ markSeen: true });
-    const timer = window.setInterval(() => load({ markSeen: false }), 20000);
+    load();
+    const timer = window.setInterval(() => load(), 20000);
     return () => window.clearInterval(timer);
   }, [load]);
 
@@ -75,12 +68,16 @@ export function DentistNotificationsPage() {
     if (!notification.read) {
       try {
         await api.markDentistNotificationRead(notification.id);
-        setNotifications((current) =>
-          (current || []).map((item) =>
+        setNotifications((current) => {
+          const next = (current || []).map((item) =>
             item.id === notification.id ? { ...item, read: true } : item
-          )
-        );
-        notifyNotificationsChanged({ source: "dentist" });
+          );
+          notifyNotificationsChanged({
+            source: "dentist",
+            unread: next.filter((item) => !item.read).length,
+          });
+          return next;
+        });
       } catch (markError) {
         setError(markError.message);
       }
@@ -94,7 +91,7 @@ export function DentistNotificationsPage() {
     navigate(target.path);
   }
 
-  if (error && !notifications) return <ErrorState message={error} onRetry={() => load({ markSeen: true })} />;
+  if (error && !notifications) return <ErrorState message={error} onRetry={load} />;
   if (!notifications) return <LoadingState label="Loading dentist notifications…" />;
 
   const unread = notifications.filter((item) => !item.read).length;
@@ -107,7 +104,7 @@ export function DentistNotificationsPage() {
         detail={`${unread} unread ${unread === 1 ? "alert" : "alerts"}`}
         action={
           <div className="dentist-heading-actions">
-            <button type="button" className="button button--secondary" onClick={() => load({ markSeen: false })}>
+            <button type="button" className="button button--secondary" onClick={() => load()}>
               <RefreshCw size={16} /> Refresh
             </button>
             <button type="button" className="button button--primary" onClick={markAll} disabled={!unread || busy}>

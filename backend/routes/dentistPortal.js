@@ -555,13 +555,14 @@ function createDentistPortalRouter({
   authenticateToken,
   clinicSms = null,
   notifyDentist = async () => {},
+  notifyStaff = async () => {},
   uploadDirectory = path.join(process.cwd(), "uploads", "patient-portal"),
 }) {
   const router = express.Router();
   router.use(authenticateToken, requireDentistAccount(db));
   void notifyDentist;
   attachDentalAuthorizationRoutes(router, { db, role: "dentist" });
-  attachPrescriptionRoutes(router, { db, role: "dentist" });
+  attachPrescriptionRoutes(router, { db, role: "dentist", notifyStaff });
 
   router.get("/dashboard", async (req, res) => {
     const scope = dentistScopeClause("appointment", req.dentist);
@@ -906,14 +907,16 @@ function createDentistPortalRouter({
         );
       }
 
-      await notifyPatient(client, {
-        userId: current.user_id,
-        type: "queue",
-        title: "You are next",
-        body: "Your dentist is ready. Please proceed to the treatment chair.",
-        entityType: "queue",
-        entityId: current.id,
-      });
+      if (current.status !== "preparing") {
+        await notifyPatient(client, {
+          userId: current.user_id,
+          type: "queue",
+          title: "You are next",
+          body: `Your queue status is now ${displayQueueStatus("preparing").replaceAll("_", " ")}. Please proceed to the treatment chair.`,
+          entityType: "queue",
+          entityId: current.id,
+        });
+      }
 
       const clinicalRecord = await clinicalPatients.findOrCreateClinicalRecordForUser(
         client,
@@ -1425,24 +1428,29 @@ function createDentistPortalRouter({
       }
       await recomputeWaitsBehind(client, current.position);
 
-      await notifyPatient(client, {
-        userId: current.user_id,
-        type: "queue",
-        title:
-          databaseStatus === "completed" && visitComplete
-            ? "Treatment completed"
-            : databaseStatus === "completed"
-              ? "Next procedure started"
-              : "Treatment status updated",
-        body:
-          databaseStatus === "completed" && visitComplete
-            ? "Your visit has been marked as completed. Thank you for visiting Amethyst Dental."
-            : databaseStatus === "completed" && nextProcedure
-              ? `Your dentist is continuing with ${nextProcedure.treatment}.`
-            : `Your treatment status is now ${displayQueueStatus(queueStatus).replaceAll("_", " ")}.`,
-        entityType: "queue",
-        entityId: current.id,
-      });
+      const savedQueueStatus = updatedResult.rows[0].status;
+      const procedureAdvanced = databaseStatus === "completed" && Boolean(nextProcedure);
+      if (savedQueueStatus !== current.status || procedureAdvanced) {
+        const savedLabel = displayQueueStatus(savedQueueStatus).replaceAll("_", " ");
+        await notifyPatient(client, {
+          userId: current.user_id,
+          type: "queue",
+          title:
+            databaseStatus === "completed" && visitComplete
+              ? "Treatment completed"
+              : procedureAdvanced
+                ? "Next procedure started"
+                : "Treatment status updated",
+          body:
+            databaseStatus === "completed" && visitComplete
+              ? "Your visit has been marked as completed. Thank you for visiting Amethyst Dental."
+              : procedureAdvanced
+                ? `Your dentist is continuing with ${nextProcedure.treatment}. Your queue status is ${savedLabel}.`
+                : `Your treatment status is now ${savedLabel}.`,
+          entityType: "queue",
+          entityId: current.id,
+        });
+      }
 
       await client.query("COMMIT");
       transactionOpen = false;
@@ -1504,9 +1512,25 @@ function createDentistPortalRouter({
   });
 
   async function recomputeWaitsBehind(client, afterPosition) {
-    await safeRecalculateQueueWaitEstimates(client, {
-      fromPosition: Math.max(1, Number(afterPosition) || 1),
-    });
+    await client.query("SAVEPOINT optional_wait_estimate");
+    try {
+      await safeRecalculateQueueWaitEstimates(client, {
+        fromPosition: Math.max(1, Number(afterPosition) || 1),
+      });
+      try {
+        await client.query("RELEASE SAVEPOINT optional_wait_estimate");
+      } catch (releaseError) {
+        await client.query("ROLLBACK TO SAVEPOINT optional_wait_estimate");
+        console.warn("Queue estimate was rolled back:", releaseError.message);
+      }
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK TO SAVEPOINT optional_wait_estimate");
+      } catch (rollbackError) {
+        console.warn("Queue estimate could not be isolated:", rollbackError.message);
+      }
+      console.warn("Queue estimate skipped:", error.message);
+    }
   }
 
   router.patch("/queue/:id/duration", async (req, res) => {
@@ -2845,8 +2869,14 @@ function createDentistPortalRouter({
         `SELECT id, type, title, body, entity_type, entity_id, read_at, created_at
          FROM dentist_portal_notifications
          WHERE user_id = $1
-         ORDER BY created_at DESC
-         LIMIT 100`,
+         ORDER BY CASE WHEN read_at IS NULL THEN 0 ELSE 1 END, created_at DESC
+         LIMIT 200`,
+        [String(req.dentist.id)]
+      );
+      const unread = await db.query(
+        `SELECT COUNT(*)::int AS count
+         FROM dentist_portal_notifications
+         WHERE user_id = $1 AND read_at IS NULL`,
         [String(req.dentist.id)]
       );
       return res.json({
@@ -2860,6 +2890,7 @@ function createDentistPortalRouter({
           read: Boolean(notification.read_at),
           createdAt: notification.created_at,
         })),
+        unreadCount: Number(unread.rows[0]?.count || 0),
       });
     } catch (error) {
       if (error.code === "42P01") {

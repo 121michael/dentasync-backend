@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Search } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { DentalDocumentPreview } from "../components/DentalDocumentPreview";
 import { EmptyState, SectionHeading } from "../components/UI";
@@ -22,6 +23,8 @@ function formatDate(value) {
 
 export function StaffPrescriptionsPage() {
   const { pushToast } = useStaffUi();
+  const [searchParams] = useSearchParams();
+  const focusId = searchParams.get("focus");
   const [list, setList] = useState([]);
   const [search, setSearch] = useState("");
   const [detail, setDetail] = useState(null);
@@ -46,6 +49,26 @@ export function StaffPrescriptionsPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (!focusId) return undefined;
+    let cancelled = false;
+    api.getStaffPrescription(focusId)
+      .then((data) => {
+        if (cancelled) return;
+        setDetail(data.prescription);
+        setConfirmation(null);
+        setReviewChecked(false);
+        setViewedPdfId("");
+        setError("");
+      })
+      .catch((focusError) => {
+        if (!cancelled) setError(focusError.message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [focusId]);
 
   useEffect(() => {
     return () => {

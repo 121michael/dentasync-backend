@@ -16,7 +16,7 @@ export function AdminNotificationsPage() {
   const [busy, setBusy] = useState(false);
   const [smsLogs, setSmsLogs] = useState([]);
 
-  const load = useCallback(async ({ markSeen = false } = {}) => {
+  const load = useCallback(async () => {
     try {
       const [response, logsResponse] = await Promise.all([
         api.getAdminNotifications(),
@@ -26,25 +26,18 @@ export function AdminNotificationsPage() {
       setNotifications(items);
       setSmsLogs(logsResponse.logs || []);
       setError("");
-
-      if (markSeen) {
-        const unread = items.filter((item) => !item.read);
-        if (unread.length) {
-          await api.markAllAdminNotificationsRead();
-          setNotifications((current) =>
-            (current || []).map((item) => ({ ...item, read: true }))
-          );
-        }
-        notifyNotificationsChanged({ source: "admin", unread: 0 });
-      }
+      const unread = Number.isFinite(Number(response.unreadCount))
+        ? Number(response.unreadCount)
+        : items.filter((item) => !item.read).length;
+      notifyNotificationsChanged({ source: "admin", unread });
     } catch (loadError) {
       setError(loadError.message);
     }
   }, []);
 
   useEffect(() => {
-    load({ markSeen: true });
-    const timer = window.setInterval(() => load({ markSeen: false }), 30000);
+    load();
+    const timer = window.setInterval(() => load(), 30000);
     return () => window.clearInterval(timer);
   }, [load]);
 
@@ -82,12 +75,16 @@ export function AdminNotificationsPage() {
     if (!notification.read) {
       try {
         await api.markAdminNotificationRead(notification.id);
-        setNotifications((current) =>
-          (current || []).map((item) =>
+        setNotifications((current) => {
+          const next = (current || []).map((item) =>
             item.id === notification.id ? { ...item, read: true } : item
-          )
-        );
-        notifyNotificationsChanged({ source: "admin" });
+          );
+          notifyNotificationsChanged({
+            source: "admin",
+            unread: next.filter((item) => !item.read).length,
+          });
+          return next;
+        });
       } catch (markError) {
         setError(markError.message);
       }
@@ -101,7 +98,7 @@ export function AdminNotificationsPage() {
     navigate(target.path);
   }
 
-  if (error && !notifications) return <ErrorState message={error} onRetry={() => load({ markSeen: true })} />;
+  if (error && !notifications) return <ErrorState message={error} onRetry={load} />;
   if (!notifications) return <LoadingState label="Loading admin notifications…" />;
 
   const unread = notifications.filter((item) => !item.read).length;
@@ -114,7 +111,7 @@ export function AdminNotificationsPage() {
         detail={`${unread} unread ${unread === 1 ? "alert" : "alerts"}`}
         action={
           <div className="admin-heading-actions">
-            <button className="button button--secondary" onClick={() => load({ markSeen: false })}>
+            <button className="button button--secondary" onClick={() => load()}>
               <RefreshCw size={16} /> Refresh
             </button>
             <button className="button button--primary" onClick={markAll} disabled={!unread || busy}>

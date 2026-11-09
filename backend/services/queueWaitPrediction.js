@@ -615,13 +615,26 @@ async function estimateWaitForQueueContext(db, { entry, aheadEntries = [], now =
   });
 }
 
+async function isolateQuery(db, sql, params) {
+  await db.query("SAVEPOINT queue_estimate_write");
+  try {
+    const result = await db.query(sql, params);
+    await db.query("RELEASE SAVEPOINT queue_estimate_write");
+    return result;
+  } catch (error) {
+    await db.query("ROLLBACK TO SAVEPOINT queue_estimate_write");
+    throw error;
+  }
+}
+
 async function persistEstimate(db, entryId, estimate, waitPoint, { serving = false } = {}) {
   const midpoint = roundMinutes(
     ((estimate.estimatedWaitMinutes?.min || 0) + (estimate.estimatedWaitMinutes?.max || 0)) / 2
   );
   if (serving) {
     try {
-      await db.query(
+      await isolateQuery(
+        db,
         `UPDATE patient_portal_queue_entries
          SET wait_estimate_duration_minutes = $2,
              wait_estimate_at = CURRENT_TIMESTAMP,
@@ -636,7 +649,8 @@ async function persistEstimate(db, entryId, estimate, waitPoint, { serving = fal
     return;
   }
   try {
-    await db.query(
+    await isolateQuery(
+      db,
       `UPDATE patient_portal_queue_entries
        SET estimated_wait_minutes = $2,
            wait_estimate_min_minutes = $3,

@@ -66,10 +66,6 @@ function PortalLayoutShell({ theme, onToggleTheme, onThemeChange }) {
   const refreshAlerts = useCallback(async () => {
     try {
       const dashboard = await api.getDashboard({ silent: true });
-      if (location.pathname.startsWith("/notifications")) {
-        setUnreadCount(0);
-        return;
-      }
       setUnreadCount(Number(dashboard.unreadNotifications || 0));
     } catch {
       // Keep the last known badge state if the poll fails briefly.
@@ -77,9 +73,6 @@ function PortalLayoutShell({ theme, onToggleTheme, onThemeChange }) {
   }, [location.pathname]);
 
   useEffect(() => {
-    if (location.pathname.startsWith("/notifications")) {
-      setUnreadCount(0);
-    }
     refreshAlerts();
     const timer = window.setInterval(refreshAlerts, 20000);
     const stopListening = onNotificationsChanged((detail) => {
@@ -140,10 +133,7 @@ function PortalLayoutShell({ theme, onToggleTheme, onThemeChange }) {
             <NavLink
               key={to}
               to={to}
-              onClick={() => {
-                if (to === "/notifications") setUnreadCount(0);
-                closeMenu();
-              }}
+              onClick={closeMenu}
               className={({ isActive }) => `portal-nav__link ${isActive ? "is-active" : ""}`}
             >
               <Icon size={19} aria-hidden="true" />
@@ -195,7 +185,7 @@ function PortalLayoutShell({ theme, onToggleTheme, onThemeChange }) {
             <NavLink
               to="/notifications"
               className="icon-button notification-button"
-              onClick={() => setUnreadCount(0)}
+              onClick={closeMenu}
               aria-label={hasUnread ? `Notifications, ${unreadCount} unread` : "Notifications"}
             >
               <Bell size={19} />
@@ -267,8 +257,7 @@ function PortalLayoutShell({ theme, onToggleTheme, onThemeChange }) {
               ],
             },
           ]}
-          onNavigate={(to) => {
-            if (to === "/notifications") setUnreadCount(0);
+          onNavigate={() => {
             closeMenu();
           }}
         />

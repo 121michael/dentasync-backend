@@ -15,7 +15,7 @@ function sendError(res, error) {
   return res.status(status).json({ message });
 }
 
-function attachPrescriptionRoutes(router, { db, role, uploadDirectory }) {
+function attachPrescriptionRoutes(router, { db, role, uploadDirectory, notifyStaff = async () => {} }) {
   const directory = uploadDirectory || prescriptions.DEFAULT_UPLOAD_DIR;
 
   router.get("/prescriptions", async (req, res) => {
@@ -134,7 +134,32 @@ function attachPrescriptionRoutes(router, { db, role, uploadDirectory }) {
           dentist: req.dentist,
           prescriptionId: req.params.id,
         });
-        return res.json({ prescription, message: "Prescription sent to staff for processing." });
+        let notificationWarning = "";
+        if (role === "dentist") {
+          const patientName = prescription.patient?.fullName || "a patient";
+          const signed = prescription.workflowStatus === "authorized" && prescription.signedAt;
+          try {
+            await notifyStaff({
+              type: "prescription",
+              title: "Prescription sent to staff",
+              body: signed
+                ? `${prescription.prescriptionNumber} for ${patientName} (version ${prescription.currentVersion}) is signed and ready for staff processing.`
+                : `${prescription.prescriptionNumber} for ${patientName} (version ${prescription.currentVersion}) was sent to staff for processing.`,
+              entityType: "prescription",
+              entityId: String(prescription.id),
+              dedupe: true,
+            });
+          } catch (notifyError) {
+            console.warn("Staff prescription notification was not created:", notifyError.message);
+            notificationWarning =
+              "The prescription was sent, but staff notifications could not be saved. Staff can still open it from Prescription Processing.";
+          }
+        }
+        return res.json({
+          prescription,
+          message: "Prescription sent to staff for processing.",
+          ...(notificationWarning ? { notificationWarning } : {}),
+        });
       } catch (error) {
         return sendError(res, error);
       }

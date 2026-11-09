@@ -10,6 +10,7 @@ const db = require("../db");
 const { createDentistPortalRouter } = require("../routes/dentistPortal");
 const { createStaffPortalRouter } = require("../routes/staffPortal");
 const { createPatientPortalRouter } = require("../routes/patientPortal");
+const { notifyActiveStaff } = require("../services/staffNotifications");
 const {
   normalizeItems,
   contentHash,
@@ -406,6 +407,7 @@ test("dentist-staff workflow authorizes a version and blocks staff clinical edit
   const clinicalRecordId = record.rows[0].id;
   const uploadDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "rx-pdf-"));
   const mailLog = [];
+  let draftNoticeId = null;
 
   const dentistApp = express();
   dentistApp.use(express.json());
@@ -417,6 +419,7 @@ test("dentist-staff workflow authorizes a version and blocks staff clinical edit
         req.user = { id: liveDentistId, role: "dentist" };
         next();
       },
+      notifyStaff: (notification) => notifyActiveStaff(db, notification),
     })
   );
   const staffApp = express();
@@ -455,10 +458,28 @@ test("dentist-staff workflow authorizes a version and blocks staff clinical edit
     const createdBody = await created.json();
     assert.equal(created.status, 201, createdBody.message || JSON.stringify(createdBody));
     const draft = createdBody.prescription;
+    draftNoticeId = draft.id;
+    const noticesFor = async () => {
+      const count = await db.query(
+        `SELECT COUNT(*)::int AS count
+         FROM staff_portal_notifications
+         WHERE type = 'prescription' AND entity_id = $1`,
+        [String(draft.id)]
+      );
+      return count.rows[0].count;
+    };
+    assert.equal(await noticesFor(), 0);
     const submitted = await fetch(`${dentist.url}/api/dentist/prescriptions/${draft.id}/submit`, {
       method: "POST",
     });
     assert.equal(submitted.status, 200);
+    const noticesAfterSend = await noticesFor();
+    assert.ok(noticesAfterSend >= 1);
+    const repeatedSend = await fetch(`${dentist.url}/api/dentist/prescriptions/${draft.id}/submit`, {
+      method: "POST",
+    });
+    assert.notEqual(repeatedSend.status, 200);
+    assert.equal(await noticesFor(), noticesAfterSend);
     const staffPatch = await fetch(`${staff.url}/api/staff/prescriptions/${draft.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -509,10 +530,13 @@ test("dentist-staff workflow authorizes a version and blocks staff clinical edit
         (event) => event.action === "submitted_to_staff" && event.version === handedBody.prescription.currentVersion
       )
     );
+    const noticesAfterSignedSend = await noticesFor();
+    assert.ok(noticesAfterSignedSend > noticesAfterSend);
     const duplicateHandOff = await fetch(`${dentist.url}/api/dentist/prescriptions/${draft.id}/submit`, {
       method: "POST",
     });
     assert.equal(duplicateHandOff.status, 409);
+    assert.equal(await noticesFor(), noticesAfterSignedSend);
     const issuedAt = authBody.prescription.authorizedAt;
     const edited = await fetch(`${dentist.url}/api/dentist/prescriptions/${draft.id}`, {
       method: "PATCH",
@@ -592,6 +616,13 @@ test("dentist-staff workflow authorizes a version and blocks staff clinical edit
     });
     assert.equal(staffTokenAsDentist.status, 404);
   } finally {
+    if (draftNoticeId) {
+      await db.query(
+        `DELETE FROM staff_portal_notifications
+         WHERE type = 'prescription' AND entity_id = $1`,
+        [String(draftNoticeId)]
+      ).catch(() => {});
+    }
     await dentist.close();
     await staff.close();
   }

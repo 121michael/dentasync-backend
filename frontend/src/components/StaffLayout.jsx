@@ -105,25 +105,20 @@ export function StaffLayout() {
     try {
       const dashboard = await api.getStaffDashboard({ silent: true });
       setAlerts((current) => ({
-        unreadNotifications: location.pathname.startsWith("/staff/notifications")
-          ? 0
-          : Number(dashboard.metrics?.unreadNotifications || 0),
+        unreadNotifications: Number(dashboard.metrics?.unreadNotifications || 0),
         pendingAppointments: Number(dashboard.metrics?.pendingRequests || 0),
       }));
     } catch {
       // Keep the last known badge state if the poll fails briefly.
     }
-  }, [location.pathname]);
+  }, []);
 
   useEffect(() => {
-    if (location.pathname.startsWith("/staff/notifications")) {
-      setAlerts((current) => ({ ...current, unreadNotifications: 0 }));
-    }
     refreshAlerts();
     const timer = window.setInterval(refreshAlerts, 20000);
     const stopListening = onNotificationsChanged((detail) => {
-      if (detail?.source === "staff" && detail.unread === 0) {
-        setAlerts((current) => ({ ...current, unreadNotifications: 0 }));
+      if (detail?.source === "staff" && typeof detail.unread === "number") {
+        setAlerts((current) => ({ ...current, unreadNotifications: detail.unread }));
         return;
       }
       refreshAlerts();
@@ -170,11 +165,8 @@ export function StaffLayout() {
     });
   }, []);
 
-  function closeMenu(to) {
+  function closeMenu() {
     setIsMobileMenuOpen(false);
-    if (to === "/staff/notifications") {
-      setAlerts((current) => ({ ...current, unreadNotifications: 0 }));
-    }
   }
 
   const hasUnread = alerts.unreadNotifications > 0;
@@ -232,7 +224,7 @@ export function StaffLayout() {
               <NavLink
                 to="/staff/notifications"
                 className="icon-button"
-                onClick={() => setAlerts((current) => ({ ...current, unreadNotifications: 0 }))}
+                onClick={() => setIsMobileMenuOpen(false)}
                 aria-label={
                   hasUnread
                     ? `Open notifications, ${alerts.unreadNotifications} unread`
@@ -280,11 +272,8 @@ export function StaffLayout() {
                 ],
               },
             ]}
-            onNavigate={(to) => {
+            onNavigate={() => {
               setIsMobileMenuOpen(false);
-              if (to === "/staff/notifications") {
-                setAlerts((current) => ({ ...current, unreadNotifications: 0 }));
-              }
             }}
           />
         </RoleBottomDock>
