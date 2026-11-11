@@ -170,7 +170,6 @@ function attachPrescriptionRoutes(router, { db, role, uploadDirectory, notifySta
         const prescription = await prescriptions.authorize(db, {
           dentist: req.dentist,
           prescriptionId: req.params.id,
-          confirmation: req.body?.confirmation,
           signaturePng: req.body?.signaturePng,
         });
         return res.json({

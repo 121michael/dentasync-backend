@@ -9,7 +9,8 @@ const { withPrescriptionSchema } = require("./prescriptionSchema");
 
 const DEFAULT_UPLOAD_DIR = path.join(process.cwd(), "uploads", "prescriptions");
 const SIGNATURE_DIR = path.join(process.cwd(), "uploads", "prescription-signatures");
-const SIGN_CONFIRMATION = "SIGN THIS PRESCRIPTION";
+// Recorded when the dentist clicks Confirm. The typed phrase is no longer collected.
+const CONFIRMATION_RECORD = "CONFIRMED";
 const LICENSE_RELEASE_MESSAGE =
   "This prescription cannot be released. The prescribing dentist's license number is missing or not marked verified. An administrator must confirm the license on the dentist profile before a signed prescription can be generated.";
 const WORKFLOW = {
@@ -903,11 +904,11 @@ function decodeSignaturePng(value) {
   const match = raw.match(/^data:image\/png;base64,([A-Za-z0-9+/=\s]+)$/i);
   const encoded = (match ? match[1] : raw).replace(/\s/g, "");
   if (!encoded || !/^[A-Za-z0-9+/=]+$/.test(encoded)) {
-    throw httpError(400, "Draw a signature, preview it, then confirm this prescription version.");
+    throw httpError(400, "Draw a signature, then confirm this prescription version.");
   }
   const buffer = Buffer.from(encoded, "base64");
   if (buffer.length < 32 || buffer.length > 500000) {
-    throw httpError(400, "Draw a signature, preview it, then confirm this prescription version.");
+    throw httpError(400, "Draw a signature, then confirm this prescription version.");
   }
   if (buffer[0] !== 0x89 || buffer.toString("ascii", 1, 4) !== "PNG") {
     throw httpError(400, "The signature must be a PNG image from the signature pad.");
@@ -939,13 +940,7 @@ function verifiedLicense(dentist) {
   return license;
 }
 
-async function authorize(db, { dentist, prescriptionId, confirmation, signaturePng }) {
-  if (String(confirmation || "").trim() !== SIGN_CONFIRMATION) {
-    throw httpError(
-      400,
-      "Type SIGN THIS PRESCRIPTION to confirm this signature applies only to the current version."
-    );
-  }
+async function authorize(db, { dentist, prescriptionId, signaturePng }) {
   const png = decodeSignaturePng(signaturePng);
   const license = verifiedLicense(dentist);
   const result = await db.query(`SELECT * FROM prescriptions WHERE id = $1`, [prescriptionId]);
@@ -1011,7 +1006,7 @@ async function authorize(db, { dentist, prescriptionId, confirmation, signatureP
         versionRow.content_hash,
         String(dentist.id),
         storedName,
-        SIGN_CONFIRMATION,
+        CONFIRMATION_RECORD,
       ]
     );
     await client.query(

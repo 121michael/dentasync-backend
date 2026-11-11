@@ -16,8 +16,6 @@ function statusLabel(status) {
   return String(status || "").replace(/_/g, " ");
 }
 
-const SIGN_CONFIRMATION = "SIGN THIS PRESCRIPTION";
-
 function SignaturePad({ onChange }) {
   const canvasRef = useRef(null);
   const drawing = useRef(false);
@@ -159,7 +157,6 @@ export function DentistPrescriptionsPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const [signaturePng, setSignaturePng] = useState("");
-  const [confirmPhrase, setConfirmPhrase] = useState("");
   const [licenseVerified, setLicenseVerified] = useState(false);
   const [licenseNumber, setLicenseNumber] = useState("");
   const [signatureEpoch, setSignatureEpoch] = useState(0);
@@ -226,7 +223,6 @@ export function DentistPrescriptionsPage() {
     setForm(nextForm);
     setSavedSnapshot(formSnapshot(nextForm));
     setSignaturePng("");
-    setConfirmPhrase("");
     setSignatureEpoch((current) => current + 1);
   }
 
@@ -243,7 +239,6 @@ export function DentistPrescriptionsPage() {
     setForm(nextForm);
     setSavedSnapshot(formSnapshot(nextForm));
     setSignaturePng("");
-    setConfirmPhrase("");
     setSignatureEpoch((current) => current + 1);
   }
 
@@ -288,13 +283,11 @@ export function DentistPrescriptionsPage() {
           ? await api.submitDentistPrescription(selectedId)
           : kind === "authorize"
             ? await api.authorizeDentistPrescription(selectedId, {
-                confirmation: confirmPhrase.trim(),
                 signaturePng,
               })
             : await api.cancelDentistPrescription(selectedId);
       if (kind === "authorize") {
         setSignaturePng("");
-        setConfirmPhrase("");
       }
       setDetail(data.prescription);
       setError(data.notificationWarning || "");
@@ -316,7 +309,6 @@ export function DentistPrescriptionsPage() {
     editable &&
     !unsavedChanges &&
     Boolean(signaturePng) &&
-    confirmPhrase.trim() === SIGN_CONFIRMATION &&
     licenseVerified &&
     Boolean(licenseNumber) &&
     !busy;
@@ -620,14 +612,6 @@ export function DentistPrescriptionsPage() {
                   </p>
                 )}
                 <SignaturePad key={signatureEpoch} onChange={setSignaturePng} />
-                <label className="field">
-                  <span>Type SIGN THIS PRESCRIPTION to confirm this version</span>
-                  <input
-                    value={confirmPhrase}
-                    autoComplete="off"
-                    onChange={(event) => setConfirmPhrase(event.target.value)}
-                  />
-                </label>
               </div>
             ) : null}
             {detail?.workflowStatus === "cancelled" ? null : (

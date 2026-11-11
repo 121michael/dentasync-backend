@@ -24,7 +24,6 @@ const TEST_SIGNATURE_PNG = Buffer.from(
 
 function signBody() {
   return JSON.stringify({
-    confirmation: "SIGN THIS PRESCRIPTION",
     signaturePng: `data:image/png;base64,${TEST_SIGNATURE_PNG.toString("base64")}`,
   });
 }
@@ -496,12 +495,12 @@ test("dentist-staff workflow authorizes a version and blocks staff clinical edit
       }),
     });
     assert.equal(unauthorizedSend.status, 409);
-    const missingConfirmation = await fetch(`${dentist.url}/api/dentist/prescriptions/${draft.id}/authorize`, {
+    const missingSignature = await fetch(`${dentist.url}/api/dentist/prescriptions/${draft.id}/authorize`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: signBody().replace("SIGN THIS PRESCRIPTION", "not yet"),
+      body: JSON.stringify({ confirmation: "SIGN THIS PRESCRIPTION" }),
     });
-    assert.equal(missingConfirmation.status, 400);
+    assert.equal(missingSignature.status, 400);
     const staffSign = await fetch(`${staff.url}/api/staff/prescriptions/${draft.id}/authorize`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
