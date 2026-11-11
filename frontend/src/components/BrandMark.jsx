@@ -1,4 +1,4 @@
-const LOGO_SRC = "/logo.png";
+export const LOGO_SRC = "/logo.png";
 
 export function BrandMark({
   compact = false,
