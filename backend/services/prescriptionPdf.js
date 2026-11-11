@@ -42,7 +42,7 @@ const LOGO_CANDIDATES = [
   path.join(__dirname, "..", "..", "frontend", "public", "logo.png"),
 ];
 const AFTERCARE_BLOCK = 132;
-const DENTIST_BLOCK = 168;
+const DENTIST_BLOCK = 155;
 const SIGNATURE_IMAGE_HEIGHT = 46;
 const FOOTER_RESERVE = 42;
 
@@ -478,13 +478,6 @@ function generatePrescriptionPdf({
           width: blockWidth,
           align: "center",
         });
-        const expires = formatExpiry(authorizedAt);
-        if (expires) {
-          doc.text(`Valid until ${expires}`, blockX, doc.y + 1, {
-            width: blockWidth,
-            align: "center",
-          });
-        }
       }
       doc.y = doc.y + 6;
     }

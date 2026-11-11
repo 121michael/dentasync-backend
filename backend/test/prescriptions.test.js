@@ -174,7 +174,7 @@ test("PDF lists multiple medications from the supplied snapshot only", async () 
   assert.match(text, /License No\. 12345/);
   assert.match(text, /electronic signature/i);
   assert.match(text, /Issued /);
-  assert.match(text, /Valid until /);
+  assert.doesNotMatch(text, /Valid until /);
   assert.match(text, /Valid for 24 hours from the date and time of issuance/);
   assert.doesNotMatch(text, /PTR No/);
   assert.doesNotMatch(text, /valid without signature/i);
