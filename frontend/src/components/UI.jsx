@@ -1,22 +1,26 @@
 import { useLayoutEffect } from "react";
+import { useLocation } from "react-router-dom";
 import { AlertCircle, ArrowRight, Sparkles } from "lucide-react";
 import { beginPageLoader, endPageLoader } from "../loadingStore";
-import { ToothLoader } from "./ToothLoader";
+import { SkeletonScreen, skeletonKind, skeletonPortal } from "./SkeletonScreen";
 
-export function LoadingState({ label = "Preparing your care overview", inline = false }) {
+export function LoadingState({ label = "Preparing your care overview", inline = false, scope }) {
+  const location = useLocation();
   useLayoutEffect(() => {
     if (inline) return undefined;
     beginPageLoader(label);
     return () => endPageLoader();
   }, [inline, label]);
 
+  const session = scope === "session";
   return (
-    <ToothLoader
-      overlay={!inline}
-      compact={inline}
+    <SkeletonScreen
       label={label}
-      className={inline ? "loading-state loading-state--inline" : "loading-state tooth-loader--page"}
-      active
+      inline={inline}
+      session={session}
+      kind={session ? "simple" : skeletonKind(location.pathname)}
+      portal={skeletonPortal(location.pathname)}
+      history={!session && skeletonPortal(location.pathname) === "patient" && /\/appointments\/?$/.test(location.pathname)}
     />
   );
 }

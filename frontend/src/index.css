@@ -1264,29 +1264,137 @@ strong {
 }
 
 .loading-state {
-  display: grid;
-  place-content: center;
-  justify-items: center;
+  display: block;
   width: 100%;
+  min-width: 0;
 }
 
-.loading-state.tooth-loader--page {
+:root {
+  --skeleton: rgba(91, 42, 134, 0.1);
+  --skeleton-shine: rgba(91, 42, 134, 0.18);
+}
+
+.portal-shell[data-theme="dark"] {
+  --skeleton: rgba(236, 230, 245, 0.12);
+  --skeleton-shine: rgba(236, 230, 245, 0.22);
+}
+
+html[data-theme="dark"] .skeleton-screen--session {
+  --skeleton: rgba(236, 230, 245, 0.12);
+  --skeleton-shine: rgba(236, 230, 245, 0.22);
+}
+
+.skeleton-block {
+  display: block;
+  border-radius: 10px;
+  background: linear-gradient(100deg, var(--skeleton) 25%, var(--skeleton-shine) 45%, var(--skeleton) 65%);
+  background-size: 220% 100%;
+  animation: skeleton-shimmer 1.35s ease-in-out infinite;
+}
+
+.skeleton-line { height: 0.8rem; width: 100%; }
+.skeleton-line--eyebrow { width: 7.5rem; height: 0.7rem; }
+.skeleton-line--title { width: min(18rem, 70%); height: 1.7rem; }
+.skeleton-line--text { width: min(24rem, 88%); height: 0.8rem; }
+.skeleton-line--label { width: 6.5rem; height: 0.7rem; }
+.skeleton-line--value { width: 4.5rem; height: 1.45rem; }
+.skeleton-line--wide { width: 100%; }
+.skeleton-line--on-brand {
+  background: linear-gradient(100deg, rgba(255,255,255,.28) 25%, rgba(255,255,255,.5) 45%, rgba(255,255,255,.28) 65%);
+  background-size: 220% 100%;
+}
+.skeleton-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+}
+.skeleton-icon--on-brand {
+  background: rgba(255, 255, 255, 0.28);
+}
+.skeleton-seal { width: 9.5rem; height: 1.6rem; border-radius: 999px; }
+.skeleton-pill { width: 4.5rem; height: 1.4rem; border-radius: 999px; }
+.skeleton-panel { width: 100%; height: 8.5rem; border-radius: 18px; }
+.skeleton-panel--short { height: 5.5rem; }
+.skeleton-simple,
+.skeleton-rows { display: grid; gap: 1rem; }
+.section-heading > div:has(.skeleton-block),
+.dashboard-welcome > div:has(.skeleton-block),
+.next-visit-card__content:has(.skeleton-block),
+.admin-welcome-card div:has(.skeleton-block),
+.staff-welcome-card div:has(.skeleton-block),
+.dentist-stat-card > div:has(.skeleton-block),
+.admin-stat-card:has(.skeleton-block),
+.staff-summary-card:has(.skeleton-block),
+.metric-card:has(.skeleton-block),
+.glass-card:has(.skeleton-block) {
+  display: grid;
+  gap: 0.45rem;
+  align-content: start;
+}
+.skeleton-row-list { display: grid; gap: 0.65rem; }
+.skeleton-row {
+  display: grid;
+  grid-template-columns: 0.8fr 1.2fr 1fr auto;
+  align-items: center;
+  gap: 0.8rem;
+  min-height: 3.4rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+}
+.skeleton-inline { display: grid; gap: 0.55rem; }
+.skeleton-session {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr);
   min-height: 100dvh;
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
+  background: var(--canvas, #f7f4fa);
+}
+html[data-theme="dark"] .skeleton-session { background: #150f1d; }
+.skeleton-session__rail {
+  display: grid;
+  align-content: start;
+  gap: 0.7rem;
+  padding: 1.4rem 1rem;
+  background: #2c1146;
+}
+.skeleton-session__rail .skeleton-block {
+  background: linear-gradient(100deg, rgba(255,255,255,.16) 25%, rgba(255,255,255,.34) 45%, rgba(255,255,255,.16) 65%);
+  background-size: 220% 100%;
+}
+.skeleton-session__brand { width: 70%; height: 2.4rem; border-radius: 14px; }
+.skeleton-session__link { width: 100%; height: 2.2rem; border-radius: 12px; }
+.skeleton-session__main {
+  display: grid;
+  align-content: start;
+  gap: 1.2rem;
+  padding: clamp(1.2rem, 3vw, 2.4rem);
+}
+.skeleton-session__header { width: min(16rem, 50%); height: 1.4rem; }
+.skeleton-screen--cover {
+  background: var(--canvas, #f7f4fa);
+  box-sizing: border-box;
+  opacity: 1;
+  animation: none;
+}
+.portal-shell[data-theme="dark"] .skeleton-screen--cover { background: #150f1d; }
+
+@keyframes skeleton-shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
 }
 
-.portal-content > .loading-state.tooth-loader--page,
-.staff-content > .loading-state.tooth-loader--page,
-.admin-content > .loading-state.tooth-loader--page,
-.dentist-content > .loading-state.tooth-loader--page {
-  min-height: min(70vh, calc(100dvh - 8.5rem));
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-block,
+  .skeleton-line--on-brand {
+    animation: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .skeleton-session { grid-template-columns: 1fr; }
+  .skeleton-session__rail { display: none; }
+  .skeleton-row { grid-template-columns: 1fr auto; }
 }
 
 .loading-state--inline {

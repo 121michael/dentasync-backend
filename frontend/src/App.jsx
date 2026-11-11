@@ -62,7 +62,7 @@ function WalkInOrLanding() {
   const { user, isLoading } = useAuth();
   const walkin = String(searchParams.get("walkin") || searchParams.get("token") || "").trim();
   if (walkin) return <WalkInCheckInPage />;
-  if (isLoading) return <LoadingState label="Checking your secure session" />;
+  if (isLoading) return <LoadingState scope="session" label="Checking your secure session" />;
   return user ? <Navigate to={landingRoute(user)} replace /> : <LandingPage />;
 }
 
@@ -77,7 +77,7 @@ function landingRoute(user) {
 function RequireAuthenticated() {
   const { user, isLoading } = useAuth();
   const location = useLocation();
-  if (isLoading) return <LoadingState label="Opening your secure clinic session" />;
+  if (isLoading) return <LoadingState scope="session" label="Opening your secure clinic session" />;
   if (!user) {
     const next = `${location.pathname}${location.search}`;
     const search = next.startsWith("/") && !next.startsWith("//") ? `?next=${encodeURIComponent(next)}` : "";
@@ -119,7 +119,7 @@ function DentistPortal() {
 
 function PublicOnly() {
   const { user, isLoading } = useAuth();
-  if (isLoading) return <LoadingState label="Checking your secure session" />;
+  if (isLoading) return <LoadingState scope="session" label="Checking your secure session" />;
   return user ? <Navigate to={landingRoute(user)} replace /> : <Outlet />;
 }
 
