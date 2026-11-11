@@ -1373,10 +1373,29 @@ strong {
   display: block;
   width: 112px;
   height: 112px;
-  object-fit: cover;
-  border-radius: 28%;
-  background: transparent;
+  background-color: var(--amethyst-700);
+  -webkit-mask: url("/logo-mark.png") center / contain no-repeat;
+  mask: url("/logo-mark.png") center / contain no-repeat;
+  border-radius: 0;
   box-shadow: none;
+}
+
+html[data-theme="dark"] .tooth-loader__logo,
+.portal-shell[data-theme="dark"] .tooth-loader__logo {
+  background-color: #fff;
+}
+
+html[data-theme="dark"] .admin-shell .tooth-loader__logo,
+html[data-theme="dark"] .staff-shell .tooth-loader__logo,
+html[data-theme="dark"] .dentist-shell .tooth-loader__logo,
+html[data-theme="dark"] .admin-shell ~ .tooth-loader .tooth-loader__logo,
+html[data-theme="dark"] .staff-shell ~ .tooth-loader .tooth-loader__logo,
+html[data-theme="dark"] .dentist-shell ~ .tooth-loader .tooth-loader__logo {
+  background-color: var(--amethyst-700);
+}
+
+html[data-theme="dark"] .portal-shell[data-theme="dark"] ~ .tooth-loader .tooth-loader__logo {
+  background-color: #fff;
 }
 
 .tooth-loader--compact .tooth-loader__logo {

@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { LOGO_SRC } from "./BrandMark";
 
 export function ToothLoader({
   label = "Loading",
@@ -50,7 +49,7 @@ export function ToothLoader({
       aria-busy="true"
       aria-label={labelText}
     >
-      <img src={LOGO_SRC} alt="" className="tooth-loader__logo" />
+      <span className="tooth-loader__logo" aria-hidden="true" />
       <p className="sr-only">{labelText}</p>
     </div>
   );
