@@ -570,6 +570,9 @@ export const api = {
   getAdminBackups: () => request("/admin/backups"),
   getAdminBackup: (id) => request(`/admin/backups/${encodeURIComponent(id)}`),
   createAdminBackup: () => request("/admin/backups", { method: "POST" }),
+  createAdminPostgresBackup: () => request("/admin/backups/postgres", { method: "POST" }),
+  testRestoreAdminDump: (id) =>
+    request(`/admin/backups/${encodeURIComponent(id)}/dump-test-restore`, { method: "POST" }),
   updateAdminBackupSettings: (body) => request("/admin/backups/settings", { method: "PUT", body }),
   restoreAdminBackup: (id, body) =>
     request(`/admin/backups/${encodeURIComponent(id)}/restore`, { method: "POST", body }),

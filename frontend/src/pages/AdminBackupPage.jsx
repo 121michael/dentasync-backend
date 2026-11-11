@@ -34,10 +34,23 @@ function statusTone(status) {
 }
 
 function storageLabel(backup) {
+  if (backup?.archiveFormat === "pg_dump_custom") return "PostgreSQL .dump";
   if (backup?.offsiteProtected) return "Verified off-site";
   if (backup?.storageClass === "both") return "Database + independent copy";
   if (backup?.storageClass === "legacy_database" || !backup?.storageClass) return "Legacy database payload";
   return backup.storageClass;
+}
+
+function formatLabel(backup) {
+  return backup?.formatLabel || (backup?.archiveFormat === "pg_dump_custom" ? ".dump" : ".dsb");
+}
+
+function recoveryLabel(backup) {
+  if (backup?.archiveFormat !== "pg_dump_custom") return null;
+  if (backup.recoveryStage === "test_restore_passed") return "Test restore passed";
+  if (backup.recoveryStage === "archive_validated") return "Archive validated";
+  if (backup.status === "success") return "Backup created";
+  return null;
 }
 
 export function AdminBackupPage() {
@@ -132,6 +145,28 @@ export function AdminBackupPage() {
     ],
     [data, offsite, storage]
   );
+
+  async function createPostgresBackup() {
+    const ok = await confirm({
+      title: "Create a PostgreSQL backup?",
+      message:
+        "This downloads as a .dump file. It contains the application database schema and rows. Files stored separately, such as uploaded X-rays or PDFs, are not inside the .dump and need their own backup. The job is complete only after pg_dump succeeds and pg_restore can read the archive.",
+      confirmLabel: "Create PostgreSQL backup",
+      tone: "primary",
+    });
+    if (!ok) return;
+    setBusy("postgres");
+    try {
+      const response = await api.createAdminPostgresBackup();
+      pushToast(response.message || "Backup created.");
+      await load();
+    } catch (createError) {
+      pushToast(createError.message, "error");
+      await load();
+    } finally {
+      setBusy("");
+    }
+  }
 
   async function createBackup() {
     const ok = await confirm({
@@ -250,7 +285,9 @@ export function AdminBackupPage() {
     if (!recovery?.backup) return;
     setBusy("isolated");
     try {
-      const result = await api.isolatedRestoreAdminBackup(recovery.backup.id);
+      const result = recovery.backup.archiveFormat === "pg_dump_custom"
+        ? await api.testRestoreAdminDump(recovery.backup.id)
+        : await api.isolatedRestoreAdminBackup(recovery.backup.id);
       setRecovery((current) => ({ ...current, step: Math.max(current.step, 5), isolated: result }));
       pushToast(result.message || "Isolated restore test finished.");
       await load();
@@ -305,8 +342,11 @@ export function AdminBackupPage() {
             <button className="button button--secondary" onClick={load} type="button">
               <RefreshCw size={16} /> Refresh
             </button>
+            <button className="button button--secondary" onClick={createPostgresBackup} type="button" disabled={jobRunning}>
+              <DatabaseBackup size={16} /> {busy === "postgres" ? "Running…" : "Create PostgreSQL backup"}
+            </button>
             <button className="button button--primary" onClick={createBackup} type="button" disabled={jobRunning}>
-              <DatabaseBackup size={16} /> {busy === "create" ? "Running…" : "Create Backup"}
+              <DatabaseBackup size={16} /> {busy === "create" ? "Running…" : "Create .dsb backup"}
             </button>
           </div>
         </div>
@@ -351,14 +391,21 @@ export function AdminBackupPage() {
             <span className="eyebrow">Create</span>
             <h2>Manual backup</h2>
             <p>
-              Jobs move through Queued, Running, Uploading, Verifying, then Completed. Completed is shown only after
-              required steps succeed. Environment secrets are redacted; they are never written into the downloadable archive.
+              A .dump is a PostgreSQL custom-format backup of schema and rows. It is marked complete only after pg_dump
+              exits successfully and pg_restore can read the archive. Uploaded X-rays, PDFs, and other files stored
+              outside the database are not in the .dump and need their own backup. The .dsb archive remains the
+              application snapshot, with secrets removed.
             </p>
           </div>
         </div>
-        <button className="button button--primary" onClick={createBackup} type="button" disabled={jobRunning}>
-          <DatabaseBackup size={16} /> {busy === "create" ? "Working…" : "Create Backup"}
-        </button>
+        <div className="admin-heading-actions">
+          <button className="button button--secondary" onClick={createPostgresBackup} type="button" disabled={jobRunning}>
+            <DatabaseBackup size={16} /> {busy === "postgres" ? "Working…" : "Create PostgreSQL backup"}
+          </button>
+          <button className="button button--primary" onClick={createBackup} type="button" disabled={jobRunning}>
+            <DatabaseBackup size={16} /> {busy === "create" ? "Working…" : "Create .dsb backup"}
+          </button>
+        </div>
       </section>
 
       <section className="admin-panel">
@@ -377,6 +424,7 @@ export function AdminBackupPage() {
                   <th>Backup ID</th>
                   <th>Created</th>
                   <th>Type</th>
+                  <th>Format</th>
                   <th>Size</th>
                   <th>Storage</th>
                   <th>Verification</th>
@@ -391,10 +439,17 @@ export function AdminBackupPage() {
                     <td><code>{String(backup.id).slice(0, 8)}</code></td>
                     <td>{formatAdminDateTime(backup.createdAt)}</td>
                     <td>{backup.backupType}{backup.scheduleSlot ? ` · ${backup.scheduleSlot}` : ""}</td>
+                    <td>{formatLabel(backup)}</td>
                     <td>{bytesLabel(backup.byteSize)}</td>
                     <td>{storageLabel(backup)}</td>
                     <td><AdminStatusBadge status={backup.verificationStatus} /></td>
-                    <td><AdminStatusBadge status={backup.pipelineStatus || backup.status} /></td>
+                    <td>
+                      {recoveryLabel(backup) ? (
+                        <span className="admin-status">{recoveryLabel(backup)}</span>
+                      ) : (
+                        <AdminStatusBadge status={backup.pipelineStatus || backup.status} />
+                      )}
+                    </td>
                     <td>{backup.createdByName || "System"}</td>
                     <td>
                       <div className="admin-row-actions">
@@ -507,6 +562,8 @@ export function AdminBackupPage() {
           <dl className="admin-backup-details">
             <div><dt>ID</dt><dd>{details.id}</dd></div>
             <div><dt>Pipeline status</dt><dd>{details.pipelineStatus || details.status}</dd></div>
+            <div><dt>Format</dt><dd>{formatLabel(details)}{details.archiveFormat === "pg_dump_custom" ? " · PostgreSQL data only" : " · application snapshot"}</dd></div>
+            <div><dt>Recovery stage</dt><dd>{recoveryLabel(details) || "—"}</dd></div>
             <div><dt>Type</dt><dd>{details.backupType}</dd></div>
             <div><dt>Created</dt><dd>{formatAdminDateTime(details.createdAt)}</dd></div>
             <div><dt>Duration</dt><dd>{details.durationMs != null ? `${Math.round(details.durationMs / 1000)}s` : "—"}</dd></div>
@@ -531,33 +588,55 @@ export function AdminBackupPage() {
             <li className={recovery.step >= 1 ? "is-current" : ""}>
               <strong>1. Select backup</strong>
               <p>
-                {recovery.backup.id} · {formatAdminDateTime(recovery.backup.createdAt)} · {storageLabel(recovery.backup)}
+                {formatLabel(recovery.backup)} · {recovery.backup.id} · {formatAdminDateTime(recovery.backup.createdAt)} · {storageLabel(recovery.backup)}
               </p>
+              {recovery.backup.archiveFormat === "pg_dump_custom" ? (
+                <p>This .dump covers PostgreSQL data. Uploaded X-rays and PDFs need their own backup.</p>
+              ) : (
+                <p>This .dsb is an application snapshot and stays on the existing recovery workflow.</p>
+              )}
             </li>
             <li>
               <strong>2. Validate backup</strong>
-              <p>Checks archive checksum, format, packed files, and secret-free payload.</p>
+              <p>
+                {recovery.backup.archiveFormat === "pg_dump_custom"
+                  ? "Checks the checksum, then asks pg_restore to read the archive. Archive validated is not a restore."
+                  : "Checks archive checksum, format, packed files, and secret-free payload."}
+              </p>
               <button className="button button--secondary" type="button" onClick={validateRecovery} disabled={Boolean(busy)}>
                 <ShieldCheck size={16} /> {busy === "validate" ? "Validating…" : "Validate archive"}
               </button>
               {recovery.validation ? (
                 <p className="muted">
-                  Valid · {recovery.validation.tableCount} tables · {recovery.validation.fileCount} files · format v
-                  {recovery.validation.formatVersion}
+                  {recovery.backup.archiveFormat === "pg_dump_custom"
+                    ? "Archive validated. The archive can be read. This is not a successful restore."
+                    : `Valid · ${recovery.validation.tableCount} tables · ${recovery.validation.fileCount} files · format v${recovery.validation.formatVersion}`}
                 </p>
               ) : null}
             </li>
             <li>
               <strong>3. Safety backup</strong>
-              <p>A safety copy of the current system is created automatically only if production restore is approved and enabled.</p>
+              <p>
+                {recovery.backup.archiveFormat === "pg_dump_custom"
+                  ? "A successful PostgreSQL safety dump is required before any live data is replaced. The restore stops if that safety dump fails."
+                  : "A safety copy of the current system is created automatically only if production restore is approved and enabled."}
+              </p>
             </li>
             <li>
-              <strong>4–5. Isolated restore test</strong>
-              <p>Restores into a rolled-back transaction. Production tables are not kept changed.</p>
+              <strong>4–5. Restore test</strong>
+              <p>
+                {recovery.backup.archiveFormat === "pg_dump_custom"
+                  ? "Restores into a separate empty database, checks schema, record counts, and foreign keys, then drops that database. The live database is not the destination."
+                  : "Restores into a rolled-back transaction. Production tables are not kept changed."}
+              </p>
               <button className="button button--secondary" type="button" onClick={runIsolatedRecovery} disabled={Boolean(busy) || !recovery.validation}>
-                {busy === "isolated" ? "Testing…" : "Run isolated restore test"}
+                {busy === "isolated" ? "Testing…" : recovery.backup.archiveFormat === "pg_dump_custom" ? "Run test restore" : "Run isolated restore test"}
               </button>
-              {recovery.isolated ? (
+              {recovery.isolated?.stageLabel === "Test restore passed" ? (
+                <p className="muted">
+                  Test restore passed. {recovery.isolated.tableCount} tables and {recovery.isolated.foreignKeyCount} foreign keys matched. Live data was not replaced.
+                </p>
+              ) : recovery.isolated ? (
                 <pre className="admin-backup-pre">{JSON.stringify(recovery.isolated.sampleCounts || recovery.isolated.verifiedRowCounts, null, 2)}</pre>
               ) : null}
             </li>
@@ -565,8 +644,8 @@ export function AdminBackupPage() {
               <strong>6–8. Production approval</strong>
               <p>
                 {data.productionRestoreEnabled
-                  ? "This server currently allows supervised production restore. Type RESTORE. This overwrites live clinic data."
-                  : "Production restore is disabled on this server. Isolated tests are the supported recovery verification. Operators must set BACKUP_ALLOW_PRODUCTION_RESTORE=true only for an approved recovery window."}
+                  ? "This server currently allows supervised production restore. Type RESTORE. A safety backup must succeed before live data is replaced."
+                  : "Production restore is disabled on this server. Test restores do not replace live data. Operators must set BACKUP_ALLOW_PRODUCTION_RESTORE=true only for an approved recovery window."}
               </p>
               {data.productionRestoreEnabled ? (
                 <>
@@ -577,7 +656,11 @@ export function AdminBackupPage() {
                   <button
                     className="button button--danger"
                     type="button"
-                    disabled={Boolean(busy) || restorePhrase.trim() !== "RESTORE" || !recovery.isolated}
+                    disabled={
+                      Boolean(busy)
+                      || restorePhrase.trim() !== "RESTORE"
+                      || (recovery.backup.archiveFormat === "pg_dump_custom" ? !recovery.validation : !recovery.isolated)
+                    }
                     onClick={submitProductionRestore}
                   >
                     Restore production database

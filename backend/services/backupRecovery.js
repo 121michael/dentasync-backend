@@ -6,6 +6,21 @@ const { notifyActiveAdmins } = require("./adminNotifications");
 const { collectUploadFiles, restoreUploadFiles, stripFileBytes } = require("./backupFiles");
 const { createOffsiteStore, objectPrefix } = require("./backupOffsite");
 const { tryPgDump } = require("./backupPgDump");
+const {
+  ARCHIVE_FORMAT,
+  STAGE_CREATED,
+  STAGE_VALIDATED,
+  STAGE_RESTORED,
+  assertSeparateDatabase,
+  captureManifest,
+  createCustomDump,
+  assertArchiveReadable,
+  restoreCustomDump,
+  inspectDatabase,
+  compareManifest,
+  dropDatabase,
+  restoreOntoLive,
+} = require("./backupPgCustom");
 
 const BACKUP_MAGIC = "DENTASYNC_BACKUP";
 const FORMAT_VERSION = 2;
@@ -186,6 +201,9 @@ function publicBackup(row) {
     pgDumpStatus: row.pg_dump_status || null,
     encryption: row.encryption || "none",
     scheduleSlot: row.schedule_slot || null,
+    archiveFormat: row.archive_format || (String(row.file_name || "").toLowerCase().endsWith(".dump") ? ARCHIVE_FORMAT : "dsb"),
+    recoveryStage: row.recovery_stage || null,
+    formatLabel: row.archive_format === ARCHIVE_FORMAT || String(row.file_name || "").toLowerCase().endsWith(".dump") ? ".dump" : ".dsb",
     legacyDatabaseStored: Boolean(row.payload) || storageClass === "legacy_database" || storageClass === "both",
     downloadable: row.status === "success" && Number(row.byte_size || 0) > 0,
     restorable: row.status === "success" && Number(row.byte_size || 0) > 0 && Boolean(row.checksum_sha256),
@@ -511,6 +529,127 @@ function createBackupRecoveryService({ db, env = process.env, notifyAdmin = noti
     };
   }
 
+  function rowIsDump(row) {
+    return row?.archive_format === ARCHIVE_FORMAT || String(row?.file_name || "").toLowerCase().endsWith(".dump");
+  }
+
+  function payloadBuffer(value) {
+    if (!value) return Buffer.alloc(0);
+    if (Buffer.isBuffer(value)) return value;
+    return Buffer.from(value);
+  }
+
+  async function createPostgresDump({ actor = null, notes = null, backupType = "postgres_dump" } = {}) {
+    return withLock(BACKUP_LOCK, async () => {
+      const started = Date.now();
+      const inserted = await db.query(
+        `INSERT INTO admin_portal_backups (
+           backup_type, status, file_name, created_by_id, created_by_name, notes,
+           pipeline_status, started_at, archive_format, recovery_stage
+         ) VALUES ($1, 'in_progress', $2, $3, $4, $5, 'running', CURRENT_TIMESTAMP, $6, NULL)
+         RETURNING *`,
+        [
+          backupType,
+          "dentasync-postgres-pending.dump",
+          actor?.id ? String(actor.id) : null,
+          actor ? actorName(actor) : "System",
+          notes
+            ? String(notes).slice(0, 500)
+            : "PostgreSQL custom-format dump of schema and rows. Uploaded files such as X-rays and PDFs are not included.",
+          ARCHIVE_FORMAT,
+        ]
+      );
+      const record = inserted.rows[0];
+      try {
+        const manifest = await captureManifest(db);
+        const dumped = await createCustomDump(env);
+        if (dumped.buffer.length > MAX_BACKUP_BYTES) {
+          const error = new Error("PostgreSQL backup exceeds the 80 MB catalog limit and was not stored.");
+          error.status = 500;
+          throw error;
+        }
+        const checksum = sha256(dumped.buffer);
+        const fileName = `dentasync-postgres-${record.id}.dump`;
+        const tableCount = manifest.tables.filter(
+          (name) => name !== "admin_portal_backups" && name !== "admin_portal_backup_operations"
+        ).length;
+        const rowCount = Object.values(manifest.rowCounts).reduce((sum, value) => sum + Number(value || 0), 0);
+        const saved = await db.query(
+          `UPDATE admin_portal_backups
+           SET status = 'success',
+               pipeline_status = $2,
+               recovery_stage = $2,
+               file_name = $3,
+               byte_size = $4,
+               checksum_sha256 = $5,
+               format_version = 0,
+               table_count = $6,
+               row_count = $7,
+               table_names = $8,
+               payload = $9,
+               dump_manifest = $10::jsonb,
+               pg_dump_status = 'captured',
+               archive_format = $11,
+               storage_class = 'legacy_database',
+               encryption = 'none',
+               error_detail = NULL,
+               verified_at = NULL,
+               verification_detail = $12,
+               finished_at = CURRENT_TIMESTAMP,
+               duration_ms = $13
+           WHERE id = $1
+           RETURNING *`,
+          [
+            record.id,
+            STAGE_CREATED,
+            fileName,
+            dumped.buffer.length,
+            checksum,
+            tableCount,
+            rowCount,
+            manifest.tables,
+            dumped.buffer,
+            JSON.stringify(manifest),
+            ARCHIVE_FORMAT,
+            "Backup created. pg_dump finished and pg_restore could read the archive. This is not a restore.",
+            Date.now() - started,
+          ]
+        );
+        await recordOperation({
+          backupId: record.id,
+          operation: "create",
+          status: "success",
+          actor,
+          detail: `PostgreSQL custom dump created. tables=${tableCount} rows=${rowCount} bytes=${dumped.buffer.length}.`,
+        });
+        return publicBackup(saved.rows[0]);
+      } catch (error) {
+        const message = String(error.message || "PostgreSQL backup failed.").slice(0, 500);
+        await db.query(
+          `UPDATE admin_portal_backups
+           SET status = 'failed',
+               pipeline_status = 'failed',
+               recovery_stage = NULL,
+               error_detail = $2,
+               finished_at = CURRENT_TIMESTAMP,
+               duration_ms = $3
+           WHERE id = $1`,
+          [record.id, message, Date.now() - started]
+        ).catch(() => {});
+        await recordOperation({
+          backupId: record.id,
+          operation: "create",
+          status: "failed",
+          actor,
+          detail: message,
+        });
+        await alertAdmins("PostgreSQL backup failed", "A PostgreSQL .dump job failed. The dashboard lists the error without archive contents.", record.id);
+        error.status = error.status || 500;
+        throw error;
+      }
+    });
+  }
+
   async function createBackup({ type = "manual", actor = null, notes = null, scheduleSlot = null } = {}) {
     return withLock(BACKUP_LOCK, async () => {
       const started = Date.now();
@@ -756,7 +895,8 @@ function createBackupRecoveryService({ db, env = process.env, notifyAdmin = noti
                 table_count, row_count, table_names, error_detail, created_by_id, created_by_name,
                 created_at, finished_at, notes, pipeline_status, storage_class, offsite_object_key,
                 offsite_verified, verified_at, verification_detail, started_at, duration_ms,
-                excluded_fields, file_manifest, pg_dump_status, encryption, schedule_slot
+                excluded_fields, file_manifest, pg_dump_status, encryption, schedule_slot,
+                archive_format, recovery_stage, dump_manifest
          FROM admin_portal_backups
          ORDER BY created_at DESC
          LIMIT 50`
@@ -798,7 +938,11 @@ function createBackupRecoveryService({ db, env = process.env, notifyAdmin = noti
     const latestAttempted = backups[0] || null;
     const latestCompleted = successful[0] || null;
     const latestFailed = backups.find((item) => item.status === "failed") || null;
-    const latestVerified = backups.find((item) => item.verifiedAt) || latestCompleted;
+    const latestVerified = backups.find((item) => (
+      item.archiveFormat === ARCHIVE_FORMAT
+        ? item.recoveryStage === STAGE_RESTORED
+        : Boolean(item.verifiedAt)
+    )) || successful.find((item) => item.archiveFormat !== ARCHIVE_FORMAT) || null;
     const inProgress = backups.find((item) => item.status === "in_progress" || ["queued", "running", "uploading", "verifying"].includes(item.pipelineStatus));
     const verifiedOffsite = backups.find((item) => item.offsiteProtected);
     let lastRestore = null;
@@ -807,12 +951,12 @@ function createBackupRecoveryService({ db, env = process.env, notifyAdmin = noti
       const restore = await db.query(
         `SELECT backup_id, operation, status, actor_name, detail, created_at, finished_at
          FROM admin_portal_backup_operations
-         WHERE operation IN ('restore', 'isolated_restore')
+         WHERE operation IN ('restore', 'isolated_restore', 'dump_test_restore')
          ORDER BY created_at DESC
          LIMIT 5`
       );
       lastRestore = restore.rows.find((row) => row.operation === "restore") || null;
-      lastIsolated = restore.rows.find((row) => row.operation === "isolated_restore") || null;
+      lastIsolated = restore.rows.find((row) => row.operation === "isolated_restore" || row.operation === "dump_test_restore") || null;
     } catch (error) {
       if (error?.code !== "42P01") throw error;
     }
@@ -894,7 +1038,8 @@ function createBackupRecoveryService({ db, env = process.env, notifyAdmin = noti
          table_count, row_count, table_names, error_detail, created_by_id, created_by_name,
          created_at, finished_at, notes, pipeline_status, storage_class, offsite_object_key,
          offsite_verified, verified_at, verification_detail, started_at, duration_ms,
-         excluded_fields, file_manifest, pg_dump_status, encryption, schedule_slot`;
+         excluded_fields, file_manifest, pg_dump_status, encryption, schedule_slot,
+         archive_format, recovery_stage, dump_manifest`;
     try {
       const result = await db.query(
         `SELECT ${columns} FROM admin_portal_backups WHERE id::text = $1 LIMIT 1`,
@@ -1011,6 +1156,9 @@ function createBackupRecoveryService({ db, env = process.env, notifyAdmin = noti
       throw error;
     }
     const buffer = await loadArchiveBuffer(row);
+    if (rowIsDump(row)) {
+      return validatePostgresDump({ row, buffer, actor });
+    }
     const expectedChecksum = row.payload && row.payload.length ? row.checksum_sha256 : null;
     const parsed = parseAndValidatePayload(buffer, expectedChecksum);
     const fileCount = (parsed.files?.included || []).length;
@@ -1056,7 +1204,242 @@ function createBackupRecoveryService({ db, env = process.env, notifyAdmin = noti
     return { restoreNames, verified };
   }
 
+  async function validatePostgresDump({ row, buffer, actor }) {
+    const bytes = payloadBuffer(buffer);
+    const digest = sha256(bytes);
+    if (!row.checksum_sha256 || digest !== row.checksum_sha256) {
+      const error = new Error("Backup checksum does not match the stored PostgreSQL dump.");
+      error.status = 400;
+      throw error;
+    }
+    await assertArchiveReadable(bytes, env);
+    const saved = await db.query(
+      `UPDATE admin_portal_backups
+       SET recovery_stage = $2,
+           pipeline_status = $2,
+           verified_at = NULL,
+           verification_detail = $3
+       WHERE id = $1
+       RETURNING *`,
+      [
+        row.id,
+        STAGE_VALIDATED,
+        "Archive validated. pg_restore could read the custom-format archive. This is not a restore.",
+      ]
+    );
+    await recordOperation({
+      backupId: row.id,
+      operation: "validate",
+      status: "success",
+      actor,
+      detail: "Archive validated. Readable custom-format dump. Not a restore.",
+    });
+    return {
+      valid: true,
+      recoveryStage: STAGE_VALIDATED,
+      stageLabel: "Archive validated",
+      formatLabel: ".dump",
+      backup: publicBackup(saved.rows[0] || row),
+      restored: false,
+    };
+  }
+
+  async function testRestorePostgresDump({ backupId, actor }) {
+    return withLock(RESTORE_LOCK, async () => {
+      const row = await getBackupRow(backupId, { includePayload: true });
+      if (!row || !rowIsDump(row) || row.status !== "success") {
+        const error = new Error("Only a completed PostgreSQL .dump can be restore-tested.");
+        error.status = 400;
+        throw error;
+      }
+      if (row.recovery_stage !== STAGE_VALIDATED && row.recovery_stage !== STAGE_RESTORED) {
+        const error = new Error("Validate the .dump before a restore test. A readable archive is not a successful restore.");
+        error.status = 400;
+        throw error;
+      }
+      const bytes = payloadBuffer(await loadArchiveBuffer(row));
+      if (sha256(bytes) !== row.checksum_sha256) {
+        const error = new Error("Backup checksum does not match the stored PostgreSQL dump.");
+        error.status = 400;
+        throw error;
+      }
+      const destination = `dentasync_restore_${crypto.randomBytes(4).toString("hex")}`;
+      assertSeparateDatabase(env, destination);
+      const expected = typeof row.dump_manifest === "string"
+        ? JSON.parse(row.dump_manifest)
+        : (row.dump_manifest || {});
+      try {
+        await restoreCustomDump(bytes, env, destination);
+        const actual = await inspectDatabase(env, destination);
+        compareManifest(expected, actual);
+        const saved = await db.query(
+          `UPDATE admin_portal_backups
+           SET recovery_stage = $2,
+               pipeline_status = $2,
+               verified_at = CURRENT_TIMESTAMP,
+               verification_detail = $3
+           WHERE id = $1
+           RETURNING *`,
+          [
+            row.id,
+            STAGE_RESTORED,
+            "Test restore passed. Schema, record counts, and foreign keys were checked in a separate empty database.",
+          ]
+        );
+        await recordOperation({
+          backupId: row.id,
+          operation: "dump_test_restore",
+          status: "success",
+          actor,
+          detail: `Test restore passed. tables=${Object.keys(expected.rowCounts || {}).length} foreignKeys=${(expected.foreignKeys || []).length}. Live database was not replaced.`,
+        });
+        return {
+          isolated: true,
+          productionTouched: false,
+          recoveryStage: STAGE_RESTORED,
+          stageLabel: "Test restore passed",
+          backup: publicBackup(saved.rows[0] || row),
+          tableCount: Object.keys(expected.rowCounts || {}).length,
+          foreignKeyCount: (expected.foreignKeys || []).length,
+          destinationDropped: true,
+        };
+      } catch (error) {
+        await recordOperation({
+          backupId: row.id,
+          operation: "dump_test_restore",
+          status: "failed",
+          actor,
+          detail: String(error.message || "Test restore failed.").slice(0, 500),
+        });
+        error.status = error.status || 500;
+        throw error;
+      } finally {
+        await dropDatabase(env, destination);
+      }
+    });
+  }
+
+  async function productionRestorePostgresDump({ backupId, confirmation, actor }) {
+    if (String(confirmation || "").trim() !== "RESTORE") {
+      const error = new Error("Type RESTORE to confirm this destructive recovery.");
+      error.status = 400;
+      throw error;
+    }
+    if (!productionRestoreAllowed(env)) {
+      const error = new Error(
+        "Production restore is disabled. Validate the .dump, run a test restore, then set BACKUP_ALLOW_PRODUCTION_RESTORE=true only for a supervised recovery window."
+      );
+      error.status = 403;
+      throw error;
+    }
+    return withLock(RESTORE_LOCK, async () => {
+      const row = await getBackupRow(backupId, { includePayload: true });
+      if (!row || !rowIsDump(row)) {
+        const error = new Error("Backup not found.");
+        error.status = 404;
+        throw error;
+      }
+      if (row.status !== "success") {
+        const error = new Error("Only a completed PostgreSQL .dump can be restored.");
+        error.status = 400;
+        throw error;
+      }
+      if (row.recovery_stage !== STAGE_VALIDATED && row.recovery_stage !== STAGE_RESTORED) {
+        const error = new Error("Production restore stays disabled until this .dump is validated.");
+        error.status = 400;
+        throw error;
+      }
+      const bytes = payloadBuffer(await loadArchiveBuffer(row));
+      if (sha256(bytes) !== row.checksum_sha256) {
+        const error = new Error("Backup checksum does not match the stored PostgreSQL dump.");
+        error.status = 400;
+        throw error;
+      }
+      let safety = null;
+      let safetyBytes = null;
+      try {
+        safety = await createPostgresDump({
+          actor,
+          backupType: "safety",
+          notes: `Safety PostgreSQL dump before restore of ${row.id}`,
+        });
+        const safetyRow = await getBackupRow(safety.id, { includePayload: true });
+        safetyBytes = payloadBuffer(safetyRow?.payload);
+        if (!safetyBytes.length || sha256(safetyBytes) !== safety.checksumSha256) {
+          throw new Error("Safety backup could not be read back.");
+        }
+      } catch (error) {
+        await recordOperation({
+          backupId: row.id,
+          operation: "restore",
+          status: "blocked",
+          actor,
+          detail: `Safety backup failed: ${String(error.message || "").slice(0, 300)}`,
+        });
+        const blocked = new Error("Restore stopped because the safety PostgreSQL backup failed.");
+        blocked.status = 500;
+        throw blocked;
+      }
+      if (!safety?.id || safety.status !== "success") {
+        const blocked = new Error("Restore stopped because the safety PostgreSQL backup did not complete.");
+        blocked.status = 500;
+        throw blocked;
+      }
+      try {
+        await restoreOntoLive(bytes, env);
+        await db.query(
+          `INSERT INTO admin_portal_backups (
+             backup_type, status, file_name, byte_size, checksum_sha256, format_version,
+             table_count, row_count, payload, created_by_name, finished_at, notes,
+             pipeline_status, archive_format, recovery_stage, storage_class, encryption, pg_dump_status
+           ) VALUES (
+             'safety', 'success', $1, $2, $3, 0,
+             $4, $5, $6, $7, CURRENT_TIMESTAMP, $8,
+             $9, $10, $9, 'legacy_database', 'none', 'captured'
+           )`,
+          [
+            safety.fileName,
+            safetyBytes.length,
+            safety.checksumSha256,
+            safety.tableCount,
+            safety.rowCount,
+            safetyBytes,
+            actor ? actorName(actor) : "System",
+            "Safety PostgreSQL dump kept after the live restore replaced the catalog.",
+            STAGE_CREATED,
+            ARCHIVE_FORMAT,
+          ]
+        );
+      } catch (error) {
+        await recordOperation({
+          backupId: row.id,
+          operation: "restore",
+          status: "failed",
+          actor,
+          detail: String(error.message || "Production restore failed.").slice(0, 300),
+        });
+        throw error;
+      }
+      await recordOperation({
+        backupId: row.id,
+        operation: "restore",
+        status: "success",
+        actor,
+        detail: `PostgreSQL dump restored after safety backup ${safety.id}.`,
+      });
+      return {
+        restored: true,
+        backup: publicBackup(row),
+        safetyBackup: safety,
+      };
+    });
+  }
+
   async function isolatedRestore({ backupId, actor }) {
+    const peek = await getBackupRow(backupId, { includePayload: false });
+    if (peek && rowIsDump(peek)) {
+      return testRestorePostgresDump({ backupId, actor });
+    }
     return withLock(RESTORE_LOCK, async () => {
       const row = await getBackupRow(backupId, { includePayload: true });
       if (!row || row.status !== "success") {
@@ -1114,6 +1497,18 @@ function createBackupRecoveryService({ db, env = process.env, notifyAdmin = noti
   }
 
   async function restoreBackup({ backupId, confirmation, actor, createSafety = true, mode = "isolated" }) {
+    const peek = await getBackupRow(backupId, { includePayload: false });
+    if (peek && rowIsDump(peek)) {
+      if (mode !== "production") {
+        return testRestorePostgresDump({ backupId, actor });
+      }
+      if (!createSafety) {
+        const error = new Error("Production restore of a PostgreSQL dump stays disabled unless a safety backup is required first.");
+        error.status = 403;
+        throw error;
+      }
+      return productionRestorePostgresDump({ backupId, confirmation, actor });
+    }
     if (mode !== "production") {
       return isolatedRestore({ backupId, actor });
     }
@@ -1417,6 +1812,8 @@ function createBackupRecoveryService({ db, env = process.env, notifyAdmin = noti
     loadSettings,
     saveSettings,
     createBackup,
+    createPostgresDump,
+    testRestorePostgresDump,
     getBackupRow,
     publicBackup,
     parseAndValidatePayload,

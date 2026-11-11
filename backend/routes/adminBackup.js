@@ -82,6 +82,32 @@ function attachAdminBackupRoutes(router, { db }) {
     }
   });
 
+  router.post("/backups/postgres", async (req, res) => {
+    try {
+      const backup = await backups.createPostgresDump({ actor: req.admin });
+      await audit(db, req, {
+        action: "create_postgres_backup",
+        targetType: "backup",
+        targetId: backup.id,
+        targetLabel: backup.fileName,
+        result: "success",
+        detail: `PostgreSQL .dump stored (${backup.byteSize} bytes, ${backup.checksumSha256}).`,
+      });
+      return res.status(201).json({
+        message: "Backup created. This .dump is PostgreSQL data only. Uploaded X-rays and PDFs need their own backup.",
+        backup,
+      });
+    } catch (error) {
+      await audit(db, req, {
+        action: "create_postgres_backup",
+        targetType: "backup",
+        result: "failed",
+        detail: String(error.message || "PostgreSQL backup failed.").slice(0, 300),
+      });
+      return sendServiceError(res, error, "Unable to create PostgreSQL backup.");
+    }
+  });
+
   router.post("/backups", async (req, res) => {
     try {
       const backup = await backups.createBackup({ type: "manual", actor: req.admin });
@@ -169,6 +195,28 @@ function attachAdminBackupRoutes(router, { db }) {
       return res.json({ message: "Backup archive passed integrity checks.", ...result });
     } catch (error) {
       return sendServiceError(res, error, "Unable to validate backup.");
+    }
+  });
+
+  router.post("/backups/:id/dump-test-restore", async (req, res) => {
+    try {
+      const result = await backups.testRestorePostgresDump({
+        backupId: stringValue(req.params.id, 80),
+        actor: req.admin,
+      });
+      await audit(db, req, {
+        action: "dump_test_restore",
+        targetType: "backup",
+        targetId: result.backup?.id,
+        result: "success",
+        detail: "Test restore passed in a separate empty database. Live data was not replaced.",
+      });
+      return res.json({
+        message: "Test restore passed. The live database was not replaced.",
+        ...result,
+      });
+    } catch (error) {
+      return sendServiceError(res, error, "Unable to test-restore this PostgreSQL dump.");
     }
   });
 
