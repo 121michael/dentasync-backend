@@ -15,6 +15,7 @@ const clinicalPatients = require("../services/clinicalPatients");
 const { insertPatientNotification } = require("../services/patientPortalNotifications");
 const { loadAdminAnalytics, isMissingRelation: analyticsMissingRelation } = require("../services/adminAnalytics");
 const { renderAdminAnalyticsExport } = require("../services/adminAnalyticsExport");
+const patientRecordExport = require("../services/patientRecordExport");
 const { buildAdminOtpMailStatus } = require("../services/otpMailStatus");
 const { updatePasswordHash } = require("../services/sessionRevocation");
 
@@ -791,6 +792,75 @@ function createAdminPortalRouter({
   router.get("/patients", (req, res) => listAccountsByRole(req, res, "patient"));
   router.get("/staff", (req, res) => listAccountsByRole(req, res, "staff"));
   router.get("/dentists", (req, res) => listAccountsByRole(req, res, "dentist"));
+
+  async function loadClinicalExportRecords(req) {
+    const search = stringValue(req.query.search, 100);
+    const records = await clinicalPatients.listClinicalRecords(db, {
+      search,
+      limit: null,
+      offset: 0,
+    });
+    return { search: search || "", records };
+  }
+
+  function sendClinicalExportError(res, error) {
+    if (clinicalPatients.isMissingRelation(error)) {
+      return res.status(503).json({
+        message: "Clinical patient records are not available. Run npm run migrate:clinical-records, then restart the server.",
+      });
+    }
+    console.error("Admin clinical record export error:", error.message);
+    return res.status(500).json({ message: "Unable to export patient records." });
+  }
+
+  router.get("/clinical-records/export/preview", async (req, res) => {
+    try {
+      const { search, records } = await loadClinicalExportRecords(req);
+      return res.json({
+        search,
+        total: records.length,
+        records: records.map(patientRecordExport.previewRecord),
+      });
+    } catch (error) {
+      return sendClinicalExportError(res, error);
+    }
+  });
+
+  router.get("/clinical-records/export.xlsx", async (req, res) => {
+    try {
+      const { search, records } = await loadClinicalExportRecords(req);
+      if (!records.length) {
+        return res.status(400).json({ message: "No patient records match the current search." });
+      }
+      if (records.length > patientRecordExport.MAX_EXPORT_ROWS) {
+        return res.status(413).json({
+          message: `This search matches ${records.length} records. Narrow the search before exporting.`,
+        });
+      }
+      const buffer = await patientRecordExport.buildPatientRecordsWorkbook(records);
+      const filename = patientRecordExport.exportFilename();
+      await writeAdminAudit(db, {
+        actorId: req.admin?.id,
+        actorName: `${req.admin?.first_name || ""} ${req.admin?.last_name || ""}`.trim(),
+        actorRole: "admin",
+        action: "export_clinical_records",
+        targetType: "clinical_record_export",
+        targetLabel: filename,
+        result: "success",
+        detail: `Exported ${records.length} clinical patient records${search ? " for the current search." : "."}`,
+        ipAddress: req.ip,
+      });
+      res.setHeader(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      );
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.setHeader("Content-Length", String(buffer.length));
+      return res.status(200).send(buffer);
+    } catch (error) {
+      return sendClinicalExportError(res, error);
+    }
+  });
 
   router.get("/clinical-records", async (req, res) => {
     const search = stringValue(req.query.search, 100);

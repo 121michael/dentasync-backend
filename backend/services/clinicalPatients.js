@@ -138,6 +138,7 @@ function mapClinicalRecord(row, extras = {}) {
     fullName: `${firstName} ${lastName}`.trim(),
     email: row.email || "",
     phone: row.phone || "",
+    storedPhone: row.phone == null ? "" : String(row.phone),
     dateOfBirth,
     gender,
     age,
@@ -235,6 +236,7 @@ async function enrichRecordsFromLinkedProfiles(db, records) {
   if (!linkedIds.length) {
     return records.map((record) => ({
       ...record,
+      storedPhone: record.storedPhone || record.phone || "",
       profileLocked: Boolean(record.linkedUserId),
       accountLinked: Boolean(record.linkedUserId),
     }));
@@ -314,6 +316,7 @@ async function enrichRecordsFromLinkedProfiles(db, records) {
     if (!account) {
       return {
         ...record,
+        storedPhone: record.storedPhone || record.phone || "",
         profileLocked: true,
         accountLinked: true,
       };
@@ -325,6 +328,10 @@ async function enrichRecordsFromLinkedProfiles(db, records) {
     const gender = stringValue(account.gender, 40) || record.gender;
     const age = ageFromDateOfBirth(dateOfBirth);
 
+    const storedPhone =
+      account.phone == null || String(account.phone).trim() === ""
+        ? record.storedPhone || record.phone || ""
+        : String(account.phone).trim();
     return {
       ...record,
       firstName,
@@ -332,6 +339,7 @@ async function enrichRecordsFromLinkedProfiles(db, records) {
       fullName: `${firstName || ""} ${lastName || ""}`.trim() || record.fullName,
       email: normalizeEmail(account.email) || record.email,
       phone: normalizePhone(account.phone) || record.phone || "",
+      storedPhone,
       dateOfBirth,
       gender: gender || "",
       age,
@@ -382,7 +390,12 @@ async function listClinicalRecords(db, { search = null, includeArchived = false,
     )`);
   }
   const whereSql = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-  params.push(limit, offset);
+  const unlimited = limit == null;
+  let limitSql = "";
+  if (!unlimited) {
+    params.push(limit, offset);
+    limitSql = `LIMIT $${params.length - 1} OFFSET $${params.length}`;
+  }
 
   const result = await db.query(
     `SELECT
@@ -415,7 +428,7 @@ async function listClinicalRecords(db, { search = null, includeArchived = false,
      FROM clinic_patient_records AS record
      ${whereSql}
      ORDER BY record.updated_at DESC, record.id DESC
-     LIMIT $${params.length - 1} OFFSET $${params.length}`,
+     ${limitSql}`,
     params
   );
 

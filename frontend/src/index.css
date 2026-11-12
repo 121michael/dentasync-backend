@@ -6301,6 +6301,18 @@ body.is-queue-display .staff-mobile-nav {
   padding: .42rem .45rem .42rem .76rem;
   color: var(--text-muted);
 }
+.admin-export-preview {
+  max-height: 240px;
+  overflow: auto;
+  margin: .75rem 0;
+}
+.admin-export-progress {
+  margin: .25rem 0 .85rem;
+}
+.admin-export-progress progress {
+  width: 100%;
+  height: 8px;
+}
 .admin-search input {
   min-width: 0;
   flex: 1;

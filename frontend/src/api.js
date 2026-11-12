@@ -78,6 +78,54 @@ function filenameFromDisposition(header, fallback) {
   return match?.[1] || fallback;
 }
 
+async function downloadWithProgress(path, filename, onProgress) {
+  const token = accessToken();
+  let response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+  } catch {
+    throw new ApiError("Unable to export patient records. Check the connection and try again.", 0);
+  }
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    throw new ApiError(data?.message || "Unable to export patient records.", response.status, data);
+  }
+  const total = Number(response.headers.get("content-length") || 0);
+  if (!response.body) {
+    const blob = await response.blob();
+    if (onProgress) onProgress(100);
+    saveBlob(blob, filenameFromDisposition(response.headers.get("content-disposition"), filename));
+    return;
+  }
+  const reader = response.body.getReader();
+  const chunks = [];
+  let received = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.byteLength;
+    if (onProgress) onProgress(total > 0 ? Math.min(100, Math.round((received / total) * 100)) : null);
+  }
+  const blob = new Blob(chunks, {
+    type: response.headers.get("content-type") || "application/octet-stream",
+  });
+  saveBlob(blob, filenameFromDisposition(response.headers.get("content-disposition"), filename));
+}
+
+function saveBlob(blob, filename) {
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(objectUrl);
+}
+
 async function download(path, filename, { silent = false, fullscreen } = {}) {
   const token = accessToken();
   const track = shouldTrackLoading(path, { method: "GET", silent, fullscreen });
@@ -93,14 +141,7 @@ async function download(path, filename, { silent = false, fullscreen } = {}) {
     }
 
     const blob = await response.blob();
-    const objectUrl = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = objectUrl;
-    anchor.download = filenameFromDisposition(response.headers.get("content-disposition"), filename);
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(objectUrl);
+    saveBlob(blob, filenameFromDisposition(response.headers.get("content-disposition"), filename));
   } finally {
     if (track) endApiLoading();
   }
@@ -379,6 +420,19 @@ export const api = {
   getAdminClinicalRecords: (params = {}) => {
     const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value || value === 0));
     return request(`/admin/clinical-records${search.size ? `?${search}` : ""}`);
+  },
+  previewAdminClinicalExport: (params = {}) => {
+    const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value || value === 0));
+    return request(`/admin/clinical-records/export/preview${search.size ? `?${search}` : ""}`, { silent: true });
+  },
+  downloadAdminClinicalExport: (params = {}, onProgress) => {
+    const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value || value === 0));
+    const query = search.size ? `?${search}` : "";
+    return downloadWithProgress(
+      `/admin/clinical-records/export.xlsx${query}`,
+      "DentaSync_Patient_Records.xlsx",
+      onProgress
+    );
   },
   getAdminClinicalRecord: (id) => request(`/admin/clinical-records/${id}`),
   authorizationPath(portal, patientId) {

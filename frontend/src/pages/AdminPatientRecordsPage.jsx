@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Eye, Search } from "lucide-react";
+import { Download, Eye, Search } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
@@ -54,6 +54,7 @@ export function AdminPatientRecordsPage() {
   const [applied, setApplied] = useState("");
   const [error, setError] = useState("");
   const [detail, setDetail] = useState(null);
+  const [exportJob, setExportJob] = useState(null);
   const [focusKey, setFocusKey] = useState(() => searchParams.get("focus") || "");
   const focusedRowRef = useRef(null);
   const focusHandledRef = useRef("");
@@ -100,6 +101,60 @@ export function AdminPatientRecordsPage() {
       window.clearTimeout(clearTimer);
     };
   }, [focusKey, data, searchParams, setSearchParams]);
+
+  async function startExport() {
+    setExportJob({ phase: "checking", records: [], total: 0, percent: null, message: "" });
+    try {
+      const preview = await api.previewAdminClinicalExport({ search: applied });
+      const matches = preview?.records || [];
+      if (!matches.length) {
+        setExportJob({
+          phase: "error",
+          records: [],
+          total: 0,
+          percent: null,
+          message: "No patient records match the current search.",
+        });
+        return;
+      }
+      setExportJob({
+        phase: "preview",
+        records: matches,
+        total: Number(preview.total || matches.length),
+        percent: null,
+        message: "",
+        beyondPage: Number(preview.total || matches.length) > (data?.records?.length || 0),
+      });
+    } catch (exportError) {
+      setExportJob({
+        phase: "error",
+        records: [],
+        total: 0,
+        percent: null,
+        message: exportError.message || "Unable to export patient records.",
+      });
+    }
+  }
+
+  async function downloadExport() {
+    setExportJob((current) => ({ ...current, phase: "generating", percent: 0, message: "" }));
+    try {
+      await api.downloadAdminClinicalExport({ search: applied }, (percent) => {
+        setExportJob((current) =>
+          current && current.phase === "generating" ? { ...current, percent } : current
+        );
+      });
+      pushToast("Patient records downloaded.");
+      setExportJob(null);
+    } catch (exportError) {
+      setExportJob((current) => ({
+        ...(current || { records: [], total: 0 }),
+        phase: "error",
+        percent: null,
+        message: exportError.message || "Unable to export patient records.",
+      }));
+    }
+  }
 
   async function viewRecord(record) {
     try {
@@ -167,7 +222,20 @@ export function AdminPatientRecordsPage() {
               placeholder="Search patient by name, ID, phone, or keyword"
             />
           </label>
-          <button className="button button--secondary button--compact">Search</button>
+          <button className="button button--secondary button--compact" type="submit">Search</button>
+          <button
+            className="button button--secondary button--compact"
+            type="button"
+            onClick={startExport}
+            disabled={exportJob?.phase === "checking" || exportJob?.phase === "generating"}
+          >
+            <Download size={16} />
+            {exportJob?.phase === "checking"
+              ? "Checking records…"
+              : exportJob?.phase === "generating"
+                ? "Creating workbook…"
+                : "Export Data (.xlsx)"}
+          </button>
         </form>
 
         {data.setupRequired || data.message ? (
@@ -223,6 +291,64 @@ export function AdminPatientRecordsPage() {
           />
         )}
       </section>
+
+      {exportJob ? (
+        <AdminModal title="Export Data (.xlsx)" onClose={() => setExportJob(null)}>
+          {exportJob.phase === "checking" ? (
+            <p className="muted-copy">Checking which records match the current search…</p>
+          ) : null}
+          {exportJob.phase === "error" ? (
+            <p className="inline-alert inline-alert--error" role="alert">{exportJob.message}</p>
+          ) : null}
+          {exportJob.phase === "preview" || exportJob.phase === "generating" ? (
+            <>
+              <p>
+                {exportJob.total} {exportJob.total === 1 ? "record" : "records"} will be included
+                {applied ? ` for “${applied}”` : ""}.
+                {exportJob.beyondPage
+                  ? " This includes matches that are not on the current page."
+                  : ""}
+              </p>
+              <div className="admin-table-wrap admin-export-preview">
+                <table className="admin-table admin-table--patient-list">
+                  <thead>
+                    <tr>
+                      <th>Patient ID</th>
+                      <th>Patient Name</th>
+                      <th>Sex</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {exportJob.records.map((item) => (
+                      <tr key={item.id}>
+                        <td><code>{listValue(item.patientId)}</code></td>
+                        <td><strong>{listValue(item.fullName)}</strong></td>
+                        <td>{listValue(item.gender)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : null}
+          {exportJob.phase === "generating" ? (
+            <div className="admin-export-progress">
+              <p>Creating the workbook… {exportJob.percent == null ? "" : `${exportJob.percent}%`}</p>
+              <progress max={100} value={exportJob.percent == null ? undefined : exportJob.percent} />
+            </div>
+          ) : null}
+          <div className="admin-heading-actions">
+            <button className="button button--secondary button--compact" type="button" onClick={() => setExportJob(null)}>
+              Close
+            </button>
+            {exportJob.phase === "preview" ? (
+              <button className="button button--primary button--compact" type="button" onClick={downloadExport}>
+                <Download size={16} /> Download .xlsx
+              </button>
+            ) : null}
+          </div>
+        </AdminModal>
+      ) : null}
 
       {detail && record ? (
         <AdminModal title="Patient Record" onClose={() => setDetail(null)} wide>
