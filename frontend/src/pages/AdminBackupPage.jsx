@@ -178,11 +178,45 @@ export function AdminBackupPage() {
     setBusy("postgres");
     try {
       const response = await api.createAdminPostgresBackup();
-      pushToast(response.message || "Backup created.");
+      if (!response?.started) {
+        pushToast(response?.message || "Backup created.");
+        await load();
+        return;
+      }
+      pushToast(response.message || "PostgreSQL backup started.");
+      const deadline = Date.now() + 180000;
+      let finished = null;
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => window.setTimeout(resolve, 2000));
+        const next = await api.getAdminBackups();
+        setData(next);
+        setError("");
+        const match = (next.backups || []).find((item) => item.id === response.backupId) || next.latestAttemptedBackup;
+        if (match && match.status !== "in_progress" && !next.activeJob) {
+          finished = match;
+          break;
+        }
+      }
+      if (!finished) {
+        setError("The PostgreSQL backup is still running. Refresh this page in a moment. It is not finished until the latest attempt leaves “in progress.”");
+        return;
+      }
+      if (finished.status === "failed") {
+        const reason = finished.errorDetail || "PostgreSQL backup failed.";
+        setError(reason);
+        pushToast(reason, "error");
+        return;
+      }
+      pushToast("Backup created. This .dump is PostgreSQL data only. Uploaded X-rays and PDFs need their own backup.");
       await load();
     } catch (createError) {
-      pushToast(createError.message, "error");
+      const dropped = /could not be completed|check the connection|failed to fetch/i.test(createError.message || "");
+      const message = dropped
+        ? "The PostgreSQL backup request closed before the server answered. Refresh this page and read the latest attempt. If it says the tools are missing, install pg_dump and pg_restore on the API host."
+        : createError.message;
+      pushToast(message, "error");
       await load();
+      setError(message);
     } finally {
       setBusy("");
     }

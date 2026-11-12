@@ -21,6 +21,7 @@ const {
   dropDatabase,
   restoreOntoLive,
   describeBackupTools,
+  ensurePostgresTools,
 } = require("./backupPgCustom");
 
 const BACKUP_MAGIC = "DENTASYNC_BACKUP";
@@ -553,7 +554,7 @@ function createBackupRecoveryService({ db, env = process.env, notifyAdmin = noti
     return Buffer.from(value);
   }
 
-  async function createPostgresDump({ actor = null, notes = null, backupType = "postgres_dump" } = {}) {
+  async function createPostgresDump({ actor = null, notes = null, backupType = "postgres_dump", onStarted = null } = {}) {
     return withLock(BACKUP_LOCK, async () => {
       const started = Date.now();
       const inserted = await db.query(
@@ -574,6 +575,14 @@ function createBackupRecoveryService({ db, env = process.env, notifyAdmin = noti
         ]
       );
       const record = inserted.rows[0];
+      await ensurePostgresTools(env);
+      if (typeof onStarted === "function") {
+        try {
+          onStarted(publicBackup(record));
+        } catch {
+          /* the caller already answered the browser */
+        }
+      }
       try {
         const manifest = await captureManifest(db);
         const dumped = await createCustomDump(env);

@@ -92,12 +92,12 @@ function connectionArgs(env = process.env, database) {
   return ["-h", parts.host, "-p", parts.port, "-U", parts.user, "-d", parts.database];
 }
 
-function runTool(command, args, env, database) {
+function runTool(command, args, env, database, timeout = 120_000) {
   return new Promise((resolve) => {
     execFile(
       command,
       args,
-      { timeout: 120_000, maxBuffer: 8 * 1024 * 1024, env: toolEnv(env, database) },
+      { timeout, maxBuffer: 8 * 1024 * 1024, env: toolEnv(env, database) },
       (error, stdout, stderr) => {
         resolve({
           ok: !error,
@@ -169,17 +169,32 @@ async function captureManifest(db) {
   };
 }
 
-async function createCustomDump(env = process.env) {
+async function ensurePostgresTools(env = process.env) {
   if (!(await toolAvailable("pg_dump", env)) || !(await toolAvailable("pg_restore", env))) {
-    const error = new Error("PostgreSQL backup tools are missing. Install pg_dump and pg_restore on the API host.");
-    error.status = 500;
+    const error = new Error("PostgreSQL backup tools are missing. Install pg_dump and pg_restore on the API host, then try Create PostgreSQL backup again.");
+    error.status = 503;
     throw error;
   }
+}
+
+async function createCustomDump(env = process.env) {
+  await ensurePostgresTools(env);
   const filePath = path.join(os.tmpdir(), `ds-pgdump-${crypto.randomBytes(8).toString("hex")}.dump`);
   const dumped = await runTool(
     "pg_dump",
-    ["--format=custom", "--no-owner", "--no-acl", "--file", filePath, ...connectionArgs(env)],
-    env
+    [
+      "--format=custom",
+      "--no-owner",
+      "--no-acl",
+      "--exclude-table=public.admin_portal_backups",
+      "--exclude-table=public.admin_portal_backup_operations",
+      "--file",
+      filePath,
+      ...connectionArgs(env),
+    ],
+    env,
+    undefined,
+    300_000
   );
   if (!dumped.ok) {
     fs.rmSync(filePath, { force: true });
@@ -295,6 +310,7 @@ function compareManifest(expected, actual) {
   }
   const actualKeys = new Set((actual.foreignKeys || []).map((item) => item.name));
   for (const key of expected.foreignKeys || []) {
+    if (key.table_name === "admin_portal_backups" || key.table_name === "admin_portal_backup_operations") continue;
     if (!actualKeys.has(key.name)) {
       const error = new Error(`Test restore did not recover foreign key ${key.name}.`);
       error.status = 500;
@@ -429,6 +445,7 @@ module.exports = {
   assertSeparateDatabase,
   safeToolError,
   describeBackupTools,
+  ensurePostgresTools,
   captureManifest,
   createCustomDump,
   assertArchiveReadable,

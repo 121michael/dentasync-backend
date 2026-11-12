@@ -83,8 +83,20 @@ function attachAdminBackupRoutes(router, { db }) {
   });
 
   router.post("/backups/postgres", async (req, res) => {
+    let startedId = null;
     try {
-      const backup = await backups.createPostgresDump({ actor: req.admin });
+      const backup = await backups.createPostgresDump({
+        actor: req.admin,
+        onStarted(row) {
+          startedId = row?.id || null;
+          if (res.headersSent) return;
+          res.status(202).json({
+            started: true,
+            backupId: startedId,
+            message: "PostgreSQL backup started. This page keeps checking until pg_dump finishes and pg_restore can read the archive.",
+          });
+        },
+      });
       await audit(db, req, {
         action: "create_postgres_backup",
         targetType: "backup",
@@ -93,17 +105,25 @@ function attachAdminBackupRoutes(router, { db }) {
         result: "success",
         detail: `PostgreSQL .dump stored (${backup.byteSize} bytes, ${backup.checksumSha256}).`,
       });
-      return res.status(201).json({
-        message: "Backup created. This .dump is PostgreSQL data only. Uploaded X-rays and PDFs need their own backup.",
-        backup,
-      });
+      if (!res.headersSent) {
+        return res.status(201).json({
+          message: "Backup created. This .dump is PostgreSQL data only. Uploaded X-rays and PDFs need their own backup.",
+          backup,
+        });
+      }
+      return undefined;
     } catch (error) {
       await audit(db, req, {
         action: "create_postgres_backup",
         targetType: "backup",
+        targetId: startedId,
         result: "failed",
         detail: String(error.message || "PostgreSQL backup failed.").slice(0, 300),
       });
+      if (res.headersSent) {
+        console.error("PostgreSQL backup failed after the page was told it started.", error.message);
+        return undefined;
+      }
       return sendServiceError(res, error, "Unable to create PostgreSQL backup.");
     }
   });
