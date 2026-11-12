@@ -457,6 +457,11 @@ strong {
   background: var(--emerald-wash);
 }
 
+.inline-alert--warning {
+  color: #8a5a12;
+  background: var(--amber-wash);
+}
+
 .account-switch-banner {
   display: flex;
   align-items: center;
@@ -6305,6 +6310,32 @@ body.is-queue-display .staff-mobile-nav {
   padding: 0;
   color: var(--text-strong);
   background: transparent;
+}
+.admin-backup-page .admin-panel__heading {
+  flex-wrap: wrap;
+}
+.admin-backup-page .admin-panel__heading > div:first-child {
+  flex: 1 1 18rem;
+  min-width: 0;
+}
+.admin-backup-actions {
+  position: relative;
+  z-index: 2;
+  max-width: 100%;
+}
+.admin-backup-action-note {
+  flex: 1 1 100%;
+  margin: 0;
+  max-width: 36rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 650;
+  line-height: 1.45;
+  text-align: right;
+}
+.admin-status--interrupted {
+  color: #8a5a12;
+  background: var(--amber-wash);
 }
 .admin-backup-page .admin-stats-grid,
 .admin-backup-stats {

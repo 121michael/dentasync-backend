@@ -348,6 +348,78 @@ async function restoreOntoLive(buffer, env = process.env) {
   }
 }
 
+function databaseConfigured(env = process.env) {
+  return Boolean(String(env.DB_USER || env.DATABASE_URL || env.PGUSER || "").trim());
+}
+
+async function probeMaintenanceDatabase(env = process.env) {
+  const parts = connectionParts(env, maintenanceDatabase(env));
+  const client = new Client({
+    host: parts.host,
+    port: Number(parts.port),
+    user: parts.user,
+    password: parts.password,
+    database: parts.database,
+    connectionTimeoutMillis: 4000,
+    ssl: postgresSslConfig(env),
+  });
+  try {
+    await client.connect();
+    await client.query("SELECT 1");
+    return { ok: true, message: "" };
+  } catch (error) {
+    return { ok: false, message: safeToolError(error.message) };
+  } finally {
+    await client.end().catch(() => {});
+  }
+}
+
+async function describeBackupTools(env = process.env) {
+  const dumpReady = await toolAvailable("pg_dump", env);
+  const restoreReady = await toolAvailable("pg_restore", env);
+  const toolsReady = dumpReady && restoreReady;
+  const missingTools = {
+    available: false,
+    reason: "PostgreSQL backup tools are missing on the API host.",
+    nextStep: "Install pg_dump and pg_restore, using the same major version as the database, then refresh this page.",
+  };
+  const postgresDump = toolsReady
+    ? { available: true, reason: "", nextStep: "" }
+    : missingTools;
+  let testRestore = toolsReady
+    ? {
+        available: true,
+        reason: "",
+        nextStep: "",
+      }
+    : {
+        available: false,
+        reason: "A test restore needs pg_restore on the API host.",
+        nextStep: "Install pg_restore, then open Restore on a completed backup. Creating a backup does not use the test database.",
+      };
+  if (toolsReady && databaseConfigured(env)) {
+    const probe = await probeMaintenanceDatabase(env);
+    if (!probe.ok) {
+      testRestore = {
+        available: false,
+        reason: "The separate database used for a test restore cannot be opened.",
+        nextStep: probe.message
+          ? `${probe.message} Creating a backup is still allowed. Give the database user permission to create a temporary database, then try Restore again.`
+          : "Creating a backup is still allowed. Give the database user permission to create a temporary database, then try Restore again.",
+      };
+    }
+  }
+  return {
+    postgresDump,
+    applicationSnapshot: {
+      available: true,
+      reason: "",
+      nextStep: "",
+    },
+    testRestore,
+  };
+}
+
 module.exports = {
   ARCHIVE_FORMAT,
   STAGE_CREATED,
@@ -356,6 +428,7 @@ module.exports = {
   liveDatabaseName,
   assertSeparateDatabase,
   safeToolError,
+  describeBackupTools,
   captureManifest,
   createCustomDump,
   assertArchiveReadable,

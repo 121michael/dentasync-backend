@@ -20,6 +20,7 @@ const {
   compareManifest,
   dropDatabase,
   restoreOntoLive,
+  describeBackupTools,
 } = require("./backupPgCustom");
 
 const BACKUP_MAGIC = "DENTASYNC_BACKUP";
@@ -349,6 +350,19 @@ function createBackupRecoveryService({ db, env = process.env, notifyAdmin = noti
     } finally {
       if (shouldRelease) client.release();
     }
+  }
+
+  async function jobIsRunning() {
+    for (const key of [BACKUP_LOCK, RESTORE_LOCK]) {
+      try {
+        const locked = await db.query("SELECT pg_try_advisory_lock($1) AS locked", [key]);
+        if (!locked.rows[0]?.locked) return true;
+        await db.query("SELECT pg_advisory_unlock($1)", [key]);
+      } catch {
+        return false;
+      }
+    }
+    return false;
   }
 
   async function recordOperation({ backupId, operation, status, actor, detail }) {
@@ -916,9 +930,27 @@ function createBackupRecoveryService({ db, env = process.env, notifyAdmin = noti
       } else if (error?.code === "42P01") {
         return {
           status: "unavailable",
+          activeJob: false,
           message: "Backup storage is not installed. Run npm run migrate:admin-backups.",
           availableCount: 0,
           backups: [],
+          capabilities: {
+            postgresDump: {
+              available: false,
+              reason: "Backup storage is not installed.",
+              nextStep: "Run npm run migrate:admin-backups, then restart the API.",
+            },
+            applicationSnapshot: {
+              available: false,
+              reason: "Backup storage is not installed.",
+              nextStep: "Run npm run migrate:admin-backups, then restart the API.",
+            },
+            testRestore: {
+              available: false,
+              reason: "Backup storage is not installed, so a restore test cannot run.",
+              nextStep: "Install the backup catalog first. Backup creation stays off until that catalog exists.",
+            },
+          },
           settings,
           storage: {
             method: "postgresql",
@@ -943,7 +975,11 @@ function createBackupRecoveryService({ db, env = process.env, notifyAdmin = noti
         ? item.recoveryStage === STAGE_RESTORED
         : Boolean(item.verifiedAt)
     )) || successful.find((item) => item.archiveFormat !== ARCHIVE_FORMAT) || null;
-    const inProgress = backups.find((item) => item.status === "in_progress" || ["queued", "running", "uploading", "verifying"].includes(item.pipelineStatus));
+    const activeJob = await jobIsRunning();
+    for (const item of backups) {
+      const running = item.status === "in_progress" || ["queued", "running", "uploading", "verifying"].includes(item.pipelineStatus);
+      if (running && !activeJob) item.interrupted = true;
+    }
     const verifiedOffsite = backups.find((item) => item.offsiteProtected);
     let lastRestore = null;
     let lastIsolated = null;
@@ -962,15 +998,42 @@ function createBackupRecoveryService({ db, env = process.env, notifyAdmin = noti
     }
 
     let status = "never_backed_up";
-    if (inProgress) status = "in_progress";
+    if (activeJob) status = "in_progress";
     else if (latestAttempted?.status === "failed") status = "failed";
     else if (latestCompleted) status = "success";
     else if (latestFailed) status = "failed";
+    const historicalFailure = latestFailed
+      && latestAttempted
+      && latestAttempted.status === "success"
+      && latestAttempted.id !== latestFailed.id
+      ? {
+          id: latestFailed.id,
+          createdAt: latestFailed.createdAt,
+          errorDetail: latestFailed.errorDetail,
+          message: "This is an older failed backup, not the result of the latest attempt.",
+        }
+      : null;
+    const capabilities = await describeBackupTools(env).catch(() => ({
+      postgresDump: {
+        available: false,
+        reason: "PostgreSQL backup tools could not be checked.",
+        nextStep: "Confirm pg_dump and pg_restore are installed on the API host, then refresh this page.",
+      },
+      applicationSnapshot: { available: true, reason: "", nextStep: "" },
+      testRestore: {
+        available: false,
+        reason: "A test restore could not be checked.",
+        nextStep: "Creating a backup is still allowed. Open Restore after the tools are available.",
+      },
+    }));
 
     const storageBytes = successful.reduce((sum, item) => sum + Number(item.byteSize || 0), 0);
 
     return {
       status,
+      activeJob,
+      capabilities,
+      historicalFailure,
       availableCount: successful.length,
       latestBackup: latestAttempted,
       latestAttemptedBackup: latestAttempted,

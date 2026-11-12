@@ -400,6 +400,55 @@ test("create backup stores metadata and excludes env secrets", async () => {
   assert.equal(payloadContainsSecrets(parsed, { SEMAPHORE_API_KEY: "not-in-this-dump" }), false);
 });
 
+test("an interrupted older job does not disable a new backup", async () => {
+  const db = createMemoryDb();
+  db.backups.unshift({
+    id: "old-fail",
+    status: "failed",
+    pipeline_status: "failed",
+    backup_type: "manual",
+    file_name: "old-fail.dsb",
+    byte_size: 0,
+    created_at: "2026-10-29T02:46:00.000Z",
+    error_detail: "Backup aborted because environment secrets were detected in table data.",
+  });
+  db.backups.unshift({
+    id: "stuck-job",
+    status: "in_progress",
+    pipeline_status: "running",
+    backup_type: "manual",
+    file_name: "stuck.dsb",
+    byte_size: 0,
+    created_at: "2026-11-01T00:00:00.000Z",
+    error_detail: null,
+  });
+  db.backups.unshift({
+    id: "latest-ok",
+    status: "success",
+    pipeline_status: "completed",
+    backup_type: "manual",
+    file_name: "latest.dsb",
+    byte_size: 12,
+    checksum_sha256: "abc",
+    created_at: "2026-11-12T02:02:00.000Z",
+    error_detail: null,
+  });
+  const service = createBackupRecoveryService({
+    db,
+    env: { BACKUP_SKIP_PG_DUMP: "true" },
+    notifyAdmin: async () => 0,
+  });
+  const overview = await service.getOverview();
+  assert.equal(overview.activeJob, false);
+  assert.equal(overview.status, "success");
+  assert.equal(overview.capabilities.applicationSnapshot.available, true);
+  assert.equal(overview.backups.find((item) => item.id === "stuck-job").interrupted, true);
+  assert.match(overview.historicalFailure.message, /older failed backup/i);
+  assert.match(overview.historicalFailure.errorDetail, /secrets/);
+  const created = await service.createBackup({ type: "manual", actor: { id: "admin-1" } });
+  assert.equal(created.status, "success");
+});
+
 test("create backup redacts a leaked env secret instead of storing it", async () => {
   const db = createMemoryDb();
   db.tables.clinic_sms_logs[0].error_detail = "failed with live-semaphore-key-value";

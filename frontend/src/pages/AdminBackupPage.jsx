@@ -91,7 +91,27 @@ export function AdminBackupPage() {
   const backups = data?.backups || [];
   const storage = data?.storage;
   const offsite = data?.offsite;
-  const jobRunning = Boolean(busy) || data?.status === "in_progress";
+  const activeJob = Boolean(data?.activeJob);
+  const postgresCapability = data?.capabilities?.postgresDump || { available: true, reason: "", nextStep: "" };
+  const snapshotCapability = data?.capabilities?.applicationSnapshot || { available: true, reason: "", nextStep: "" };
+  const testRestoreCapability = data?.capabilities?.testRestore || { available: true, reason: "", nextStep: "" };
+  const jobRunning = Boolean(busy) || activeJob;
+  const postgresDisabled = jobRunning || postgresCapability.available === false;
+  const snapshotDisabled = jobRunning || snapshotCapability.available === false;
+
+  function unavailableReason(kind) {
+    if (activeJob) {
+      return "A backup or restore is already running. Wait until that job finishes, then click again.";
+    }
+    if (busy) {
+      return "This page is finishing another backup action. Wait until it completes, then click again.";
+    }
+    const capability = kind === "postgres" ? postgresCapability : snapshotCapability;
+    if (capability.available === false) {
+      return [capability.reason, capability.nextStep].filter(Boolean).join(" ");
+    }
+    return "";
+  }
 
   const overviewCards = useMemo(
     () => [
@@ -338,16 +358,22 @@ export function AdminBackupPage() {
               Independent off-site protection is reported only after a verified object-storage copy exists.
             </p>
           </div>
-          <div className="admin-heading-actions">
+          <div className="admin-heading-actions admin-backup-actions">
             <button className="button button--secondary" onClick={load} type="button">
               <RefreshCw size={16} /> Refresh
             </button>
-            <button className="button button--secondary" onClick={createPostgresBackup} type="button" disabled={jobRunning}>
+            <button className="button button--secondary" onClick={createPostgresBackup} type="button" disabled={postgresDisabled}>
               <DatabaseBackup size={16} /> {busy === "postgres" ? "Running…" : "Create PostgreSQL backup"}
             </button>
-            <button className="button button--primary" onClick={createBackup} type="button" disabled={jobRunning}>
+            <button className="button button--primary" onClick={createBackup} type="button" disabled={snapshotDisabled}>
               <DatabaseBackup size={16} /> {busy === "create" ? "Running…" : "Create .dsb backup"}
             </button>
+            {unavailableReason("postgres") ? (
+              <p className="admin-backup-action-note">Create PostgreSQL backup: {unavailableReason("postgres")}</p>
+            ) : null}
+            {unavailableReason("dsb") && unavailableReason("dsb") !== unavailableReason("postgres") ? (
+              <p className="admin-backup-action-note">Create .dsb backup: {unavailableReason("dsb")}</p>
+            ) : null}
           </div>
         </div>
         <div className="admin-stats-grid admin-backup-stats">
@@ -373,14 +399,13 @@ export function AdminBackupPage() {
             <dd>{data.pitr?.available ? data.pitr.window : "Unavailable on this plan"}</dd>
           </div>
         </dl>
-        {data.lastError ? (
-          <p className="inline-alert inline-alert--error">
-            <AlertTriangle size={16} /> Latest failed backup: {data.lastError}
+        {data.historicalFailure ? (
+          <p className="inline-alert inline-alert--warning">
+            <AlertTriangle size={16} /> Older failed backup from {formatAdminDateTime(data.historicalFailure.createdAt)}: {data.historicalFailure.errorDetail} {data.historicalFailure.message}
           </p>
-        ) : null}
-        {data.status === "success" && data.latestFailedBackup && data.latestAttemptedBackup?.status === "failed" ? (
+        ) : data.latestAttemptedBackup?.status === "failed" && data.lastError ? (
           <p className="inline-alert inline-alert--error">
-            A newer backup attempt failed after an older successful archive. The successful copy does not hide this failure.
+            <AlertTriangle size={16} /> Latest attempt failed: {data.lastError}
           </p>
         ) : null}
       </section>
@@ -398,13 +423,19 @@ export function AdminBackupPage() {
             </p>
           </div>
         </div>
-        <div className="admin-heading-actions">
-          <button className="button button--secondary" onClick={createPostgresBackup} type="button" disabled={jobRunning}>
+        <div className="admin-heading-actions admin-backup-actions">
+          <button className="button button--secondary" onClick={createPostgresBackup} type="button" disabled={postgresDisabled}>
             <DatabaseBackup size={16} /> {busy === "postgres" ? "Working…" : "Create PostgreSQL backup"}
           </button>
-          <button className="button button--primary" onClick={createBackup} type="button" disabled={jobRunning}>
+          <button className="button button--primary" onClick={createBackup} type="button" disabled={snapshotDisabled}>
             <DatabaseBackup size={16} /> {busy === "create" ? "Working…" : "Create .dsb backup"}
           </button>
+          {unavailableReason("postgres") ? (
+            <p className="admin-backup-action-note">Create PostgreSQL backup: {unavailableReason("postgres")}</p>
+          ) : null}
+          {unavailableReason("dsb") && unavailableReason("dsb") !== unavailableReason("postgres") ? (
+            <p className="admin-backup-action-note">Create .dsb backup: {unavailableReason("dsb")}</p>
+          ) : null}
         </div>
       </section>
 
@@ -444,7 +475,9 @@ export function AdminBackupPage() {
                     <td>{storageLabel(backup)}</td>
                     <td><AdminStatusBadge status={backup.verificationStatus} /></td>
                     <td>
-                      {recoveryLabel(backup) ? (
+                      {backup.interrupted ? (
+                        <span className="admin-status admin-status--interrupted">Interrupted older job</span>
+                      ) : recoveryLabel(backup) ? (
                         <span className="admin-status">{recoveryLabel(backup)}</span>
                       ) : (
                         <AdminStatusBadge status={backup.pipelineStatus || backup.status} />
@@ -629,7 +662,17 @@ export function AdminBackupPage() {
                   ? "Restores into a separate empty database, checks schema, record counts, and foreign keys, then drops that database. The live database is not the destination."
                   : "Restores into a rolled-back transaction. Production tables are not kept changed."}
               </p>
-              <button className="button button--secondary" type="button" onClick={runIsolatedRecovery} disabled={Boolean(busy) || !recovery.validation}>
+              {testRestoreCapability.available === false ? (
+                <p className="admin-backup-action-note">
+                  {[testRestoreCapability.reason, testRestoreCapability.nextStep].filter(Boolean).join(" ")}
+                </p>
+              ) : null}
+              <button
+                className="button button--secondary"
+                type="button"
+                onClick={runIsolatedRecovery}
+                disabled={Boolean(busy) || !recovery.validation || testRestoreCapability.available === false}
+              >
                 {busy === "isolated" ? "Testing…" : recovery.backup.archiveFormat === "pg_dump_custom" ? "Run test restore" : "Run isolated restore test"}
               </button>
               {recovery.isolated?.stageLabel === "Test restore passed" ? (
