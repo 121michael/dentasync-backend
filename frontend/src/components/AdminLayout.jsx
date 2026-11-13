@@ -7,6 +7,7 @@ import {
   CalendarDays,
   Cloud,
   CreditCard,
+  Building2,
   DatabaseBackup,
   FolderOpen,
   LayoutDashboard,
@@ -39,6 +40,7 @@ export function useAdminUi() {
 const navigation = [
   { to: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { to: "/admin/users", label: "Manage User", icon: Users },
+  { to: "/admin/branches", label: "Branch Management", icon: Building2 },
   { to: "/admin/patient-records", label: "Patient Record", icon: FolderOpen },
   { to: "/admin/rfid", label: "RFID Tags", icon: CreditCard },
   { to: "/admin/schedule", label: "Clinic Schedule", icon: CalendarDays },
@@ -53,6 +55,7 @@ const navigation = [
 const PAGE_TITLES = {
   "/admin/dashboard": "Dashboard Overview",
   "/admin/users": "User Management",
+  "/admin/branches": "Branch Management",
   "/admin/archived-records": "Archive Records",
   "/admin/patient-records": "Patient Records Vault",
   "/admin/rfid": "RFID Tag Assignments",
@@ -267,6 +270,7 @@ export function AdminLayout() {
                 items: [
                   { to: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
                   { to: "/admin/users", label: "Manage User", icon: Users, showDot: alerts.pendingAccounts > 0 },
+                  { to: "/admin/branches", label: "Branch Management", icon: Building2 },
                   { to: "/admin/patient-records", label: "Patient Record", icon: FolderOpen },
                   { to: "/admin/rfid", label: "RFID Tags", icon: CreditCard },
                   { to: "/admin/schedule", label: "Clinic Schedule", icon: CalendarDays, showDot: alerts.pendingAppointments > 0 },

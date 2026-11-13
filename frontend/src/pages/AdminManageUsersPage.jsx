@@ -25,6 +25,8 @@ const emptyForm = {
   scheduleNotes: "",
   licenseNumber: "",
   licenseVerified: false,
+  branchId: "",
+  branchIds: [],
 };
 
 const PH_MOBILE_PATTERN = /^09[0-9]{9}$/;
@@ -64,6 +66,14 @@ function categoryLabel(value) {
 function patientPasswordStatusLabel(user) {
   const status = String(user?.passwordStatus || "").trim();
   return status || "—";
+}
+
+function assignmentSummary(user) {
+  const items = Array.isArray(user?.branches) ? user.branches : [];
+  if (!items.length) return "Unassigned";
+  return items
+    .map((branch) => `${branch.name}${branch.inactive || branch.status !== "active" ? " (Inactive branch)" : ""}`)
+    .join(", ");
 }
 
 const PATIENT_PASSWORD_MIN_LENGTH = 10;
@@ -129,6 +139,7 @@ export function AdminManageUsersPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(emptyForm);
+  const [branches, setBranches] = useState([]);
   const [detail, setDetail] = useState(null);
   const [dependentDetail, setDependentDetail] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -178,6 +189,20 @@ export function AdminManageUsersPage() {
     const focus = searchParams.get("focus");
     if (focus) setFocusKey(focus);
   }, [searchParams, tab]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getAdminBranches({ status: "all" })
+      .then((response) => {
+        if (!cancelled) setBranches(response.branches || []);
+      })
+      .catch(() => {
+        if (!cancelled) setBranches([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!focusKey) return;
@@ -250,6 +275,8 @@ export function AdminManageUsersPage() {
       scheduleNotes: user.scheduleNotes || "",
       licenseNumber: user.licenseNumber || "",
       licenseVerified: Boolean(user.licenseVerified),
+      branchId: user.branches?.[0] ? String(user.branches[0].id) : "",
+      branchIds: (user.branches || []).map((branch) => String(branch.id)),
     });
     setPhoneError("");
     setFormOpen(true);
@@ -266,15 +293,26 @@ export function AdminManageUsersPage() {
       pushToast(PH_MOBILE_MESSAGE, "error");
       return;
     }
+    if (tab === "staff" && !form.branchId) {
+      pushToast("Staff must be assigned to exactly one branch.", "error");
+      return;
+    }
+    if (tab === "dentist" && !form.branchIds.length) {
+      pushToast("Dentists must be assigned to at least one branch.", "error");
+      return;
+    }
+    const payload = { ...form };
+    if (tab === "staff") delete payload.branchIds;
+    if (tab === "dentist") delete payload.branchId;
     setBusy(true);
     try {
       if (editing) {
         const updater = tab === "staff" ? api.updateAdminStaff : api.updateAdminDentist;
-        await updater(editing.id, form);
+        await updater(editing.id, payload);
         pushToast("Account updated successfully.");
       } else {
         const creator = tab === "staff" ? api.createAdminStaff : api.createAdminDentist;
-        const response = await creator(form);
+        const response = await creator(payload);
         pushToast(response.message || "Profile provisioned successfully.");
       }
       setFormOpen(false);
@@ -578,6 +616,7 @@ export function AdminManageUsersPage() {
                   {tab === "patient" ? <th>Email</th> : null}
                   {tab === "patient" ? <th>Phone</th> : null}
                   {tab !== "patient" ? <th>Contact Endpoint</th> : null}
+                  {tab !== "patient" ? <th>Assigned Branch</th> : null}
                   {tab === "patient" ? <th>Password Status</th> : null}
                   <th>{tab === "patient" ? "Status" : "Operational Status"}</th>
                   <th>Actions</th>
@@ -612,6 +651,7 @@ export function AdminManageUsersPage() {
                       {tab === "patient" ? <td>{user.email || "—"}</td> : null}
                       {tab === "patient" ? <td>{user.phone || "—"}</td> : null}
                       {tab !== "patient" ? <td>{user.email}</td> : null}
+                      {tab !== "patient" ? <td>{assignmentSummary(user)}</td> : null}
                       {tab === "patient" ? <td>{patientPasswordStatusLabel(user)}</td> : null}
                       <td>
                         <AdminStatusBadge
@@ -948,6 +988,51 @@ export function AdminManageUsersPage() {
                   <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Optional" />
                 </label>
               ) : null}
+              {tab === "staff" || tab === "dentist" ? (
+                <label className="admin-form--manage-user__full">
+                  Assigned branch{tab === "dentist" ? "es" : ""}
+                  {tab === "staff" ? (
+                    <select
+                      required
+                      value={form.branchId}
+                      onChange={(event) => setForm({ ...form, branchId: event.target.value })}
+                    >
+                      <option value="">Select one branch</option>
+                      {branches
+                        .filter((branch) => branch.status === "active" || String(branch.id) === String(form.branchId))
+                        .map((branch) => (
+                          <option key={branch.id} value={branch.id}>
+                            {branch.name}{branch.status !== "active" ? " (Inactive branch)" : ""}
+                          </option>
+                        ))}
+                    </select>
+                  ) : (
+                    <span className="admin-branch-choices">
+                      {branches
+                        .filter((branch) => branch.status === "active" || form.branchIds.includes(String(branch.id)))
+                        .map((branch) => {
+                          const id = String(branch.id);
+                          const checked = form.branchIds.includes(id);
+                          return (
+                            <label key={id}>
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(event) => {
+                                  const next = event.target.checked
+                                    ? [...form.branchIds, id]
+                                    : form.branchIds.filter((value) => value !== id);
+                                  setForm({ ...form, branchIds: next });
+                                }}
+                              />
+                              {branch.name}{branch.status !== "active" ? " (Inactive branch)" : ""}
+                            </label>
+                          );
+                        })}
+                    </span>
+                  )}
+                </label>
+              ) : null}
               {tab === "staff" ? (
                 <label className="admin-form--manage-user__full">
                   Operational role
@@ -1045,6 +1130,9 @@ export function AdminManageUsersPage() {
             <p><small>Email</small><strong>{detail.email}</strong></p>
             <p><small>Phone</small><strong>{detail.phone || "—"}</strong></p>
             <p><small>Role</small><strong className="capitalize">{detail.role}</strong></p>
+            {String(detail.role || "").toLowerCase() === "staff" || String(detail.role || "").toLowerCase() === "dentist" ? (
+              <p><small>Assigned branch</small><strong>{assignmentSummary(detail)}</strong></p>
+            ) : null}
             {detail.patientCategory ? (
               <p><small>Category</small><strong>{categoryLabel(detail.patientCategory)}</strong></p>
             ) : null}

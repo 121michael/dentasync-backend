@@ -6,6 +6,8 @@ const bcrypt = require("bcrypt");
 const express = require("express");
 const { attachAdminDocumentSyncRoutes } = require("./adminDocumentSync");
 const { attachAdminBackupRoutes } = require("./adminBackup");
+const { attachClinicBranchRoutes } = require("./clinicBranches");
+const clinicBranches = require("../services/clinicBranches");
 const { attachDentalAuthorizationRoutes } = require("./dentalAuthorization");
 const { attachAdminCommandCenterRoutes } = require("./adminCommandCenter");
 const { attachClinicScheduleRoutes } = require("./clinicSchedule");
@@ -429,6 +431,7 @@ function createAdminPortalRouter({
   const router = express.Router();
 
   router.use(authenticateToken, requireAdminAccount(db));
+  attachClinicBranchRoutes(router, { db });
 
   attachAdminDocumentSyncRoutes(router, {
     db,
@@ -762,6 +765,8 @@ function createAdminPortalRouter({
       );
       if (role === "patient") {
         await overlayPatientPasswordStatus(db, accounts);
+      } else if (role === "staff" || role === "dentist") {
+        await clinicBranches.attachAssignments(db, accounts);
       }
       return {
         page,
@@ -1230,6 +1235,12 @@ function createAdminPortalRouter({
         }
       }
 
+      await clinicBranches.replacePersonnelAssignments(client, {
+        userId: staff.id,
+        role: "staff",
+        branchIds: clinicBranches.readRequestedBranchIds(req.body, "staff"),
+      });
+
       await client.query("COMMIT");
       transactionOpen = false;
     } catch (error) {
@@ -1240,6 +1251,9 @@ function createAdminPortalRouter({
         return res.status(409).json({
           message: "That email address or phone number is already registered.",
         });
+      }
+      if (error.status) {
+        return res.status(error.status).json({ message: error.message });
       }
       console.error("Admin staff create error:", error.message);
       return res.status(500).json({ message: "Unable to create the staff account." });
@@ -1331,15 +1345,20 @@ function createAdminPortalRouter({
       fields.push(`status = $${params.length}`);
     }
 
-    if (!fields.length && position === null) {
+    const staffBranchChange = clinicBranches.assignmentRequested(req.body);
+    if (!fields.length && position === null && !staffBranchChange) {
       return res.status(400).json({ message: "Provide at least one staff field to update." });
     }
 
+    const client = await db.connect();
+    let transactionOpen = false;
     try {
+      await client.query("BEGIN");
+      transactionOpen = true;
       let staff;
       if (fields.length) {
         params.push(staffId);
-        const result = await db.query(
+        const result = await client.query(
           `UPDATE users
            SET ${fields.join(", ")}
            WHERE id::text = $${params.length}
@@ -1349,11 +1368,13 @@ function createAdminPortalRouter({
           params
         );
         if (!result.rows.length) {
+          await client.query("ROLLBACK");
+          transactionOpen = false;
           return res.status(404).json({ message: "Staff record not found." });
         }
         staff = result.rows[0];
       } else {
-        const result = await db.query(
+        const result = await client.query(
           `SELECT id, first_name, last_name, email, phone, role, status, is_verified, created_at
            FROM users
            WHERE id::text = $1
@@ -1363,22 +1384,41 @@ function createAdminPortalRouter({
           [staffId]
         );
         if (!result.rows.length) {
+          await client.query("ROLLBACK");
+          transactionOpen = false;
           return res.status(404).json({ message: "Staff record not found." });
         }
         staff = result.rows[0];
       }
 
-      return res.json({
-        staff: mapAccount(staff, { position: position || "" }),
-      });
+      if (staffBranchChange) {
+        await clinicBranches.replacePersonnelAssignments(client, {
+          userId: staff.id,
+          role: "staff",
+          branchIds: clinicBranches.readRequestedBranchIds(req.body, "staff"),
+        });
+      }
+      await client.query("COMMIT");
+      transactionOpen = false;
+      const [withBranches] = await clinicBranches.attachAssignments(db, [mapAccount(staff, { position: position || "" })]);
+      return res.json({ staff: withBranches });
     } catch (error) {
+      if (transactionOpen) {
+        await client.query("ROLLBACK").catch(() => {});
+        transactionOpen = false;
+      }
       if (error.code === "23505") {
         return res.status(409).json({
           message: "That email address or phone number is already in use.",
         });
       }
+      if (error.status) {
+        return res.status(error.status).json({ message: error.message });
+      }
       console.error("Admin staff update error:", error.message);
       return res.status(500).json({ message: "Unable to update the staff account." });
+    } finally {
+      client.release();
     }
   });
 
@@ -1445,6 +1485,12 @@ function createAdminPortalRouter({
         [String(dentist.id), specialization || null, scheduleNotes || null, catalogDentistId]
       );
 
+      await clinicBranches.replacePersonnelAssignments(client, {
+        userId: dentist.id,
+        role: "dentist",
+        branchIds: clinicBranches.readRequestedBranchIds(req.body, "dentist"),
+      });
+
       await client.query("COMMIT");
       transactionOpen = false;
     } catch (error) {
@@ -1455,6 +1501,9 @@ function createAdminPortalRouter({
         return res.status(409).json({
           message: "That email address or phone number is already registered.",
         });
+      }
+      if (error.status) {
+        return res.status(error.status).json({ message: error.message });
       }
       if (isMissingRelation(error)) {
         return migrationUnavailable(res);
@@ -1551,7 +1600,8 @@ function createAdminPortalRouter({
       fields.push(`status = $${params.length}`);
     }
 
-    if (!fields.length && !specializationProvided && !scheduleNotesProvided && !licenseProvided && !verifiedProvided) {
+    const dentistBranchChange = clinicBranches.assignmentRequested(req.body);
+    if (!fields.length && !specializationProvided && !scheduleNotesProvided && !licenseProvided && !verifiedProvided && !dentistBranchChange) {
       return res.status(400).json({ message: "Provide at least one dentist field to update." });
     }
     await ensureLicenseVerifiedColumn();
@@ -1649,17 +1699,26 @@ function createAdminPortalRouter({
         [String(dentist.id)]
       );
 
+      if (dentistBranchChange) {
+        await clinicBranches.replacePersonnelAssignments(client, {
+          userId: dentist.id,
+          role: "dentist",
+          branchIds: clinicBranches.readRequestedBranchIds(req.body, "dentist"),
+        });
+      }
+
       await client.query("COMMIT");
       transactionOpen = false;
 
-      return res.json({
-        dentist: mapAccount(dentist, {
+      const [withBranches] = await clinicBranches.attachAssignments(db, [
+        mapAccount(dentist, {
           specialization: profileResult.rows[0]?.specialization || "",
           scheduleNotes: profileResult.rows[0]?.schedule_notes || "",
           licenseNumber: profileResult.rows[0]?.license_number || "",
           licenseVerified: profileResult.rows[0]?.license_verified === true,
         }),
-      });
+      ]);
+      return res.json({ dentist: withBranches });
     } catch (error) {
       if (transactionOpen) {
         await client.query("ROLLBACK");
@@ -1668,6 +1727,9 @@ function createAdminPortalRouter({
         return res.status(409).json({
           message: "That email address or phone number is already in use.",
         });
+      }
+      if (error.status) {
+        return res.status(error.status).json({ message: error.message });
       }
       if (isMissingRelation(error)) {
         return migrationUnavailable(res);

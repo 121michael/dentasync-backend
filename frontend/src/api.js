@@ -495,6 +495,14 @@ export const api = {
     request(`/dentist/patients/${patientId}/treatments/${treatmentId}`, { method: "DELETE" }),
   setDentistProcedureDuration: (queueEntryId, body) =>
     request(`/dentist/queue/${queueEntryId}/duration`, { method: "PATCH", body }),
+  getAdminBranches: (params = {}) => {
+    const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value || value === 0));
+    return request(`/admin/branches${search.size ? `?${search}` : ""}`);
+  },
+  getAdminBranch: (id) => request(`/admin/branches/${id}`),
+  createAdminBranch: (body) => request("/admin/branches", { method: "POST", body }),
+  updateAdminBranch: (id, body) => request(`/admin/branches/${id}`, { method: "PATCH", body }),
+  setAdminBranchStatus: (id, status) => request(`/admin/branches/${id}/status`, { method: "POST", body: { status } }),
   getAdminStaff: (params = {}) => {
     const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value || value === 0));
     return request(`/admin/staff${search.size ? `?${search}` : ""}`);

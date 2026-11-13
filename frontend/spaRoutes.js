@@ -33,6 +33,7 @@ export const SPA_ROUTES = [
   "/admin",
   "/admin/dashboard",
   "/admin/users",
+  "/admin/branches",
   "/admin/archived-records",
   "/admin/patient-records",
   "/admin/rfid",
