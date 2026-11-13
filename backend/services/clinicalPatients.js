@@ -1203,6 +1203,17 @@ async function addClinicalTreatment(db, recordId, input, actor = {}) {
     [recordId, actor.id ? String(actor.id) : null]
   );
 
+  if (input.originatingBranchId && result.rows[0]?.id) {
+    try {
+      await db.query(
+        `UPDATE clinic_patient_treatments SET originating_branch_id = $2 WHERE id = $1`,
+        [result.rows[0].id, input.originatingBranchId]
+      );
+      result.rows[0].originating_branch_id = input.originatingBranchId;
+    } catch (error) {
+      if (error.code !== "42703") throw error;
+    }
+  }
   const mapped = mapClinicalTreatment(result.rows[0]);
   try {
     await dentalChartSync.syncChartFromTreatment(db, recordId, result.rows[0], actor);

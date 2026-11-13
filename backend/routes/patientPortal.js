@@ -1788,7 +1788,7 @@ function createPatientPortalRouter({
       transactionOpen = true;
       await client.query("SELECT pg_advisory_xact_lock(hashtext('patient_portal_queue'))");
 
-      const appointment = await staffCheckIn.findAppointmentForCheckIn(client, { appointmentId });
+      const appointment = await staffCheckIn.findAppointmentForCheckIn(client, { appointmentId, branchId: "main" });
       if (!appointment || String(appointment.user_id) !== String(userId)) {
         await client.query("ROLLBACK");
         transactionOpen = false;
@@ -1801,6 +1801,7 @@ function createPatientPortalRouter({
         notifyClinicStaff,
         notifyClinicDentists,
         checkInMethod: "portal",
+        branchId: "main",
       });
 
       await client.query("COMMIT");
@@ -3252,7 +3253,7 @@ function createPatientPortalRouter({
       transactionOpen = true;
       await client.query("SELECT pg_advisory_xact_lock(hashtext('patient_portal_queue'))");
 
-      let appointment = await staffCheckIn.findAppointmentForCheckIn(client, { patientId: userId });
+      let appointment = await staffCheckIn.findAppointmentForCheckIn(client, { patientId: userId, branchId: "main" });
       if (!appointment) {
         const patientResult = await client.query(
           `SELECT id, first_name, last_name, email, phone, role, status, is_verified, rfid_tag
@@ -3269,6 +3270,7 @@ function createPatientPortalRouter({
         }
         const resolved = await staffCheckIn.resolveAppointmentForCheckIn(client, patient, {
           allowWalkIn: true,
+          branchId: "main",
         });
         if (!resolved.appointment) {
           await client.query("ROLLBACK");
@@ -3286,6 +3288,7 @@ function createPatientPortalRouter({
         notifyClinicStaff,
         notifyClinicDentists,
         checkInMethod: "qr",
+        branchId: "main",
       });
 
       try {

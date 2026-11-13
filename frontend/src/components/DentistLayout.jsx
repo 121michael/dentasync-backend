@@ -39,6 +39,37 @@ export function DentistLayout() {
   const [isOpen, setIsOpen] = useState(false);
   const [profile, setProfile] = useState(null);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [branchContext, setBranchContext] = useState(null);
+  const [selectedBranchId, setSelectedBranchId] = useState(
+    () => sessionStorage.getItem("dentasync.activeBranchId") || ""
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getDentistBranchContext({ silent: true })
+      .then((context) => {
+        if (cancelled) return;
+        const active = context.activeBranches || [];
+        const stored = sessionStorage.getItem("dentasync.activeBranchId");
+        const chosen = active.find((branch) => String(branch.id) === String(stored)) || active[0] || null;
+        if (chosen?.id) sessionStorage.setItem("dentasync.activeBranchId", String(chosen.id));
+        else sessionStorage.removeItem("dentasync.activeBranchId");
+        setSelectedBranchId(chosen ? String(chosen.id) : "");
+        setBranchContext(context);
+      })
+      .catch((error) => {
+        if (error?.status === 403) sessionStorage.removeItem("dentasync.activeBranchId");
+        if (!cancelled) setBranchContext({ operational: false, message: error.message, activeBranches: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function chooseBranch(nextId) {
+    sessionStorage.setItem("dentasync.activeBranchId", String(nextId));
+    setSelectedBranchId(String(nextId));
+  }
   const date = new Intl.DateTimeFormat("en-US", {
     weekday: "long",
     month: "long",
@@ -148,8 +179,23 @@ export function DentistLayout() {
             <Menu size={21} />
           </button>
           <div>
-            <span className="dentist-header__badge">Clinical Workspace</span>
+            <span className="dentist-header__badge">
+              {branchContext?.branch?.name || branchContext?.activeBranches?.find((branch) => String(branch.id) === selectedBranchId)?.name
+                ? `DentaSync — ${(branchContext.branch?.name || branchContext.activeBranches.find((branch) => String(branch.id) === selectedBranchId)?.name)} Branch`
+                : "DentaSync"}
+            </span>
             <p>{date}</p>
+            {(branchContext?.activeBranches || []).length > 1 ? (
+              <label>
+                Branch
+                <select value={selectedBranchId} onChange={(event) => chooseBranch(event.target.value)}>
+                  {branchContext.activeBranches.map((branch) => (
+                    <option key={branch.id} value={branch.id}>{branch.name}</option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            {branchContext && !branchContext.operational ? <p>{branchContext.message}</p> : null}
           </div>
           <div className="dentist-header__actions">
             <NavLink
@@ -167,7 +213,7 @@ export function DentistLayout() {
           </div>
         </header>
         <main className="dentist-content">
-          <Outlet />
+          <Outlet key={selectedBranchId || "branch"} />
         </main>
       </div>
 

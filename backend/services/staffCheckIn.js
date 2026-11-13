@@ -3,6 +3,7 @@
 const { insertPatientNotification } = require("./patientPortalNotifications");
 const { safeRecalculateQueueWaitEstimates } = require("./queueWaitPrediction");
 const queueNumbers = require("./queueNumbers");
+const branchAccess = require("./branchAccess");
 
 function stringValue(value, maxLength = 500) {
   if (typeof value !== "string" && typeof value !== "number") {
@@ -183,8 +184,19 @@ function checkInLogSelectSql({ includeClinicPatientId = true, includeMethod = tr
          LEFT JOIN patient_portal_appointments AS appointment ON appointment.id = queue.appointment_id`;
 }
 
-async function listCheckInLog(db, query = {}) {
+async function concreteBranchId(client, branchId) {
+  if (branchId == null || branchId === "") return null;
+  if (branchId === "main") return branchAccess.mainBranchId(client);
+  return branchId;
+}
+
+async function listCheckInLog(db, query = {}, { branchId = null } = {}) {
   const filter = resolveCheckInLogFilter(query);
+  const scopedBranchId = await concreteBranchId(db, branchId);
+  if (scopedBranchId) {
+    filter.params.push(scopedBranchId);
+    filter.sql += ` AND queue.branch_id = $${filter.params.length}`;
+  }
   const order = filter.sort === "asc" ? "ASC" : "DESC";
   const variants = [
     { includeClinicPatientId: true, includeMethod: true },
@@ -207,7 +219,7 @@ async function listCheckInLog(db, query = {}) {
   throw lastError;
 }
 
-async function restoreCheckInFromHistory(client, { sourceQueueId, staff, notifyClinicStaff, notifyClinicDentists }) {
+async function restoreCheckInFromHistory(client, { sourceQueueId, staff, notifyClinicStaff, notifyClinicDentists, branchId = null }) {
   const sourceId = numericId(sourceQueueId);
   if (!sourceId) {
     const error = new Error("Choose a check-in record to restore.");
@@ -225,8 +237,9 @@ async function restoreCheckInFromHistory(client, { sourceQueueId, staff, notifyC
        queue.checked_in_at
      FROM patient_portal_queue_entries AS queue
      WHERE queue.id = $1
+       AND ($2::bigint IS NULL OR queue.branch_id = $2)
      LIMIT 1`,
-    [sourceId]
+    [sourceId, branchId ? Number(branchId) : null]
   );
   const source = sourceResult.rows[0];
   if (!source) {
@@ -247,7 +260,7 @@ async function restoreCheckInFromHistory(client, { sourceQueueId, staff, notifyC
     throw error;
   }
 
-  const resolved = await resolveAppointmentForCheckIn(client, patient, { allowWalkIn: true });
+  const resolved = await resolveAppointmentForCheckIn(client, patient, { allowWalkIn: true, branchId });
   if (!resolved.appointment) {
     const error = new Error("Unable to create today's visit for this patient.");
     error.status = 404;
@@ -346,25 +359,38 @@ async function findPatient(client, { patientId, rfidTag, code, phone, email }) {
   return result.rows[0] || null;
 }
 
-async function findAppointmentForCheckIn(client, { appointmentId, patientId }) {
+async function findAppointmentForCheckIn(client, { appointmentId, patientId, branchId = null }) {
   const clinicTz = process.env.CLINIC_TIMEZONE || "Asia/Manila";
 
+  const scopedBranchId = await concreteBranchId(client, branchId);
   if (appointmentId) {
+    const params = [appointmentId];
+    let branchSql = "";
+    if (scopedBranchId) {
+      params.push(scopedBranchId);
+      branchSql = ` AND appointment.branch_id = $${params.length}`;
+    }
     const byId = await client.query(
       `SELECT appointment.*, CONCAT_WS(' ', patient.first_name, patient.last_name) AS patient_name,
               patient.phone AS patient_phone, patient.email AS patient_email
        FROM patient_portal_appointments AS appointment
        JOIN users AS patient ON patient.id::text = appointment.user_id::text
        WHERE appointment.id = $1
-         AND LOWER(appointment.status) IN ('confirmed', 'checked_in', 'pending')
+         AND LOWER(appointment.status) IN ('confirmed', 'checked_in', 'pending')${branchSql}
        LIMIT 1`,
-      [appointmentId]
+      params
     );
     if (byId.rows[0]) return byId.rows[0];
   }
 
   if (!patientId) return null;
 
+  const todayParams = [String(patientId), clinicTz];
+  let todayBranchSql = "";
+  if (scopedBranchId) {
+    todayParams.push(scopedBranchId);
+    todayBranchSql = ` AND appointment.branch_id = $${todayParams.length}`;
+  }
   const today = await client.query(
     `SELECT appointment.*, CONCAT_WS(' ', patient.first_name, patient.last_name) AS patient_name,
             patient.phone AS patient_phone, patient.email AS patient_email
@@ -372,7 +398,7 @@ async function findAppointmentForCheckIn(client, { appointmentId, patientId }) {
      JOIN users AS patient ON patient.id::text = appointment.user_id::text
      WHERE appointment.user_id::text = $1::text
        AND appointment.appointment_date = (CURRENT_TIMESTAMP AT TIME ZONE $2)::date
-       AND LOWER(appointment.status) IN ('confirmed', 'checked_in', 'pending')
+       AND LOWER(appointment.status) IN ('confirmed', 'checked_in', 'pending')${todayBranchSql}
      ORDER BY
        CASE
          WHEN EXISTS (
@@ -390,7 +416,7 @@ async function findAppointmentForCheckIn(client, { appointmentId, patientId }) {
        END,
        appointment.appointment_time ASC
      LIMIT 1`,
-    [String(patientId), clinicTz]
+    todayParams
   );
   return today.rows[0] || null;
 }
@@ -580,7 +606,7 @@ async function ensureAppointmentLinkedToCatalogDentist(client, appointment) {
   return row;
 }
 
-async function createWalkInAppointmentForPatient(client, patient) {
+async function createWalkInAppointmentForPatient(client, patient, { branchId = null } = {}) {
   const clinicTz = process.env.CLINIC_TIMEZONE || "Asia/Manila";
   const clock = await client.query(
     `SELECT (CURRENT_TIMESTAMP AT TIME ZONE $1)::date AS clinic_today,
@@ -597,15 +623,16 @@ async function createWalkInAppointmentForPatient(client, patient) {
     preferredTime
   );
 
+  const scopedBranchId = await concreteBranchId(client, branchId);
   const inserted = await client.query(
     `INSERT INTO patient_portal_appointments (
        user_id, service_id, service_name, dentist_id, dentist_name,
-       appointment_date, appointment_time, coverage_type, estimated_cost, notes, status
+       appointment_date, appointment_time, coverage_type, estimated_cost, notes, status, branch_id
      ) VALUES (
        $1, 'general-consultation', 'Walk-in Consultation',
        COALESCE(NULLIF(BTRIM($2), ''), $8),
        COALESCE(NULLIF(BTRIM($3), ''), $9),
-       $4, $5::time, 'self_pay', $6, $7, 'confirmed'
+       $4, $5::time, 'self_pay', $6, $7, 'confirmed', $10
      )
      RETURNING *`,
     [
@@ -618,6 +645,7 @@ async function createWalkInAppointmentForPatient(client, patient) {
       "Auto-created from RFID walk-in check-in.",
       DEFAULT_WALK_IN_DENTIST_ID,
       DEFAULT_WALK_IN_DENTIST_NAME,
+      scopedBranchId,
     ]
   );
 
@@ -629,8 +657,8 @@ async function createWalkInAppointmentForPatient(client, patient) {
   return appointment;
 }
 
-async function resolveAppointmentForCheckIn(client, patient, { allowWalkIn = false } = {}) {
-  let existing = await findAppointmentForCheckIn(client, { patientId: patient.id });
+async function resolveAppointmentForCheckIn(client, patient, { allowWalkIn = false, branchId = null } = {}) {
+  let existing = await findAppointmentForCheckIn(client, { patientId: patient.id, branchId });
   if (existing) {
     existing = await ensureAppointmentLinkedToCatalogDentist(client, existing);
     return { appointment: existing, walkInCreated: false };
@@ -638,7 +666,7 @@ async function resolveAppointmentForCheckIn(client, patient, { allowWalkIn = fal
   if (!allowWalkIn) {
     return { appointment: null, walkInCreated: false };
   }
-  const appointment = await createWalkInAppointmentForPatient(client, patient);
+  const appointment = await createWalkInAppointmentForPatient(client, patient, { branchId });
   return { appointment, walkInCreated: true };
 }
 
@@ -691,8 +719,9 @@ async function withSavepoint(client, name, fn) {
   }
 }
 
-async function findActiveQueueForPatient(client, patientId) {
+async function findActiveQueueForPatient(client, patientId, branchId = null) {
   if (!patientId) return null;
+  const scopedBranchId = await concreteBranchId(client, branchId);
   let result;
   try {
     result = await withSavepoint(client, "active_queue_with_method", async () =>
@@ -711,9 +740,10 @@ async function findActiveQueueForPatient(client, patientId) {
          WHERE queue.user_id = $1
            AND DATE(queue.checked_in_at) = CURRENT_DATE
            AND queue.status NOT IN ('completed', 'no_show')
+           AND ($2::bigint IS NULL OR queue.branch_id = $2)
          ORDER BY queue.checked_in_at DESC
          LIMIT 1`,
-        [String(patientId)]
+        [String(patientId), scopedBranchId]
       )
     );
   } catch (error) {
@@ -762,15 +792,15 @@ async function allocateQueueToken(client, identity) {
   return queueNumbers.allocateDailyQueueNumber(client, identity);
 }
 
-async function insertQueueEntry(client, { userId, appointmentId, token, position, estimatedWaitMinutes, method, queueIdentity }) {
+async function insertQueueEntry(client, { userId, appointmentId, token, position, estimatedWaitMinutes, method, queueIdentity, branchId = null }) {
   try {
     return await withSavepoint(client, "queue_insert_with_method", async () =>
       client.query(
         `INSERT INTO patient_portal_queue_entries (
-           user_id, appointment_id, token, position, status, estimated_wait_minutes, check_in_method
-         ) VALUES ($1, $2, $3, $4, 'waiting', $5, $6)
+           user_id, appointment_id, token, position, status, estimated_wait_minutes, check_in_method, branch_id
+         ) VALUES ($1, $2, $3, $4, 'waiting', $5, $6, $7)
          RETURNING id, token, position, status, estimated_wait_minutes, checked_in_at, check_in_method`,
-        [String(userId), appointmentId, token, position, estimatedWaitMinutes, method]
+        [String(userId), appointmentId, token, position, estimatedWaitMinutes, method, branchId]
       )
     );
   } catch (insertError) {
@@ -790,10 +820,10 @@ async function insertQueueEntry(client, { userId, appointmentId, token, position
         return await withSavepoint(client, "queue_insert_retry_method", async () =>
           client.query(
             `INSERT INTO patient_portal_queue_entries (
-               user_id, appointment_id, token, position, status, estimated_wait_minutes, check_in_method
-             ) VALUES ($1, $2, $3, $4, 'waiting', $5, $6)
+               user_id, appointment_id, token, position, status, estimated_wait_minutes, check_in_method, branch_id
+             ) VALUES ($1, $2, $3, $4, 'waiting', $5, $6, $7)
              RETURNING id, token, position, status, estimated_wait_minutes, checked_in_at, check_in_method`,
-            [String(userId), appointmentId, retryToken, position, estimatedWaitMinutes, method]
+            [String(userId), appointmentId, retryToken, position, estimatedWaitMinutes, method, branchId]
           )
         );
       } catch (retryError) {
@@ -811,8 +841,9 @@ async function insertQueueEntry(client, { userId, appointmentId, token, position
   }
 }
 
-async function performStaffCheckIn(client, { appointment, staff, notifyClinicStaff, notifyClinicDentists, checkInMethod = "rfid" }) {
-  const existingForPatient = await findActiveQueueForPatient(client, appointment.user_id);
+async function performStaffCheckIn(client, { appointment, staff, notifyClinicStaff, notifyClinicDentists, checkInMethod = "rfid", branchId = null }) {
+  const scopedBranchId = (await concreteBranchId(client, branchId)) || appointment.branch_id || (await branchAccess.mainBranchId(client));
+  const existingForPatient = await findActiveQueueForPatient(client, appointment.user_id, scopedBranchId);
   if (existingForPatient) {
     return {
       alreadyCheckedIn: true,
@@ -824,7 +855,9 @@ async function performStaffCheckIn(client, { appointment, staff, notifyClinicSta
   const positionResult = await client.query(
     `SELECT COALESCE(MAX(position), 0) + 1 AS next_position
      FROM patient_portal_queue_entries
-     WHERE DATE(checked_in_at) = CURRENT_DATE`
+     WHERE DATE(checked_in_at) = CURRENT_DATE
+       AND ($1::bigint IS NULL OR branch_id = $1)`,
+    [scopedBranchId]
   );
   const position = Number(positionResult.rows[0].next_position);
   const identityRow = await loadPatientQueueIdentity(client, appointment.user_id);
@@ -832,7 +865,7 @@ async function performStaffCheckIn(client, { appointment, staff, notifyClinicSta
     patientCategory: appointment.patient_category || identityRow.patient_category,
     clinicPatientId: appointment.clinic_patient_id || identityRow.patient_id,
   };
-  const token = await allocateQueueToken(client, queueIdentity);
+  const token = await allocateQueueToken(client, { ...queueIdentity, branchId: scopedBranchId });
 
   const aheadCount = Math.max(0, position - 1);
   // Keep wait estimates off optional tables while inside the check-in transaction.
@@ -847,7 +880,8 @@ async function performStaffCheckIn(client, { appointment, staff, notifyClinicSta
     position,
     estimatedWaitMinutes,
     method,
-    queueIdentity,
+    queueIdentity: { ...queueIdentity, branchId: scopedBranchId },
+    branchId: scopedBranchId,
   });
 
   await client.query(

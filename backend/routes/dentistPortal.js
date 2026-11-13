@@ -7,6 +7,7 @@ const bcrypt = require("bcrypt");
 const express = require("express");
 const medicalDocuments = require("../services/medicalDocuments");
 const clinicalPatients = require("../services/clinicalPatients");
+const branchAccess = require("../services/branchAccess");
 const dentalWellness = require("../services/dentalWellness");
 const dentalChartSync = require("../services/dentalChartSync");
 const patientData = require("../services/patientData");
@@ -115,6 +116,7 @@ async function saveVisitProcedureRows(client, {
   dentistName,
   procedureBodies,
   plannedOnly = false,
+  originatingBranchId = null,
 }) {
   const created = [];
   if (!Array.isArray(procedureBodies) || !procedureBodies.length) return created;
@@ -155,6 +157,7 @@ async function saveVisitProcedureRows(client, {
         notes: stringValue(body?.notes || body?.diagnosisNotes || body?.diagnosis, 2000),
         diagnosisNotes: stringValue(body?.diagnosisNotes || body?.diagnosis || body?.notes, 2000),
         dentistName,
+        originatingBranchId,
         appointmentId: queue.appointment_id || null,
         queueEntryId: queue.id,
         visitSequence,
@@ -385,28 +388,33 @@ async function notifyPatient(client, payload) {
   }
 }
 
-function dentistScopeClause(alias, dentist) {
+function dentistScopeClause(alias, dentist, branchId = null) {
   const catalogId = stringValue(dentist.catalog_dentist_id, 80);
+  let scope;
   if (catalogId) {
-    return {
+    scope = {
       sql: `${alias}.dentist_id = $1`,
       params: [catalogId],
     };
+  } else {
+    const fullName = `${dentist.first_name || ""} ${dentist.last_name || ""}`.trim();
+    const displayName = fullName ? `Dr. ${fullName}` : null;
+    if (displayName) {
+      scope = {
+        sql: `(${alias}.dentist_id = $1 OR LOWER(${alias}.dentist_name) = LOWER($2) OR LOWER(${alias}.dentist_name) = LOWER($3))`,
+        params: [String(dentist.id), displayName, fullName],
+      };
+    } else {
+      scope = {
+        sql: `${alias}.dentist_id = $1`,
+        params: [String(dentist.id)],
+      };
+    }
   }
-
-  const fullName = `${dentist.first_name || ""} ${dentist.last_name || ""}`.trim();
-  const displayName = fullName ? `Dr. ${fullName}` : null;
-  if (displayName) {
-    return {
-      sql: `(${alias}.dentist_id = $1 OR LOWER(${alias}.dentist_name) = LOWER($2) OR LOWER(${alias}.dentist_name) = LOWER($3))`,
-      params: [String(dentist.id), displayName, fullName],
-    };
-  }
-
-  return {
-    sql: `${alias}.dentist_id = $1`,
-    params: [String(dentist.id)],
-  };
+  if (!branchId) return scope;
+  scope.params.push(branchId);
+  scope.sql += ` AND ${alias}.branch_id = $${scope.params.length}`;
+  return scope;
 }
 
 async function repairOrphanWalkInQueueForDentist(db, dentist) {
@@ -559,13 +567,30 @@ function createDentistPortalRouter({
   uploadDirectory = path.join(process.cwd(), "uploads", "patient-portal"),
 }) {
   const router = express.Router();
-  router.use(authenticateToken, requireDentistAccount(db));
+  router.use(authenticateToken, requireDentistAccount(db), branchAccess.attachBranchAccess(db, "dentist"));
+
+  router.get("/branch-context", (req, res) => {
+    res.json(branchAccess.publicContext(req.branchAccess));
+  });
   void notifyDentist;
   attachDentalAuthorizationRoutes(router, { db, role: "dentist" });
   attachPrescriptionRoutes(router, { db, role: "dentist", notifyStaff });
 
   router.get("/dashboard", async (req, res) => {
-    const scope = dentistScopeClause("appointment", req.dentist);
+    if (!req.branchAccess?.activeBranch && !req.branchAccess?.legacy) {
+      return res.json({
+        ...branchAccess.publicContext(req.branchAccess),
+        date: new Date().toISOString(),
+        dentist: {
+          id: req.dentist.id,
+          fullName: `Dr. ${`${req.dentist.first_name || ""} ${req.dentist.last_name || ""}`.trim()}`.trim(),
+          specialization: req.dentist.specialization || "Dental Specialist",
+        },
+        metrics: { todaysTarget: 0, remainingQueue: 0, completedToday: 0, unreadNotifications: 0 },
+        nextPatient: null,
+      });
+    }
+    const scope = dentistScopeClause("appointment", req.dentist, req.branchAccess.activeBranch?.id);
     try {
       const [targetResult, remainingResult, completedResult, nextResult, unreadResult] = await Promise.all([
         db.query(
@@ -679,7 +704,14 @@ function createDentistPortalRouter({
   });
 
   router.get("/queue", async (req, res) => {
-    const scope = dentistScopeClause("appointment", req.dentist);
+    if (!req.branchAccess?.activeBranch && !req.branchAccess?.legacy) {
+      return res.json({
+        ...branchAccess.publicContext(req.branchAccess),
+        updatedAt: new Date().toISOString(),
+        queue: [],
+      });
+    }
+    const scope = dentistScopeClause("appointment", req.dentist, req.branchAccess.activeBranch?.id);
     const tab = stringValue(req.query.tab, 40)?.toLowerCase() || "inline";
     let statusFilter;
     if (tab === "inline" || tab === "in_line") {
@@ -776,8 +808,8 @@ function createDentistPortalRouter({
     }
   });
 
-  async function assertQueueBelongsToDentist(client, queueId, dentist) {
-    const scope = dentistScopeClause("appointment", dentist);
+  async function assertQueueBelongsToDentist(client, queueId, dentist, branchId) {
+    const scope = dentistScopeClause("appointment", dentist, branchId);
     const result = await client.query(
       `SELECT
          queue.id,
@@ -821,7 +853,7 @@ function createDentistPortalRouter({
       await client.query("BEGIN");
       transactionOpen = true;
 
-      const scope = dentistScopeClause("appointment", req.dentist);
+      const scope = dentistScopeClause("appointment", req.dentist, req.branchAccess?.activeBranch?.id);
       const nextResult = await client.query(
         `SELECT queue.id
          FROM patient_portal_queue_entries AS queue
@@ -849,7 +881,7 @@ function createDentistPortalRouter({
       }
 
       const queueId = nextResult.rows[0].id;
-      const current = await assertQueueBelongsToDentist(client, queueId, req.dentist);
+      const current = await assertQueueBelongsToDentist(client, queueId, req.dentist, req.branchAccess?.activeBranch?.id);
       if (!current) {
         await client.query("ROLLBACK");
         transactionOpen = false;
@@ -1008,7 +1040,7 @@ function createDentistPortalRouter({
       await client.query("BEGIN");
       transactionOpen = true;
 
-      const current = await assertQueueBelongsToDentist(client, queueId, req.dentist);
+      const current = await assertQueueBelongsToDentist(client, queueId, req.dentist, req.branchAccess?.activeBranch?.id);
       if (!current) {
         await client.query("ROLLBACK");
         transactionOpen = false;
@@ -1056,6 +1088,7 @@ function createDentistPortalRouter({
           dentistName,
           procedureBodies,
           plannedOnly: true,
+          originatingBranchId: req.branchAccess?.activeBranch?.id || null,
         });
       }
 
@@ -1208,7 +1241,7 @@ function createDentistPortalRouter({
       await client.query("BEGIN");
       transactionOpen = true;
 
-      const current = await assertQueueBelongsToDentist(client, queueId, req.dentist);
+      const current = await assertQueueBelongsToDentist(client, queueId, req.dentist, req.branchAccess?.activeBranch?.id);
       if (!current) {
         await client.query("ROLLBACK");
         transactionOpen = false;
@@ -1242,6 +1275,7 @@ function createDentistPortalRouter({
         dentistName,
         procedureBodies,
         plannedOnly: queueStatus !== "dentist",
+        originatingBranchId: req.branchAccess?.activeBranch?.id || null,
       });
 
       const startedNow = created.find((item) => String(item.status || "").toLowerCase() === "in_progress");
@@ -1334,7 +1368,7 @@ function createDentistPortalRouter({
       await client.query("BEGIN");
       transactionOpen = true;
 
-      const current = await assertQueueBelongsToDentist(client, queueId, req.dentist);
+      const current = await assertQueueBelongsToDentist(client, queueId, req.dentist, req.branchAccess?.activeBranch?.id);
       if (!current) {
         await client.query("ROLLBACK");
         transactionOpen = false;
@@ -1547,7 +1581,7 @@ function createDentistPortalRouter({
       await client.query("BEGIN");
       transactionOpen = true;
 
-      const current = await assertQueueBelongsToDentist(client, queueId, req.dentist);
+      const current = await assertQueueBelongsToDentist(client, queueId, req.dentist, req.branchAccess?.activeBranch?.id);
       if (!current) {
         await client.query("ROLLBACK");
         transactionOpen = false;
@@ -1678,7 +1712,15 @@ function createDentistPortalRouter({
   });
 
   router.get("/appointments", async (req, res) => {
-    const scope = dentistScopeClause("appointment", req.dentist);
+    if (!req.branchAccess?.activeBranch && !req.branchAccess?.legacy) {
+      return res.json({
+        ...branchAccess.publicContext(req.branchAccess),
+        today: [],
+        upcoming: [],
+        appointments: [],
+      });
+    }
+    const scope = dentistScopeClause("appointment", req.dentist, req.branchAccess.activeBranch?.id);
     try {
       const [todayResult, upcomingResult] = await Promise.all([
         db.query(
@@ -1787,6 +1829,7 @@ function createDentistPortalRouter({
           dentistName:
             `Dr. ${`${req.dentist.first_name || ""} ${req.dentist.last_name || ""}`.trim()}`.trim() ||
             "Amethyst Dentist",
+          originatingBranchId: req.branchAccess?.activeBranch?.id || null,
           notes: req.body?.notes || "Registered from dentist patient records vault",
           treatmentDate: new Date().toISOString().slice(0, 10),
           status: "planned",

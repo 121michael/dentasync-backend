@@ -68,14 +68,20 @@ async function clinicDateYmd(client) {
   return result.rows[0]?.clinic_date || new Date().toISOString().slice(0, 10);
 }
 
-async function nextSequenceFromExistingTokens(client, prefix, clinicDate) {
+async function nextSequenceFromExistingTokens(client, prefix, clinicDate, branchId) {
   const tz = clinicTimezone();
+  const params = [`${prefix}-___`, tz, clinicDate];
+  let branchSql = "";
+  if (branchId) {
+    params.push(branchId);
+    branchSql = ` AND branch_id = $4`;
+  }
   const result = await client.query(
     `SELECT token
      FROM patient_portal_queue_entries
      WHERE token LIKE $1
-       AND (checked_in_at AT TIME ZONE $2)::date = $3::date`,
-    [`${prefix}-___`, tz, clinicDate]
+       AND (checked_in_at AT TIME ZONE $2)::date = $3::date${branchSql}`,
+    params
   );
   let max = 0;
   for (const row of result.rows) {
@@ -87,7 +93,24 @@ async function nextSequenceFromExistingTokens(client, prefix, clinicDate) {
   return max + 1;
 }
 
-async function nextDailySequence(client, prefix, clinicDate) {
+async function nextDailySequence(client, prefix, clinicDate, branchId) {
+  if (branchId) {
+    try {
+      const result = await client.query(
+        `INSERT INTO clinic_daily_queue_counters (clinic_date, prefix, branch_id, last_sequence)
+         VALUES ($1::date, $2, $3, 1)
+         ON CONFLICT (clinic_date, prefix, branch_id)
+         DO UPDATE SET last_sequence = clinic_daily_queue_counters.last_sequence + 1
+         RETURNING last_sequence`,
+        [clinicDate, prefix, branchId]
+      );
+      return Number(result.rows[0].last_sequence);
+    } catch (error) {
+      if (error.code !== "42P01" && error.code !== "42703" && error.code !== "42P10") {
+        throw error;
+      }
+    }
+  }
   try {
     const result = await client.query(
       `INSERT INTO clinic_daily_queue_counters (clinic_date, prefix, last_sequence)
@@ -99,20 +122,20 @@ async function nextDailySequence(client, prefix, clinicDate) {
     );
     return Number(result.rows[0].last_sequence);
   } catch (error) {
-    if (error.code !== "42P01" && error.code !== "42703") {
+    if (error.code !== "42P01" && error.code !== "42703" && error.code !== "42P10") {
       throw error;
     }
-    return nextSequenceFromExistingTokens(client, prefix, clinicDate);
+    return nextSequenceFromExistingTokens(client, prefix, clinicDate, branchId);
   }
 }
 
-async function allocateDailyQueueNumber(client, { patientCategory, clinicPatientId } = {}) {
+async function allocateDailyQueueNumber(client, { patientCategory, clinicPatientId, branchId = null } = {}) {
   const prefix = prefixFromPatientRecord({ patientCategory, clinicPatientId });
   if (!prefix) {
     throw missingCategoryError();
   }
   const clinicDate = await clinicDateYmd(client);
-  const sequence = await nextDailySequence(client, prefix, clinicDate);
+  const sequence = await nextDailySequence(client, prefix, clinicDate, branchId);
   return formatQueueNumber(prefix, sequence);
 }
 

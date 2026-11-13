@@ -132,6 +132,7 @@ async function checkInByRfidTag(db, { rfidTag, notifyClinicStaff, notifyClinicDe
 
     const resolved = await staffCheckIn.resolveAppointmentForCheckIn(client, patient, {
       allowWalkIn: true,
+      branchId: "main",
     });
     if (!resolved.appointment) {
       let diagnosis = null;
@@ -164,6 +165,7 @@ async function checkInByRfidTag(db, { rfidTag, notifyClinicStaff, notifyClinicDe
       notifyClinicStaff,
       notifyClinicDentists,
       checkInMethod: "rfid",
+      branchId: "main",
     });
     await client.query("COMMIT");
     transactionOpen = false;

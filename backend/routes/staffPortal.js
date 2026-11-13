@@ -19,6 +19,7 @@ const { markQueueServingStarted, recordTreatmentComplete } = require("../service
 const { attachDentalAuthorizationRoutes } = require("./dentalAuthorization");
 const { attachPrescriptionRoutes } = require("./prescriptions");
 const { updatePasswordHash } = require("../services/sessionRevocation");
+const branchAccess = require("../services/branchAccess");
 
 const QUEUE_STATUS_MAP = {
   checked_in: "checked_in",
@@ -335,7 +336,11 @@ function createStaffPortalRouter({
 }) {
   const router = express.Router();
 
-  router.use(authenticateToken, requireStaffAccount(db));
+  router.use(authenticateToken, requireStaffAccount(db), branchAccess.attachBranchAccess(db, "staff"));
+
+  router.get("/branch-context", (req, res) => {
+    res.json(branchAccess.publicContext(req.branchAccess));
+  });
   attachDentalAuthorizationRoutes(router, { db, role: "staff" });
   attachPrescriptionRoutes(router, {
     db,
@@ -344,6 +349,25 @@ function createStaffPortalRouter({
   });
 
   router.get("/dashboard", async (req, res) => {
+    const branchId = req.branchAccess?.activeBranch?.id;
+    if (!branchId) {
+      return res.json({
+        ...branchAccess.publicContext(req.branchAccess),
+        date: new Date().toISOString().slice(0, 10),
+        serverTime: new Date().toISOString(),
+        metrics: {
+          todaysAppointments: 0,
+          todayCheckIns: 0,
+          checkedIn: 0,
+          waitingQueue: 0,
+          activeQueue: 0,
+          completedToday: 0,
+          pendingRequests: 0,
+          unreadNotifications: 0,
+        },
+        todaysActivity: [],
+      });
+    }
     try {
       const [
         appointmentsToday,
@@ -358,29 +382,39 @@ function createStaffPortalRouter({
           `SELECT COUNT(*) AS count
            FROM patient_portal_appointments
            WHERE appointment_date = CURRENT_DATE
-             AND status NOT IN ('cancelled')`
-        ),
-        db.query(
-          `SELECT COUNT(*) AS count
-           FROM patient_portal_queue_entries
-           WHERE DATE(checked_in_at) = CURRENT_DATE`
+             AND status NOT IN ('cancelled')
+             ${branchId ? "AND branch_id = $1" : ""}`,
+          branchId ? [branchId] : []
         ),
         db.query(
           `SELECT COUNT(*) AS count
            FROM patient_portal_queue_entries
            WHERE DATE(checked_in_at) = CURRENT_DATE
-             AND status IN ('checked_in', 'waiting', 'preparing')`
+             ${branchId ? "AND branch_id = $1" : ""}`,
+          branchId ? [branchId] : []
+        ),
+        db.query(
+          `SELECT COUNT(*) AS count
+           FROM patient_portal_queue_entries
+           WHERE DATE(checked_in_at) = CURRENT_DATE
+             AND status IN ('checked_in', 'waiting', 'preparing')
+             ${branchId ? "AND branch_id = $1" : ""}`,
+          branchId ? [branchId] : []
         ),
         db.query(
           `SELECT COUNT(*) AS count
            FROM patient_portal_appointments
            WHERE appointment_date = CURRENT_DATE
-             AND status = 'completed'`
+             AND status = 'completed'
+             ${branchId ? "AND branch_id = $1" : ""}`,
+          branchId ? [branchId] : []
         ),
         db.query(
           `SELECT COUNT(*) AS count
            FROM patient_portal_appointments
-           WHERE status = 'pending'`
+           WHERE status = 'pending'
+             ${branchId ? "AND branch_id = $1" : ""}`,
+          branchId ? [branchId] : []
         ),
         db.query(
           `SELECT COUNT(*) AS count
@@ -408,12 +442,15 @@ function createStaffPortalRouter({
              ON queue.appointment_id = appointment.id
             AND DATE(queue.checked_in_at) = CURRENT_DATE
            WHERE appointment.appointment_date = CURRENT_DATE
+             ${branchId ? "AND appointment.branch_id = $1" : ""}
            ORDER BY appointment.appointment_time ASC, appointment.id ASC
-           LIMIT 80`
+           LIMIT 80`,
+          branchId ? [branchId] : []
         ),
       ]);
 
       return res.json({
+        ...branchAccess.publicContext(req.branchAccess),
         date: new Date().toISOString().slice(0, 10),
         serverTime: new Date().toISOString(),
         metrics: {
@@ -446,8 +483,17 @@ function createStaffPortalRouter({
   });
 
   router.get("/check-ins", async (req, res) => {
+    if (!req.branchAccess?.activeBranch) {
+      return res.json({
+        ...branchAccess.publicContext(req.branchAccess),
+        updatedAt: new Date().toISOString(),
+        checkIns: [],
+      });
+    }
     try {
-      const { filter, rows } = await staffCheckIn.listCheckInLog(db, req.query || {});
+      const { filter, rows } = await staffCheckIn.listCheckInLog(db, req.query || {}, {
+        branchId: req.branchAccess?.activeBranch?.id || null,
+      });
       return res.json({
         updatedAt: new Date().toISOString(),
         range: filter.range,
@@ -484,6 +530,7 @@ function createStaffPortalRouter({
         staff: req.staff,
         notifyClinicStaff: notifyStaff,
         notifyClinicDentists: notifyDentist,
+        branchId: req.branchAccess?.activeBranch?.id || null,
       });
 
       await client.query("COMMIT");
@@ -551,7 +598,14 @@ function createStaffPortalRouter({
     }
   });
 
-  router.get("/queue", async (_req, res) => {
+  router.get("/queue", async (req, res) => {
+    if (!req.branchAccess?.activeBranch) {
+      return res.json({
+        ...branchAccess.publicContext(req.branchAccess),
+        updatedAt: new Date().toISOString(),
+        queue: [],
+      });
+    }
     try {
       const result = await db.query(
         `SELECT
@@ -581,15 +635,18 @@ function createStaffPortalRouter({
          JOIN users AS patient ON patient.id::text = queue.user_id
          LEFT JOIN patient_portal_appointments AS appointment ON appointment.id = queue.appointment_id
          WHERE DATE(queue.checked_in_at) = CURRENT_DATE
+           AND queue.branch_id = $1
          ORDER BY
            CASE WHEN queue.status IN ('completed', 'no_show') THEN 1 ELSE 0 END,
-           queue.position ASC`
+           queue.position ASC`,
+        [req.branchAccess.activeBranch.id]
       );
       const grouped = await clinicalPatients.listTreatmentsForQueueEntries(
         db,
         result.rows.map((row) => row.id)
       );
       return res.json({
+        ...branchAccess.publicContext(req.branchAccess),
         updatedAt: new Date().toISOString(),
         queue: result.rows.map((row) =>
           mapCheckIn({ ...row, procedures: grouped.get(Number(row.id)) || [] })
@@ -627,6 +684,7 @@ function createStaffPortalRouter({
             result.rows.map((row) => row.id)
           );
           return res.json({
+            ...branchAccess.publicContext(req.branchAccess),
             updatedAt: new Date().toISOString(),
             queue: result.rows.map((row) =>
               mapCheckIn({ ...row, procedures: grouped.get(Number(row.id)) || [] })
@@ -665,11 +723,12 @@ function createStaffPortalRouter({
       await client.query("BEGIN");
       transactionOpen = true;
       const currentResult = await client.query(
-        `SELECT id, user_id, appointment_id, token, position, status, estimated_wait_minutes
+        `SELECT id, user_id, appointment_id, token, position, status, estimated_wait_minutes, branch_id
          FROM patient_portal_queue_entries
          WHERE id = $1
+           AND branch_id = $2
          FOR UPDATE`,
-        [queueId]
+        [queueId, req.branchAccess.activeBranch.id]
       );
       const current = currentResult.rows[0];
       if (!current) {
@@ -835,6 +894,16 @@ function createStaffPortalRouter({
   router.get("/appointments", async (req, res) => {
     const tab = stringValue(req.query.tab, 40)?.toLowerCase() || "today";
     const clinicTz = process.env.CLINIC_TIMEZONE || "Asia/Manila";
+    const branchId = req.branchAccess?.activeBranch?.id;
+    if (!branchId) {
+      return res.json({
+        ...branchAccess.publicContext(req.branchAccess),
+        tab,
+        appointments: [],
+        todayAppointments: [],
+        pendingRequests: [],
+      });
+    }
     try {
       let whereSql = "TRUE";
       if (tab === "pending") {
@@ -861,8 +930,10 @@ function createStaffPortalRouter({
            FROM patient_portal_appointments AS appointment
            JOIN users AS patient ON patient.id::text = appointment.user_id
            WHERE ${whereSql}
+             AND appointment.branch_id = $1
            ORDER BY appointment.appointment_date DESC, appointment.appointment_time DESC
-           LIMIT 200`
+           LIMIT 200`,
+          [branchId]
         ),
         db.query(
           `SELECT
@@ -874,8 +945,9 @@ function createStaffPortalRouter({
            JOIN users AS patient ON patient.id::text = appointment.user_id
            WHERE appointment.appointment_date = (CURRENT_TIMESTAMP AT TIME ZONE $1)::date
              AND appointment.status IN ('confirmed', 'checked_in', 'completed', 'pending')
+             AND appointment.branch_id = $2
            ORDER BY appointment.appointment_time ASC`,
-          [clinicTz]
+          [clinicTz, branchId]
         ),
         db.query(
           `SELECT
@@ -886,8 +958,10 @@ function createStaffPortalRouter({
            FROM patient_portal_appointments AS appointment
            JOIN users AS patient ON patient.id::text = appointment.user_id
            WHERE appointment.status = 'pending'
+             AND appointment.branch_id = $1
            ORDER BY appointment.appointment_date ASC, appointment.appointment_time ASC
-           LIMIT 100`
+           LIMIT 100`,
+          [branchId]
         ),
       ]);
 
@@ -922,8 +996,9 @@ function createStaffPortalRouter({
          JOIN users AS patient ON patient.id::text = appointment.user_id
          LEFT JOIN patient_portal_profiles AS profile ON profile.user_id = appointment.user_id
          WHERE appointment.id = $1
+           AND appointment.branch_id = $2
          LIMIT 1`,
-        [appointmentId]
+        [appointmentId, req.branchAccess.activeBranch.id]
       );
       if (!result.rows.length) {
         return res.status(404).json({ message: "Appointment not found." });
@@ -1001,8 +1076,9 @@ function createStaffPortalRouter({
         `SELECT *
          FROM patient_portal_appointments
          WHERE id = $1
+           AND branch_id = $2
          FOR UPDATE`,
-        [appointmentId]
+        [appointmentId, req.branchAccess.activeBranch.id]
       );
       const current = currentResult.rows[0];
       if (!current) {
@@ -1150,8 +1226,9 @@ function createStaffPortalRouter({
          SET hmo_verification_status = $1,
              updated_at = CURRENT_TIMESTAMP
          WHERE id = $2
+           AND branch_id = $3
          RETURNING *`,
-        [status, appointmentId]
+        [status, appointmentId, req.branchAccess.activeBranch.id]
       );
       if (!result.rows.length) {
         return res.status(404).json({ message: "Appointment not found." });
@@ -2076,6 +2153,7 @@ function createStaffPortalRouter({
         const allowWalkIn = method === "rfid" || method === "manual" || method === "walk_in";
         const resolved = await staffCheckIn.resolveAppointmentForCheckIn(client, patient, {
           allowWalkIn,
+          branchId: req.branchAccess?.activeBranch?.id || null,
         });
         appointment = resolved.appointment;
         walkInCreated = Boolean(resolved.walkInCreated);
@@ -2121,6 +2199,7 @@ function createStaffPortalRouter({
         notifyClinicStaff: notifyStaff,
         notifyClinicDentists: notifyDentist,
         checkInMethod: method,
+        branchId: req.branchAccess?.activeBranch?.id || null,
       });
 
       await client.query("COMMIT");
@@ -2365,7 +2444,9 @@ function createStaffPortalRouter({
          SET status = 'completed', updated_at = CURRENT_TIMESTAMP
          WHERE DATE(checked_in_at) = CURRENT_DATE
            AND status NOT IN ('completed', 'no_show')
-         RETURNING id`
+           AND branch_id = $1
+         RETURNING id`,
+        [req.branchAccess.activeBranch.id]
       );
       await safeRecalculateQueueWaitEstimates(client, { fromPosition: 1 });
       await client.query("COMMIT");

@@ -95,6 +95,26 @@ export function StaffLayout() {
     unreadNotifications: 0,
     pendingAppointments: 0,
   });
+  const [branchContext, setBranchContext] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getStaffBranchContext({ silent: true })
+      .then((context) => {
+        if (cancelled) return;
+        const branch = context.branch || context.activeBranches?.[0] || null;
+        if (branch?.id) sessionStorage.setItem("dentasync.activeBranchId", String(branch.id));
+        else sessionStorage.removeItem("dentasync.activeBranchId");
+        setBranchContext(context);
+      })
+      .catch((error) => {
+        if (error?.status === 403) sessionStorage.removeItem("dentasync.activeBranchId");
+        if (!cancelled) setBranchContext({ operational: false, message: error.message, branch: null });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 30000);
@@ -214,7 +234,13 @@ export function StaffLayout() {
               <Menu size={21} />
             </button>
             <div className="staff-header__title-block">
+              <p className="eyebrow">
+                {branchContext?.branch?.name
+                  ? `DentaSync — ${branchContext.branch.name} Branch`
+                  : "DentaSync"}
+              </p>
               <h1>{pageTitle}</h1>
+              {branchContext && !branchContext.operational ? <p>{branchContext.message}</p> : null}
               <p>
                 {date} · {time}
               </p>

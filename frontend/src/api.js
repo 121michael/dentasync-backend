@@ -38,6 +38,10 @@ async function request(path, { method = "GET", body, headers = {}, authenticated
   if (authenticated && token) {
     requestHeaders.Authorization = `Bearer ${token}`;
   }
+  if (path.startsWith("/staff") || path.startsWith("/dentist")) {
+    const branchId = sessionStorage.getItem("dentasync.activeBranchId");
+    if (branchId) requestHeaders["X-DentaSync-Branch"] = branchId;
+  }
 
   if (body && !(body instanceof FormData)) {
     requestHeaders["Content-Type"] = "application/json";
@@ -278,6 +282,7 @@ export const api = {
     request(`/patient/notifications/${notificationId}/read`, { method: "PATCH" }),
   markAllNotificationsRead: () => request("/patient/notifications/read-all", { method: "PATCH" }),
   getStaffDashboard: (options = {}) => request("/staff/dashboard", options),
+  getStaffBranchContext: (options = {}) => request("/staff/branch-context", options),
   getStaffCheckIns: (options = {}) => {
     const { query = {}, ...requestOptions } = options;
     const params = new URLSearchParams();
@@ -362,6 +367,7 @@ export const api = {
   downloadStaffExport: (report) =>
     download(`/staff/export/${encodeURIComponent(report)}`, `${report}-log.csv`),
   getDentistDashboard: (options = {}) => request("/dentist/dashboard", options),
+  getDentistBranchContext: (options = {}) => request("/dentist/branch-context", options),
   getDentistQueue: (tab = "ongoing", options = {}) =>
     request(`/dentist/queue?tab=${encodeURIComponent(tab)}`, options),
   recalculateDentistQueueEstimates: () =>
