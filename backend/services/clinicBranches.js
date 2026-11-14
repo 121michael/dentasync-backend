@@ -29,6 +29,9 @@ function mapBranch(row, extras = {}) {
     email: row.email || "",
     isMain: Boolean(row.is_main),
     status: row.status,
+    rfidEnabled: Boolean(row.rfid_enabled),
+    qrEnabled: Boolean(row.qr_enabled),
+    monitorToken: row.monitor_token || null,
     createdAt: row.created_at,
     missingDetails: missingDetails(row),
     personnel: extras.personnel || undefined,
@@ -180,7 +183,31 @@ async function createBranch(db, input) {
      RETURNING *`,
     [code, fields.name, fields.address, fields.contactNumber, fields.email, fields.status || "active"]
   );
-  return mapBranch(result.rows[0]);
+  const created = mapBranch(result.rows[0]);
+  if (Object.prototype.hasOwnProperty.call(input, "rfidEnabled") || Object.prototype.hasOwnProperty.call(input, "qrEnabled")) {
+    await saveCheckInMethods(db, result.rows[0].id, input);
+    return getBranch(db, result.rows[0].id);
+  }
+  return created;
+}
+
+async function saveCheckInMethods(db, id, input) {
+  const sets = [];
+  const params = [id];
+  if (Object.prototype.hasOwnProperty.call(input, "rfidEnabled")) {
+    params.push(Boolean(input.rfidEnabled));
+    sets.push(`rfid_enabled = $${params.length}`);
+  }
+  if (Object.prototype.hasOwnProperty.call(input, "qrEnabled")) {
+    params.push(Boolean(input.qrEnabled));
+    sets.push(`qr_enabled = $${params.length}`);
+  }
+  if (!sets.length) return;
+  try {
+    await db.query(`UPDATE clinic_branches SET ${sets.join(", ")} WHERE id = $1`, params);
+  } catch (error) {
+    if (error.code !== "42703") throw error;
+  }
 }
 
 async function updateBranch(db, id, input) {
@@ -208,7 +235,8 @@ async function updateBranch(db, id, input) {
      RETURNING *`,
     [row.id, fields.name, fields.address, fields.contactNumber, fields.email, fields.status || row.status]
   );
-  return mapBranch(result.rows[0]);
+  await saveCheckInMethods(db, row.id, input);
+  return getBranch(db, row.id);
 }
 
 async function setBranchStatus(db, id, status) {

@@ -108,9 +108,10 @@ async function resolveForAccount(db, { userId, role, requestedBranchId }) {
     if (!branch.active) {
       return {
         assignments,
-        activeBranch: null,
+        activeBranch: branch,
         branch,
-        message: `${branch.name} is inactive. New check-ins, appointments, and queue updates are paused.`,
+        paused: true,
+        message: `${branch.name} is inactive. New check-ins are paused. A consultation already underway can still be finished.`,
       };
     }
     return { assignments, activeBranch: branch, branch, message: null };
@@ -120,13 +121,14 @@ async function resolveForAccount(db, { userId, role, requestedBranchId }) {
   if (requested && !requested.active) {
     return {
       assignments,
-      activeBranch: null,
+      activeBranch: requested,
       branch: requested,
+      paused: true,
       requiresSelection: active.length > 1,
-      message: `${requested.name} is inactive. New appointments and queue updates are paused for that branch.`,
+      message: `${requested.name} is inactive. New check-ins are paused. A consultation already underway can still be finished.`,
     };
   }
-  const chosen = requested || active[0] || null;
+  const chosen = requested || active[0] || assignments[0] || null;
   if (!chosen) {
     return {
       assignments,
@@ -134,6 +136,15 @@ async function resolveForAccount(db, { userId, role, requestedBranchId }) {
       message: assignments.length
         ? "Every assigned branch is inactive. An administrator can reactivate one."
         : "No branch is assigned to this account. Ask an administrator to assign a branch.",
+    };
+  }
+  if (!chosen.active) {
+    return {
+      assignments,
+      activeBranch: chosen,
+      branch: chosen,
+      paused: true,
+      message: `${chosen.name} is inactive. New check-ins are paused. A consultation already underway can still be finished.`,
     };
   }
   return {
@@ -173,6 +184,16 @@ function attachBranchAccess(db, role) {
       const reading = req.method === "GET" || req.method === "HEAD";
       const profileOrNotice = path.startsWith("/profile") || path.startsWith("/notifications") || path.startsWith("/branch-context");
       const clinicalRead = reading && path.startsWith("/patients");
+      const finishUnderway =
+        req.branchAccess.paused &&
+        req.method === "PATCH" &&
+        /^\/queue\/[^/]+$/.test(path);
+      if (req.branchAccess.paused && !reading && !profileOrNotice && !finishUnderway) {
+        return res.status(409).json({
+          message: req.branchAccess.message,
+          branch: publicContext(req.branchAccess),
+        });
+      }
       if (!req.branchAccess.activeBranch && !reading && !profileOrNotice && !clinicalRead) {
         return res.status(409).json({
           message: req.branchAccess.message,

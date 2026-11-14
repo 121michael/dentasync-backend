@@ -61,9 +61,7 @@ export function QueueDisplayPage() {
         {data?.nowServing ? (
           <>
             <h2>{data.nowServing.token}</h2>
-            <p>
-              {data.nowServing.procedure} · {titleCase(data.nowServing.status)}
-            </p>
+            <p>{titleCase(data.nowServing.status)}</p>
           </>
         ) : (
           <>

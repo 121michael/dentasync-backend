@@ -95,6 +95,7 @@ async function nextSequenceFromExistingTokens(client, prefix, clinicDate, branch
 
 async function nextDailySequence(client, prefix, clinicDate, branchId) {
   if (branchId) {
+    await client.query("SAVEPOINT queue_counter_branch");
     try {
       const result = await client.query(
         `INSERT INTO clinic_daily_queue_counters (clinic_date, prefix, branch_id, last_sequence)
@@ -104,13 +105,16 @@ async function nextDailySequence(client, prefix, clinicDate, branchId) {
          RETURNING last_sequence`,
         [clinicDate, prefix, branchId]
       );
+      await client.query("RELEASE SAVEPOINT queue_counter_branch");
       return Number(result.rows[0].last_sequence);
     } catch (error) {
+      await client.query("ROLLBACK TO SAVEPOINT queue_counter_branch");
       if (error.code !== "42P01" && error.code !== "42703" && error.code !== "42P10") {
         throw error;
       }
     }
   }
+  await client.query("SAVEPOINT queue_counter_day");
   try {
     const result = await client.query(
       `INSERT INTO clinic_daily_queue_counters (clinic_date, prefix, last_sequence)
@@ -120,8 +124,10 @@ async function nextDailySequence(client, prefix, clinicDate, branchId) {
        RETURNING last_sequence`,
       [clinicDate, prefix]
     );
+    await client.query("RELEASE SAVEPOINT queue_counter_day");
     return Number(result.rows[0].last_sequence);
   } catch (error) {
+    await client.query("ROLLBACK TO SAVEPOINT queue_counter_day");
     if (error.code !== "42P01" && error.code !== "42703" && error.code !== "42P10") {
       throw error;
     }

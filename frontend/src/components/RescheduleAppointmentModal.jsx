@@ -131,7 +131,7 @@ export function RescheduleAppointmentModal({ appointment, busy, error, onClose, 
         {availability && !availability.closed && !slots.length ? (
           <p className="muted">No appointment slots are available in this period.</p>
         ) : null}
-        <p className="muted">Preferred time is optional and stays at this branch.</p>
+        <p className="muted">Choose an available time. Rescheduling stays at this branch.</p>
         {loadError || error ? (
           <p className="inline-alert inline-alert--error" role="alert">
             {loadError || error}
@@ -144,12 +144,11 @@ export function RescheduleAppointmentModal({ appointment, busy, error, onClose, 
           <button
             type="button"
             className="button button--primary"
-            disabled={busy || !date || (time ? false : availability?.dateOnlyBookable === false)}
+            disabled={busy || !date || !time}
             onClick={() => {
-              if (busy || confirmLock.current || !date) return;
-              if (!time && availability?.dateOnlyBookable === false) return;
+              if (busy || confirmLock.current || !date || !time) return;
               confirmLock.current = true;
-              Promise.resolve(onConfirm({ appointmentDate: date, appointmentTime: time || null })).finally(() => {
+              Promise.resolve(onConfirm({ appointmentDate: date, appointmentTime: time })).finally(() => {
                 confirmLock.current = false;
               });
             }}

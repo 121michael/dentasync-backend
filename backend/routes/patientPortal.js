@@ -1109,8 +1109,8 @@ function createPatientPortalRouter({
     if (!isIsoDate(appointmentDate)) {
       return res.status(400).json({ message: "Please choose a valid appointment date." });
     }
-    if (requestedTime != null && !normalizedAppointmentTime) {
-      return res.status(400).json({ message: "Please choose a valid appointment time or leave it blank." });
+    if (!normalizedAppointmentTime) {
+      return res.status(400).json({ message: "Choose an available appointment time." });
     }
     if (!normalizedCoverage) {
       return res.status(400).json({ message: "Please choose a coverage option." });
@@ -1421,8 +1421,8 @@ function createPatientPortalRouter({
       ? null
       : String(req.body.appointmentTime);
     const appointmentTime = requestedTime == null ? null : clinicSchedule.normalizeTime(requestedTime);
-    if (!clinicSchedule.isIsoDate(appointmentDate) || (requestedTime != null && !appointmentTime)) {
-      return res.status(400).json({ message: "Choose a valid date. A preferred time is optional." });
+    if (!clinicSchedule.isIsoDate(appointmentDate) || !appointmentTime) {
+      return res.status(400).json({ message: "Choose an available date and time. Rescheduling stays at this branch." });
     }
     if (req.body?.branchId != null && String(req.body.branchId).trim() !== "") {
       // Branch changes are rejected after the appointment is loaded.
@@ -1540,12 +1540,13 @@ function createPatientPortalRouter({
       const [nowServingResult, preferenceResult] = await Promise.all([
         currentPreview
           ? db.query(
-          `SELECT token
-           FROM patient_portal_queue_entries
-           WHERE DATE(checked_in_at) = CURRENT_DATE
-             AND status = 'dentist'
-             AND ($1::bigint IS NULL OR branch_id = $1)
-           ORDER BY updated_at DESC NULLS LAST, position ASC
+          `SELECT queue.token
+           FROM patient_portal_queue_entries AS queue
+           LEFT JOIN patient_portal_appointments AS appointment ON appointment.id = queue.appointment_id
+           WHERE DATE(queue.checked_in_at) = CURRENT_DATE
+             AND queue.status IN ('dentist', 'preparing')
+             AND ($1::bigint IS NULL OR queue.branch_id = $1)
+           ORDER BY ${require("../services/branchCheckIn").QUEUE_ORDER_SQL}
            LIMIT 1`,
           [currentPreview.branch_id || null]
         ).catch(async (error) => {
@@ -1684,6 +1685,7 @@ function createPatientPortalRouter({
         notifyClinicDentists,
         checkInMethod: "portal",
         branchId: appointment.branch_id,
+        patientId: userId,
       });
 
       await client.query("COMMIT");
@@ -3135,7 +3137,18 @@ function createPatientPortalRouter({
       transactionOpen = true;
       await client.query("SELECT pg_advisory_xact_lock(hashtext('patient_portal_queue'))");
 
-      let appointment = await staffCheckIn.findAppointmentForCheckIn(client, { patientId: userId, branchId: "main" });
+      const sessionBranchId = validity.session.branch_id || null;
+      if (!sessionBranchId) {
+        await client.query("ROLLBACK");
+        transactionOpen = false;
+        return res.status(409).json({
+          message: "This QR code has no clinic branch. Ask staff to generate a new one.",
+        });
+      }
+      let appointment = await staffCheckIn.findAppointmentForCheckIn(client, {
+        patientId: userId,
+        branchId: sessionBranchId,
+      });
       if (!appointment) {
         const patientResult = await client.query(
           `SELECT id, first_name, last_name, email, phone, role, status, is_verified, rfid_tag
@@ -3151,8 +3164,8 @@ function createPatientPortalRouter({
           return res.status(404).json({ message: "Patient account not found." });
         }
         const resolved = await staffCheckIn.resolveAppointmentForCheckIn(client, patient, {
-          allowWalkIn: true,
-          branchId: "main",
+          allowWalkIn: false,
+          branchId: sessionBranchId,
         });
         if (!resolved.appointment) {
           await client.query("ROLLBACK");
@@ -3170,7 +3183,8 @@ function createPatientPortalRouter({
         notifyClinicStaff,
         notifyClinicDentists,
         checkInMethod: "qr",
-        branchId: "main",
+        branchId: sessionBranchId,
+        patientId: userId,
       });
 
       try {

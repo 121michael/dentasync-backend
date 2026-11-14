@@ -87,15 +87,26 @@ function isMissingRelation(error) {
   return error?.code === "42P01";
 }
 
-async function createWalkInQrSession(db, { staffId, ttlSeconds = DEFAULT_TTL_SECONDS, frontendOrigin } = {}) {
+async function createWalkInQrSession(db, { staffId, ttlSeconds = DEFAULT_TTL_SECONDS, frontendOrigin, branchId = null } = {}) {
   const token = crypto.randomBytes(24).toString("hex");
   const ttl = Math.max(60, Number(ttlSeconds) || DEFAULT_TTL_SECONDS);
-  const result = await db.query(
-    `INSERT INTO staff_walkin_qr_sessions (token, created_by_user_id, expires_at)
-     VALUES ($1, $2, CURRENT_TIMESTAMP + ($3::text || ' seconds')::interval)
-     RETURNING id, token, expires_at, created_at`,
-    [token, String(staffId), String(ttl)]
-  );
+  let result;
+  try {
+    result = await db.query(
+      `INSERT INTO staff_walkin_qr_sessions (token, created_by_user_id, expires_at, branch_id)
+       VALUES ($1, $2, CURRENT_TIMESTAMP + ($3::text || ' seconds')::interval, $4)
+       RETURNING id, token, expires_at, created_at, branch_id`,
+      [token, String(staffId), String(ttl), branchId]
+    );
+  } catch (error) {
+    if (error.code !== "42703") throw error;
+    result = await db.query(
+      `INSERT INTO staff_walkin_qr_sessions (token, created_by_user_id, expires_at)
+       VALUES ($1, $2, CURRENT_TIMESTAMP + ($3::text || ' seconds')::interval)
+       RETURNING id, token, expires_at, created_at`,
+      [token, String(staffId), String(ttl)]
+    );
+  }
   const session = result.rows[0];
   const checkInUrl = buildCheckInUrl(session.token, frontendOrigin);
   const qrDataUrl = await QRCode.toDataURL(checkInUrl, {
@@ -110,6 +121,7 @@ async function createWalkInQrSession(db, { staffId, ttlSeconds = DEFAULT_TTL_SEC
     token: session.token,
     expiresAt: session.expires_at,
     createdAt: session.created_at,
+    branchId: session.branch_id || branchId || null,
     ttlSeconds: ttl,
     checkInUrl,
     qrDataUrl,
@@ -167,13 +179,25 @@ async function findValidWalkInQrSession(db, token) {
     return { status: "invalid", session: null };
   }
 
-  const result = await db.query(
-    `SELECT id, token, expires_at, revoked_at, created_at
-     FROM staff_walkin_qr_sessions
-     WHERE token = $1
-     LIMIT 1`,
-    [normalized]
-  );
+  let result;
+  try {
+    result = await db.query(
+      `SELECT id, token, expires_at, revoked_at, created_at, branch_id
+       FROM staff_walkin_qr_sessions
+       WHERE token = $1
+       LIMIT 1`,
+      [normalized]
+    );
+  } catch (error) {
+    if (error.code !== "42703") throw error;
+    result = await db.query(
+      `SELECT id, token, expires_at, revoked_at, created_at
+       FROM staff_walkin_qr_sessions
+       WHERE token = $1
+       LIMIT 1`,
+      [normalized]
+    );
+  }
   const session = result.rows[0];
   if (!session) return { status: "invalid", session: null };
   if (session.revoked_at) return { status: "revoked", session };

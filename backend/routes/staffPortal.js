@@ -20,6 +20,7 @@ const { attachDentalAuthorizationRoutes } = require("./dentalAuthorization");
 const { attachPrescriptionRoutes } = require("./prescriptions");
 const { updatePasswordHash } = require("../services/sessionRevocation");
 const branchAccess = require("../services/branchAccess");
+const branchCheckIn = require("../services/branchCheckIn");
 
 const QUEUE_STATUS_MAP = {
   checked_in: "checked_in",
@@ -193,6 +194,9 @@ function mapAppointment(row) {
     dentist: row.dentist_name,
     date: row.appointment_date,
     time: row.appointment_time,
+    queueHoldReason: row.appointment_time
+      ? null
+      : "No confirmed time. This visit stays out of the queue until staff confirm a time with the patient.",
     location: row.clinic_location,
     status: row.status,
     notes: row.notes || "",
@@ -623,6 +627,7 @@ function createStaffPortalRouter({
            queue.wait_estimate_at,
            queue.serving_started_at,
            queue.checked_in_at,
+           queue.check_in_method,
            queue.appointment_id,
            appointment.service_name,
            appointment.dentist_name,
@@ -638,7 +643,7 @@ function createStaffPortalRouter({
            AND queue.branch_id = $1
          ORDER BY
            CASE WHEN queue.status IN ('completed', 'no_show') THEN 1 ELSE 0 END,
-           queue.position ASC`,
+           ${branchCheckIn.QUEUE_ORDER_SQL}`,
         [req.branchAccess.activeBranch.id]
       );
       const grouped = await clinicalPatients.listTreatmentsForQueueEntries(
@@ -735,6 +740,17 @@ function createStaffPortalRouter({
         await client.query("ROLLBACK");
         transactionOpen = false;
         return res.status(404).json({ message: "Queue entry not found." });
+      }
+      if (req.branchAccess?.paused) {
+        const underway = ["dentist", "preparing"].includes(String(current.status || "").toLowerCase());
+        const finishing = databaseStatus === "completed" || databaseStatus === "no_show";
+        if (!underway || !finishing) {
+          await client.query("ROLLBACK");
+          transactionOpen = false;
+          return res.status(409).json({
+            message: "This branch is inactive. Only a consultation already underway can be finished.",
+          });
+        }
       }
 
       const updatedResult = await client.query(
@@ -2150,7 +2166,7 @@ function createStaffPortalRouter({
             },
           });
         }
-        const allowWalkIn = method === "rfid" || method === "manual" || method === "walk_in";
+        const allowWalkIn = false;
         const resolved = await staffCheckIn.resolveAppointmentForCheckIn(client, patient, {
           allowWalkIn,
           branchId: req.branchAccess?.activeBranch?.id || null,
@@ -2200,6 +2216,7 @@ function createStaffPortalRouter({
         notifyClinicDentists: notifyDentist,
         checkInMethod: method,
         branchId: req.branchAccess?.activeBranch?.id || null,
+        patientId: String(scannedRaw || "").trim().startsWith("{") ? payload?.patientId || null : null,
       });
 
       await client.query("COMMIT");
@@ -2340,9 +2357,17 @@ function createStaffPortalRouter({
            AND expires_at > CURRENT_TIMESTAMP`,
         [String(req.staff.id)]
       );
+      const branchId = req.branchAccess?.activeBranch?.id || null;
+      if (branchId) {
+        const settings = await branchCheckIn.loadBranchCheckIn(db, branchId);
+        if (!settings.legacy && settings.row && !settings.row.qr_enabled) {
+          return res.status(409).json({ message: "QR check-in is turned off for this clinic branch." });
+        }
+      }
       const session = await staffWalkInQr.createWalkInQrSession(db, {
         staffId: req.staff.id,
         frontendOrigin: requestFrontendOrigin(req),
+        branchId,
       });
       return res.status(201).json({
         message: "Walk-in QR code generated. Ask the patient to scan it with their phone.",

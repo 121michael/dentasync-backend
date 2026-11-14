@@ -235,7 +235,8 @@ test("staff and dentist branch access", async (t) => {
   const paused = await request("GET", "/api/staff/queue", { token: pToken });
   assert.equal(paused.status, 200);
   assert.match(paused.body.message, /inactive/i);
-  assert.equal(paused.body.queue.length, 0);
+  assert.equal(paused.body.queue.length, 1);
+  assert.equal(paused.body.queue[0].token, "A-001");
   const blocked = await request("POST", "/api/staff/queue/reset", { token: pToken, body: {} });
   assert.equal(blocked.status, 409);
   const stillThere = await db.query(

@@ -184,20 +184,31 @@ test("patient branch booking", async (t) => {
 
   const pasigClosed = await request("POST", "/api/patient/appointments", {
     token: patientToken,
-    body: { serviceId: "cleaning", appointmentDate: day, coverageType: "self_pay", branchId: pasig.rows[0].id },
+    body: { serviceId: "cleaning", appointmentDate: day, appointmentTime: "11:00", coverageType: "self_pay", branchId: pasig.rows[0].id },
   });
   assert.equal(pasigClosed.status, 409);
 
-  const dateOnly = await request("POST", "/api/patient/appointments", {
+  const missingTime = await request("POST", "/api/patient/appointments", {
     token: patientToken,
     body: { serviceId: "cleaning", appointmentDate: day, coverageType: "self_pay", branchId: main.rows[0].id },
   });
+  assert.equal(missingTime.status, 400);
+
+  const dateOnly = await request("POST", "/api/patient/appointments", {
+    token: patientToken,
+    body: {
+      serviceId: "cleaning",
+      appointmentDate: day,
+      appointmentTime: "09:00",
+      coverageType: "self_pay",
+      branchId: main.rows[0].id,
+    },
+  });
   assert.equal(dateOnly.status, 201, JSON.stringify(dateOnly.body));
-  assert.equal(dateOnly.body.appointment.time, null);
+  assert.equal(String(dateOnly.body.appointment.time).slice(0, 5), "09:00");
   assert.equal(dateOnly.body.appointment.status, "pending");
   assert.equal(String(dateOnly.body.appointment.branchId), String(main.rows[0].id));
   assert.match(dateOnly.body.message, /clinic confirmation/i);
-  assert.equal(JSON.stringify(dateOnly.body).includes("09:00"), false);
 
   const timedAfterFull = await request("POST", "/api/patient/appointments", {
     token: tokenFor(secondPatientId, "patient"),
@@ -233,7 +244,7 @@ test("patient branch booking", async (t) => {
   assert.equal(pasigTimed.status, 201, JSON.stringify(pasigTimed.body));
   const mainSameDay = await request("POST", "/api/patient/appointments", {
     token: patientToken,
-    body: { serviceId: "extraction", appointmentDate: openPasig, coverageType: "self_pay", branchId: main.rows[0].id },
+    body: { serviceId: "extraction", appointmentDate: openPasig, appointmentTime: "09:00", coverageType: "self_pay", branchId: main.rows[0].id },
   });
   assert.equal(mainSameDay.status, 409);
 
@@ -243,27 +254,27 @@ test("patient branch booking", async (t) => {
 
   const cross = await request("POST", `/api/patient/appointments/${pasigTimed.body.appointment.id}/reschedule`, {
     token: patientToken,
-    body: { appointmentDate: "2099-01-20", branchId: main.rows[0].id },
+    body: { appointmentDate: "2099-01-20", appointmentTime: "11:00", branchId: main.rows[0].id },
   });
   assert.equal(cross.status, 409);
   assert.match(cross.body.message, /original clinic branch/i);
 
   const rescheduled = await request("POST", `/api/patient/appointments/${pasigTimed.body.appointment.id}/reschedule`, {
     token: patientToken,
-    body: { appointmentDate: "2099-01-20" },
+    body: { appointmentDate: "2099-01-20", appointmentTime: "11:00" },
   });
   assert.equal(rescheduled.status, 200, JSON.stringify(rescheduled.body));
-  assert.equal(rescheduled.body.appointment.time, null);
+  assert.equal(String(rescheduled.body.appointment.time).slice(0, 5), "11:00");
   const stored = await db.query(`SELECT branch_id, appointment_time FROM patient_portal_appointments WHERE id = $1`, [
     rescheduled.body.appointment.id,
   ]);
   assert.equal(String(stored.rows[0].branch_id), String(pasig.rows[0].id));
-  assert.equal(stored.rows[0].appointment_time, null);
+  assert.equal(String(stored.rows[0].appointment_time).slice(0, 5), "11:00");
 
   await db.query(`UPDATE clinic_branches SET status = 'inactive' WHERE id = $1`, [pasig.rows[0].id]);
   const inactiveBook = await request("POST", "/api/patient/appointments", {
     token: patientToken,
-    body: { serviceId: "cleaning", appointmentDate: "2099-01-21", coverageType: "self_pay", branchId: pasig.rows[0].id },
+    body: { serviceId: "cleaning", appointmentDate: "2099-01-21", appointmentTime: "11:00", coverageType: "self_pay", branchId: pasig.rows[0].id },
   });
   assert.equal(inactiveBook.status, 409);
   const review = await patientBranchBooking.listInactiveBranchReview(db);

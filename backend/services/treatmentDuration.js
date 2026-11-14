@@ -100,6 +100,7 @@ async function recordTreatmentComplete(db, {
   const closedTreatmentId =
     Number.isSafeInteger(Number(treatmentId)) && Number(treatmentId) > 0 ? Number(treatmentId) : null;
 
+  await db.query("SAVEPOINT treatment_duration").catch(() => {});
   try {
     const open = await db.query(
       `SELECT id, started_at
@@ -132,12 +133,16 @@ async function recordTreatmentComplete(db, {
       );
       invalidateDurationStatsCache();
     }
+    await db.query("RELEASE SAVEPOINT treatment_duration").catch(() => {});
   } catch (error) {
+    await db.query("ROLLBACK TO SAVEPOINT treatment_duration").catch(() => {});
+    await db.query("RELEASE SAVEPOINT treatment_duration").catch(() => {});
     if (error?.code !== "42P01") {
       console.warn("Unable to complete treatment duration row:", error.message);
     }
   }
 
+  await db.query("SAVEPOINT treatment_stamp").catch(() => {});
   try {
     await db.query(
       `UPDATE clinic_patient_treatments
@@ -154,7 +159,10 @@ async function recordTreatmentComplete(db, {
        )`,
       [patientUserId ? String(patientUserId) : "", computed]
     );
+    await db.query("RELEASE SAVEPOINT treatment_stamp").catch(() => {});
   } catch (error) {
+    await db.query("ROLLBACK TO SAVEPOINT treatment_stamp").catch(() => {});
+    await db.query("RELEASE SAVEPOINT treatment_stamp").catch(() => {});
     if (error?.code !== "42P01" && error?.code !== "42703") {
       console.warn("Unable to stamp clinical treatment completed_at:", error.message);
     }

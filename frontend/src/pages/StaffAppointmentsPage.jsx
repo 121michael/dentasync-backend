@@ -335,7 +335,10 @@ export function StaffAppointmentsPage() {
                       <small>{appointment.patientPhone || "No phone"}</small>
                     </td>
                     <td>{formatStaffDate(appointment.date)}</td>
-                    <td>{formatStaffTime(String(appointment.time || "").slice(0, 5))}</td>
+                    <td>
+                      {appointment.time ? formatStaffTime(String(appointment.time).slice(0, 5)) : "—"}
+                      {appointment.queueHoldReason ? <small>{appointment.queueHoldReason}</small> : null}
+                    </td>
                     <td>{appointment.service || appointment.treatment}</td>
                     <td>{appointment.dentist}</td>
                     <td>

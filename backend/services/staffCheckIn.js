@@ -4,6 +4,7 @@ const { insertPatientNotification } = require("./patientPortalNotifications");
 const { safeRecalculateQueueWaitEstimates } = require("./queueWaitPrediction");
 const queueNumbers = require("./queueNumbers");
 const branchAccess = require("./branchAccess");
+const branchCheckIn = require("./branchCheckIn");
 
 function stringValue(value, maxLength = 500) {
   if (typeof value !== "string" && typeof value !== "number") {
@@ -742,7 +743,12 @@ async function withSavepoint(client, name, fn) {
   await client.query(`SAVEPOINT ${savepoint}`);
   try {
     const result = await fn();
-    await client.query(`RELEASE SAVEPOINT ${savepoint}`);
+    try {
+      await client.query(`RELEASE SAVEPOINT ${savepoint}`);
+    } catch (releaseError) {
+      await client.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+      await client.query(`RELEASE SAVEPOINT ${savepoint}`);
+    }
     return result;
   } catch (error) {
     try {
@@ -850,6 +856,10 @@ async function insertQueueEntry(client, { userId, appointmentId, token, position
       );
     }
     if (insertError.code === "23505") {
+      if (String(insertError.constraint || "").includes("appointment")) {
+        insertError.appointmentConflict = true;
+        throw insertError;
+      }
       const retryToken = await allocateQueueToken(client, queueIdentity || {});
       try {
         return await withSavepoint(client, "queue_insert_retry_method", async () =>
@@ -876,7 +886,7 @@ async function insertQueueEntry(client, { userId, appointmentId, token, position
   }
 }
 
-async function performStaffCheckIn(client, { appointment, staff, notifyClinicStaff, notifyClinicDentists, checkInMethod = "rfid", branchId = null }) {
+async function performStaffCheckIn(client, { appointment, staff, notifyClinicStaff, notifyClinicDentists, checkInMethod = "rfid", branchId = null, patientId = null }) {
   const scopedBranchId = (await concreteBranchId(client, branchId)) || appointment.branch_id || (await branchAccess.mainBranchId(client));
   if (
     appointment?.branch_id &&
@@ -889,6 +899,12 @@ async function performStaffCheckIn(client, { appointment, staff, notifyClinicSta
     error.status = 409;
     throw error;
   }
+  await branchCheckIn.assertCheckInAllowed(client, {
+    appointment,
+    branchId: scopedBranchId,
+    method: checkInMethod,
+    patientId,
+  });
   const existingForPatient = await findActiveQueueForPatient(client, appointment.user_id, scopedBranchId);
   if (existingForPatient) {
     return {
@@ -919,17 +935,29 @@ async function performStaffCheckIn(client, { appointment, staff, notifyClinicSta
   const estimatedWaitMinutes = aheadCount * 45;
 
   const method = String(checkInMethod || "rfid").toLowerCase();
-  const queueResult = await insertQueueEntry(client, {
-    userId: appointment.user_id,
-    appointmentId: appointment.id,
-    token,
-    position,
-    estimatedWaitMinutes,
-    method,
-    queueIdentity: { ...queueIdentity, branchId: scopedBranchId },
-    branchId: scopedBranchId,
-  });
-
+  if (appointment?.id) {
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext('queue-appointment'), hashtext($1::text))`, [
+      String(appointment.id),
+    ]);
+  }
+  let queueResult;
+  try {
+    queueResult = await insertQueueEntry(client, {
+      userId: appointment.user_id,
+      appointmentId: appointment.id,
+      token,
+      position,
+      estimatedWaitMinutes,
+      method,
+      queueIdentity: { ...queueIdentity, branchId: scopedBranchId },
+      branchId: scopedBranchId,
+    });
+  } catch (error) {
+    if (!error.appointmentConflict) throw error;
+    const existing = await branchCheckIn.findQueueForAppointment(client, appointment.id);
+    if (!existing) throw error;
+    return { alreadyCheckedIn: true, queueEntry: existing, appointment };
+  }
   await client.query(
     `UPDATE patient_portal_appointments
      SET status = 'checked_in', updated_at = CURRENT_TIMESTAMP
@@ -965,8 +993,9 @@ async function performStaffCheckIn(client, { appointment, staff, notifyClinicSta
     }
   }
 
+  await branchCheckIn.resequenceWaitingPositions(client, scopedBranchId);
   const patientName = appointment.patient_name || "Patient";
-  const queueEntry = queueResult.rows[0];
+  const queueEntry = (await branchCheckIn.reloadQueueEntry(client, queueResult.rows[0].id)) || queueResult.rows[0];
   const checkInNotice = {
     type: "check_in",
     title: "Patient checked in",
@@ -996,7 +1025,7 @@ async function performStaffCheckIn(client, { appointment, staff, notifyClinicSta
 
   return {
     alreadyCheckedIn: false,
-    queueEntry: queueResult.rows[0],
+    queueEntry,
     appointment,
   };
 }

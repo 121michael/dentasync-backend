@@ -3,6 +3,7 @@
 const crypto = require("crypto");
 const staffCheckIn = require("./staffCheckIn");
 const staffRfidEvents = require("./staffRfidEvents");
+const branchCheckIn = require("./branchCheckIn");
 
 function resolvedDeviceSecret(env = process.env) {
   return String(env.RFID_DEVICE_SECRET || "").trim();
@@ -81,9 +82,10 @@ function mapSuccess(appointment, checkIn, walkInCreated) {
   };
 }
 
-// The reader firmware does not send a branch. This path stays on the Main Branch.
-// An appointment booked at another branch is refused here and sent to that desk.
-// A walk-in with no appointment still joins the Main Branch queue.
+// The reader firmware does not send a branch. The authorized clinic_rfid_readers
+// row supplies the branch. A request body cannot choose a different branch.
+// Appointments at another branch are refused. Check-in requires an eligible
+// appointment; a tap with no appointment does not open a walk-in ticket.
 async function checkInByRfidTag(db, { rfidTag, notifyClinicStaff, notifyClinicDentists }) {
   const tag = staffCheckIn.normalizeRfidTag(rfidTag);
   if (!tag) {
@@ -133,9 +135,21 @@ async function checkInByRfidTag(db, { rfidTag, notifyClinicStaff, notifyClinicDe
       };
     }
 
+    const reader = await branchCheckIn.resolveAuthorizedReader(client);
+    const readerBranchId = reader?.legacy ? "main" : reader?.branch_id || null;
+    if (!readerBranchId) {
+      await client.query("ROLLBACK");
+      transactionOpen = false;
+      return { ok: false, status: 409, message: "RFID reader is not configured for a clinic branch." };
+    }
+    if (!reader?.legacy && reader?.rfid_enabled === false) {
+      await client.query("ROLLBACK");
+      transactionOpen = false;
+      return { ok: false, status: 409, message: "RFID check-in is turned off for this clinic branch." };
+    }
     const resolved = await staffCheckIn.resolveAppointmentForCheckIn(client, patient, {
-      allowWalkIn: true,
-      branchId: "main",
+      allowWalkIn: false,
+      branchId: readerBranchId,
     });
     if (!resolved.appointment) {
       let diagnosis = null;
@@ -168,7 +182,7 @@ async function checkInByRfidTag(db, { rfidTag, notifyClinicStaff, notifyClinicDe
       notifyClinicStaff,
       notifyClinicDentists,
       checkInMethod: "rfid",
-      branchId: "main",
+      branchId: readerBranchId,
     });
     await client.query("COMMIT");
     transactionOpen = false;

@@ -11,6 +11,8 @@ const emptyForm = {
   address: "",
   contactNumber: "",
   email: "",
+  rfidEnabled: false,
+  qrEnabled: false,
 };
 
 function assignmentLabel(person) {
@@ -57,6 +59,8 @@ export function AdminBranchesPage() {
       address: branch.address || "",
       contactNumber: branch.contactNumber || "",
       email: branch.email || "",
+      rfidEnabled: Boolean(branch.rfidEnabled),
+      qrEnabled: Boolean(branch.qrEnabled),
     });
     setFormOpen(true);
   }
@@ -168,6 +172,7 @@ export function AdminBranchesPage() {
                 <th>Email</th>
                 <th>Main</th>
                 <th>Status</th>
+                <th>Check-in</th>
                 <th>Created</th>
                 <th>Actions</th>
               </tr>
@@ -182,6 +187,7 @@ export function AdminBranchesPage() {
                   <td>{branch.email || "No email"}</td>
                   <td>{branch.isMain ? "Main Branch" : "—"}</td>
                   <td><AdminStatusBadge status={branch.status} /></td>
+                  <td>{branch.rfidEnabled ? "RFID on" : "RFID off"} · {branch.qrEnabled ? "QR on" : "QR off"}</td>
                   <td>{formatAdminDateTime(branch.createdAt)}</td>
                   <td>
                     <div className="admin-row-actions">
@@ -239,6 +245,22 @@ export function AdminBranchesPage() {
             <label>
               Email address
               <input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="Optional" />
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={Boolean(form.rfidEnabled)}
+                onChange={(event) => setForm({ ...form, rfidEnabled: event.target.checked })}
+              />{" "}
+              RFID check-in
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={Boolean(form.qrEnabled)}
+                onChange={(event) => setForm({ ...form, qrEnabled: event.target.checked })}
+              />{" "}
+              QR check-in
             </label>
             <div className="admin-modal__actions">
               <button type="button" className="button button--secondary" onClick={() => setFormOpen(false)}>Cancel</button>

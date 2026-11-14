@@ -1369,6 +1369,7 @@ function attachAdminCommandCenterRoutes(router, { db, passwordResetService = nul
 
       let appointments = [];
       let inactiveBranchReview = [];
+      let missingTimeReview = [];
       try {
         const branchId = stringValue(req.query.branchId, 40);
         const appointmentParams = [];
@@ -1412,7 +1413,12 @@ function attachAdminCommandCenterRoutes(router, { db, passwordResetService = nul
           branchId: row.branch_id || null,
           branchName: row.branch_name || null,
           branchStatus: row.branch_status || null,
-          reviewReason: row.branch_status === "inactive" ? "branch_inactive" : null,
+          reviewReason:
+            row.branch_status === "inactive"
+              ? "branch_inactive"
+              : row.appointment_time == null && ["pending", "confirmed", "checked_in"].includes(String(row.status || "").toLowerCase())
+                ? "missing_time"
+                : null,
         }));
         const reviewResult = await db.query(
           `SELECT appointment.id,
@@ -1440,6 +1446,33 @@ function attachAdminCommandCenterRoutes(router, { db, passwordResetService = nul
           patientName: row.patient_name || "Patient",
           branchName: row.branch_name,
           reviewReason: "branch_inactive",
+        }));
+        const missingTimeResult = await db.query(
+          `SELECT appointment.id,
+                  appointment.appointment_date,
+                  appointment.appointment_time,
+                  appointment.status,
+                  appointment.service_name,
+                  CONCAT_WS(' ', patient.first_name, patient.last_name) AS patient_name,
+                  branch.name AS branch_name
+           FROM patient_portal_appointments AS appointment
+           JOIN users AS patient ON patient.id::text = appointment.user_id
+           LEFT JOIN clinic_branches AS branch ON branch.id = appointment.branch_id
+           WHERE appointment.appointment_date >= CURRENT_DATE
+             AND appointment.status IN ('pending', 'confirmed', 'checked_in')
+             AND appointment.appointment_time IS NULL
+           ORDER BY appointment.appointment_date ASC, appointment.id ASC
+           LIMIT 50`
+        );
+        missingTimeReview = missingTimeResult.rows.map((row) => ({
+          id: row.id,
+          date: row.appointment_date,
+          time: null,
+          status: row.status,
+          treatment: row.service_name,
+          patientName: row.patient_name || "Patient",
+          branchName: row.branch_name,
+          reviewReason: "missing_time",
         }));
       } catch (error) {
         if (error?.code === "42P01" || error?.code === "42703") {
@@ -1497,6 +1530,7 @@ function attachAdminCommandCenterRoutes(router, { db, passwordResetService = nul
         schedules,
         appointments,
         inactiveBranchReview,
+        missingTimeReview,
         clinicHours,
         setupRequired: !scheduleTableReady,
         message: scheduleTableReady

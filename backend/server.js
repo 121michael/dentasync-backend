@@ -44,6 +44,7 @@ const express = require("express");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const db = require("./db");
+const branchCheckIn = require("./services/branchCheckIn");
 const { createAuthRouter } = require("./routes/auth");
 const { SERVICES: PATIENT_BOOKABLE_SERVICES, createPatientPortalRouter } = require("./routes/patientPortal");
 const { createPublicClinicInfoHandler } = require("./routes/publicClinicInfo");
@@ -208,53 +209,13 @@ app.get(
   })
 );
 
-app.get("/api/public/queue-display", async (_req, res) => {
+app.get("/api/public/queue-display", async (req, res) => {
   try {
-    const result = await db.query(
-      `SELECT
-         queue.token,
-         queue.position,
-         queue.status,
-         queue.estimated_wait_minutes,
-         appointment.service_name,
-         appointment.dentist_name
-       FROM patient_portal_queue_entries AS queue
-       LEFT JOIN patient_portal_appointments AS appointment
-         ON appointment.id = queue.appointment_id
-       WHERE DATE(queue.checked_in_at) = CURRENT_DATE
-         AND queue.status <> 'completed'
-       ORDER BY
-         CASE queue.status
-           WHEN 'dentist' THEN 0
-           WHEN 'preparing' THEN 1
-           WHEN 'waiting' THEN 2
-           ELSE 3
-         END,
-         queue.position ASC
-       LIMIT 40`
-    );
-
-    const rows = result.rows.map((row) => ({
-      token: row.token,
-      position: row.position,
-      status: row.status === "dentist" ? "in_chair" : row.status,
-      estimatedWaitMinutes: Number(row.estimated_wait_minutes || 0),
-      procedure: row.service_name || "Dental visit",
-      dentist: row.dentist_name || "Clinic team",
-    }));
-
-    const nowServing = rows.find((row) => row.status === "in_chair") || rows[0] || null;
-    const upNext = rows.filter((row) => row.token !== nowServing?.token).slice(0, 8);
-
-    return res.json({
-      clinicName: process.env.CLINIC_NAME || "Amethyst Dental Clinic",
-      updatedAt: new Date().toISOString(),
-      nowServing,
-      upNext,
-      queue: rows,
-    });
+    const board = await branchCheckIn.publicQueueBoard(db, { monitor: req.query.monitor || "" });
+    if (board.status !== 200) return res.status(board.status).json(board.body);
+    return res.json({ ...board.body, updatedAt: new Date().toISOString() });
   } catch (error) {
-    if (error?.code === "42P01") {
+    if (error?.code === "42P01" || error?.code === "42703") {
       return res.json({
         clinicName: process.env.CLINIC_NAME || "Amethyst Dental Clinic",
         updatedAt: new Date().toISOString(),

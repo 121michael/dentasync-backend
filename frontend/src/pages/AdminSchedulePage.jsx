@@ -269,6 +269,20 @@ export function AdminSchedulePage() {
             </ul>
           </div>
         ) : null}
+        {data.missingTimeReview?.length ? (
+          <div className="inline-alert" role="status">
+            {data.missingTimeReview.length} upcoming appointment
+            {data.missingTimeReview.length === 1 ? "" : "s"} still have no confirmed time. They stay out of the queue
+            until staff confirm a time with the patient. The saved record is unchanged.
+            <ul>
+              {data.missingTimeReview.map((appointment) => (
+                <li key={appointment.id}>
+                  {appointment.patientName} · {appointment.branchName || "Clinic"} · {formatAdminDate(appointment.date)}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
         {data.appointments?.length ? (
           <div className="admin-table-wrap">
             <table className="admin-table">
@@ -300,6 +314,7 @@ export function AdminSchedulePage() {
                     <td>
                       {appointment.branchName || "—"}
                       {appointment.reviewReason === "branch_inactive" ? " · needs review" : ""}
+                      {appointment.reviewReason === "missing_time" ? " · confirm a time" : ""}
                     </td>
                     <td>{appointment.treatment}</td>
                     <td>{appointment.dentistName}</td>

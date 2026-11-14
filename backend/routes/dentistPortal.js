@@ -653,14 +653,7 @@ function createDentistPortalRouter({
            WHERE ${scope.sql}
              AND ${clinicTodayQueueSql("queue")}
              AND queue.status IN ('dentist', 'checked_in', 'waiting', 'preparing')
-           ORDER BY
-             CASE queue.status
-               WHEN 'dentist' THEN 0
-               WHEN 'preparing' THEN 1
-               WHEN 'waiting' THEN 2
-               ELSE 3
-             END,
-             queue.position ASC
+           ORDER BY ${require("../services/branchCheckIn").QUEUE_ORDER_SQL}
              LIMIT 1`,
           scope.params
         ),
@@ -757,7 +750,7 @@ function createDentistPortalRouter({
          WHERE ${scope.sql}
            AND ${clinicTodayQueueSql("queue")}
            AND ${statusFilter}
-         ORDER BY queue.position ASC`,
+         ORDER BY ${require("../services/branchCheckIn").QUEUE_ORDER_SQL}`,
         scope.params
       );
 
@@ -862,13 +855,7 @@ function createDentistPortalRouter({
          WHERE ${scope.sql}
            AND ${clinicTodayQueueSql("queue")}
            AND queue.status IN ('checked_in', 'waiting', 'preparing')
-         ORDER BY
-           CASE queue.status
-             WHEN 'preparing' THEN 0
-             WHEN 'waiting' THEN 1
-             ELSE 2
-           END,
-           queue.position ASC
+         ORDER BY ${require("../services/branchCheckIn").QUEUE_ORDER_SQL}
          LIMIT 1
          FOR UPDATE OF queue SKIP LOCKED`,
         scope.params
@@ -1375,6 +1362,17 @@ function createDentistPortalRouter({
         return res.status(404).json({
           message: "Queue entry not found for this dentist.",
         });
+      }
+      if (req.branchAccess?.paused) {
+        const underway = ["dentist", "preparing"].includes(String(current.status || "").toLowerCase());
+        const finishing = databaseStatus === "completed" || databaseStatus === "no_show";
+        if (!underway || !finishing) {
+          await client.query("ROLLBACK");
+          transactionOpen = false;
+          return res.status(409).json({
+            message: "This branch is inactive. Only a consultation already underway can be finished.",
+          });
+        }
       }
 
       let completedTreatment = null;

@@ -260,7 +260,12 @@ function mapAppointment(row) {
     branchId: row.branch_id || null,
     branchName: row.branch_name || null,
     branchStatus: row.branch_status || null,
-    reviewReason: row.branch_status === "inactive" ? "branch_inactive" : null,
+    reviewReason:
+      row.branch_status === "inactive"
+        ? "branch_inactive"
+        : row.appointment_time == null && ["pending", "confirmed", "checked_in"].includes(String(row.status || "").toLowerCase())
+          ? "missing_time"
+          : null,
     location: row.clinic_location,
     status: row.status,
     notes: row.notes || "",
@@ -1996,6 +2001,11 @@ function createAdminPortalRouter({
       clauses.push(`appointment.appointment_date >= CURRENT_DATE`);
       clauses.push(`appointment.status IN ('pending', 'confirmed', 'checked_in')`);
       clauses.push(`branch.status = 'inactive'`);
+    }
+    if (review === "missing-time") {
+      clauses.push(`appointment.appointment_date >= CURRENT_DATE`);
+      clauses.push(`appointment.status IN ('pending', 'confirmed', 'checked_in')`);
+      clauses.push(`appointment.appointment_time IS NULL`);
     }
     if (search) {
       params.push(`%${search}%`);

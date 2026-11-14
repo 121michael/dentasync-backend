@@ -241,6 +241,7 @@ export function StaffQueuePage() {
                   <th>Service</th>
                   <th>Dentist</th>
                   <th>Check-In Time</th>
+                  <th>Method</th>
                   <th>Queue Status</th>
                   <th>Est. Duration</th>
                   <th>Est. Wait</th>
@@ -285,6 +286,7 @@ export function StaffQueuePage() {
                       </td>
                       <td>{entry.appointment?.dentist || "—"}</td>
                       <td>{formatStaffDateTime(entry.timestamp)}</td>
+                      <td className="capitalize">{entry.checkInMethod || "—"}</td>
                       <td>
                         <StaffStatusBadge status={entry.status} />
                       </td>
