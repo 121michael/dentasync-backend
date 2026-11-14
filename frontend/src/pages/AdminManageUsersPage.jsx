@@ -31,6 +31,16 @@ const emptyForm = {
 
 const PH_MOBILE_PATTERN = /^09[0-9]{9}$/;
 const PH_MOBILE_MESSAGE = "Enter a valid 11-digit mobile number starting with 09.";
+const INCOMPLETE_EMAIL_MESSAGE = "Enter a complete email address, including the full domain.";
+
+function emailFieldError(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "Enter an email address.";
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)) return "";
+  const domain = raw.includes("@") ? raw.slice(raw.indexOf("@") + 1) : "";
+  if (domain && !domain.includes(".")) return INCOMPLETE_EMAIL_MESSAGE;
+  return "Enter a valid email address.";
+}
 
 function isValidManageUserMobile(value) {
   return PH_MOBILE_PATTERN.test(String(value || ""));
@@ -144,6 +154,7 @@ export function AdminManageUsersPage() {
   const [dependentDetail, setDependentDetail] = useState(null);
   const [busy, setBusy] = useState(false);
   const [phoneError, setPhoneError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState({});
   const [actionBusyId, setActionBusyId] = useState("");
   const [passwordResetTarget, setPasswordResetTarget] = useState(null);
   const [passwordReset, setPasswordReset] = useState(emptyPasswordReset);
@@ -151,6 +162,7 @@ export function AdminManageUsersPage() {
   const [passwordResetBusy, setPasswordResetBusy] = useState(false);
   const [focusKey, setFocusKey] = useState(() => searchParams.get("focus") || "");
   const focusedRowRef = useRef(null);
+  const saveLock = useRef(false);
 
   const load = useCallback(async () => {
     try {
@@ -255,6 +267,7 @@ export function AdminManageUsersPage() {
       position: tab === "staff" ? "Chief Clinic Coordinator" : emptyForm.position,
     });
     setPhoneError("");
+    setFieldErrors({});
     setFormOpen(true);
   }
 
@@ -279,31 +292,55 @@ export function AdminManageUsersPage() {
       branchIds: (user.branches || []).map((branch) => String(branch.id)),
     });
     setPhoneError("");
+    setFieldErrors({});
     setFormOpen(true);
+  }
+
+  function clearFieldError(name) {
+    setFieldErrors((current) => {
+      if (!current[name]) return current;
+      const next = { ...current };
+      delete next[name];
+      return next;
+    });
   }
 
   async function saveUser(event) {
     event.preventDefault();
+    if (busy || saveLock.current) return;
     if (tab === "patient") {
       pushToast("Administrators cannot create patient login accounts.", "error");
       return;
     }
-    if (!isValidManageUserMobile(form.phone)) {
-      setPhoneError(PH_MOBILE_MESSAGE);
-      pushToast(PH_MOBILE_MESSAGE, "error");
-      return;
+    const errors = {};
+    if (!String(form.firstName || "").trim()) errors.firstName = "Enter a first name.";
+    if (!String(form.lastName || "").trim()) errors.lastName = "Enter a last name.";
+    const emailError = emailFieldError(form.email);
+    if (emailError) errors.email = emailError;
+    if (!String(form.phone || "").trim()) errors.phone = "Enter a mobile number.";
+    else if (!isValidManageUserMobile(form.phone)) errors.phone = PH_MOBILE_MESSAGE;
+    if (!editing && form.password && form.password.length < 10) {
+      errors.password = "Password must be at least 10 characters long.";
     }
     if (tab === "staff" && !form.branchId) {
-      pushToast("Staff must be assigned to exactly one branch.", "error");
-      return;
+      errors.branchId = "Staff must be assigned to exactly one branch.";
     }
     if (tab === "dentist" && !form.branchIds.length) {
-      pushToast("Dentists must be assigned to at least one branch.", "error");
+      errors.branchIds = "Dentists must be assigned to at least one branch.";
+    }
+    if (tab === "dentist" && form.licenseVerified && !String(form.licenseNumber || "").trim()) {
+      errors.licenseNumber = "Enter this dentist's own license number before marking it verified. Do not use another dentist's number.";
+    }
+    setFieldErrors(errors);
+    setPhoneError(errors.phone || "");
+    if (Object.keys(errors).length) {
+      pushToast(Object.values(errors)[0], "error");
       return;
     }
     const payload = { ...form };
     if (tab === "staff") delete payload.branchIds;
     if (tab === "dentist") delete payload.branchId;
+    saveLock.current = true;
     setBusy(true);
     try {
       if (editing) {
@@ -318,8 +355,14 @@ export function AdminManageUsersPage() {
       setFormOpen(false);
       await load();
     } catch (saveError) {
+      const returned = saveError.data?.fields;
+      if (returned && typeof returned === "object") {
+        setFieldErrors(returned);
+        if (returned.phone) setPhoneError(returned.phone);
+      }
       pushToast(saveError.message, "error");
     } finally {
+      saveLock.current = false;
       setBusy(false);
     }
   }
@@ -945,15 +988,43 @@ export function AdminManageUsersPage() {
             <div className="admin-form--manage-user__grid">
               <label>
                 First name
-                <input required value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} />
+                <input
+                  required
+                  value={form.firstName}
+                  aria-invalid={fieldErrors.firstName ? "true" : "false"}
+                  onChange={(e) => {
+                    setForm({ ...form, firstName: e.target.value });
+                    clearFieldError("firstName");
+                  }}
+                />
+                {fieldErrors.firstName ? <span className="admin-form--manage-user__error">{fieldErrors.firstName}</span> : null}
               </label>
               <label>
                 Last name
-                <input required value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} />
+                <input
+                  required
+                  value={form.lastName}
+                  aria-invalid={fieldErrors.lastName ? "true" : "false"}
+                  onChange={(e) => {
+                    setForm({ ...form, lastName: e.target.value });
+                    clearFieldError("lastName");
+                  }}
+                />
+                {fieldErrors.lastName ? <span className="admin-form--manage-user__error">{fieldErrors.lastName}</span> : null}
               </label>
               <label>
                 Email
-                <input required type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+                <input
+                  required
+                  type="email"
+                  value={form.email}
+                  aria-invalid={fieldErrors.email ? "true" : "false"}
+                  onChange={(e) => {
+                    setForm({ ...form, email: e.target.value });
+                    clearFieldError("email");
+                  }}
+                />
+                {fieldErrors.email ? <span className="admin-form--manage-user__error">{fieldErrors.email}</span> : null}
               </label>
               <label>
                 Mobile Number
@@ -970,6 +1041,7 @@ export function AdminManageUsersPage() {
                   onChange={(e) => {
                     setForm({ ...form, phone: sanitizeManageUserMobileInput(e.target.value) });
                     setPhoneError("");
+                    clearFieldError("phone");
                   }}
                   onPaste={(event) => {
                     event.preventDefault();
@@ -985,17 +1057,32 @@ export function AdminManageUsersPage() {
               {!editing ? (
                 <label className="admin-form--manage-user__full">
                   Temporary password
-                  <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Optional" />
+                  <input
+                    type="password"
+                    value={form.password}
+                    aria-invalid={fieldErrors.password ? "true" : "false"}
+                    onChange={(e) => {
+                      setForm({ ...form, password: e.target.value });
+                      clearFieldError("password");
+                    }}
+                    placeholder="Optional"
+                  />
+                  {fieldErrors.password ? <span className="admin-form--manage-user__error">{fieldErrors.password}</span> : null}
                 </label>
               ) : null}
               {tab === "staff" || tab === "dentist" ? (
                 <label className="admin-form--manage-user__full">
                   Assigned branch{tab === "dentist" ? "es" : ""}
                   {tab === "staff" ? (
+                    <>
                     <select
                       required
                       value={form.branchId}
-                      onChange={(event) => setForm({ ...form, branchId: event.target.value })}
+                      aria-invalid={fieldErrors.branchId ? "true" : "false"}
+                      onChange={(event) => {
+                        setForm({ ...form, branchId: event.target.value });
+                        clearFieldError("branchId");
+                      }}
                     >
                       <option value="">Select one branch</option>
                       {branches
@@ -1006,7 +1093,10 @@ export function AdminManageUsersPage() {
                           </option>
                         ))}
                     </select>
+                    {fieldErrors.branchId ? <span className="admin-form--manage-user__error">{fieldErrors.branchId}</span> : null}
+                    </>
                   ) : (
+                    <>
                     <span className="admin-branch-choices">
                       {branches
                         .filter((branch) => branch.status === "active" || form.branchIds.includes(String(branch.id)))
@@ -1030,6 +1120,8 @@ export function AdminManageUsersPage() {
                           );
                         })}
                     </span>
+                    {fieldErrors.branchIds ? <span className="admin-form--manage-user__error">{fieldErrors.branchIds}</span> : null}
+                    </>
                   )}
                 </label>
               ) : null}
@@ -1057,9 +1149,14 @@ export function AdminManageUsersPage() {
                     PRC license number
                     <input
                       value={form.licenseNumber || ""}
-                      onChange={(e) => setForm({ ...form, licenseNumber: e.target.value, licenseVerified: false })}
+                      aria-invalid={fieldErrors.licenseNumber ? "true" : "false"}
+                      onChange={(e) => {
+                        setForm({ ...form, licenseNumber: e.target.value, licenseVerified: false });
+                        clearFieldError("licenseNumber");
+                      }}
                       placeholder="This dentist's own license number"
                     />
+                    {fieldErrors.licenseNumber ? <span className="admin-form--manage-user__error">{fieldErrors.licenseNumber}</span> : null}
                   </label>
                   <label className="admin-form--manage-user__full admin-license-verify">
                     <input
@@ -1076,7 +1173,7 @@ export function AdminManageUsersPage() {
             </div>
             <div className="admin-modal__actions">
               <button type="button" className="button button--secondary" onClick={() => setFormOpen(false)}>Cancel</button>
-              <button className="button button--primary" disabled={busy || !isValidManageUserMobile(form.phone)}>{busy ? "Saving…" : "Save"}</button>
+              <button className="button button--primary" disabled={busy}>{busy ? "Saving…" : "Save"}</button>
             </div>
           </form>
         </AdminModal>

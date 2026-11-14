@@ -64,6 +64,49 @@ function normalizeEmail(value) {
   return email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null;
 }
 
+const INCOMPLETE_EMAIL_MESSAGE = "Enter a complete email address, including the full domain.";
+
+function emailFieldMessage(value) {
+  if (typeof value !== "string" || !value.trim()) {
+    return "Enter an email address.";
+  }
+  const email = value.trim().toLowerCase();
+  if (email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return null;
+  }
+  const domain = email.includes("@") ? email.slice(email.indexOf("@") + 1) : "";
+  if (domain && !domain.includes(".")) {
+    return INCOMPLETE_EMAIL_MESSAGE;
+  }
+  return "Enter a valid email address.";
+}
+
+function accountFieldErrors(body) {
+  const firstName = stringValue(body?.firstName, 80);
+  const lastName = stringValue(body?.lastName, 80);
+  const emailMessage = emailFieldMessage(body?.email);
+  const email = emailMessage ? null : normalizeEmail(body?.email);
+  const phone = parseManageUserMobile(body?.phone);
+  const password = typeof body?.password === "string" ? body.password : null;
+  const fields = {};
+  if (!firstName) fields.firstName = "Enter a first name.";
+  if (!lastName) fields.lastName = "Enter a last name.";
+  if (emailMessage) fields.email = emailMessage;
+  if (!phone) {
+    const raw = typeof body?.phone === "string" ? body.phone.trim() : "";
+    fields.phone = raw ? PH_MOBILE_MESSAGE : "Enter a mobile number.";
+  }
+  if (password && password.length < 10) {
+    fields.password = "Password must be at least 10 characters long.";
+  }
+  return { fields, firstName, lastName, email, phone, password };
+}
+
+function rejectAccountFields(res, fields) {
+  const message = fields.firstName || fields.lastName || fields.email || fields.phone || fields.password;
+  return res.status(400).json({ message, fields });
+}
+
 function normalizePhone(value) {
   if (typeof value !== "string" && typeof value !== "number") {
     return null;
@@ -1035,7 +1078,8 @@ function createAdminPortalRouter({
     const statusInput = stringValue(req.body?.status, 40)?.toLowerCase();
 
     if (req.body?.email !== undefined && !email) {
-      return res.status(400).json({ message: "Provide a valid email address." });
+      const message = emailFieldMessage(req.body.email);
+      return res.status(400).json({ message, fields: { email: message } });
     }
     if (req.body?.phone !== undefined && !phone) {
       return res.status(400).json({ message: PH_MOBILE_MESSAGE });
@@ -1175,25 +1219,11 @@ function createAdminPortalRouter({
   });
 
   router.post("/staff", async (req, res) => {
-    const firstName = stringValue(req.body?.firstName, 80);
-    const lastName = stringValue(req.body?.lastName, 80);
-    const email = normalizeEmail(req.body?.email);
-    const phone = parseManageUserMobile(req.body?.phone);
-    const password = typeof req.body?.password === "string" ? req.body.password : null;
+    const { fields, firstName, lastName, email, phone, password } = accountFieldErrors(req.body);
     const position = stringValue(req.body?.position, 120) || "";
 
-    if (!firstName || !lastName || !email) {
-      return res.status(400).json({
-        message: "First name, last name, email, and phone are required.",
-      });
-    }
-    if (!phone) {
-      return res.status(400).json({ message: PH_MOBILE_MESSAGE });
-    }
-    if (password && password.length < 10) {
-      return res.status(400).json({
-        message: "Password must be at least 10 characters long.",
-      });
+    if (Object.keys(fields).length) {
+      return rejectAccountFields(res, fields);
     }
 
     const client = await db.connect();
@@ -1229,6 +1259,7 @@ function createAdminPortalRouter({
       staff = userResult.rows[0];
 
       const operationalRole = position || stringValue(req.body?.operationalRole, 120) || "Clinic Staff";
+      await client.query("SAVEPOINT staff_profile");
       try {
         await client.query(
           `INSERT INTO admin_portal_staff_profiles (user_id, operational_role)
@@ -1238,7 +1269,10 @@ function createAdminPortalRouter({
              updated_at = CURRENT_TIMESTAMP`,
           [String(staff.id), operationalRole]
         );
+        await client.query("RELEASE SAVEPOINT staff_profile");
       } catch (profileError) {
+        await client.query("ROLLBACK TO SAVEPOINT staff_profile");
+        await client.query("RELEASE SAVEPOINT staff_profile");
         if (!isMissingRelation(profileError)) {
           throw profileError;
         }
@@ -1322,7 +1356,8 @@ function createAdminPortalRouter({
     const position = stringValue(req.body?.position, 120);
 
     if (req.body?.email !== undefined && !email) {
-      return res.status(400).json({ message: "Provide a valid email address." });
+      const message = emailFieldMessage(req.body.email);
+      return res.status(400).json({ message, fields: { email: message } });
     }
     if (req.body?.phone !== undefined && !phone) {
       return res.status(400).json({ message: PH_MOBILE_MESSAGE });
@@ -1432,26 +1467,22 @@ function createAdminPortalRouter({
   });
 
   router.post("/dentists", async (req, res) => {
-    const firstName = stringValue(req.body?.firstName, 80);
-    const lastName = stringValue(req.body?.lastName, 80);
-    const email = normalizeEmail(req.body?.email);
-    const phone = parseManageUserMobile(req.body?.phone);
-    const password = typeof req.body?.password === "string" ? req.body.password : null;
+    const { fields, firstName, lastName, email, phone, password } = accountFieldErrors(req.body);
     const specialization = stringValue(req.body?.specialization, 180) || "";
     const scheduleNotes = stringValue(req.body?.scheduleNotes, 2000) || "";
     const catalogDentistId = stringValue(req.body?.catalogDentistId, 80) || null;
+    const licenseNumber = stringValue(req.body?.licenseNumber, 80) || "";
+    const licenseVerified = Boolean(req.body?.licenseVerified);
 
-    if (!firstName || !lastName || !email) {
-      return res.status(400).json({
-        message: "First name, last name, email, and phone are required.",
-      });
+    if (Object.keys(fields).length) {
+      return rejectAccountFields(res, fields);
     }
-    if (!phone) {
-      return res.status(400).json({ message: PH_MOBILE_MESSAGE });
-    }
-    if (password && password.length < 10) {
+    if (licenseVerified && !licenseNumber) {
       return res.status(400).json({
-        message: "Password must be at least 10 characters long.",
+        message: "Enter this dentist's own license number before marking it verified. Do not use another dentist's number.",
+        fields: {
+          licenseNumber: "Enter this dentist's own license number before marking it verified. Do not use another dentist's number.",
+        },
       });
     }
 
@@ -1487,12 +1518,33 @@ function createAdminPortalRouter({
       );
       dentist = userResult.rows[0];
 
-      await client.query(
-        `INSERT INTO admin_portal_dentist_profiles (
-           user_id, specialization, schedule_notes, catalog_dentist_id
-         ) VALUES ($1, $2, $3, $4)`,
-        [String(dentist.id), specialization || null, scheduleNotes || null, catalogDentistId]
-      );
+      await client.query("SAVEPOINT dentist_profile");
+      try {
+        await client.query(
+          `INSERT INTO admin_portal_dentist_profiles (
+             user_id, specialization, schedule_notes, catalog_dentist_id, license_number, license_verified
+           ) VALUES ($1, $2, $3, $4, $5, $6)`,
+          [
+            String(dentist.id),
+            specialization || null,
+            scheduleNotes || null,
+            catalogDentistId,
+            licenseNumber || null,
+            licenseVerified,
+          ]
+        );
+        await client.query("RELEASE SAVEPOINT dentist_profile");
+      } catch (profileError) {
+        await client.query("ROLLBACK TO SAVEPOINT dentist_profile");
+        if (profileError.code !== "42703") throw profileError;
+        await client.query(
+          `INSERT INTO admin_portal_dentist_profiles (
+             user_id, specialization, schedule_notes, catalog_dentist_id
+           ) VALUES ($1, $2, $3, $4)`,
+          [String(dentist.id), specialization || null, scheduleNotes || null, catalogDentistId]
+        );
+        await client.query("RELEASE SAVEPOINT dentist_profile");
+      }
 
       await clinicBranches.replacePersonnelAssignments(client, {
         userId: dentist.id,
@@ -1577,7 +1629,8 @@ function createAdminPortalRouter({
     const licenseNumber = licenseProvided ? stringValue(req.body.licenseNumber, 80) || "" : undefined;
 
     if (req.body?.email !== undefined && !email) {
-      return res.status(400).json({ message: "Provide a valid email address." });
+      const message = emailFieldMessage(req.body.email);
+      return res.status(400).json({ message, fields: { email: message } });
     }
     if (req.body?.phone !== undefined && !phone) {
       return res.status(400).json({ message: PH_MOBILE_MESSAGE });

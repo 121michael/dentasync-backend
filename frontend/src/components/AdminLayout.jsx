@@ -17,7 +17,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { AdminConfirmModal, AdminToastStack } from "./AdminUI";
 import { onNotificationsChanged } from "../notificationEvents";
@@ -76,6 +76,7 @@ export function AdminLayout() {
   const location = useLocation();
   const [isOpen, setIsOpen] = useState(false);
   const [toasts, setToasts] = useState([]);
+  const visibleToastKeys = useRef(new Set());
   const [confirmState, setConfirmState] = useState(null);
   const [alerts, setAlerts] = useState({
     pendingAccounts: 0,
@@ -96,9 +97,13 @@ export function AdminLayout() {
   }, [location.pathname]);
 
   const pushToast = useCallback((message, tone = "success") => {
+    const key = `${tone}:${message}`;
+    if (visibleToastKeys.current.has(key)) return;
+    visibleToastKeys.current.add(key);
     const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    setToasts((current) => [...current, { id, message, tone }]);
+    setToasts((current) => [...current, { id, key, message, tone }]);
     window.setTimeout(() => {
+      visibleToastKeys.current.delete(key);
       setToasts((current) => current.filter((toast) => toast.id !== id));
     }, 4200);
   }, []);
@@ -300,7 +305,16 @@ export function AdminLayout() {
           />
         </RoleBottomDock>
 
-        <AdminToastStack toasts={toasts} onDismiss={(id) => setToasts((current) => current.filter((toast) => toast.id !== id))} />
+        <AdminToastStack
+          toasts={toasts}
+          onDismiss={(id) => {
+            setToasts((current) => {
+              const dismissed = current.find((toast) => toast.id === id);
+              if (dismissed?.key) visibleToastKeys.current.delete(dismissed.key);
+              return current.filter((toast) => toast.id !== id);
+            });
+          }}
+        />
         {confirmState ? (
           <AdminConfirmModal
             title={confirmState.title || "Confirm action"}
