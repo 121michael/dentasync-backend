@@ -26,7 +26,10 @@ function attachClinicScheduleRoutes(router, { db }) {
       const defaults = await clinicSchedule.loadDefaults(db);
       const dates = clinicSchedule.datesInMonth(year, month);
       const { start, end } = clinicSchedule.monthDateRange(year, month);
-      const dayMap = await clinicSchedule.loadDayMap(db, start, end);
+      const branchId = await clinicSchedule.mainBranchId(db);
+      const requestedBranch = stringValue(req.query.branchId, 40);
+      const scheduleBranchId = requestedBranch || branchId;
+      const dayMap = await clinicSchedule.loadDayMap(db, start, end, scheduleBranchId);
       const bookedByDate = new Map();
       const unavailableByDate = new Map();
       try {
@@ -36,14 +39,28 @@ function attachClinicScheduleRoutes(router, { db }) {
            WHERE appointment_date >= $1::date
              AND appointment_date <= $2::date
              AND LOWER(COALESCE(status, 'pending')) <> 'cancelled'
+             AND ($3::bigint IS NULL OR branch_id = $3)
            GROUP BY appointment_date`,
-          [start, end]
+          [start, end, scheduleBranchId]
         );
         for (const row of booked.rows) {
           bookedByDate.set(String(row.appointment_date).slice(0, 10), Number.parseInt(row.count, 10) || 0);
         }
       } catch (error) {
-        if (error?.code !== "42P01") throw error;
+        if (error?.code === "42703") {
+          const booked = await db.query(
+            `SELECT appointment_date::text AS appointment_date, COUNT(*) AS count
+             FROM patient_portal_appointments
+             WHERE appointment_date >= $1::date
+               AND appointment_date <= $2::date
+               AND LOWER(COALESCE(status, 'pending')) <> 'cancelled'
+             GROUP BY appointment_date`,
+            [start, end]
+          );
+          for (const row of booked.rows) {
+            bookedByDate.set(String(row.appointment_date).slice(0, 10), Number.parseInt(row.count, 10) || 0);
+          }
+        } else if (error?.code !== "42P01") throw error;
       }
       try {
         const blocked = await db.query(
@@ -52,14 +69,28 @@ function attachClinicScheduleRoutes(router, { db }) {
            WHERE schedule_date >= $1::date
              AND schedule_date <= $2::date
              AND LOWER(status) = 'unavailable'
+             AND ($3::bigint IS NULL OR branch_id = $3)
            GROUP BY schedule_date`,
-          [start, end]
+          [start, end, scheduleBranchId]
         );
         for (const row of blocked.rows) {
           unavailableByDate.set(String(row.schedule_date).slice(0, 10), Number.parseInt(row.count, 10) || 0);
         }
       } catch (error) {
-        if (error?.code !== "42P01") throw error;
+        if (error?.code === "42703") {
+          const blocked = await db.query(
+            `SELECT schedule_date::text AS schedule_date, COUNT(*) AS count
+             FROM clinic_schedule_slots
+             WHERE schedule_date >= $1::date
+               AND schedule_date <= $2::date
+               AND LOWER(status) = 'unavailable'
+             GROUP BY schedule_date`,
+            [start, end]
+          );
+          for (const row of blocked.rows) {
+            unavailableByDate.set(String(row.schedule_date).slice(0, 10), Number.parseInt(row.count, 10) || 0);
+          }
+        } else if (error?.code !== "42P01") throw error;
       }
 
       const days = dates.map((date) => {
@@ -101,12 +132,14 @@ function attachClinicScheduleRoutes(router, { db }) {
     }
     try {
       const defaults = await clinicSchedule.loadDefaults(db);
-      const dayMap = await clinicSchedule.loadDayMap(db, date, date);
+      const scheduleBranchId = stringValue(req.query.branchId, 40) || (await clinicSchedule.mainBranchId(db));
+      const dayMap = await clinicSchedule.loadDayMap(db, date, date, scheduleBranchId);
       const dayRow = dayMap.get(date) || null;
       const hours = clinicSchedule.resolveOperatingHours(date, dayRow, defaults);
-      const savedSlots = await clinicSchedule.loadSlotMap(db, date);
-      const bookedTimes = await clinicSchedule.loadBookedTimes(db, date);
-      const appointments = await clinicSchedule.loadBookedAppointments(db, date);
+      const savedSlots = await clinicSchedule.loadSlotMap(db, date, scheduleBranchId);
+      const bookedTimes = await clinicSchedule.loadBookedTimes(db, date, scheduleBranchId);
+      const dateOnlyCount = await clinicSchedule.loadDateOnlyCount(db, date, scheduleBranchId);
+      const appointments = await clinicSchedule.loadBookedAppointments(db, date, scheduleBranchId);
       return res.json({
         date,
         defaults,
@@ -120,7 +153,7 @@ function attachClinicScheduleRoutes(router, { db }) {
             }
           : null,
         hours,
-        slots: clinicSchedule.buildSlots(hours, defaults, savedSlots, bookedTimes),
+        slots: clinicSchedule.buildSlots(hours, defaults, savedSlots, bookedTimes, dateOnlyCount),
         appointments,
       });
     } catch (error) {
@@ -156,30 +189,60 @@ function attachClinicScheduleRoutes(router, { db }) {
     }
 
     try {
-      const appointments = await clinicSchedule.loadBookedAppointments(db, date);
-      const result = await db.query(
-        `INSERT INTO clinic_schedule_days (
-           schedule_date, mode, is_holiday, open_time, close_time, notes, updated_by, updated_at
-         ) VALUES ($1::date, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
-         ON CONFLICT (schedule_date) DO UPDATE SET
-           mode = EXCLUDED.mode,
-           is_holiday = EXCLUDED.is_holiday,
-           open_time = EXCLUDED.open_time,
-           close_time = EXCLUDED.close_time,
-           notes = EXCLUDED.notes,
-           updated_by = EXCLUDED.updated_by,
-           updated_at = CURRENT_TIMESTAMP
-         RETURNING schedule_date::text AS schedule_date, mode, is_holiday, open_time, close_time, notes`,
-        [
-          date,
-          mode,
-          isHoliday,
-          mode === "custom" ? openTime : null,
-          mode === "custom" ? closeTime : null,
-          notes,
-          String(req.admin.id),
-        ]
-      );
+      const scheduleBranchId = stringValue(req.body?.branchId, 40) || (await clinicSchedule.mainBranchId(db));
+      const appointments = await clinicSchedule.loadBookedAppointments(db, date, scheduleBranchId);
+      let result;
+      try {
+        result = await db.query(
+          `INSERT INTO clinic_schedule_days (
+             branch_id, schedule_date, mode, is_holiday, open_time, close_time, notes, updated_by, updated_at
+           ) VALUES ($1, $2::date, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
+           ON CONFLICT (branch_id, schedule_date) DO UPDATE SET
+             mode = EXCLUDED.mode,
+             is_holiday = EXCLUDED.is_holiday,
+             open_time = EXCLUDED.open_time,
+             close_time = EXCLUDED.close_time,
+             notes = EXCLUDED.notes,
+             updated_by = EXCLUDED.updated_by,
+             updated_at = CURRENT_TIMESTAMP
+           RETURNING schedule_date::text AS schedule_date, mode, is_holiday, open_time, close_time, notes`,
+          [
+            scheduleBranchId,
+            date,
+            mode,
+            isHoliday,
+            mode === "custom" ? openTime : null,
+            mode === "custom" ? closeTime : null,
+            notes,
+            String(req.admin.id),
+          ]
+        );
+      } catch (schemaError) {
+        if (schemaError?.code !== "42703") throw schemaError;
+        result = await db.query(
+          `INSERT INTO clinic_schedule_days (
+             schedule_date, mode, is_holiday, open_time, close_time, notes, updated_by, updated_at
+           ) VALUES ($1::date, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
+           ON CONFLICT (schedule_date) DO UPDATE SET
+             mode = EXCLUDED.mode,
+             is_holiday = EXCLUDED.is_holiday,
+             open_time = EXCLUDED.open_time,
+             close_time = EXCLUDED.close_time,
+             notes = EXCLUDED.notes,
+             updated_by = EXCLUDED.updated_by,
+             updated_at = CURRENT_TIMESTAMP
+           RETURNING schedule_date::text AS schedule_date, mode, is_holiday, open_time, close_time, notes`,
+          [
+            date,
+            mode,
+            isHoliday,
+            mode === "custom" ? openTime : null,
+            mode === "custom" ? closeTime : null,
+            notes,
+            String(req.admin.id),
+          ]
+        );
+      }
 
       await writeAdminAudit(db, {
         actorId: req.admin.id,
@@ -229,18 +292,27 @@ function attachClinicScheduleRoutes(router, { db }) {
 
     try {
       const defaults = await clinicSchedule.loadDefaults(db);
-      const dayMap = await clinicSchedule.loadDayMap(db, date, date);
+      const scheduleBranchId = stringValue(req.body?.branchId, 40) || (await clinicSchedule.mainBranchId(db));
+      const dayMap = await clinicSchedule.loadDayMap(db, date, date, scheduleBranchId);
       const hours = clinicSchedule.resolveOperatingHours(date, dayMap.get(date), defaults);
       if (hours.closed) {
         return res.status(409).json({ message: "The clinic is closed on this date. Open it before setting slots." });
       }
 
       const generated = new Set(clinicSchedule.generateSlotTimes(hours.open, hours.close, defaults.slotMinutes));
-      const bookedTimes = await clinicSchedule.loadBookedTimes(db, date);
+      const bookedTimes = await clinicSchedule.loadBookedTimes(db, date, scheduleBranchId);
       const client = await db.connect();
       try {
         await client.query("BEGIN");
-        await client.query(`DELETE FROM clinic_schedule_slots WHERE schedule_date = $1::date`, [date]);
+        try {
+          await client.query(
+            `DELETE FROM clinic_schedule_slots WHERE schedule_date = $1::date AND branch_id = $2`,
+            [date, scheduleBranchId]
+          );
+        } catch (schemaError) {
+          if (schemaError?.code !== "42703") throw schemaError;
+          await client.query(`DELETE FROM clinic_schedule_slots WHERE schedule_date = $1::date`, [date]);
+        }
         for (const slot of slots) {
           const time = clinicSchedule.normalizeTime(slot?.time);
           const status = String(slot?.status || "available").toLowerCase() === "unavailable"
@@ -248,11 +320,20 @@ function attachClinicScheduleRoutes(router, { db }) {
             : "available";
           if (!time || !generated.has(time)) continue;
           if (bookedTimes.get(time) && status === "unavailable") continue;
-          await client.query(
-            `INSERT INTO clinic_schedule_slots (schedule_date, slot_time, status, updated_by, updated_at)
-             VALUES ($1::date, $2, $3, $4, CURRENT_TIMESTAMP)`,
-            [date, time, status, String(req.admin.id)]
-          );
+          try {
+            await client.query(
+              `INSERT INTO clinic_schedule_slots (branch_id, schedule_date, slot_time, status, updated_by, updated_at)
+               VALUES ($1, $2::date, $3, $4, $5, CURRENT_TIMESTAMP)`,
+              [scheduleBranchId, date, time, status, String(req.admin.id)]
+            );
+          } catch (schemaError) {
+            if (schemaError?.code !== "42703") throw schemaError;
+            await client.query(
+              `INSERT INTO clinic_schedule_slots (schedule_date, slot_time, status, updated_by, updated_at)
+               VALUES ($1::date, $2, $3, $4, CURRENT_TIMESTAMP)`,
+              [date, time, status, String(req.admin.id)]
+            );
+          }
         }
         await client.query("COMMIT");
       } catch (error) {
@@ -273,11 +354,12 @@ function attachClinicScheduleRoutes(router, { db }) {
         result: "success",
       });
 
-      const savedSlots = await clinicSchedule.loadSlotMap(db, date);
+      const savedSlots = await clinicSchedule.loadSlotMap(db, date, scheduleBranchId);
+      const dateOnlyCount = await clinicSchedule.loadDateOnlyCount(db, date, scheduleBranchId);
       return res.json({
         message: "Appointment slots saved.",
         hours,
-        slots: clinicSchedule.buildSlots(hours, defaults, savedSlots, bookedTimes),
+        slots: clinicSchedule.buildSlots(hours, defaults, savedSlots, bookedTimes, dateOnlyCount),
       });
     } catch (error) {
       if (error?.code === "42P01") {

@@ -256,7 +256,11 @@ function mapAppointment(row) {
     dentistId: row.dentist_id,
     dentist: row.dentist_name,
     date: row.appointment_date,
-    time: row.appointment_time,
+    time: row.appointment_time || null,
+    branchId: row.branch_id || null,
+    branchName: row.branch_name || null,
+    branchStatus: row.branch_status || null,
+    reviewReason: row.branch_status === "inactive" ? "branch_inactive" : null,
     location: row.clinic_location,
     status: row.status,
     notes: row.notes || "",
@@ -1982,6 +1986,17 @@ function createAdminPortalRouter({
       params.push(status);
       clauses.push(`LOWER(appointment.status) = $${params.length}`);
     }
+    const branchFilter = stringValue(req.query.branchId, 40);
+    if (branchFilter) {
+      params.push(branchFilter);
+      clauses.push(`appointment.branch_id::text = $${params.length}`);
+    }
+    const review = stringValue(req.query.review, 40);
+    if (review === "inactive-branch") {
+      clauses.push(`appointment.appointment_date >= CURRENT_DATE`);
+      clauses.push(`appointment.status IN ('pending', 'confirmed', 'checked_in')`);
+      clauses.push(`branch.status = 'inactive'`);
+    }
     if (search) {
       params.push(`%${search}%`);
       clauses.push(
@@ -1989,7 +2004,8 @@ function createAdminPortalRouter({
           OR appointment.service_name ILIKE $${params.length}
           OR appointment.dentist_name ILIKE $${params.length}
           OR patient.email ILIKE $${params.length}
-          OR patient.phone ILIKE $${params.length})`
+          OR patient.phone ILIKE $${params.length}
+          OR COALESCE(branch.name, '') ILIKE $${params.length})`
       );
     }
 
@@ -1999,6 +2015,7 @@ function createAdminPortalRouter({
         `SELECT COUNT(*) AS count
          FROM patient_portal_appointments AS appointment
          JOIN users AS patient ON patient.id::text = appointment.user_id
+         LEFT JOIN clinic_branches AS branch ON branch.id = appointment.branch_id
          WHERE ${whereSql}`,
         params
       );
@@ -2008,11 +2025,14 @@ function createAdminPortalRouter({
            appointment.*,
            CONCAT_WS(' ', patient.first_name, patient.last_name) AS patient_name,
            patient.email AS patient_email,
-           patient.phone AS patient_phone
+           patient.phone AS patient_phone,
+           branch.name AS branch_name,
+           branch.status AS branch_status
          FROM patient_portal_appointments AS appointment
          JOIN users AS patient ON patient.id::text = appointment.user_id
+         LEFT JOIN clinic_branches AS branch ON branch.id = appointment.branch_id
          WHERE ${whereSql}
-         ORDER BY appointment.appointment_date DESC, appointment.appointment_time DESC
+         ORDER BY appointment.appointment_date DESC, appointment.appointment_time DESC NULLS LAST
          LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`,
         listParams
       );

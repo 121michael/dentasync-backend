@@ -38,6 +38,7 @@ const dentalWellness = require("../services/dentalWellness");
 const staffWalkInQr = require("../services/staffWalkInQr");
 const staffRfidEvents = require("../services/staffRfidEvents");
 const clinicSchedule = require("../services/clinicSchedule");
+const patientBranchBooking = require("../services/patientBranchBooking");
 const accountDependents = require("../services/accountDependents");
 const patientAiConversations = require("../services/patientAiConversations");
 const { resolveAppSecrets } = require("../lib/securityConfig");
@@ -438,6 +439,11 @@ function mapAppointment(appointment, queueStatus) {
     service: appointment.service_name,
     date: normalizeIsoDate(appointment.appointment_date),
     time: normalizeTime(appointment.appointment_time),
+    branchId: appointment.branch_id || null,
+    branchName: appointment.branch_name || null,
+    branchCode: appointment.branch_code || null,
+    branchStatus: appointment.branch_status || null,
+    branchIsMain: appointment.is_main == null ? null : Boolean(appointment.is_main),
     location: appointment.clinic_location,
     coverage: appointment.coverage_type,
     coverageType: appointment.coverage_type,
@@ -629,26 +635,28 @@ function createPatientPortalRouter({
     });
   });
 
+  router.get("/branches", async (_req, res) => {
+    try {
+      return res.json(await patientBranchBooking.publicBranchChoices(db));
+    } catch (error) {
+      console.error("Patient branches error:", error.message);
+      return res.status(500).json({ message: "Unable to load clinic branches." });
+    }
+  });
+
   router.get("/availability", async (req, res) => {
     const date = stringValue(req.query.date, 10);
     if (!clinicSchedule.isIsoDate(date)) {
       return res.status(400).json({ message: "Provide a valid appointment date." });
     }
     try {
-      const defaults = await clinicSchedule.loadDefaults(db);
-      const dayMap = await clinicSchedule.loadDayMap(db, date, date);
-      const hours = clinicSchedule.resolveOperatingHours(date, dayMap.get(date), defaults);
-      const savedSlots = await clinicSchedule.loadSlotMap(db, date);
-      const bookedTimes = await clinicSchedule.loadBookedTimes(db, date);
-      const slots = clinicSchedule.buildSlots(hours, defaults, savedSlots, bookedTimes);
-      return res.json({
+      const availability = await patientBranchBooking.availabilityForBranch(db, {
         date,
-        closed: hours.closed,
-        hours,
-        slots,
-        availableTimes: slots.filter((slot) => slot.bookable).map((slot) => slot.time),
+        branchId: req.query.branchId,
       });
+      return res.json(availability);
     } catch (error) {
+      if (error.status) return res.status(error.status).json({ message: error.message });
       console.error("Patient availability error:", error.message);
       return res.status(500).json({ message: "Unable to load appointment availability." });
     }
@@ -962,8 +970,13 @@ function createPatientPortalRouter({
 
     try {
       const result = await db.query(
-        `SELECT appointments.*
+        `SELECT appointments.*,
+                branch.name AS branch_name,
+                branch.branch_code,
+                branch.status AS branch_status,
+                branch.is_main
          FROM patient_portal_appointments AS appointments
+         LEFT JOIN clinic_branches AS branch ON branch.id = appointments.branch_id
          WHERE (
            appointments.user_id = $1
            OR appointments.user_id IN (
@@ -975,7 +988,7 @@ function createPatientPortalRouter({
                AND removed_at IS NULL
            )
          )${statusClause}
-         ORDER BY appointments.appointment_date DESC, appointments.appointment_time DESC`,
+         ORDER BY appointments.appointment_date DESC, appointments.appointment_time DESC NULLS LAST`,
         params
       );
 
@@ -1009,8 +1022,13 @@ function createPatientPortalRouter({
       if (error?.code === "42703") {
         try {
           const fallback = await db.query(
-            `SELECT appointments.*
+            `SELECT appointments.*,
+                    branch.name AS branch_name,
+                    branch.branch_code,
+                    branch.status AS branch_status,
+                    branch.is_main
              FROM patient_portal_appointments AS appointments
+             LEFT JOIN clinic_branches AS branch ON branch.id = appointments.branch_id
              WHERE (
                appointments.user_id = $1
                OR appointments.user_id IN (
@@ -1021,7 +1039,7 @@ function createPatientPortalRouter({
                    AND LOWER(COALESCE(approval_status, 'approved')) = 'approved'
                )
              )${statusClause}
-             ORDER BY appointments.appointment_date DESC, appointments.appointment_time DESC`,
+             ORDER BY appointments.appointment_date DESC, appointments.appointment_time DESC NULLS LAST`,
             params
           );
           return res.json({ appointments: fallback.rows.map(mapAppointment) });
@@ -1034,10 +1052,15 @@ function createPatientPortalRouter({
         // Dependents table missing — fall back to self-only appointments.
         try {
           const fallback = await db.query(
-            `SELECT *
-             FROM patient_portal_appointments
-             WHERE user_id = $1${fallbackStatusClause}
-             ORDER BY appointment_date DESC, appointment_time DESC`,
+            `SELECT appointments.*,
+                    branch.name AS branch_name,
+                    branch.branch_code,
+                    branch.status AS branch_status,
+                    branch.is_main
+             FROM patient_portal_appointments AS appointments
+             LEFT JOIN clinic_branches AS branch ON branch.id = appointments.branch_id
+             WHERE appointments.user_id = $1${fallbackStatusClause.replaceAll("status", "appointments.status")}
+             ORDER BY appointments.appointment_date DESC, appointments.appointment_time DESC NULLS LAST`,
             params
           );
           return res.json({ appointments: fallback.rows.map(mapAppointment) });
@@ -1077,7 +1100,8 @@ function createPatientPortalRouter({
 
     const service = SERVICES.find((item) => item.id === serviceId);
     const normalizedCoverage = coverageType === "hmo" ? "hmo" : coverageType === "self_pay" ? "self_pay" : null;
-    const normalizedAppointmentTime = normalizeTime(appointmentTime);
+    const requestedTime = appointmentTime == null || String(appointmentTime).trim() === "" ? null : String(appointmentTime);
+    const normalizedAppointmentTime = requestedTime == null ? null : normalizeTime(requestedTime);
 
     if (!isPublicBookableService(service)) {
       return res.status(400).json({ message: "Please select a treatment." });
@@ -1085,8 +1109,8 @@ function createPatientPortalRouter({
     if (!isIsoDate(appointmentDate)) {
       return res.status(400).json({ message: "Please choose a valid appointment date." });
     }
-    if (!normalizedAppointmentTime) {
-      return res.status(400).json({ message: "Please choose an appointment time." });
+    if (requestedTime != null && !normalizedAppointmentTime) {
+      return res.status(400).json({ message: "Please choose a valid appointment time or leave it blank." });
     }
     if (!normalizedCoverage) {
       return res.status(400).json({ message: "Please choose a coverage option." });
@@ -1094,26 +1118,6 @@ function createPatientPortalRouter({
 
     if (isPastDate(appointmentDate)) {
       return res.status(400).json({ message: "Appointments must be scheduled for a future date." });
-    }
-
-    try {
-      const defaults = await clinicSchedule.loadDefaults(db);
-      const dayMap = await clinicSchedule.loadDayMap(db, appointmentDate, appointmentDate);
-      const hours = clinicSchedule.resolveOperatingHours(appointmentDate, dayMap.get(appointmentDate), defaults);
-      const savedSlots = await clinicSchedule.loadSlotMap(db, appointmentDate);
-      const bookedTimes = await clinicSchedule.loadBookedTimes(db, appointmentDate);
-      if (hours.closed) {
-        return res.status(400).json({ message: "The clinic is closed on that date. Please choose another day." });
-      }
-      if (!clinicSchedule.isSlotBookable(hours, defaults, savedSlots, bookedTimes, normalizedAppointmentTime)) {
-        return res.status(400).json({
-          message: "That time is outside clinic hours or is not available. Please choose another slot.",
-        });
-      }
-    } catch (scheduleError) {
-      if (scheduleError?.code !== "42P01") {
-        console.warn("Clinic schedule booking check skipped:", scheduleError.message);
-      }
     }
 
     const normalizedProvider = stringValue(hmoProvider, 120);
@@ -1177,51 +1181,6 @@ function createPatientPortalRouter({
         }
       }
 
-      // Patients no longer pick a preferred dentist; assign the first available
-      // clinician for the requested slot (falls back to the first catalog dentist).
-      let dentist =
-        dentistId && DENTISTS.find((item) => item.id === dentistId)
-          ? DENTISTS.find((item) => item.id === dentistId)
-          : null;
-
-      if (!dentist) {
-        for (const candidate of DENTISTS) {
-          const conflict = await db.query(
-            `SELECT id
-             FROM patient_portal_appointments
-             WHERE dentist_id = $1
-               AND appointment_date = $2
-               AND appointment_time = $3
-               AND status <> 'cancelled'
-             LIMIT 1`,
-            [candidate.id, appointmentDate, normalizedAppointmentTime]
-          );
-          if (conflict.rows.length === 0) {
-            dentist = candidate;
-            break;
-          }
-        }
-        dentist = dentist || DENTISTS[0];
-      }
-
-      if (!dentist) {
-        return res.status(503).json({ message: "No dentists are available for booking right now." });
-      }
-
-      const conflict = await db.query(
-        `SELECT id
-         FROM patient_portal_appointments
-         WHERE dentist_id = $1
-           AND appointment_date = $2
-           AND appointment_time = $3
-           AND status <> 'cancelled'
-         LIMIT 1`,
-        [dentist.id, appointmentDate, normalizedAppointmentTime]
-      );
-      if (conflict.rows.length > 0) {
-        return res.status(409).json({ message: "That time was just booked. Please choose another available slot." });
-      }
-
       const bookingNote =
         userId !== guardianUserId || isActingAsDependent(req)
           ? [stringValue(notes, 1100), `(Booked by guardian account ${guardianUserId})`]
@@ -1230,35 +1189,35 @@ function createPatientPortalRouter({
               .slice(0, 1200)
           : stringValue(notes, 1200);
 
-      const result = await db.query(
-        `INSERT INTO patient_portal_appointments (
-           user_id, service_id, service_name, dentist_id, dentist_name,
-           appointment_date, appointment_time, coverage_type, hmo_provider,
-           hmo_member_number, hmo_company_name, hmo_birth_date, hmo_verification_status,
-           authorization_document_id, estimated_cost, notes, status
-         ) VALUES (
-           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 'pending'
-         )
-         RETURNING *`,
-        [
-          userId,
-          service.id,
-          service.name,
-          dentist.id,
-          dentist.name,
-          appointmentDate,
-          normalizedAppointmentTime,
-          normalizedCoverage,
-          normalizedCoverage === "hmo" ? normalizedProvider : null,
-          normalizedCoverage === "hmo" ? normalizedMemberNumber : null,
-          normalizedCoverage === "hmo" ? normalizedCompanyName : null,
-          normalizedCoverage === "hmo" ? normalizedBirthDate : null,
-          hmoVerificationStatus,
-          authorizationDocumentId || null,
-          service.estimatedCost,
-          bookingNote,
-        ]
-      );
+      const explicitDentist =
+        dentistId && DENTISTS.find((item) => item.id === dentistId)
+          ? DENTISTS.find((item) => item.id === dentistId)
+          : null;
+      const booked = await patientBranchBooking.createBooking(db, {
+        userId,
+        service,
+        appointmentDate,
+        appointmentTime: normalizedAppointmentTime,
+        coverageType: normalizedCoverage,
+        hmoProvider: normalizedCoverage === "hmo" ? normalizedProvider : null,
+        hmoMemberNumber: normalizedCoverage === "hmo" ? normalizedMemberNumber : null,
+        hmoCompanyName: normalizedCoverage === "hmo" ? normalizedCompanyName : null,
+        hmoBirthDate: normalizedCoverage === "hmo" ? normalizedBirthDate : null,
+        hmoVerificationStatus,
+        authorizationDocumentId: authorizationDocumentId || null,
+        notes: bookingNote,
+        branchId: req.body?.branchId,
+        dentist: explicitDentist,
+        catalog: DENTISTS,
+      });
+      const savedAppointment = {
+        ...booked.appointment,
+        branch_name: booked.branch?.name || null,
+        branch_code: booked.branch?.branchId || null,
+        branch_status: booked.branch?.status || null,
+        is_main: booked.branch?.isMain ?? null,
+      };
+      const when = patientBranchBooking.schedulePhrase(appointmentDate, normalizedAppointmentTime);
 
       if (medicalDocumentId) {
         try {
@@ -1268,7 +1227,7 @@ function createPatientPortalRouter({
              WHERE id = $2
                AND user_id = $3
                AND document_type = $4`,
-            [result.rows[0].id, medicalDocumentId, userId, medicalDocuments.DOCUMENT_TYPE]
+            [savedAppointment.id, medicalDocumentId, userId, medicalDocuments.DOCUMENT_TYPE]
           );
         } catch (linkError) {
           if (linkError.code !== "42703") {
@@ -1281,18 +1240,18 @@ function createPatientPortalRouter({
         userId,
         type: "appointment",
         title: "Appointment request received",
-        body: `${service.name} with ${dentist.name} on ${appointmentDate} at ${appointmentTime} is waiting for clinic confirmation.`,
+        body: `${service.name} with ${savedAppointment.dentist_name} on ${when} is waiting for clinic confirmation.`,
         entityType: "appointment",
-        entityId: result.rows[0].id,
+        entityId: savedAppointment.id,
       });
       if (userId !== guardianUserId) {
         await insertPatientNotification(db, {
           userId: guardianUserId,
           type: "appointment",
           title: "Dependent appointment submitted",
-          body: `You booked ${service.name} for a linked dependent on ${appointmentDate} at ${appointmentTime}.`,
+          body: `You booked ${service.name} for a linked dependent on ${when}.`,
           entityType: "appointment",
-          entityId: result.rows[0].id,
+          entityId: savedAppointment.id,
         });
       }
       const patientNameResult = await db.query(
@@ -1303,29 +1262,29 @@ function createPatientPortalRouter({
         [userId]
       );
       const patientName = String(patientNameResult.rows[0]?.full_name || "").trim() || "a patient";
-      const appointmentId = result.rows[0].id;
+      const appointmentId = savedAppointment.id;
       await notifyClinicStaff({
         type: "appointment",
         title: "New Appointment Request",
-        body: `New appointment booking from ${patientName}. ${service.name} on ${appointmentDate} at ${appointmentTime}.`,
+        body: `New appointment booking from ${patientName}. ${service.name} on ${when}.`,
         entityType: "appointment",
         entityId: appointmentId,
       });
       await notifyClinicAdmins({
         type: "appointment",
         title: "New Appointment Request",
-        body: `New appointment booking from ${patientName}. ${service.name} on ${appointmentDate} at ${appointmentTime}.`,
+        body: `New appointment booking from ${patientName}. ${service.name} on ${when}.`,
         entityType: "appointment",
         entityId: appointmentId,
       });
       await notifyClinicDentists({
         type: "appointment",
         title: "New Appointment Request",
-        body: `New appointment booking from ${patientName}. ${service.name} on ${appointmentDate} at ${appointmentTime}.`,
+        body: `New appointment booking from ${patientName}. ${service.name} on ${when}.`,
         entityType: "appointment",
         entityId: appointmentId,
-        dentistId: dentist.id,
-        dentistName: dentist.name,
+        dentistId: savedAppointment.dentist_id,
+        dentistName: savedAppointment.dentist_name,
       });
 
       return res.status(201).json({
@@ -1333,7 +1292,7 @@ function createPatientPortalRouter({
           userId !== actorUserId
             ? "Dependent appointment request was submitted for clinic confirmation."
             : "Your appointment request was submitted for clinic confirmation.",
-        appointment: mapAppointment(result.rows[0]),
+        appointment: mapAppointment(savedAppointment),
       });
     } catch (error) {
       if (error.status) {
@@ -1422,14 +1381,14 @@ function createPatientPortalRouter({
       await notifyClinicStaff({
         type: "appointment",
         title: "Appointment cancellation",
-        body: `A patient cancelled ${result.rows[0].service_name} scheduled for ${result.rows[0].appointment_date} at ${String(result.rows[0].appointment_time).slice(0, 5)}.`,
+        body: `A patient cancelled ${result.rows[0].service_name} scheduled for ${patientBranchBooking.schedulePhrase(result.rows[0].appointment_date, result.rows[0].appointment_time)}.`,
         entityType: "appointment",
         entityId: result.rows[0].id,
       });
       await notifyClinicDentists({
         type: "appointment",
         title: "Appointment cancellation",
-        body: `A patient cancelled ${result.rows[0].service_name} scheduled for ${result.rows[0].appointment_date} at ${String(result.rows[0].appointment_time).slice(0, 5)}.`,
+        body: `A patient cancelled ${result.rows[0].service_name} scheduled for ${patientBranchBooking.schedulePhrase(result.rows[0].appointment_date, result.rows[0].appointment_time)}.`,
         entityType: "appointment",
         entityId: result.rows[0].id,
         dentistId: result.rows[0].dentist_id,
@@ -1458,17 +1417,31 @@ function createPatientPortalRouter({
   router.post("/appointments/:id/reschedule", async (req, res) => {
     const actorUserId = userIdFor(req);
     const appointmentDate = stringValue(req.body?.appointmentDate, 10);
-    const appointmentTime = clinicSchedule.normalizeTime(req.body?.appointmentTime);
-    if (!clinicSchedule.isIsoDate(appointmentDate) || !appointmentTime) {
-      return res.status(400).json({ message: "Choose a valid date and available time." });
+    const requestedTime = req.body?.appointmentTime == null || String(req.body.appointmentTime).trim() === ""
+      ? null
+      : String(req.body.appointmentTime);
+    const appointmentTime = requestedTime == null ? null : clinicSchedule.normalizeTime(requestedTime);
+    if (!clinicSchedule.isIsoDate(appointmentDate) || (requestedTime != null && !appointmentTime)) {
+      return res.status(400).json({ message: "Choose a valid date. A preferred time is optional." });
+    }
+    if (req.body?.branchId != null && String(req.body.branchId).trim() !== "") {
+      // Branch changes are rejected after the appointment is loaded.
     }
 
-    const client = await db.connect();
-    let transactionOpen = false;
     try {
       const current = await loadOwnedAppointment(req.params.id, actorUserId);
       if (!current) {
         return res.status(404).json({ message: "Appointment not found." });
+      }
+      if (
+        req.body?.branchId != null &&
+        String(req.body.branchId).trim() !== "" &&
+        current.branch_id != null &&
+        String(req.body.branchId) !== String(current.branch_id)
+      ) {
+        return res.status(409).json({
+          message: "Rescheduling stays at the original clinic branch.",
+        });
       }
       const queue = await appointmentLifecycle.loadActiveQueueForAppointment(db, current.id);
       if (!appointmentLifecycle.canPatientReschedule(current.status, queue?.status)) {
@@ -1486,139 +1459,19 @@ function createPatientPortalRouter({
         return res.status(400).json({ message: "Choose a different date or time to reschedule." });
       }
 
-      const defaults = await clinicSchedule.loadDefaults(db);
-      const dayMap = await clinicSchedule.loadDayMap(db, appointmentDate, appointmentDate);
-      const hours = clinicSchedule.resolveOperatingHours(appointmentDate, dayMap.get(appointmentDate), defaults);
-      const savedSlots = await clinicSchedule.loadSlotMap(db, appointmentDate);
-      const bookedTimes = await clinicSchedule.loadBookedTimes(db, appointmentDate);
-      if (hours.closed || !clinicSchedule.isSlotBookable(hours, defaults, savedSlots, bookedTimes, appointmentTime)) {
-        return res.status(409).json({
-          message: "That time is outside clinic hours or is no longer available. Please choose another slot.",
-        });
-      }
-
-      await client.query("BEGIN");
-      transactionOpen = true;
-
-      const conflict = await client.query(
-        `SELECT id
-         FROM patient_portal_appointments
-         WHERE dentist_id = $1
-           AND appointment_date = $2
-           AND appointment_time = $3
-           AND id <> $4
-           AND status NOT IN ('cancelled', 'no_show', 'rescheduled')
-         LIMIT 1`,
-        [current.dentist_id, appointmentDate, appointmentTime, current.id]
-      );
-      if (conflict.rows.length) {
-        await client.query("ROLLBACK");
-        transactionOpen = false;
-        return res.status(409).json({
-          message: "That time was just booked. Please choose another available slot.",
-        });
-      }
-
-      let inserted;
-      const nextStatus = current.status === "pending" ? "pending" : "confirmed";
-      try {
-        inserted = await client.query(
-          `INSERT INTO patient_portal_appointments (
-             user_id, service_id, service_name, dentist_id, dentist_name,
-             appointment_date, appointment_time, coverage_type, hmo_provider,
-             hmo_member_number, hmo_company_name, hmo_birth_date, hmo_verification_status,
-             authorization_document_id, estimated_cost, notes, status, clinic_location,
-             rescheduled_from_id
-           ) VALUES (
-             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-             $17, $18, $19
-           )
-           RETURNING *`,
-          [
-            current.user_id,
-            current.service_id,
-            current.service_name,
-            current.dentist_id,
-            current.dentist_name,
-            appointmentDate,
-            appointmentTime,
-            current.coverage_type,
-            current.hmo_provider,
-            current.hmo_member_number,
-            current.hmo_company_name,
-            current.hmo_birth_date,
-            current.hmo_verification_status,
-            current.authorization_document_id,
-            current.estimated_cost,
-            current.notes,
-            nextStatus,
-            current.clinic_location,
-            current.id,
-          ]
-        );
-      } catch (schemaError) {
-        if (schemaError.code !== "42703") throw schemaError;
-        inserted = await client.query(
-          `INSERT INTO patient_portal_appointments (
-             user_id, service_id, service_name, dentist_id, dentist_name,
-             appointment_date, appointment_time, coverage_type, hmo_provider,
-             hmo_member_number, authorization_document_id, estimated_cost, notes, status
-           ) VALUES (
-             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
-           )
-           RETURNING *`,
-          [
-            current.user_id,
-            current.service_id,
-            current.service_name,
-            current.dentist_id,
-            current.dentist_name,
-            appointmentDate,
-            appointmentTime,
-            current.coverage_type,
-            current.hmo_provider,
-            current.hmo_member_number,
-            current.authorization_document_id,
-            current.estimated_cost,
-            current.notes,
-            nextStatus,
-          ]
-        );
-      }
-
-      let original;
-      try {
-        original = await client.query(
-          `UPDATE patient_portal_appointments
-           SET status = 'rescheduled',
-               rescheduled_to_id = $2,
-               updated_at = CURRENT_TIMESTAMP
-           WHERE id = $1
-           RETURNING *`,
-          [current.id, inserted.rows[0].id]
-        );
-      } catch (schemaError) {
-        if (schemaError.code !== "42703") throw schemaError;
-        original = await client.query(
-          `UPDATE patient_portal_appointments
-           SET status = 'cancelled',
-               notes = LEFT(CONCAT_WS(E'\n', NULLIF(notes, ''), 'Rescheduled to a new visit.'), 1200),
-               updated_at = CURRENT_TIMESTAMP
-           WHERE id = $1
-           RETURNING *`,
-          [current.id]
-        );
-      }
-
-      await client.query("COMMIT");
-      transactionOpen = false;
+      const saved = await patientBranchBooking.rescheduleBooking(db, {
+        current,
+        appointmentDate,
+        appointmentTime,
+        catalog: DENTISTS,
+      });
       await appointmentLifecycle.closeQueueForAppointment(db, current.id, "no_show");
 
       if (clinicSms?.handleAppointmentEvent) {
         clinicSms
           .handleAppointmentEvent({
-            appointment: inserted.rows[0],
-            previous: original.rows[0],
+            appointment: saved.appointment,
+            previous: saved.original,
             action: "reschedule",
             actorRole: "patient",
             actorId: actorUserId,
@@ -1626,28 +1479,29 @@ function createPatientPortalRouter({
           .catch((smsError) => console.warn("Patient reschedule SMS failed:", smsError.message));
       }
 
-      const nextAppointment = mapAppointment(inserted.rows[0]);
+      const when = patientBranchBooking.schedulePhrase(appointmentDate, appointmentTime);
+      const nextAppointment = mapAppointment(saved.appointment);
       await notifyClinicStaff({
         type: "appointment",
         title: "Appointment rescheduled",
-        body: `A patient rescheduled ${current.service_name} to ${appointmentDate} at ${appointmentTime}.`,
+        body: `A patient rescheduled ${current.service_name} to ${when}.`,
         entityType: "appointment",
         entityId: nextAppointment.id,
       });
       return res.json({
-        message: `${current.service_name} was rescheduled to ${appointmentDate} at ${appointmentTime}.`,
+        message: `${current.service_name} was rescheduled to ${when}.`,
         appointment: nextAppointment,
-        originalAppointment: mapAppointment(original.rows[0]),
+        originalAppointment: mapAppointment(saved.original),
       });
     } catch (error) {
-      if (transactionOpen) await client.query("ROLLBACK");
+      if (error.status) {
+        return res.status(error.status).json({ message: error.message });
+      }
       if (error?.code === "23505") {
         return res.status(409).json({ message: "That time was just booked. Please choose another available slot." });
       }
       console.error("Reschedule appointment error:", error.message);
       return res.status(500).json({ message: "Unable to reschedule the appointment." });
-    } finally {
-      client.release();
     }
   });
 
@@ -1655,22 +1509,24 @@ function createPatientPortalRouter({
     const userId = userIdFor(req);
 
     try {
-      const [currentResult, nowServingResult, preferenceResult] = await Promise.all([
-        db.query(
-          `SELECT id, token, position, status, estimated_wait_minutes, checked_in_at, check_in_method, appointment_id,
-                  wait_estimate_min_minutes, wait_estimate_max_minutes, wait_estimate_duration_minutes,
-                  wait_estimate_call_start, wait_estimate_call_end, wait_estimate_at
-           FROM patient_portal_queue_entries
-           WHERE user_id = $1
-             AND DATE(checked_in_at) = CURRENT_DATE
-             AND status NOT IN ('completed', 'no_show')
-           ORDER BY checked_in_at DESC
+      const currentResult = await db.query(
+          `SELECT queue.id, queue.token, queue.position, queue.status, queue.estimated_wait_minutes,
+                  queue.checked_in_at, queue.check_in_method, queue.appointment_id, queue.branch_id,
+                  branch.name AS branch_name,
+                  queue.wait_estimate_min_minutes, queue.wait_estimate_max_minutes, queue.wait_estimate_duration_minutes,
+                  queue.wait_estimate_call_start, queue.wait_estimate_call_end, queue.wait_estimate_at
+           FROM patient_portal_queue_entries AS queue
+           LEFT JOIN clinic_branches AS branch ON branch.id = queue.branch_id
+           WHERE queue.user_id = $1
+             AND DATE(queue.checked_in_at) = CURRENT_DATE
+             AND queue.status NOT IN ('completed', 'no_show')
+           ORDER BY queue.checked_in_at DESC
            LIMIT 1`,
           [userId]
         ).catch(async (error) => {
-          if (error.code !== "42703") throw error;
+          if (error.code !== "42703" && error.code !== "42P01") throw error;
           return db.query(
-            `SELECT id, token, position, status, estimated_wait_minutes, checked_in_at
+            `SELECT id, token, position, status, estimated_wait_minutes, checked_in_at, appointment_id
              FROM patient_portal_queue_entries
              WHERE user_id = $1
                AND DATE(checked_in_at) = CURRENT_DATE
@@ -1679,15 +1535,32 @@ function createPatientPortalRouter({
              LIMIT 1`,
             [userId]
           );
-        }),
-        db.query(
+        });
+      const currentPreview = currentResult.rows[0] || null;
+      const [nowServingResult, preferenceResult] = await Promise.all([
+        currentPreview
+          ? db.query(
           `SELECT token
            FROM patient_portal_queue_entries
            WHERE DATE(checked_in_at) = CURRENT_DATE
              AND status = 'dentist'
+             AND ($1::bigint IS NULL OR branch_id = $1)
            ORDER BY updated_at DESC NULLS LAST, position ASC
-           LIMIT 1`
-        ),
+           LIMIT 1`,
+          [currentPreview.branch_id || null]
+        ).catch(async (error) => {
+          if (error.code !== "42703") throw error;
+          if (!currentPreview) return { rows: [] };
+          return db.query(
+            `SELECT token
+             FROM patient_portal_queue_entries
+             WHERE DATE(checked_in_at) = CURRENT_DATE
+               AND status = 'dentist'
+             ORDER BY updated_at DESC NULLS LAST, position ASC
+             LIMIT 1`
+          );
+        })
+          : Promise.resolve({ rows: [] }),
         db.query(
           `SELECT notify_queue
            FROM patient_portal_preferences
@@ -1750,6 +1623,8 @@ function createPatientPortalRouter({
                 queueStatus: current.status,
               }),
               appointmentId: current.appointment_id || null,
+              branchId: current.branch_id || null,
+              branchName: current.branch_name || null,
               steps: queueSteps(current.status),
             }
           : null,
@@ -1788,11 +1663,18 @@ function createPatientPortalRouter({
       transactionOpen = true;
       await client.query("SELECT pg_advisory_xact_lock(hashtext('patient_portal_queue'))");
 
-      const appointment = await staffCheckIn.findAppointmentForCheckIn(client, { appointmentId, branchId: "main" });
+      const appointment = await staffCheckIn.findAppointmentForCheckIn(client, { appointmentId });
       if (!appointment || String(appointment.user_id) !== String(userId)) {
         await client.query("ROLLBACK");
         transactionOpen = false;
         return res.status(404).json({ message: "A confirmed appointment was not found." });
+      }
+      if (!appointment.branch_id) {
+        await client.query("ROLLBACK");
+        transactionOpen = false;
+        return res.status(409).json({
+          message: "This appointment has no clinic branch on file. Please check in at the staffed desk.",
+        });
       }
 
       const checkIn = await staffCheckIn.performStaffCheckIn(client, {
@@ -1801,7 +1683,7 @@ function createPatientPortalRouter({
         notifyClinicStaff,
         notifyClinicDentists,
         checkInMethod: "portal",
-        branchId: "main",
+        branchId: appointment.branch_id,
       });
 
       await client.query("COMMIT");

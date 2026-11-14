@@ -325,7 +325,7 @@ function fileKindLabel(name, mime) {
   return "Document";
 }
 
-function validateBooking(form, { selectedServicePrice, availability, throughStep }) {
+function validateBooking(form, { selectedServicePrice, availability, throughStep, branchChoices, availabilityLoading, availabilityError }) {
   if (throughStep >= 1) {
     if (!form.serviceId) {
       return { step: 1, message: "Select a dental service before continuing." };
@@ -338,18 +338,34 @@ function validateBooking(form, { selectedServicePrice, availability, throughStep
     }
   }
   if (throughStep >= 2) {
+    if (branchChoices && !branchChoices.legacy && !(branchChoices.branches || []).length) {
+      return {
+        step: 2,
+        message: "No clinic branches are currently available for appointment booking. Please contact the clinic.",
+      };
+    }
+    if (branchChoices?.requiresSelection && !form.branchId) {
+      return { step: 2, message: "Select Clinic Branch." };
+    }
     if (!form.appointmentDate) {
       return { step: 2, message: "Choose an appointment date." };
+    }
+    if (availabilityLoading) {
+      return { step: 2, message: "Appointment availability is still loading." };
+    }
+    if (availabilityError) {
+      return { step: 2, message: availabilityError };
     }
     if (availability?.closed) {
       return { step: 2, message: `The clinic is closed on ${displayDate(form.appointmentDate)}. Choose another date.` };
     }
-    if (!form.appointmentTime) {
-      return { step: 2, message: "Choose an available appointment time." };
-    }
-    const bookable = availability?.availableTimes || [];
-    if (availability && bookable.length && !bookable.includes(form.appointmentTime)) {
-      return { step: 2, message: "That time is no longer available. Choose another appointment slot." };
+    if (form.appointmentTime) {
+      const bookable = availability?.availableTimes || [];
+      if (availability && !bookable.includes(form.appointmentTime)) {
+        return { step: 2, message: "That time is no longer available. Choose another appointment slot." };
+      }
+    } else if (availability && availability.dateOnlyBookable === false) {
+      return { step: 2, message: "That date is fully booked. Choose another date or a preferred time that is still open." };
     }
   }
   if (throughStep >= 3) {
@@ -390,9 +406,16 @@ export function AppointmentsPage() {
   const [loaded, setLoaded] = useState(false);
   const [timePeriod, setTimePeriod] = useState("Morning");
   const [availability, setAvailability] = useState(null);
+  const [availabilityLoading, setAvailabilityLoading] = useState(false);
+  const [availabilityError, setAvailabilityError] = useState("");
+  const [branchChoices, setBranchChoices] = useState(null);
+  const [branchesLoading, setBranchesLoading] = useState(false);
+  const [branchesError, setBranchesError] = useState("");
+  const availabilityRequest = useRef(0);
   const [form, setForm] = useState({
     serviceId: "",
     bracesOption: "",
+    branchId: "",
     appointmentDate: tomorrow(),
     appointmentTime: "",
     coverageType: "self_pay",
@@ -453,15 +476,54 @@ export function AppointmentsPage() {
   }, [load]);
 
   useEffect(() => {
-    if (!isBooking || !form.appointmentDate) {
-      setAvailability(null);
-      return undefined;
-    }
+    if (!isBooking) return undefined;
     let active = true;
+    setBranchesLoading(true);
+    setBranchesError("");
     api
-      .getAppointmentAvailability(form.appointmentDate)
+      .getBookingBranches()
       .then((response) => {
         if (!active) return;
+        setBranchChoices(response);
+        const only = response.autoSelectedBranchId;
+        if (only) {
+          setForm((current) => ({ ...current, branchId: String(only) }));
+        }
+      })
+      .catch((loadError) => {
+        if (!active) return;
+        setBranchesError(loadError.message || "Unable to load clinic branches.");
+      })
+      .finally(() => {
+        if (active) setBranchesLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [isBooking]);
+
+  useEffect(() => {
+    if (!isBooking || !form.appointmentDate) {
+      setAvailability(null);
+      setAvailabilityLoading(false);
+      return undefined;
+    }
+    const needsBranch = branchChoices?.requiresSelection && !form.branchId;
+    const noBranches = branchChoices && !branchChoices.legacy && !(branchChoices.branches || []).length;
+    if (!branchChoices || branchesLoading || needsBranch || noBranches) {
+      setAvailability(null);
+      setAvailabilityLoading(false);
+      return undefined;
+    }
+    const requestId = availabilityRequest.current + 1;
+    availabilityRequest.current = requestId;
+    setAvailabilityLoading(true);
+    setAvailabilityError("");
+    setAvailability(null);
+    api
+      .getAppointmentAvailability(form.appointmentDate, form.branchId || undefined)
+      .then((response) => {
+        if (requestId !== availabilityRequest.current) return;
         setAvailability(response);
         const bookable = new Set(response.availableTimes || []);
         setForm((current) =>
@@ -474,13 +536,16 @@ export function AppointmentsPage() {
         );
         setTimePeriod((current) => (periods.includes(current) ? current : periods[0] || current));
       })
-      .catch(() => {
-        if (active) setAvailability(null);
+      .catch((loadError) => {
+        if (requestId !== availabilityRequest.current) return;
+        setAvailability(null);
+        setAvailabilityError(loadError.message || "Unable to load appointment availability.");
+      })
+      .finally(() => {
+        if (requestId === availabilityRequest.current) setAvailabilityLoading(false);
       });
-    return () => {
-      active = false;
-    };
-  }, [form.appointmentDate, isBooking]);
+    return undefined;
+  }, [form.appointmentDate, form.branchId, isBooking, branchChoices, branchesLoading]);
 
   useEffect(() => {
     const focus = searchParams.get("focus");
@@ -569,6 +634,9 @@ export function AppointmentsPage() {
         selectedServicePrice,
         availability,
         throughStep: step - 1,
+        branchChoices,
+        availabilityLoading,
+        availabilityError,
       });
       if (issue) {
         showBookingIssue(issue);
@@ -584,6 +652,9 @@ export function AppointmentsPage() {
       selectedServicePrice,
       availability,
       throughStep: bookingStep,
+      branchChoices,
+      availabilityLoading,
+      availabilityError,
     });
     if (issue) {
       showBookingIssue(issue);
@@ -598,6 +669,9 @@ export function AppointmentsPage() {
       selectedServicePrice,
       availability,
       throughStep: 3,
+      branchChoices,
+      availabilityLoading,
+      availabilityError,
     });
     if (issue) {
       showBookingIssue(issue);
@@ -675,6 +749,9 @@ export function AppointmentsPage() {
         selectedServicePrice,
         availability,
         throughStep: 3,
+        branchChoices,
+        availabilityLoading,
+        availabilityError,
       });
       if (issue) {
         showBookingIssue(issue);
@@ -818,8 +895,15 @@ export function AppointmentsPage() {
                       <dd>{displayDate(appointment.date)}</dd>
                     </div>
                     <div>
+                      <dt>Branch</dt>
+                      <dd>
+                        {appointment.branchName || "Clinic branch"}
+                        {appointment.branchStatus === "inactive" ? " (inactive)" : ""}
+                      </dd>
+                    </div>
+                    <div>
                       <dt>Time</dt>
-                      <dd>{displayTime(appointment.time)}</dd>
+                      <dd>{appointment.time ? displayTime(appointment.time) : "No preferred time"}</dd>
                     </div>
                     <div className="appointment-history-card__service">
                       <dt>Service</dt>
@@ -1027,6 +1111,41 @@ export function AppointmentsPage() {
                 </select>
               </label>
             ) : null}
+            {branchesLoading ? <p className="muted">Loading clinic branches…</p> : null}
+            {branchesError ? (
+              <p className="inline-alert inline-alert--error" role="alert">
+                {branchesError}
+              </p>
+            ) : null}
+            {branchChoices && !branchChoices.legacy && !(branchChoices.branches || []).length ? (
+              <p className="inline-alert" role="status">
+                No clinic branches are currently available for appointment booking. Please contact the clinic.
+              </p>
+            ) : null}
+            {branchChoices?.requiresSelection ? (
+              <label className="field" style={{ marginBottom: "1rem" }}>
+                <span>Select Clinic Branch.</span>
+                <select
+                  name="branchId"
+                  value={form.branchId}
+                  onChange={(event) => {
+                    const branchId = event.target.value;
+                    setError("");
+                    setAvailability(null);
+                    setForm((current) => ({ ...current, branchId, appointmentTime: "" }));
+                  }}
+                  required
+                >
+                  <option value="">Select Clinic Branch.</option>
+                  {(branchChoices.branches || []).map((branch) => (
+                    <option key={branch.id} value={branch.id}>
+                      {branch.name}
+                      {branch.isMain ? " (Main Branch)" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             <div className="schedule-fields">
               <label className="field">
                 <span>Preferred date</span>
@@ -1040,6 +1159,12 @@ export function AppointmentsPage() {
                 />
               </label>
             </div>
+            {availabilityLoading ? <p className="muted">Loading availability…</p> : null}
+            {availabilityError ? (
+              <p className="inline-alert inline-alert--error" role="alert">
+                {availabilityError}
+              </p>
+            ) : null}
             {availability?.closed ? (
               <p className="inline-alert" role="status">
                 The clinic is closed on {displayDate(form.appointmentDate)}. Choose another date.
@@ -1078,6 +1203,17 @@ export function AppointmentsPage() {
                   </button>
                 ))}
             </div>
+            {form.appointmentTime ? (
+              <button
+                type="button"
+                className="button button--secondary button--compact"
+                onClick={() => setForm((current) => ({ ...current, appointmentTime: "" }))}
+              >
+                Clear preferred time
+              </button>
+            ) : (
+              <p className="muted">Preferred time is optional. Leave it blank to book the date only.</p>
+            )}
             {availability && !availability.closed && !(availability.availableTimes || []).length ? (
               <p className="muted">No appointment slots are available on this date.</p>
             ) : null}
@@ -1377,12 +1513,32 @@ export function AppointmentsPage() {
                       </div>
                     ) : null}
                     <div className="booking-summary__line">
+                      <span>Patient</span>
+                      <strong>
+                        {form.forPatientUserId
+                          ? dependents.find((dependent) => String(dependent.dependentUserId) === String(form.forPatientUserId))
+                              ?.fullName || "Approved dependent"
+                          : user?.fullName || "Account holder"}
+                      </strong>
+                    </div>
+                    <div className="booking-summary__line">
+                      <span>Branch</span>
+                      <strong>
+                        {(branchChoices?.branches || []).find((branch) => String(branch.id) === String(form.branchId))
+                          ?.name || availability?.branch?.name || "Clinic branch"}
+                      </strong>
+                    </div>
+                    <div className="booking-summary__line">
                       <span>Date</span>
                       <strong>{form.appointmentDate ? displayDate(form.appointmentDate) : "Choose a date"}</strong>
                     </div>
                     <div className="booking-summary__line">
-                      <span>Time</span>
-                      <strong>{form.appointmentTime ? displayTime(form.appointmentTime) : "Choose a time"}</strong>
+                      <span>Preferred time</span>
+                      <strong>{form.appointmentTime ? displayTime(form.appointmentTime) : "No preferred time"}</strong>
+                    </div>
+                    <div className="booking-summary__line">
+                      <span>Status</span>
+                      <strong>Pending</strong>
                     </div>
                     <div className="booking-summary__line">
                       <span>Coverage</span>

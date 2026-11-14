@@ -186,8 +186,12 @@ export const api = {
   getCurrentUser: () => request("/auth/me"),
   getDashboard: (options = {}) => request("/patient/dashboard", options),
   getCatalog: () => request("/patient/catalog"),
-  getAppointmentAvailability: (date) =>
-    request(`/patient/availability?date=${encodeURIComponent(date)}`),
+  getBookingBranches: () => request("/patient/branches"),
+  getAppointmentAvailability: (date, branchId) => {
+    const params = new URLSearchParams({ date });
+    if (branchId != null && branchId !== "") params.set("branchId", String(branchId));
+    return request(`/patient/availability?${params}`);
+  },
   getAppointments: (options = {}) => request("/patient/appointments", options),
   createAppointment: (body) => request("/patient/appointments", { method: "POST", body }),
   cancelAppointment: (appointmentId, body = {}) =>

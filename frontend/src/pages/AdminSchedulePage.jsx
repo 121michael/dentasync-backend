@@ -32,16 +32,23 @@ export function AdminSchedulePage() {
   const [busy, setBusy] = useState(false);
   const [focusKey, setFocusKey] = useState(() => searchParams.get("focus") || "");
   const [focusedAppointment, setFocusedAppointment] = useState(null);
+  const [branches, setBranches] = useState([]);
+  const [branchId, setBranchId] = useState("");
   const focusedRowRef = useRef(null);
 
   const load = useCallback(async () => {
     try {
-      setData(await api.getAdminSchedules());
+      const [schedules, branchList] = await Promise.all([
+        api.getAdminSchedules(branchId ? { branchId } : {}),
+        api.getAdminBranches().catch(() => ({ branches: [] })),
+      ]);
+      setData(schedules);
+      setBranches(branchList.branches || []);
       setError("");
     } catch (loadError) {
       setError(loadError.message);
     }
-  }, []);
+  }, [branchId]);
 
   useEffect(() => {
     load();
@@ -235,12 +242,40 @@ export function AdminSchedulePage() {
             ({focusedAppointment.status}).
           </p>
         ) : null}
+        <label className="field" style={{ maxWidth: "320px", marginBottom: "1rem" }}>
+          <span>Clinic branch</span>
+          <select value={branchId} onChange={(event) => setBranchId(event.target.value)}>
+            <option value="">All branches</option>
+            {branches.map((branch) => (
+              <option key={branch.id} value={branch.id}>
+                {branch.name}
+                {branch.isMain ? " (Main Branch)" : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+        {data.inactiveBranchReview?.length ? (
+          <div className="inline-alert" role="status">
+            {data.inactiveBranchReview.length} upcoming appointment
+            {data.inactiveBranchReview.length === 1 ? "" : "s"} at a deactivated branch need review. Their branch and
+            status stay as booked until an authorized person acts.
+            <ul>
+              {data.inactiveBranchReview.map((appointment) => (
+                <li key={appointment.id}>
+                  {appointment.patientName} · {appointment.branchName} · {formatAdminDate(appointment.date)}
+                  {appointment.time ? "" : " · no preferred time"}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
         {data.appointments?.length ? (
           <div className="admin-table-wrap">
             <table className="admin-table">
               <thead>
                 <tr>
                   <th>Patient</th>
+                  <th>Branch</th>
                   <th>Treatment</th>
                   <th>Dentist</th>
                   <th>Date</th>
@@ -262,6 +297,10 @@ export function AdminSchedulePage() {
                     }
                   >
                     <td><strong>{appointment.patientName}</strong></td>
+                    <td>
+                      {appointment.branchName || "—"}
+                      {appointment.reviewReason === "branch_inactive" ? " · needs review" : ""}
+                    </td>
                     <td>{appointment.treatment}</td>
                     <td>{appointment.dentistName}</td>
                     <td>{formatAdminDate(appointment.date)}</td>

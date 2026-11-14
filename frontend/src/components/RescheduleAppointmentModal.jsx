@@ -28,7 +28,7 @@ export function RescheduleAppointmentModal({ appointment, busy, error, onClose, 
     setLoadError("");
     setTime("");
     api
-      .getAppointmentAvailability(date)
+      .getAppointmentAvailability(date, appointment?.branchId)
       .then((response) => {
         if (cancelled) return;
         setAvailability(response);
@@ -41,13 +41,13 @@ export function RescheduleAppointmentModal({ appointment, busy, error, onClose, 
     return () => {
       cancelled = true;
     };
-  }, [date]);
+  }, [date, appointment?.branchId]);
 
   useEffect(() => {
     if (!error) return undefined;
     let cancelled = false;
     api
-      .getAppointmentAvailability(date)
+      .getAppointmentAvailability(date, appointment?.branchId)
       .then((response) => {
         if (cancelled) return;
         setAvailability(response);
@@ -79,6 +79,12 @@ export function RescheduleAppointmentModal({ appointment, busy, error, onClose, 
         </header>
         <p className="muted-copy">
           Service: <strong>{appointment.treatment || appointment.service}</strong>
+          {appointment.branchName ? (
+            <>
+              {" "}
+              · Branch: <strong>{appointment.branchName}</strong>
+            </>
+          ) : null}
         </p>
         <label className="field">
           <span>New date</span>
@@ -125,6 +131,7 @@ export function RescheduleAppointmentModal({ appointment, busy, error, onClose, 
         {availability && !availability.closed && !slots.length ? (
           <p className="muted">No appointment slots are available in this period.</p>
         ) : null}
+        <p className="muted">Preferred time is optional and stays at this branch.</p>
         {loadError || error ? (
           <p className="inline-alert inline-alert--error" role="alert">
             {loadError || error}
@@ -137,11 +144,12 @@ export function RescheduleAppointmentModal({ appointment, busy, error, onClose, 
           <button
             type="button"
             className="button button--primary"
-            disabled={busy || !time}
+            disabled={busy || !date || (time ? false : availability?.dateOnlyBookable === false)}
             onClick={() => {
-              if (busy || confirmLock.current || !time) return;
+              if (busy || confirmLock.current || !date) return;
+              if (!time && availability?.dateOnlyBookable === false) return;
               confirmLock.current = true;
-              Promise.resolve(onConfirm({ appointmentDate: date, appointmentTime: time })).finally(() => {
+              Promise.resolve(onConfirm({ appointmentDate: date, appointmentTime: time || null })).finally(() => {
                 confirmLock.current = false;
               });
             }}

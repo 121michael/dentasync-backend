@@ -657,8 +657,43 @@ async function createWalkInAppointmentForPatient(client, patient, { branchId = n
   return appointment;
 }
 
+async function findTodayAppointmentOutsideBranch(client, patientId, branchId) {
+  const scopedBranchId = await concreteBranchId(client, branchId);
+  if (!scopedBranchId || !patientId) return null;
+  const clinicTz = process.env.CLINIC_TIMEZONE || "Asia/Manila";
+  try {
+    const result = await client.query(
+      `SELECT appointment.id, appointment.branch_id, branch.name AS branch_name
+       FROM patient_portal_appointments AS appointment
+       LEFT JOIN clinic_branches AS branch ON branch.id = appointment.branch_id
+       WHERE appointment.user_id::text = $1::text
+         AND appointment.appointment_date = (CURRENT_TIMESTAMP AT TIME ZONE $2)::date
+         AND LOWER(appointment.status) IN ('confirmed', 'checked_in', 'pending')
+         AND appointment.branch_id IS NOT NULL
+         AND appointment.branch_id <> $3
+       ORDER BY appointment.appointment_time ASC NULLS LAST
+       LIMIT 1`,
+      [String(patientId), clinicTz, scopedBranchId]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    if (error?.code === "42P01" || error?.code === "42703") return null;
+    throw error;
+  }
+}
+
 async function resolveAppointmentForCheckIn(client, patient, { allowWalkIn = false, branchId = null } = {}) {
   let existing = await findAppointmentForCheckIn(client, { patientId: patient.id, branchId });
+  if (!existing) {
+    const elsewhere = await findTodayAppointmentOutsideBranch(client, patient.id, branchId);
+    if (elsewhere) {
+      const error = new Error(
+        `This appointment is at ${elsewhere.branch_name || "another clinic branch"}. Please check in at that branch's staffed desk.`
+      );
+      error.status = 409;
+      throw error;
+    }
+  }
   if (existing) {
     existing = await ensureAppointmentLinkedToCatalogDentist(client, existing);
     return { appointment: existing, walkInCreated: false };
@@ -843,6 +878,17 @@ async function insertQueueEntry(client, { userId, appointmentId, token, position
 
 async function performStaffCheckIn(client, { appointment, staff, notifyClinicStaff, notifyClinicDentists, checkInMethod = "rfid", branchId = null }) {
   const scopedBranchId = (await concreteBranchId(client, branchId)) || appointment.branch_id || (await branchAccess.mainBranchId(client));
+  if (
+    appointment?.branch_id &&
+    scopedBranchId &&
+    String(appointment.branch_id) !== String(scopedBranchId)
+  ) {
+    const error = new Error(
+      "This appointment belongs to another clinic branch. Please check in at that branch's staffed desk."
+    );
+    error.status = 409;
+    throw error;
+  }
   const existingForPatient = await findActiveQueueForPatient(client, appointment.user_id, scopedBranchId);
   if (existingForPatient) {
     return {

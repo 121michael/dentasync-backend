@@ -89,7 +89,11 @@ export function QueuePage() {
       <SectionHeading
         eyebrow="Central clinic queue"
         title="Your queue status"
-        detail="RFID and QR check-in both use the same clinic queue number shared with Staff and Dentist."
+        detail={
+          current?.branchName
+            ? `Your place is in the ${current.branchName} queue. RFID and QR check-in use that branch's queue number.`
+            : "RFID and QR check-in both use the same clinic queue number shared with Staff and Dentist."
+        }
         action={
           <button className="button button--secondary" onClick={load}>
             <RefreshCw size={16} /> Refresh

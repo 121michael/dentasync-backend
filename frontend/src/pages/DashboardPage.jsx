@@ -45,7 +45,7 @@ function prettyDate(value, fallback = "To be recommended") {
 }
 
 function prettyTime(value) {
-  if (typeof value !== "string") return "Time to be confirmed";
+  if (typeof value !== "string" || !value.trim()) return "No preferred time";
   const [hours, minutes] = value.split(":");
   if (
     !/^\d{1,2}$/.test(hours || "") ||

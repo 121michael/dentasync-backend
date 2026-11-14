@@ -83,7 +83,12 @@ async function startPatientPortal({ userId = "patient-1", role = "patient", docu
     createPatientPortalRouter({
       db: {
         async query(sql, params = []) {
-          if (sql.includes("FROM admin_portal_settings") || sql.includes("FROM clinic_schedule")) {
+          if (
+            sql.includes("FROM admin_portal_settings") ||
+            sql.includes("FROM clinic_schedule") ||
+            sql.includes("FROM clinic_branches") ||
+            sql.includes("FROM clinic_branch_assignments")
+          ) {
             const missing = new Error("missing");
             missing.code = "42P01";
             throw missing;
@@ -164,6 +169,12 @@ async function startPatientPortal({ userId = "patient-1", role = "patient", docu
             return { rows: [{ full_name: "Test Patient", id: userId }] };
           }
           return { rows: [] };
+        },
+        async connect() {
+          return {
+            query: (sql, params) => this.query(sql, params),
+            async release() {},
+          };
         },
       },
       authenticateToken(req, _res, next) {
@@ -256,6 +267,11 @@ async function startDentistPortal({
             row.reviewed_by_name = params[1];
             row.reviewed_at = new Date().toISOString();
             return { rows: [row] };
+          }
+          if (sql.includes("clinic_branch")) {
+            const missing = new Error("missing");
+            missing.code = "42P01";
+            throw missing;
           }
           throw new Error(`Unexpected dentist query: ${sql}`);
         },

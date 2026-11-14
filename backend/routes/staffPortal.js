@@ -1096,7 +1096,7 @@ function createStaffPortalRouter({
       if (action === "approve" || action === "confirm") {
         nextStatus = "confirmed";
         patientTitle = "Appointment confirmed";
-        patientBody = `Your ${current.service_name} appointment is confirmed for ${schedulePart(current.appointment_date, 10)} at ${schedulePart(current.appointment_time, 5)}.`;
+        patientBody = `Your ${current.service_name} appointment is confirmed for ${schedulePart(current.appointment_date, 10)}${schedulePart(current.appointment_time, 5) ? ` at ${schedulePart(current.appointment_time, 5)}` : ""}.`;
       } else if (action === "deny" || action === "cancel") {
         nextStatus = "cancelled";
         patientTitle = action === "deny" ? "Appointment request declined" : "Appointment cancelled";
@@ -2277,7 +2277,9 @@ function createStaffPortalRouter({
       if (transactionOpen) {
         await client.query("ROLLBACK");
       }
-      console.error("Staff check-in error:", error.message, error.code || "", error.detail || "");
+      if (!error.status || error.status >= 500) {
+        console.error("Staff check-in error:", error.message, error.code || "", error.detail || "");
+      }
       if (method === "rfid") {
         staffRfidEvents.recordRfidEvent({
           rfidTag,

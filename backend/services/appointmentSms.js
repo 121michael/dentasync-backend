@@ -94,9 +94,8 @@ function whenPhrase({ date, time, now = new Date(), timeZone = clinicTimezone() 
   const clock = formatClock12(time);
   if (!iso) return clock;
   const today = clinicParts(now, timeZone).date;
-  if (iso === today) return `today at ${clock}`;
-  if (iso === addDaysIso(today, 1)) return `tomorrow at ${clock}`;
-  return `${formatLongDate(iso)} at ${clock}`;
+  const day = iso === today ? "today" : iso === addDaysIso(today, 1) ? "tomorrow" : formatLongDate(iso);
+  return clock ? `${day} at ${clock}` : day;
 }
 
 function planReminderTimes({ appointmentAt, now = new Date() }) {
@@ -120,10 +119,13 @@ function planReminderTimes({ appointmentAt, now = new Date() }) {
 function reminderMessage({ serviceName, date, time, now, timeZone, clinicName }) {
   const service = serviceName || "your dental visit";
   const arrive = formatClock12(time);
-  if (!isoDateOnly(date) || !arrive) {
+  if (!isoDateOnly(date)) {
     return `This is a reminder of your appointment for ${service}. Please arrive on or before your scheduled time. Thank you.`;
   }
   const when = whenPhrase({ date, time, now, timeZone });
+  if (!arrive) {
+    return `This is a reminder of your appointment for ${service} ${when}. Please arrive during clinic hours. Thank you.`;
+  }
   return `This is a reminder of your appointment for ${service} ${when}. Please arrive on or before ${arrive}. Thank you.`;
 }
 
@@ -131,28 +133,38 @@ function confirmationMessage({ serviceName, date, time, now, timeZone }) {
   const service = serviceName || "your dental visit";
   const when = whenPhrase({ date, time, now, timeZone });
   const arrive = formatClock12(time);
+  if (!arrive) {
+    return `Your appointment for ${service} is confirmed for ${when}. Please arrive during clinic hours. Thank you.`;
+  }
   return `Your appointment for ${service} is confirmed for ${when}. Please arrive on or before ${arrive}. Thank you.`;
 }
 
 function rescheduleMessage({ serviceName, date, time }) {
   const service = serviceName || "your dental visit";
   const clock = formatClock12(time);
-  return `Your appointment for ${service} has been rescheduled to ${formatLongDate(date)} at ${clock}. Please arrive on or before ${clock}. Thank you.`;
+  const when = clock ? `${formatLongDate(date)} at ${clock}` : formatLongDate(date);
+  if (!clock) {
+    return `Your appointment for ${service} has been rescheduled to ${when}. Please arrive during clinic hours. Thank you.`;
+  }
+  return `Your appointment for ${service} has been rescheduled to ${when}. Please arrive on or before ${clock}. Thank you.`;
 }
 
 function cancelMessage({ serviceName, date, time }) {
   const service = serviceName || "your dental visit";
-  const when = `${formatLongDate(date)} at ${formatClock12(time)}`;
+  const clock = formatClock12(time);
+  const when = clock ? `${formatLongDate(date)} at ${clock}` : formatLongDate(date);
   return `Your appointment for ${service} on ${when} has been cancelled. Please contact the clinic if you need assistance. Thank you.`;
 }
 
 function updateMessage({ serviceName, date, time, change }) {
   const service = serviceName || "your dental visit";
   const clock = formatClock12(time);
+  const when = clock ? `${formatLongDate(date)} at ${clock}` : formatLongDate(date);
+  const arrival = clock ? `Please arrive on or before ${clock}.` : "Please arrive during clinic hours.";
   if (change === "service") {
-    return `Your appointment service is now ${service} on ${formatLongDate(date)} at ${clock}. Please arrive on or before ${clock}. Thank you.`;
+    return `Your appointment service is now ${service} on ${when}. ${arrival} Thank you.`;
   }
-  return `Your appointment for ${service} was updated to ${formatLongDate(date)} at ${clock}. Please arrive on or before ${clock}. Thank you.`;
+  return `Your appointment for ${service} was updated to ${when}. ${arrival} Thank you.`;
 }
 
 function queueUpdateMessage({ waitMinutes, status, clinicName }) {

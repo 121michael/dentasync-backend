@@ -1368,7 +1368,15 @@ function attachAdminCommandCenterRoutes(router, { db, passwordResetService = nul
       }
 
       let appointments = [];
+      let inactiveBranchReview = [];
       try {
+        const branchId = stringValue(req.query.branchId, 40);
+        const appointmentParams = [];
+        let branchSql = "";
+        if (branchId) {
+          appointmentParams.push(branchId);
+          branchSql = ` AND appointment.branch_id::text = $${appointmentParams.length}`;
+        }
         const appointmentResult = await db.query(
           `SELECT appointment.id,
                   appointment.dentist_id,
@@ -1377,27 +1385,98 @@ function attachAdminCommandCenterRoutes(router, { db, passwordResetService = nul
                   appointment.appointment_time,
                   appointment.status,
                   appointment.service_name,
-                  CONCAT_WS(' ', patient.first_name, patient.last_name) AS patient_name
+                  appointment.branch_id,
+                  CONCAT_WS(' ', patient.first_name, patient.last_name) AS patient_name,
+                  branch.name AS branch_name,
+                  branch.status AS branch_status
            FROM patient_portal_appointments AS appointment
            LEFT JOIN users AS patient ON patient.id::text = appointment.user_id
+           LEFT JOIN clinic_branches AS branch ON branch.id = appointment.branch_id
            WHERE appointment.appointment_date >= CURRENT_DATE - INTERVAL '1 day'
              AND appointment.appointment_date <= CURRENT_DATE + INTERVAL '14 days'
              AND appointment.status NOT IN ('cancelled')
-           ORDER BY appointment.appointment_date ASC, appointment.appointment_time ASC
-           LIMIT 100`
+             ${branchSql}
+           ORDER BY appointment.appointment_date ASC, appointment.appointment_time ASC NULLS LAST
+           LIMIT 100`,
+          appointmentParams
         );
         appointments = appointmentResult.rows.map((row) => ({
           id: row.id,
           dentistId: row.dentist_id,
           dentistName: row.dentist_name,
           date: row.appointment_date,
-          time: row.appointment_time,
+          time: row.appointment_time || null,
           status: row.status,
           treatment: row.service_name,
           patientName: row.patient_name || "Patient",
+          branchId: row.branch_id || null,
+          branchName: row.branch_name || null,
+          branchStatus: row.branch_status || null,
+          reviewReason: row.branch_status === "inactive" ? "branch_inactive" : null,
+        }));
+        const reviewResult = await db.query(
+          `SELECT appointment.id,
+                  appointment.appointment_date,
+                  appointment.appointment_time,
+                  appointment.status,
+                  appointment.service_name,
+                  CONCAT_WS(' ', patient.first_name, patient.last_name) AS patient_name,
+                  branch.name AS branch_name
+           FROM patient_portal_appointments AS appointment
+           JOIN users AS patient ON patient.id::text = appointment.user_id
+           JOIN clinic_branches AS branch ON branch.id = appointment.branch_id
+           WHERE appointment.appointment_date >= CURRENT_DATE
+             AND appointment.status IN ('pending', 'confirmed', 'checked_in')
+             AND branch.status = 'inactive'
+           ORDER BY appointment.appointment_date ASC, appointment.appointment_time ASC NULLS LAST
+           LIMIT 50`
+        );
+        inactiveBranchReview = reviewResult.rows.map((row) => ({
+          id: row.id,
+          date: row.appointment_date,
+          time: row.appointment_time || null,
+          status: row.status,
+          treatment: row.service_name,
+          patientName: row.patient_name || "Patient",
+          branchName: row.branch_name,
+          reviewReason: "branch_inactive",
         }));
       } catch (error) {
-        if (!isMissingRelation(error)) {
+        if (error?.code === "42P01" || error?.code === "42703") {
+          try {
+            const appointmentResult = await db.query(
+              `SELECT appointment.id,
+                      appointment.dentist_id,
+                      appointment.dentist_name,
+                      appointment.appointment_date,
+                      appointment.appointment_time,
+                      appointment.status,
+                      appointment.service_name,
+                      CONCAT_WS(' ', patient.first_name, patient.last_name) AS patient_name
+               FROM patient_portal_appointments AS appointment
+               LEFT JOIN users AS patient ON patient.id::text = appointment.user_id
+               WHERE appointment.appointment_date >= CURRENT_DATE - INTERVAL '1 day'
+                 AND appointment.appointment_date <= CURRENT_DATE + INTERVAL '14 days'
+                 AND appointment.status NOT IN ('cancelled')
+               ORDER BY appointment.appointment_date ASC, appointment.appointment_time ASC
+               LIMIT 100`
+            );
+            appointments = appointmentResult.rows.map((row) => ({
+              id: row.id,
+              dentistId: row.dentist_id,
+              dentistName: row.dentist_name,
+              date: row.appointment_date,
+              time: row.appointment_time || null,
+              status: row.status,
+              treatment: row.service_name,
+              patientName: row.patient_name || "Patient",
+            }));
+          } catch (fallbackError) {
+            if (!isMissingRelation(fallbackError)) {
+              console.warn("Admin schedules appointment lookup skipped:", fallbackError.message);
+            }
+          }
+        } else if (!isMissingRelation(error)) {
           console.warn("Admin schedules appointment lookup skipped:", error.message);
         }
       }
@@ -1417,6 +1496,7 @@ function attachAdminCommandCenterRoutes(router, { db, passwordResetService = nul
       return res.json({
         schedules,
         appointments,
+        inactiveBranchReview,
         clinicHours,
         setupRequired: !scheduleTableReady,
         message: scheduleTableReady

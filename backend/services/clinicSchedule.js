@@ -216,66 +216,153 @@ async function loadDefaults(db) {
   }
 }
 
-async function loadDayMap(db, startDate, endDate) {
+async function mainBranchId(db) {
+  try {
+    const result = await db.query(
+      `SELECT id FROM clinic_branches WHERE is_main ORDER BY id LIMIT 1`
+    );
+    return result.rows[0]?.id || null;
+  } catch (error) {
+    if (error?.code === "42P01") return null;
+    throw error;
+  }
+}
+
+// Omitted branchId keeps the historical Mandaluyong schedule. Pass null to read every branch.
+async function scopeBranchId(db, branchId) {
+  if (branchId === null) return null;
+  if (branchId !== undefined && branchId !== "") return branchId;
+  return mainBranchId(db);
+}
+
+function mapDayRows(rows) {
+  return new Map(
+    rows.map((row) => [String(row.schedule_date).slice(0, 10), row])
+  );
+}
+
+async function loadDayMap(db, startDate, endDate, branchId) {
+  const scoped = await scopeBranchId(db, branchId);
   try {
     const result = await db.query(
       `SELECT schedule_date::text AS schedule_date, mode, is_holiday, open_time, close_time, notes
        FROM clinic_schedule_days
-       WHERE schedule_date >= $1::date AND schedule_date <= $2::date`,
-      [startDate, endDate]
+       WHERE schedule_date >= $1::date AND schedule_date <= $2::date
+         AND ($3::bigint IS NULL OR branch_id = $3)`,
+      [startDate, endDate, scoped]
     );
-    return new Map(
-      result.rows.map((row) => [
-        String(row.schedule_date).slice(0, 10),
-        row,
-      ])
-    );
+    return mapDayRows(result.rows);
   } catch (error) {
+    if (error?.code === "42703") {
+      const result = await db.query(
+        `SELECT schedule_date::text AS schedule_date, mode, is_holiday, open_time, close_time, notes
+         FROM clinic_schedule_days
+         WHERE schedule_date >= $1::date AND schedule_date <= $2::date`,
+        [startDate, endDate]
+      );
+      return mapDayRows(result.rows);
+    }
     if (error?.code === "42P01") return new Map();
     throw error;
   }
 }
 
-async function loadSlotMap(db, scheduleDate) {
+async function loadSlotMap(db, scheduleDate, branchId) {
+  const scoped = await scopeBranchId(db, branchId);
   try {
     const result = await db.query(
       `SELECT slot_time, status
        FROM clinic_schedule_slots
-       WHERE schedule_date = $1::date`,
-      [scheduleDate]
+       WHERE schedule_date = $1::date
+         AND ($2::bigint IS NULL OR branch_id = $2)`,
+      [scheduleDate, scoped]
     );
     return new Map(
       result.rows.map((row) => [normalizeTime(row.slot_time), String(row.status || "available").toLowerCase()])
     );
   } catch (error) {
+    if (error?.code === "42703") {
+      const result = await db.query(
+        `SELECT slot_time, status
+         FROM clinic_schedule_slots
+         WHERE schedule_date = $1::date`,
+        [scheduleDate]
+      );
+      return new Map(
+        result.rows.map((row) => [normalizeTime(row.slot_time), String(row.status || "available").toLowerCase()])
+      );
+    }
     if (error?.code === "42P01") return new Map();
     throw error;
   }
 }
 
-async function loadBookedTimes(db, scheduleDate) {
+async function loadBookedTimes(db, scheduleDate, branchId) {
+  const scoped = await scopeBranchId(db, branchId);
   try {
     const result = await db.query(
       `SELECT appointment_time::text AS appointment_time, COUNT(*) AS count
        FROM patient_portal_appointments
        WHERE appointment_date = $1::date
+         AND appointment_time IS NOT NULL
          AND LOWER(COALESCE(status, 'pending')) <> 'cancelled'
+         AND ($2::bigint IS NULL OR branch_id = $2)
        GROUP BY appointment_time`,
-      [scheduleDate]
+      [scheduleDate, scoped]
     );
     return new Map(
-      result.rows.map((row) => [
-        normalizeTime(String(row.appointment_time || "").slice(0, 5)),
-        Number.parseInt(row.count, 10) || 0,
-      ])
+      result.rows
+        .map((row) => [
+          normalizeTime(String(row.appointment_time || "").slice(0, 5)),
+          Number.parseInt(row.count, 10) || 0,
+        ])
+        .filter(([time]) => time)
     );
   } catch (error) {
+    if (error?.code === "42703") {
+      const result = await db.query(
+        `SELECT appointment_time::text AS appointment_time, COUNT(*) AS count
+         FROM patient_portal_appointments
+         WHERE appointment_date = $1::date
+           AND LOWER(COALESCE(status, 'pending')) <> 'cancelled'
+         GROUP BY appointment_time`,
+        [scheduleDate]
+      );
+      return new Map(
+        result.rows
+          .map((row) => [
+            normalizeTime(String(row.appointment_time || "").slice(0, 5)),
+            Number.parseInt(row.count, 10) || 0,
+          ])
+          .filter(([time]) => time)
+      );
+    }
     if (error?.code === "42P01") return new Map();
     throw error;
   }
 }
 
-async function loadBookedAppointments(db, scheduleDate) {
+async function loadDateOnlyCount(db, scheduleDate, branchId) {
+  const scoped = await scopeBranchId(db, branchId);
+  try {
+    const result = await db.query(
+      `SELECT COUNT(*) AS count
+       FROM patient_portal_appointments
+       WHERE appointment_date = $1::date
+         AND appointment_time IS NULL
+         AND LOWER(COALESCE(status, 'pending')) <> 'cancelled'
+         AND ($2::bigint IS NULL OR branch_id = $2)`,
+      [scheduleDate, scoped]
+    );
+    return Number.parseInt(result.rows[0]?.count, 10) || 0;
+  } catch (error) {
+    if (error?.code === "42P01" || error?.code === "42703") return 0;
+    throw error;
+  }
+}
+
+async function loadBookedAppointments(db, scheduleDate, branchId) {
+  const scoped = await scopeBranchId(db, branchId);
   try {
     const result = await db.query(
       `SELECT
@@ -288,8 +375,9 @@ async function loadBookedAppointments(db, scheduleDate) {
        LEFT JOIN users AS patient ON patient.id::text = appointment.user_id
        WHERE appointment.appointment_date = $1::date
          AND LOWER(COALESCE(appointment.status, 'pending')) <> 'cancelled'
-       ORDER BY appointment.appointment_time ASC`,
-      [scheduleDate]
+         AND ($2::bigint IS NULL OR appointment.branch_id = $2)
+       ORDER BY appointment.appointment_time ASC NULLS LAST`,
+      [scheduleDate, scoped]
     );
     return result.rows.map((row) => ({
       id: row.id,
@@ -300,19 +388,71 @@ async function loadBookedAppointments(db, scheduleDate) {
     }));
   } catch (error) {
     if (error?.code === "42P01") return [];
+    if (error?.code === "42703") {
+      const result = await db.query(
+        `SELECT
+           appointment.id,
+           appointment.appointment_time::text AS appointment_time,
+           appointment.service_name,
+           appointment.status,
+           CONCAT_WS(' ', patient.first_name, patient.last_name) AS patient_name
+         FROM patient_portal_appointments AS appointment
+         LEFT JOIN users AS patient ON patient.id::text = appointment.user_id
+         WHERE appointment.appointment_date = $1::date
+           AND LOWER(COALESCE(appointment.status, 'pending')) <> 'cancelled'
+         ORDER BY appointment.appointment_time ASC`,
+        [scheduleDate]
+      );
+      return result.rows.map((row) => ({
+        id: row.id,
+        time: normalizeTime(String(row.appointment_time || "").slice(0, 5)),
+        service: row.service_name || "Appointment",
+        status: row.status,
+        patientName: row.patient_name || "Patient",
+      }));
+    }
     throw error;
   }
 }
 
-function buildSlots(hours, defaults, savedSlots, bookedTimes) {
+// A day has one place per generated clock slot that is not marked unavailable.
+// A timed booking occupies that clock time. A date-only booking consumes one
+// place and leaves every unbooked clock time unmarked, until no places remain.
+function assessCapacity(hours, defaults, savedSlots, bookedTimes, dateOnlyCount = 0) {
+  if (hours.closed) {
+    return { capacity: 0, used: 0, remaining: 0, openTimes: [] };
+  }
+  const times = generateSlotTimes(hours.open, hours.close, defaults.slotMinutes);
+  const openTimes = times.filter((time) => savedSlots.get(time) !== "unavailable");
+  let timedOnOpenSlots = 0;
+  for (const time of openTimes) {
+    if (Number(bookedTimes.get(time) || 0) > 0) timedOnOpenSlots += 1;
+  }
+  let timedOutside = 0;
+  for (const [time, count] of bookedTimes.entries()) {
+    if (!time || openTimes.includes(time)) continue;
+    timedOutside += Number(count) || 0;
+  }
+  const used = timedOnOpenSlots + timedOutside + (Number(dateOnlyCount) || 0);
+  return {
+    capacity: openTimes.length,
+    used,
+    remaining: openTimes.length - used,
+    openTimes,
+  };
+}
+
+function buildSlots(hours, defaults, savedSlots, bookedTimes, dateOnlyCount = 0) {
   if (hours.closed) return [];
   const times = generateSlotTimes(hours.open, hours.close, defaults.slotMinutes);
+  const capacity = assessCapacity(hours, defaults, savedSlots, bookedTimes, dateOnlyCount);
   return times.map((time) => {
     const booked = Number(bookedTimes.get(time) || 0) > 0;
     const saved = savedSlots.get(time);
     let status = "available";
     if (booked) status = "booked";
     else if (saved === "unavailable") status = "unavailable";
+    else if (capacity.remaining <= 0) status = "full";
     return {
       time,
       period: slotPeriod(time),
@@ -323,11 +463,16 @@ function buildSlots(hours, defaults, savedSlots, bookedTimes) {
   });
 }
 
-function isSlotBookable(hours, defaults, savedSlots, bookedTimes, appointmentTime) {
+function isSlotBookable(hours, defaults, savedSlots, bookedTimes, appointmentTime, dateOnlyCount = 0) {
   const time = normalizeTime(appointmentTime);
   if (!time || hours.closed) return false;
-  const slot = buildSlots(hours, defaults, savedSlots, bookedTimes).find((item) => item.time === time);
+  const slot = buildSlots(hours, defaults, savedSlots, bookedTimes, dateOnlyCount).find((item) => item.time === time);
   return Boolean(slot?.bookable);
+}
+
+function isDateOnlyBookable(hours, defaults, savedSlots, bookedTimes, dateOnlyCount = 0) {
+  if (hours.closed) return false;
+  return assessCapacity(hours, defaults, savedSlots, bookedTimes, dateOnlyCount).remaining > 0;
 }
 
 function addDaysYmd(ymd, days) {
@@ -392,12 +537,16 @@ module.exports = {
   monthDateRange,
   datesInMonth,
   loadDefaults,
+  mainBranchId,
   loadDayMap,
   loadSlotMap,
   loadBookedTimes,
+  loadDateOnlyCount,
   loadBookedAppointments,
+  assessCapacity,
   buildSlots,
   isSlotBookable,
+  isDateOnlyBookable,
   toMinutes,
   formatClock,
   formatHourRange,

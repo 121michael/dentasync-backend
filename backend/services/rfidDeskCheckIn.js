@@ -81,6 +81,9 @@ function mapSuccess(appointment, checkIn, walkInCreated) {
   };
 }
 
+// The reader firmware does not send a branch. This path stays on the Main Branch.
+// An appointment booked at another branch is refused here and sent to that desk.
+// A walk-in with no appointment still joins the Main Branch queue.
 async function checkInByRfidTag(db, { rfidTag, notifyClinicStaff, notifyClinicDentists }) {
   const tag = staffCheckIn.normalizeRfidTag(rfidTag);
   if (!tag) {
@@ -191,6 +194,9 @@ async function checkInByRfidTag(db, { rfidTag, notifyClinicStaff, notifyClinicDe
       status: "failed",
       message: error.message || "Unable to complete patient check-in.",
     });
+    if (error.status) {
+      return { ok: false, status: error.status, message: error.message };
+    }
     throw error;
   } finally {
     client.release();
