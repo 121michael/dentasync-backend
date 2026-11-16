@@ -251,6 +251,11 @@ function clinicTimezone() {
   return process.env.CLINIC_TIMEZONE || "Asia/Manila";
 }
 
+function clinicLocalDateSql(column, cmp = "=") {
+  const tz = clinicTimezone().replace(/'/g, "''");
+  return `${column} ${cmp} (CURRENT_TIMESTAMP AT TIME ZONE '${tz}')::date`;
+}
+
 /** Same clinic-local "today" used by RFID check-in. */
 function clinicTodayQueueSql(alias = "queue") {
   const tz = clinicTimezone().replace(/'/g, "''");
@@ -683,7 +688,7 @@ function createDentistPortalRouter({
           `SELECT COUNT(*) AS count
            FROM patient_portal_appointments AS appointment
            WHERE ${scope.sql}
-             AND appointment.appointment_date = CURRENT_DATE
+             AND ${clinicLocalDateSql("appointment.appointment_date")}
              AND appointment.status NOT IN ('cancelled')`,
           scope.params
         ),
@@ -1815,7 +1820,7 @@ function createDentistPortalRouter({
            FROM patient_portal_appointments AS appointment
            JOIN users AS patient ON patient.id::text = appointment.user_id
            WHERE ${scope.sql}
-             AND appointment.appointment_date = CURRENT_DATE
+             AND ${clinicLocalDateSql("appointment.appointment_date")}
              AND appointment.status NOT IN ('cancelled')
            ORDER BY appointment.appointment_time ASC`,
           scope.params
@@ -1828,7 +1833,7 @@ function createDentistPortalRouter({
            FROM patient_portal_appointments AS appointment
            JOIN users AS patient ON patient.id::text = appointment.user_id
            WHERE ${scope.sql}
-             AND appointment.appointment_date > CURRENT_DATE
+             AND ${clinicLocalDateSql("appointment.appointment_date", ">")}
              AND appointment.status IN ('pending', 'confirmed')
            ORDER BY appointment.appointment_date ASC, appointment.appointment_time ASC
            LIMIT 50`,
