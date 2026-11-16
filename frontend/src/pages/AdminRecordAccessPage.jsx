@@ -66,13 +66,13 @@ export function AdminRecordAccessPage() {
   return (
     <div className="admin-page">
       <header className="admin-page__header">
-        <p className="eyebrow">Admin</p>
+        <p className="eyebrow">Review and revoke</p>
         <h1>Cross-Branch Access Requests</h1>
         <p>
-          New access is authorized at the requesting workstation. An Admin or delegated dentist signs in with their
-          own account in a separate browser profile and enters the approval code. Do not type an approver password
-          into the dentist session. Legacy pending requests stay listed until that verification. Active grants can be
-          revoked here.
+          This page reviews access activity and revokes active grants. Approval codes are entered on Authorize Record
+          Access by an Admin or delegated dentist signed in with their own account in a separate browser profile. Do
+          not type an approver password into the dentist session. Legacy pending requests stay listed until that
+          verification.
         </p>
       </header>
       <form onSubmit={saveDuration} className="admin-card" style={{ marginBottom: "1.5rem" }}>

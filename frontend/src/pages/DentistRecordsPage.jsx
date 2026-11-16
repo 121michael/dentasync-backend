@@ -188,6 +188,13 @@ function DelegatedRequestQueue() {
   return (
     <section className="dentist-card">
       <h2>Cross-branch requests you may review</h2>
+      <p className="muted">
+        Sign in on Authorize Record Access in a separate browser profile to enter an approval code. Do not use the
+        requesting dentist’s session.
+      </p>
+      <p>
+        <a href="/record-access/authorize">Open authorization</a>
+      </p>
       {!requests.length ? <p>No pending requests for your authorized branches.</p> : null}
       {requests.map((request) => (
         <p key={request.id}>

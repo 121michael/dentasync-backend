@@ -597,6 +597,16 @@ function approverAccountEligible(row) {
   return false;
 }
 
+async function sessionApproverStatus(db, user) {
+  const role = String(user?.role || "").toLowerCase();
+  const approver = await loadSessionApprover(db, user);
+  return {
+    eligible: Boolean(approver),
+    role,
+    canApproveCrossBranchAccess: Boolean(approver?.can_approve_cross_branch_access),
+  };
+}
+
 async function loadSessionApprover(db, user) {
   if (!user?.id) return null;
   const result = await db.query(
@@ -924,6 +934,7 @@ module.exports = {
   requesterChallengeStatus,
   rejectSharedSessionAuthorize,
   loadSessionApprover,
+  sessionApproverStatus,
   decideRequest,
   approverMayDecide,
   loadGrantMinutes,

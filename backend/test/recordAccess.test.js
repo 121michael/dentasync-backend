@@ -481,6 +481,22 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
   );
   assert.equal(stillNoGrant.rows.length, 0);
 
+  const anonymousApprover = await api("GET", "/api/record-access/approver");
+  assert.equal(anonymousApprover.status, 401);
+  const staffApprover = await api("GET", "/api/record-access/approver", { role: "staff", id: staffId });
+  assert.equal(staffApprover.status, 200);
+  assert.equal(staffApprover.json.eligible, false);
+  const ordinaryApprover = await api("GET", "/api/record-access/approver", { role: "dentist", id: coworkerId });
+  assert.equal(ordinaryApprover.json.eligible, false);
+  const selfApprover = await api("GET", "/api/record-access/approver", { role: "dentist", id: treatingId });
+  assert.equal(selfApprover.json.eligible, false);
+  const delegateApprover = await api("GET", "/api/record-access/approver", { role: "dentist", id: delegateId });
+  assert.equal(delegateApprover.json.eligible, true);
+  const adminApprover = await api("GET", "/api/record-access/approver", { role: "admin", id: adminId });
+  assert.equal(adminApprover.json.eligible, true);
+  const inactiveApprover = await api("GET", "/api/record-access/approver", { role: "admin", id: inactiveAdminId });
+  assert.equal(inactiveApprover.status, 403);
+
   const anonymousCode = await api("GET", `/api/record-access/challenges/${approvalCode}`);
   assert.equal(anonymousCode.status, 401);
   const anonymousApprove = await api("POST", `/api/record-access/challenges/${approvalCode}/approve`, {

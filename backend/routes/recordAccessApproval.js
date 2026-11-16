@@ -18,6 +18,15 @@ function createRecordAccessApprovalRouter({ db, authenticateToken }) {
   const router = express.Router();
   router.use(authenticateToken);
 
+  router.get("/approver", async (req, res) => {
+    try {
+      const status = await recordAccess.sessionApproverStatus(db, req.user);
+      return res.json(status);
+    } catch (error) {
+      return sendAccessError(res, error, "Unable to check authorization access.");
+    }
+  });
+
   router.get("/challenges/:code", async (req, res) => {
     try {
       const challenge = await recordAccess.previewChallenge(db, req, req.params.code);

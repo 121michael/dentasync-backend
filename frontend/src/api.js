@@ -397,6 +397,7 @@ export const api = {
     request(`/dentist/patients/${patientId}/access-challenges`, { method: "POST", body }),
   getDentistRecordAccessChallenge: (patientId, challengeId) =>
     request(`/dentist/patients/${patientId}/access-challenges/${challengeId}`),
+  getRecordAccessApprover: () => request("/record-access/approver"),
   previewRecordAccessChallenge: (code) =>
     request(`/record-access/challenges/${encodeURIComponent(String(code || "").trim())}`),
   approveRecordAccessChallenge: (code) =>

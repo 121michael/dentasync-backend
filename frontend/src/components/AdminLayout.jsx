@@ -60,6 +60,7 @@ const PAGE_TITLES = {
   "/admin/branches": "Branch Management",
   "/admin/archived-records": "Archive Records",
   "/admin/patient-records": "Patient Records Vault",
+  "/admin/record-access": "Cross-Branch Access Review",
   "/admin/rfid": "RFID Tag Assignments",
   "/admin/schedule": "Clinic Schedule",
   "/admin/roster": "Staff Roster",
