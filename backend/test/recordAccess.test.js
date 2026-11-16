@@ -486,6 +486,9 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
   const staffApprover = await api("GET", "/api/record-access/approver", { role: "staff", id: staffId });
   assert.equal(staffApprover.status, 200);
   assert.equal(staffApprover.json.eligible, false);
+  const patientApprover = await api("GET", "/api/record-access/approver", { role: "patient", id: patientId });
+  assert.equal(patientApprover.status, 200);
+  assert.equal(patientApprover.json.eligible, false);
   const ordinaryApprover = await api("GET", "/api/record-access/approver", { role: "dentist", id: coworkerId });
   assert.equal(ordinaryApprover.json.eligible, false);
   const selfApprover = await api("GET", "/api/record-access/approver", { role: "dentist", id: treatingId });
@@ -503,6 +506,26 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
     body: { originatingBranchId: pasigId, scope: "xrays", clinicalRecordId: otherRecordId },
   });
   assert.equal(anonymousApprove.status, 401);
+
+  const grantsBeforePatient = await db.query(
+    `SELECT id FROM record_access_grants WHERE clinical_record_id = $1 AND scope = 'diagnosis_notes'`,
+    [recordId]
+  );
+  const patientPreview = await api("GET", `/api/record-access/challenges/${approvalCode}`, {
+    role: "patient",
+    id: patientId,
+  });
+  assert.equal(patientPreview.status, 403, JSON.stringify(patientPreview.json));
+  const patientAuth = await api("POST", `/api/record-access/challenges/${approvalCode}/approve`, {
+    role: "patient",
+    id: patientId,
+  });
+  assert.equal(patientAuth.status, 403, JSON.stringify(patientAuth.json));
+  const grantsAfterPatient = await db.query(
+    `SELECT id FROM record_access_grants WHERE clinical_record_id = $1 AND scope = 'diagnosis_notes'`,
+    [recordId]
+  );
+  assert.equal(grantsAfterPatient.rows.length, grantsBeforePatient.rows.length);
 
   const staffAuth = await api("POST", `/api/record-access/challenges/${approvalCode}/approve`, {
     role: "staff",

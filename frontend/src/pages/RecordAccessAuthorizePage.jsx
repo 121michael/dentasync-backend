@@ -11,6 +11,11 @@ function landingFor(role) {
   return "/dashboard";
 }
 
+function roleBlockedFromAuthorize(role) {
+  const value = String(role || "").toLowerCase();
+  return value === "patient" || value === "staff";
+}
+
 export function RecordAccessAuthorizePage() {
   const { user } = useAuth();
   const [code, setCode] = useState("");
@@ -19,8 +24,12 @@ export function RecordAccessAuthorizePage() {
   const [busy, setBusy] = useState(false);
   const [eligibility, setEligibility] = useState(null);
   const role = String(user?.role || eligibility?.role || "").toLowerCase();
+  const blockedByRole = roleBlockedFromAuthorize(role);
+  const eligible = !blockedByRole && eligibility?.eligible === true;
+  const denied = blockedByRole || eligibility?.eligible === false;
 
   useEffect(() => {
+    if (blockedByRole) return undefined;
     let cancelled = false;
     api
       .getRecordAccessApprover()
@@ -33,10 +42,11 @@ export function RecordAccessAuthorizePage() {
     return () => {
       cancelled = true;
     };
-  }, [user?.role]);
+  }, [blockedByRole, user?.role]);
 
   async function loadChallenge(event) {
     event.preventDefault();
+    if (!eligible) return;
     setBusy(true);
     setMessage("");
     try {
@@ -51,7 +61,7 @@ export function RecordAccessAuthorizePage() {
   }
 
   async function approve() {
-    if (!challenge?.approvalCode) return;
+    if (!eligible || !challenge?.approvalCode) return;
     setBusy(true);
     setMessage("");
     try {
@@ -66,15 +76,13 @@ export function RecordAccessAuthorizePage() {
     }
   }
 
-  const eligible = eligibility?.eligible === true;
-
   return (
     <main className="admin-page" style={{ maxWidth: "40rem", margin: "2rem auto", padding: "0 1rem" }}>
       <p className="eyebrow">Cross-branch records</p>
       <h1>Authorize record access</h1>
-      {!eligibility ? <p>Checking whether this account can authorize record access…</p> : null}
-      {eligibility && !eligible ? (
+      {denied ? (
         <>
+          <h2>Access denied</h2>
           <p>
             Only an Admin or a dentist who is delegated to approve cross-branch access can use this page. Approval
             codes are entered here, not on the requesting dentist’s chart.
@@ -85,6 +93,7 @@ export function RecordAccessAuthorizePage() {
           </p>
         </>
       ) : null}
+      {!denied && !eligible ? <p>Checking whether this account can authorize record access…</p> : null}
       {eligible ? (
         <>
           <p>
