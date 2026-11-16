@@ -25,11 +25,12 @@ export function RecordAccessAuthorizePage() {
   const [eligibility, setEligibility] = useState(null);
   const role = String(user?.role || eligibility?.role || "").toLowerCase();
   const blockedByRole = roleBlockedFromAuthorize(role);
-  const eligible = !blockedByRole && eligibility?.eligible === true;
-  const denied = blockedByRole || eligibility?.eligible === false;
+  const isAdmin = role === "admin";
+  const eligible = isAdmin || (!blockedByRole && eligibility?.eligible === true);
+  const denied = blockedByRole || (!isAdmin && eligibility?.eligible === false);
 
   useEffect(() => {
-    if (blockedByRole) return undefined;
+    if (blockedByRole || isAdmin) return undefined;
     let cancelled = false;
     api
       .getRecordAccessApprover()
@@ -42,7 +43,7 @@ export function RecordAccessAuthorizePage() {
     return () => {
       cancelled = true;
     };
-  }, [blockedByRole, user?.role]);
+  }, [blockedByRole, isAdmin, user?.role]);
 
   async function loadChallenge(event) {
     event.preventDefault();

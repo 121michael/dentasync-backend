@@ -497,6 +497,18 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
   assert.equal(delegateApprover.json.eligible, true);
   const adminApprover = await api("GET", "/api/record-access/approver", { role: "admin", id: adminId });
   assert.equal(adminApprover.json.eligible, true);
+  const unverifiedAdmin = await db.query(
+    `INSERT INTO users (first_name, last_name, email, phone, password_hash, role, is_verified, status)
+     VALUES ('Admin', 'User', 'admin.user@example.test', '09170000021', 'synthetic-hash', 'admin', FALSE, 'Active')
+     RETURNING id`
+  );
+  const unverifiedAdminId = String(unverifiedAdmin.rows[0].id);
+  const unverifiedApprover = await api("GET", "/api/record-access/approver", {
+    role: "admin",
+    id: unverifiedAdminId,
+  });
+  assert.equal(unverifiedApprover.status, 200);
+  assert.equal(unverifiedApprover.json.eligible, true);
   const inactiveApprover = await api("GET", "/api/record-access/approver", { role: "admin", id: inactiveAdminId });
   assert.equal(inactiveApprover.status, 403);
 

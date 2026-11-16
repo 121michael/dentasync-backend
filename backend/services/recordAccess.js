@@ -587,18 +587,32 @@ async function uniqueApprovalCode(db) {
 }
 
 function approverAccountEligible(row) {
-  if (!row?.is_verified) return false;
   if (row.is_archived) return false;
   const status = String(row.status || "active").toLowerCase();
   if (["inactive", "disabled", "suspended", "rejected", "pending", "unverified"].includes(status)) return false;
   const role = String(row.role || "").toLowerCase();
   if (role === "admin") return true;
+  if (!row?.is_verified) return false;
   if (role === "dentist" && row.can_approve_cross_branch_access === true) return true;
   return false;
 }
 
+function tokenAdminApprover(user) {
+  if (String(user?.role || "").toLowerCase() !== "admin" || !user?.id) return null;
+  return {
+    id: user.id,
+    first_name: user.first_name || user.firstName || "",
+    last_name: user.last_name || user.lastName || "",
+    role: "admin",
+    can_approve_cross_branch_access: false,
+  };
+}
+
 async function sessionApproverStatus(db, user) {
   const role = String(user?.role || "").toLowerCase();
+  if (role === "admin") {
+    return { eligible: true, role, canApproveCrossBranchAccess: false };
+  }
   const approver = await loadSessionApprover(db, user);
   return {
     eligible: Boolean(approver),
@@ -609,25 +623,42 @@ async function sessionApproverStatus(db, user) {
 
 async function loadSessionApprover(db, user) {
   if (!user?.id) return null;
-  const result = await db.query(
-    `SELECT account.id, account.first_name, account.last_name, account.role, account.status,
-            account.is_verified, account.is_archived, profile.can_approve_cross_branch_access
-     FROM users AS account
-     LEFT JOIN admin_portal_dentist_profiles AS profile
-       ON profile.user_id::text = account.id::text
-     WHERE account.id::text = $1
-     LIMIT 1`,
-    [String(user.id)]
-  );
-  const row = result.rows[0];
-  if (!row || !approverAccountEligible(row)) return null;
-  return {
-    id: row.id,
-    first_name: row.first_name,
-    last_name: row.last_name,
-    role: String(row.role || "").toLowerCase(),
-    can_approve_cross_branch_access: row.can_approve_cross_branch_access === true,
-  };
+  try {
+    const result = await db.query(
+      `SELECT account.id, account.first_name, account.last_name, account.role, account.status,
+              account.is_verified, account.is_archived, profile.can_approve_cross_branch_access
+       FROM users AS account
+       LEFT JOIN admin_portal_dentist_profiles AS profile
+         ON profile.user_id::text = account.id::text
+       WHERE account.id::text = $1
+       LIMIT 1`,
+      [String(user.id)]
+    );
+    const row = result.rows[0];
+    if (row && approverAccountEligible(row)) {
+      return {
+        id: row.id,
+        first_name: row.first_name,
+        last_name: row.last_name,
+        role: String(row.role || "").toLowerCase(),
+        can_approve_cross_branch_access: row.can_approve_cross_branch_access === true,
+      };
+    }
+    if (String(row?.role || user.role || "").toLowerCase() === "admin" && approverAccountEligible({
+      ...row,
+      role: "admin",
+      is_archived: row?.is_archived === true,
+      status: row?.status || user.status || "active",
+    })) {
+      return tokenAdminApprover({ ...user, ...row, role: "admin" });
+    }
+    return null;
+  } catch (error) {
+    if (error.code === "42703" || error.code === "42P01") {
+      return tokenAdminApprover(user);
+    }
+    throw error;
+  }
 }
 
 function rejectSharedSessionAuthorize() {
