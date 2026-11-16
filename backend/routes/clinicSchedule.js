@@ -26,9 +26,8 @@ function attachClinicScheduleRoutes(router, { db }) {
       const defaults = await clinicSchedule.loadDefaults(db);
       const dates = clinicSchedule.datesInMonth(year, month);
       const { start, end } = clinicSchedule.monthDateRange(year, month);
-      const branchId = await clinicSchedule.mainBranchId(db);
-      const requestedBranch = stringValue(req.query.branchId, 40);
-      const scheduleBranchId = requestedBranch || branchId;
+      const calendarBranch = await clinicSchedule.resolveCalendarBranch(db, stringValue(req.query.branchId, 40));
+      const scheduleBranchId = calendarBranch.branchId;
       const dayMap = await clinicSchedule.loadDayMap(db, start, end, scheduleBranchId);
       const bookedByDate = new Map();
       const unavailableByDate = new Map();
@@ -112,9 +111,14 @@ function attachClinicScheduleRoutes(router, { db }) {
         year,
         month,
         defaults,
+        branch: calendarBranch.branch,
+        branches: calendarBranch.branches,
         days,
       });
     } catch (error) {
+      if (error?.status) {
+        return res.status(error.status).json({ message: error.message });
+      }
       if (error?.code === "42P01") {
         return res.status(503).json({
           message: "Clinic schedule tables are not available. Run npm run migrate:clinic-schedule.",
@@ -132,7 +136,8 @@ function attachClinicScheduleRoutes(router, { db }) {
     }
     try {
       const defaults = await clinicSchedule.loadDefaults(db);
-      const scheduleBranchId = stringValue(req.query.branchId, 40) || (await clinicSchedule.mainBranchId(db));
+      const calendarBranch = await clinicSchedule.resolveCalendarBranch(db, stringValue(req.query.branchId, 40));
+      const scheduleBranchId = calendarBranch.branchId;
       const dayMap = await clinicSchedule.loadDayMap(db, date, date, scheduleBranchId);
       const dayRow = dayMap.get(date) || null;
       const hours = clinicSchedule.resolveOperatingHours(date, dayRow, defaults);
@@ -143,6 +148,8 @@ function attachClinicScheduleRoutes(router, { db }) {
       return res.json({
         date,
         defaults,
+        branch: calendarBranch.branch,
+        branches: calendarBranch.branches,
         saved: dayRow
           ? {
               mode: dayRow.mode,
@@ -157,6 +164,9 @@ function attachClinicScheduleRoutes(router, { db }) {
         appointments,
       });
     } catch (error) {
+      if (error?.status) {
+        return res.status(error.status).json({ message: error.message });
+      }
       if (error?.code === "42P01") {
         return res.status(503).json({
           message: "Clinic schedule tables are not available. Run npm run migrate:clinic-schedule.",
@@ -189,7 +199,8 @@ function attachClinicScheduleRoutes(router, { db }) {
     }
 
     try {
-      const scheduleBranchId = stringValue(req.body?.branchId, 40) || (await clinicSchedule.mainBranchId(db));
+      const calendarBranch = await clinicSchedule.resolveCalendarBranch(db, stringValue(req.body?.branchId, 40));
+      const scheduleBranchId = calendarBranch.branchId;
       const appointments = await clinicSchedule.loadBookedAppointments(db, date, scheduleBranchId);
       let result;
       try {
@@ -261,7 +272,10 @@ function attachClinicScheduleRoutes(router, { db }) {
       const defaults = await clinicSchedule.loadDefaults(db);
       const hours = clinicSchedule.resolveOperatingHours(date, result.rows[0], defaults);
       return res.json({
-        message: "Clinic schedule saved.",
+        message: calendarBranch.branch?.name
+          ? `Clinic schedule saved for ${calendarBranch.branch.name}.`
+          : "Clinic schedule saved.",
+        branch: calendarBranch.branch,
         hours,
         appointments,
         existingAppointmentsWarning:
@@ -270,6 +284,9 @@ function attachClinicScheduleRoutes(router, { db }) {
             : null,
       });
     } catch (error) {
+      if (error?.status) {
+        return res.status(error.status).json({ message: error.message });
+      }
       if (error?.code === "42P01") {
         return res.status(503).json({
           message: "Clinic schedule tables are not available. Run npm run migrate:clinic-schedule.",
@@ -292,7 +309,8 @@ function attachClinicScheduleRoutes(router, { db }) {
 
     try {
       const defaults = await clinicSchedule.loadDefaults(db);
-      const scheduleBranchId = stringValue(req.body?.branchId, 40) || (await clinicSchedule.mainBranchId(db));
+      const calendarBranch = await clinicSchedule.resolveCalendarBranch(db, stringValue(req.body?.branchId, 40));
+      const scheduleBranchId = calendarBranch.branchId;
       const dayMap = await clinicSchedule.loadDayMap(db, date, date, scheduleBranchId);
       const hours = clinicSchedule.resolveOperatingHours(date, dayMap.get(date), defaults);
       if (hours.closed) {
@@ -357,11 +375,17 @@ function attachClinicScheduleRoutes(router, { db }) {
       const savedSlots = await clinicSchedule.loadSlotMap(db, date, scheduleBranchId);
       const dateOnlyCount = await clinicSchedule.loadDateOnlyCount(db, date, scheduleBranchId);
       return res.json({
-        message: "Appointment slots saved.",
+        message: calendarBranch.branch?.name
+          ? `Appointment slots saved for ${calendarBranch.branch.name}.`
+          : "Appointment slots saved.",
+        branch: calendarBranch.branch,
         hours,
         slots: clinicSchedule.buildSlots(hours, defaults, savedSlots, bookedTimes, dateOnlyCount),
       });
     } catch (error) {
+      if (error?.status) {
+        return res.status(error.status).json({ message: error.message });
+      }
       if (error?.code === "42P01") {
         return res.status(503).json({
           message: "Clinic schedule tables are not available. Run npm run migrate:clinic-schedule.",

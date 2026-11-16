@@ -588,8 +588,11 @@ export const api = {
     const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value || value === 0));
     return request(`/admin/clinic-schedule${search.size ? `?${search}` : ""}`);
   },
-  getAdminClinicScheduleDay: (date) =>
-    request(`/admin/clinic-schedule/day?date=${encodeURIComponent(date)}`),
+  getAdminClinicScheduleDay: (date, params = {}) => {
+    const search = new URLSearchParams({ date });
+    if (params.branchId) search.set("branchId", params.branchId);
+    return request(`/admin/clinic-schedule/day?${search}`);
+  },
   saveAdminClinicScheduleDay: (body) =>
     request("/admin/clinic-schedule/day", { method: "PUT", body }),
   saveAdminClinicScheduleSlots: (body) =>

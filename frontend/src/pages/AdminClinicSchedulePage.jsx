@@ -9,6 +9,43 @@ import { formatAdminDate, formatAdminTime } from "../adminUtils";
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
+function branchOptionLabel(branch) {
+  const tags = [];
+  if (branch.isMain) tags.push("Main Branch");
+  if (branch.inactive || String(branch.status || "").toLowerCase() === "inactive") tags.push("Inactive");
+  return tags.length ? `${branch.name} (${tags.join(" · ")})` : branch.name;
+}
+
+function appointmentTimeLabel(appointment) {
+  return appointment?.time ? formatAdminTime(appointment.time) : "Date only";
+}
+
+function appointmentStatusLabel(status) {
+  const value = String(status || "pending").replaceAll("_", " ").trim();
+  if (!value) return "Pending";
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function ClinicBranchSelector({ branches, branchId, onChange }) {
+  if (!branches?.length) return null;
+  return (
+    <label className="field clinic-calendar-branch">
+      <span>Clinic Branch</span>
+      <select
+        value={branchId}
+        onChange={(event) => onChange(event.target.value)}
+        aria-label="Clinic Branch"
+      >
+        {branches.map((branch) => (
+          <option key={branch.id} value={String(branch.id)}>
+            {branchOptionLabel(branch)}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 function padMonthGrid(days) {
   if (!days.length) return [];
   const first = days[0];
@@ -26,7 +63,7 @@ function hoursSummary(hours, defaults) {
   return `${open} – ${close}`;
 }
 
-function AdminClinicCalendarPanel({ onOpenSlots }) {
+function AdminClinicCalendarPanel({ branchId, onBranchChange, onBranchLoaded, onOpenSlots }) {
   const { pushToast, confirm } = useAdminUi();
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
@@ -44,15 +81,29 @@ function AdminClinicCalendarPanel({ onOpenSlots }) {
     closeTime: "16:00",
     applyRecurring: false,
   });
+  const selectedBranch = data?.branch || dayDetail?.branch || null;
+  const branchName = selectedBranch?.name || "this branch";
 
   const load = useCallback(async () => {
     try {
-      setData(await api.getAdminClinicSchedule({ year, month }));
+      const next = await api.getAdminClinicSchedule({
+        year,
+        month,
+        ...(branchId ? { branchId } : {}),
+      });
+      setData(next);
+      onBranchLoaded?.(next.branches || [], next.branch || null);
       setError("");
     } catch (loadError) {
       setError(loadError.message);
     }
-  }, [month, year]);
+  }, [branchId, month, onBranchLoaded, year]);
+
+  useEffect(() => {
+    setSelectedDate("");
+    setDayDetail(null);
+    setEditorOpen(false);
+  }, [branchId]);
 
   useEffect(() => {
     load();
@@ -80,7 +131,7 @@ function AdminClinicCalendarPanel({ onOpenSlots }) {
     setSelectedDate(date);
     setBusy(true);
     try {
-      const detail = await api.getAdminClinicScheduleDay(date);
+      const detail = await api.getAdminClinicScheduleDay(date, branchId ? { branchId } : {});
       setDayDetail(detail);
       setForm({
         mode: detail.saved?.mode || "default",
@@ -102,11 +153,11 @@ function AdminClinicCalendarPanel({ onOpenSlots }) {
     const appointments = dayDetail?.appointments || [];
     if (form.mode === "closed" && appointments.length) {
       const list = appointments
-        .map((item) => `${item.patientName} at ${formatAdminTime(item.time)}`)
+        .map((item) => `${item.patientName} (${appointmentTimeLabel(item)})`)
         .join("; ");
       const ok = await confirm({
         title: "Existing appointments on this date",
-        message: `${appointments.length} existing appointment(s) will not be cancelled: ${list}. Continue marking the clinic closed for new bookings?`,
+        message: `${appointments.length} existing appointment(s) at ${branchName} will not be cancelled: ${list}. Continue marking ${branchName} closed for new bookings?`,
         confirmLabel: "Save closed day",
         tone: "danger",
       });
@@ -115,8 +166,8 @@ function AdminClinicCalendarPanel({ onOpenSlots }) {
       const ok = await confirm({
         title: "Save clinic schedule",
         message: form.applyRecurring
-          ? `Save hours for ${formatAdminDate(selectedDate)} and update the matching default weekly hours?`
-          : `Save the operating hours for ${formatAdminDate(selectedDate)} only?`,
+          ? `Save hours for ${branchName} on ${formatAdminDate(selectedDate)} and update the matching default weekly hours?`
+          : `Save the operating hours for ${branchName} on ${formatAdminDate(selectedDate)} only? This does not change other branches.`,
         confirmLabel: "Save Schedule",
         tone: "primary",
       });
@@ -138,6 +189,7 @@ function AdminClinicCalendarPanel({ onOpenSlots }) {
       }
       const response = await api.saveAdminClinicScheduleDay({
         date: selectedDate,
+        branchId: branchId || undefined,
         mode: form.mode,
         isHoliday: form.isHoliday,
         openTime: form.openTime,
@@ -145,7 +197,7 @@ function AdminClinicCalendarPanel({ onOpenSlots }) {
       });
       pushToast(response.existingAppointmentsWarning || response.message || "Schedule saved.");
       setEditorOpen(false);
-      const detail = await api.getAdminClinicScheduleDay(selectedDate);
+      const detail = await api.getAdminClinicScheduleDay(selectedDate, branchId ? { branchId } : {});
       setDayDetail(detail);
       await load();
     } catch (saveError) {
@@ -167,8 +219,13 @@ function AdminClinicCalendarPanel({ onOpenSlots }) {
             <h2>View Calendar</h2>
             <p>
               Default hours are 9:00 AM–4:00 PM on weekdays and 11:00 AM–4:00 PM on weekends and holidays.
-              Click a date to view, add, or edit that day only.
+              Click a date to view, add, or edit that day for the selected branch only.
             </p>
+            <ClinicBranchSelector
+              branches={data.branches || []}
+              branchId={branchId || (data.branch ? String(data.branch.id) : "")}
+              onChange={onBranchChange}
+            />
           </div>
           <div className="admin-row-actions">
             <button className="button button--secondary button--compact" onClick={() => shiftMonth(-1)}>
@@ -199,7 +256,9 @@ function AdminClinicCalendarPanel({ onOpenSlots }) {
                 <span>{cell.compact}</span>
                 {cell.isHoliday && cell.source !== "closed" ? <small>Holiday</small> : null}
                 {cell.hasUnavailableSlots ? <small>Slots off</small> : null}
-                {cell.hasBookings ? <small>Booked</small> : null}
+                {cell.hasBookings ? (
+                  <small>{cell.bookedCount > 1 ? `${cell.bookedCount} booked` : "Booked"}</small>
+                ) : null}
               </button>
             )
           )}
@@ -220,7 +279,10 @@ function AdminClinicCalendarPanel({ onOpenSlots }) {
             <div>
               <span className="eyebrow">Selected date</span>
               <h2>{formatAdminDate(selectedDate)}</h2>
-              <p>{hoursSummary(dayDetail.hours, dayDetail.defaults)}</p>
+              <p>
+                {hoursSummary(dayDetail.hours, dayDetail.defaults)}
+                {selectedBranch?.name ? ` · ${selectedBranch.name}` : ""}
+              </p>
             </div>
             <div className="admin-row-actions">
               <button className="button button--secondary button--compact" type="button" onClick={() => setEditorOpen(true)}>
@@ -236,12 +298,27 @@ function AdminClinicCalendarPanel({ onOpenSlots }) {
             </div>
           </div>
           {dayDetail.appointments?.length ? (
-            <p className="inline-alert" role="status">
-              {dayDetail.appointments.length} existing appointment(s) stay booked if you close or change hours:{" "}
-              {dayDetail.appointments.map((item) => `${item.patientName} (${formatAdminTime(item.time)})`).join(", ")}.
-            </p>
+            <div className="clinic-calendar-appointments">
+              <p className="inline-alert" role="status">
+                {dayDetail.appointments.length} appointment{dayDetail.appointments.length === 1 ? "" : "s"} at{" "}
+                {branchName}. Closing or changing hours does not cancel them.
+              </p>
+              <ul>
+                {dayDetail.appointments.map((item) => (
+                  <li key={item.id}>
+                    <strong>{item.patientName}</strong>
+                    {" · "}
+                    {appointmentTimeLabel(item)}
+                    {" · "}
+                    {item.service || "Appointment"}
+                    {" · "}
+                    {appointmentStatusLabel(item.status)}
+                  </li>
+                ))}
+              </ul>
+            </div>
           ) : (
-            <p className="muted">No existing appointments on this date.</p>
+            <p className="muted">No existing appointments on this date at {branchName}.</p>
           )}
         </section>
       ) : null}
@@ -250,6 +327,9 @@ function AdminClinicCalendarPanel({ onOpenSlots }) {
         <AdminModal title="Edit Clinic Schedule" onClose={() => setEditorOpen(false)} wide>
           <form className="admin-form" onSubmit={saveDay}>
             <p><small>Date</small><strong>{formatAdminDate(selectedDate)}</strong></p>
+            {selectedBranch?.name ? (
+              <p><small>Clinic branch</small><strong>{branchOptionLabel(selectedBranch)}</strong></p>
+            ) : null}
             <p>Current hours: {hoursSummary(dayDetail.hours, dayDetail.defaults)}</p>
             <fieldset className="clinic-schedule-modes">
               <legend>Select action</legend>
@@ -333,7 +413,7 @@ function AdminClinicCalendarPanel({ onOpenSlots }) {
   );
 }
 
-function AdminClinicSlotsPanel() {
+function AdminClinicSlotsPanel({ branchId, onBranchChange, onBranchLoaded }) {
   const { pushToast, confirm } = useAdminUi();
   const [searchParams, setSearchParams] = useSearchParams();
   const todayIso = new Date().toISOString().slice(0, 10);
@@ -342,17 +422,20 @@ function AdminClinicSlotsPanel() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [slotMinutes, setSlotMinutes] = useState(30);
+  const branchName = detail?.branch?.name || "this branch";
+  const branchQuery = branchId ? { branchId } : {};
 
   const load = useCallback(async () => {
     try {
-      const next = await api.getAdminClinicScheduleDay(date);
+      const next = await api.getAdminClinicScheduleDay(date, branchQuery);
       setDetail(next);
       setSlotMinutes(next.defaults?.slotMinutes || 30);
+      onBranchLoaded?.(next.branches || [], next.branch || null);
       setError("");
     } catch (loadError) {
       setError(loadError.message);
     }
-  }, [date]);
+  }, [branchId, date, onBranchLoaded]);
 
   useEffect(() => {
     load();
@@ -387,7 +470,7 @@ function AdminClinicSlotsPanel() {
     event.preventDefault();
     const ok = await confirm({
       title: "Save slots",
-      message: `Save available appointment slots for ${formatAdminDate(date)}? Booked appointments will not be changed.`,
+      message: `Save available appointment slots for ${branchName} on ${formatAdminDate(date)}? This does not change other branches. Booked appointments will not be changed.`,
       confirmLabel: "Save Slots",
       tone: "primary",
     });
@@ -399,7 +482,7 @@ function AdminClinicSlotsPanel() {
       );
       if (Number(detail?.defaults?.slotMinutes) !== Number(slotMinutes)) {
         await api.saveAdminClinicScheduleDefaults({ slotMinutes: Number(slotMinutes) });
-        const refreshed = await api.getAdminClinicScheduleDay(date);
+        const refreshed = await api.getAdminClinicScheduleDay(date, branchQuery);
         refreshed.slots = (refreshed.slots || []).map((slot) =>
           previousUnavailable.has(slot.time) && slot.status !== "booked"
             ? { ...slot, status: "unavailable", bookable: false }
@@ -408,6 +491,7 @@ function AdminClinicSlotsPanel() {
         setDetail(refreshed);
         const response = await api.saveAdminClinicScheduleSlots({
           date,
+          branchId: branchId || undefined,
           slots: refreshed.slots.map((slot) => ({
             time: slot.time,
             status: slot.status === "unavailable" ? "unavailable" : "available",
@@ -419,6 +503,7 @@ function AdminClinicSlotsPanel() {
       }
       const response = await api.saveAdminClinicScheduleSlots({
         date,
+        branchId: branchId || undefined,
         slots: (detail?.slots || []).map((slot) => ({
           time: slot.time,
           status: slot.status === "unavailable" ? "unavailable" : "available",
@@ -450,7 +535,12 @@ function AdminClinicSlotsPanel() {
           <div>
             <span className="eyebrow">Clinic Schedule</span>
             <h2>Set Slot</h2>
-            <p>Configure bookable times within this date’s operating hours. Booked appointments stay in place.</p>
+            <p>Configure bookable times for the selected branch within this date’s operating hours. Booked appointments stay in place.</p>
+            <ClinicBranchSelector
+              branches={detail.branches || []}
+              branchId={branchId || (detail.branch ? String(detail.branch.id) : "")}
+              onChange={onBranchChange}
+            />
           </div>
         </div>
         <form className="admin-form" onSubmit={saveSlots}>
@@ -459,7 +549,7 @@ function AdminClinicSlotsPanel() {
             <input type="date" value={date} onChange={(event) => changeDate(event.target.value)} required />
           </label>
           <p>
-            <small>Clinic hours</small>
+            <small>Clinic hours · {branchName}</small>
             <strong>{hoursSummary(detail.hours, detail.defaults)}</strong>
           </p>
           <label>
@@ -519,15 +609,46 @@ const SCHEDULE_TABS = [
 export function AdminClinicSchedulePage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = searchParams.get("tab") === "slots" ? "slots" : "calendar";
+  const branchId = searchParams.get("branchId") || "";
 
-  function selectTab(nextTab, extra = {}) {
+  function writeParams(mutate) {
     const next = new URLSearchParams(searchParams);
-    if (nextTab === "slots") next.set("tab", "slots");
-    else next.delete("tab");
-    if (extra.date) next.set("date", extra.date);
-    if (nextTab === "calendar") next.delete("date");
+    mutate(next);
     setSearchParams(next, { replace: true });
   }
+
+  function changeBranch(nextId) {
+    writeParams((next) => {
+      if (nextId) next.set("branchId", String(nextId));
+      else next.delete("branchId");
+    });
+  }
+
+  const handleBranchLoaded = useCallback(
+    (_branches, branch) => {
+      if (!searchParams.get("branchId") && branch?.id) {
+        const next = new URLSearchParams(searchParams);
+        next.set("branchId", String(branch.id));
+        setSearchParams(next, { replace: true });
+      }
+    },
+    [searchParams, setSearchParams]
+  );
+
+  function selectTab(nextTab, extra = {}) {
+    writeParams((next) => {
+      if (nextTab === "slots") next.set("tab", "slots");
+      else next.delete("tab");
+      if (extra.date) next.set("date", extra.date);
+      if (nextTab === "calendar") next.delete("date");
+    });
+  }
+
+  const branchProps = {
+    branchId,
+    onBranchChange: changeBranch,
+    onBranchLoaded: handleBranchLoaded,
+  };
 
   return (
     <div className="admin-page">
@@ -546,9 +667,9 @@ export function AdminClinicSchedulePage() {
         ))}
       </div>
       {tab === "slots" ? (
-        <AdminClinicSlotsPanel />
+        <AdminClinicSlotsPanel {...branchProps} />
       ) : (
-        <AdminClinicCalendarPanel onOpenSlots={(date) => selectTab("slots", { date })} />
+        <AdminClinicCalendarPanel {...branchProps} onOpenSlots={(date) => selectTab("slots", { date })} />
       )}
     </div>
   );
@@ -558,6 +679,8 @@ export function AdminClinicSlotsRedirect() {
   const [params] = useSearchParams();
   const next = new URLSearchParams({ tab: "slots" });
   const date = params.get("date");
+  const branchId = params.get("branchId");
   if (date) next.set("date", date);
+  if (branchId) next.set("branchId", branchId);
   return <Navigate to={`/admin/schedule?${next}`} replace />;
 }

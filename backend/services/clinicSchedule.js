@@ -228,6 +228,49 @@ async function mainBranchId(db) {
   }
 }
 
+function mapCalendarBranch(row) {
+  const status = String(row.status || "active").toLowerCase();
+  return {
+    id: row.id,
+    branchId: row.branch_code,
+    name: row.name,
+    status,
+    isMain: Boolean(row.is_main),
+    inactive: status !== "active",
+  };
+}
+
+async function listCalendarBranches(db) {
+  try {
+    const result = await db.query(
+      `SELECT id, branch_code, name, status, is_main
+       FROM clinic_branches
+       ORDER BY is_main DESC, name ASC, id ASC`
+    );
+    return result.rows.map(mapCalendarBranch);
+  } catch (error) {
+    if (error?.code === "42P01") return [];
+    throw error;
+  }
+}
+
+async function resolveCalendarBranch(db, requested) {
+  const branches = await listCalendarBranches(db);
+  const requestedId = requested == null || requested === "" ? "" : String(requested).trim();
+  if (!branches.length) {
+    return { branch: null, branches, branchId: await mainBranchId(db) };
+  }
+  const branch = requestedId
+    ? branches.find((item) => String(item.id) === requestedId || String(item.branchId) === requestedId)
+    : branches.find((item) => item.isMain) || branches[0];
+  if (requestedId && !branch) {
+    const error = new Error("Select a valid clinic branch.");
+    error.status = 400;
+    throw error;
+  }
+  return { branch, branches, branchId: branch?.id || null };
+}
+
 // Omitted branchId keeps the historical Mandaluyong schedule. Pass null to read every branch.
 async function scopeBranchId(db, branchId) {
   if (branchId === null) return null;
@@ -538,6 +581,8 @@ module.exports = {
   datesInMonth,
   loadDefaults,
   mainBranchId,
+  listCalendarBranches,
+  resolveCalendarBranch,
   loadDayMap,
   loadSlotMap,
   loadBookedTimes,

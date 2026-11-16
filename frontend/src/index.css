@@ -9931,6 +9931,20 @@ body.is-queue-display .staff-mobile-nav {
   border-radius: 12px;
 }
 
+.clinic-calendar-branch {
+  max-width: 22rem;
+  margin: 0.85rem 0 0;
+}
+
+.clinic-calendar-appointments ul {
+  margin: 0.65rem 0 0;
+  padding-left: 1.15rem;
+}
+
+.clinic-calendar-appointments li {
+  margin: 0.2rem 0;
+}
+
 .clinic-calendar__month {
   margin: 0.35rem 0 1rem;
   font-size: 1.05rem;
