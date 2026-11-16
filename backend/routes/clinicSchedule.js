@@ -37,7 +37,7 @@ function attachClinicScheduleRoutes(router, { db }) {
            FROM patient_portal_appointments
            WHERE appointment_date >= $1::date
              AND appointment_date <= $2::date
-             AND LOWER(COALESCE(status, 'pending')) <> 'cancelled'
+             AND LOWER(COALESCE(status, 'pending')) NOT IN ('cancelled', 'no_show', 'rescheduled')
              AND ($3::bigint IS NULL OR branch_id = $3)
            GROUP BY appointment_date`,
           [start, end, scheduleBranchId]
@@ -52,7 +52,7 @@ function attachClinicScheduleRoutes(router, { db }) {
              FROM patient_portal_appointments
              WHERE appointment_date >= $1::date
                AND appointment_date <= $2::date
-               AND LOWER(COALESCE(status, 'pending')) <> 'cancelled'
+               AND LOWER(COALESCE(status, 'pending')) NOT IN ('cancelled', 'no_show', 'rescheduled')
              GROUP BY appointment_date`,
             [start, end]
           );

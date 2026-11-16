@@ -85,6 +85,33 @@ function shouldRunAutoCancel(now = new Date(), timeZone = clinicTimezone()) {
   return parts.hour >= AUTO_CANCEL_HOUR;
 }
 
+function normalizeClock(value) {
+  if (value == null || value === "") return null;
+  const match = String(value).trim().match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) return null;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+// Timed visits cancel after the scheduled clock time in clinic TZ.
+// Date-only visits stay eligible through that clinic date and cancel the next local day.
+function missedCutoffPassed({ appointmentDate, appointmentTime, now = new Date(), timeZone = clinicTimezone() }) {
+  const parts = clinicParts(now, timeZone);
+  const date = String(appointmentDate || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+  const clock = normalizeClock(appointmentTime);
+  if (!clock) {
+    return parts.date > date;
+  }
+  if (parts.date > date) return true;
+  if (parts.date < date) return false;
+  const nowMinutes = parts.hour * 60 + parts.minute;
+  const [hours, minutes] = clock.split(":").map(Number);
+  return nowMinutes > hours * 60 + minutes;
+}
+
 function appointmentOwnershipSql(alias = "appointments") {
   return `(
     ${alias}.user_id = $2
@@ -148,6 +175,7 @@ module.exports = {
   queueHasProceeded,
   waitedTooLong,
   shouldRunAutoCancel,
+  missedCutoffPassed,
   appointmentOwnershipSql,
   loadActiveQueueForAppointment,
   closeQueueForAppointment,

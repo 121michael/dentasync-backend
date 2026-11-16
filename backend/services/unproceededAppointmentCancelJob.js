@@ -3,64 +3,66 @@
 const lifecycle = require("./appointmentLifecycle");
 const { insertPatientNotification } = require("./patientPortalNotifications");
 
-const AUTO_REASON = "unproceeded_after_6pm";
+const AUTO_REASON = "missed_after_scheduled_time";
 const AUTO_NOTE =
-  "Automatically cancelled after 6:00 PM clinic time because the visit had not proceeded.";
+  "Automatically cancelled because the patient had not checked in after the scheduled clinic time.";
+
+const MISSED_WHERE = `
+  appointment.status IN ('pending', 'confirmed')
+  AND (
+    (
+      appointment.appointment_time IS NOT NULL
+      AND ((appointment.appointment_date + appointment.appointment_time) AT TIME ZONE $2) < $1::timestamptz
+    )
+    OR (
+      appointment.appointment_time IS NULL
+      AND appointment.appointment_date < ($1::timestamptz AT TIME ZONE $2)::date
+    )
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM patient_portal_queue_entries AS queue
+    WHERE queue.appointment_id = appointment.id
+      AND queue.status IN ('waiting', 'checked_in', 'preparing', 'called', 'dentist')
+  )
+`;
 
 function createUnproceededAppointmentCancelJob({ db, intervalMs = 5 * 60 * 1000 } = {}) {
   let timer = null;
   let running = false;
 
   async function cancelEligible(now = new Date()) {
-    if (!lifecycle.shouldRunAutoCancel(now)) {
-      return { skipped: true, cancelled: 0, reason: "before_cutoff" };
-    }
-
     const tz = lifecycle.clinicTimezone();
-    const { date: clinicDate } = lifecycle.clinicParts(now, tz);
+    const params = [now.toISOString(), tz, AUTO_REASON, AUTO_NOTE];
     let result;
     try {
       result = await db.query(
         `UPDATE patient_portal_appointments AS appointment
          SET status = 'cancelled',
-             cancellation_reason = $2::text,
+             cancellation_reason = $3::text,
              cancelled_at = CURRENT_TIMESTAMP,
              cancelled_by = 'system',
-             notes = LEFT(CONCAT_WS(E'\n', NULLIF(appointment.notes, ''), $3::text), 1200),
+             notes = LEFT(CONCAT_WS(E'\n', NULLIF(appointment.notes, ''), $4::text), 1200),
              updated_at = CURRENT_TIMESTAMP
-         WHERE appointment.appointment_date = $1::date
-           AND appointment.appointment_time <= TIME '18:00'
-           AND appointment.status IN ('pending', 'confirmed', 'checked_in')
-           AND NOT EXISTS (
-             SELECT 1
-             FROM patient_portal_queue_entries AS queue
-             WHERE queue.appointment_id = appointment.id
-               AND queue.status IN ('preparing', 'called', 'dentist')
-           )
+         WHERE ${MISSED_WHERE}
          RETURNING appointment.id, appointment.user_id, appointment.service_name,
                    appointment.appointment_date, appointment.appointment_time`,
-        [clinicDate, AUTO_REASON, AUTO_NOTE]
+        params
       );
     } catch (error) {
       if (error.code === "42703") {
         result = await db.query(
           `UPDATE patient_portal_appointments AS appointment
            SET status = 'cancelled',
-               notes = LEFT(CONCAT_WS(E'\n', NULLIF(appointment.notes, ''), $2::text), 1200),
+               notes = LEFT(CONCAT_WS(E'\n', NULLIF(appointment.notes, ''), $3::text), 1200),
                updated_at = CURRENT_TIMESTAMP
-           WHERE appointment.appointment_date = $1::date
-             AND appointment.appointment_time <= TIME '18:00'
-             AND appointment.status IN ('pending', 'confirmed', 'checked_in')
-             AND NOT EXISTS (
-               SELECT 1
-               FROM patient_portal_queue_entries AS queue
-               WHERE queue.appointment_id = appointment.id
-                 AND queue.status IN ('preparing', 'called', 'dentist')
-             )
+           WHERE ${MISSED_WHERE}
            RETURNING appointment.id, appointment.user_id, appointment.service_name,
                      appointment.appointment_date, appointment.appointment_time`,
-          [clinicDate, AUTO_NOTE]
+          [now.toISOString(), tz, AUTO_NOTE]
         );
+      } else if (error.code === "42P01") {
+        return { skipped: false, cancelled: 0, reason: "missing_relation" };
       } else {
         throw error;
       }
@@ -73,7 +75,7 @@ function createUnproceededAppointmentCancelJob({ db, intervalMs = 5 * 60 * 1000 
         userId: row.user_id,
         type: "appointment",
         title: "Appointment cancelled",
-        body: `Your ${row.service_name} visit on ${row.appointment_date} was cancelled because it had not proceeded by 6:00 PM.`,
+        body: `Your ${row.service_name} visit on ${row.appointment_date} was cancelled because you did not check in by the scheduled time.`,
         entityType: "appointment",
         entityId: row.id,
       }).catch((notifyError) => {
@@ -81,7 +83,7 @@ function createUnproceededAppointmentCancelJob({ db, intervalMs = 5 * 60 * 1000 
       });
     }
 
-    return { skipped: false, cancelled: rows.length, clinicDate, ids: rows.map((row) => row.id) };
+    return { skipped: false, cancelled: rows.length, ids: rows.map((row) => row.id) };
   }
 
   async function runOnce(now = new Date()) {
@@ -102,12 +104,12 @@ function createUnproceededAppointmentCancelJob({ db, intervalMs = 5 * 60 * 1000 
     setTimeout(() => {
       runOnce().then((result) => {
         if (!result?.skipped && result?.cancelled) {
-          console.log(`Unproceeded appointment job cancelled ${result.cancelled} visit(s).`);
+          console.log(`Missed appointment job cancelled ${result.cancelled} visit(s).`);
         }
       });
     }, 25_000);
     timer = setInterval(() => {
-      runOnce().catch((error) => console.error("Unproceeded appointment interval error:", error.message));
+      runOnce().catch((error) => console.error("Missed appointment interval error:", error.message));
     }, intervalMs);
     if (typeof timer.unref === "function") timer.unref();
   }

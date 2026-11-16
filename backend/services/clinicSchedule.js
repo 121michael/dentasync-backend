@@ -348,7 +348,7 @@ async function loadBookedTimes(db, scheduleDate, branchId) {
        FROM patient_portal_appointments
        WHERE appointment_date = $1::date
          AND appointment_time IS NOT NULL
-         AND LOWER(COALESCE(status, 'pending')) <> 'cancelled'
+         AND LOWER(COALESCE(status, 'pending')) NOT IN ('cancelled', 'no_show', 'rescheduled')
          AND ($2::bigint IS NULL OR branch_id = $2)
        GROUP BY appointment_time`,
       [scheduleDate, scoped]
@@ -367,7 +367,7 @@ async function loadBookedTimes(db, scheduleDate, branchId) {
         `SELECT appointment_time::text AS appointment_time, COUNT(*) AS count
          FROM patient_portal_appointments
          WHERE appointment_date = $1::date
-           AND LOWER(COALESCE(status, 'pending')) <> 'cancelled'
+           AND LOWER(COALESCE(status, 'pending')) NOT IN ('cancelled', 'no_show', 'rescheduled')
          GROUP BY appointment_time`,
         [scheduleDate]
       );
@@ -393,7 +393,7 @@ async function loadDateOnlyCount(db, scheduleDate, branchId) {
        FROM patient_portal_appointments
        WHERE appointment_date = $1::date
          AND appointment_time IS NULL
-         AND LOWER(COALESCE(status, 'pending')) <> 'cancelled'
+         AND LOWER(COALESCE(status, 'pending')) NOT IN ('cancelled', 'no_show', 'rescheduled')
          AND ($2::bigint IS NULL OR branch_id = $2)`,
       [scheduleDate, scoped]
     );
@@ -417,7 +417,7 @@ async function loadBookedAppointments(db, scheduleDate, branchId) {
        FROM patient_portal_appointments AS appointment
        LEFT JOIN users AS patient ON patient.id::text = appointment.user_id
        WHERE appointment.appointment_date = $1::date
-         AND LOWER(COALESCE(appointment.status, 'pending')) <> 'cancelled'
+         AND LOWER(COALESCE(appointment.status, 'pending')) <> 'rescheduled'
          AND ($2::bigint IS NULL OR appointment.branch_id = $2)
        ORDER BY appointment.appointment_time ASC NULLS LAST`,
       [scheduleDate, scoped]
@@ -442,7 +442,7 @@ async function loadBookedAppointments(db, scheduleDate, branchId) {
          FROM patient_portal_appointments AS appointment
          LEFT JOIN users AS patient ON patient.id::text = appointment.user_id
          WHERE appointment.appointment_date = $1::date
-           AND LOWER(COALESCE(appointment.status, 'pending')) <> 'cancelled'
+           AND LOWER(COALESCE(appointment.status, 'pending')) <> 'rescheduled'
          ORDER BY appointment.appointment_time ASC`,
         [scheduleDate]
       );

@@ -58,12 +58,44 @@ test("waited-too-long uses check-in time and ignores inactive or in-chair visits
   );
 });
 
-test("auto-cancel runs at or after 18:00 Asia/Manila", () => {
-  assert.equal(lifecycle.shouldRunAutoCancel(new Date("2026-10-29T09:59:00.000Z"), "Asia/Manila"), false);
-  assert.equal(lifecycle.shouldRunAutoCancel(new Date("2026-10-29T10:00:00.000Z"), "Asia/Manila"), true);
+test("timed visits cancel after the scheduled Manila clock; date-only waits until the next local day", () => {
+  const beforeSlot = new Date("2026-10-29T01:59:00.000Z");
+  const afterSlot = new Date("2026-10-29T02:01:00.000Z");
+  assert.equal(
+    lifecycle.missedCutoffPassed({
+      appointmentDate: "2026-10-29",
+      appointmentTime: "10:00",
+      now: beforeSlot,
+    }),
+    false
+  );
+  assert.equal(
+    lifecycle.missedCutoffPassed({
+      appointmentDate: "2026-10-29",
+      appointmentTime: "10:00",
+      now: afterSlot,
+    }),
+    true
+  );
+  assert.equal(
+    lifecycle.missedCutoffPassed({
+      appointmentDate: "2026-10-29",
+      appointmentTime: null,
+      now: new Date("2026-10-29T15:59:00.000Z"),
+    }),
+    false
+  );
+  assert.equal(
+    lifecycle.missedCutoffPassed({
+      appointmentDate: "2026-10-29",
+      appointmentTime: null,
+      now: new Date("2026-10-29T16:00:00.000Z"),
+    }),
+    true
+  );
 });
 
-test("unproceeded job is idempotent and skips in-treatment visits", async () => {
+test("missed appointment job is idempotent and never targets checked-in visits", async () => {
   const updates = [];
   const db = {
     async query(sql, params) {
@@ -75,18 +107,18 @@ test("unproceeded job is idempotent and skips in-treatment visits", async () => 
     },
   };
   const job = createUnproceededAppointmentCancelJob({ db });
-  const beforeCutoff = await job.runOnce(new Date("2026-10-29T09:00:00.000Z"));
-  assert.equal(beforeCutoff.skipped, true);
-  assert.equal(beforeCutoff.cancelled, 0);
+  const morning = await job.runOnce(new Date("2026-10-29T01:00:00.000Z"));
+  assert.equal(morning.skipped, false);
+  assert.equal(morning.cancelled, 0);
 
-  const afterCutoff = await job.runOnce(new Date("2026-10-29T11:00:00.000Z"));
-  assert.equal(afterCutoff.cancelled, 0);
   const update = updates.find((entry) => entry.sql.includes("UPDATE patient_portal_appointments"));
   assert.ok(update);
-  assert.match(update.sql, /status IN \('pending', 'confirmed', 'checked_in'\)/);
-  assert.match(update.sql, /preparing', 'called', 'dentist/);
-  assert.equal(update.params[1], AUTO_REASON);
+  assert.match(update.sql, /appointment\.status IN \('pending', 'confirmed'\)/);
+  assert.doesNotMatch(update.sql, /appointment\.status IN \('pending', 'confirmed', 'checked_in'\)/);
+  assert.match(update.sql, /appointment_time IS NULL/);
+  assert.equal(update.params[1], "Asia/Manila");
+  assert.equal(update.params[2], AUTO_REASON);
 
-  const again = await job.runOnce(new Date("2026-10-29T11:05:00.000Z"));
+  const again = await job.runOnce(new Date("2026-10-29T01:05:00.000Z"));
   assert.equal(again.cancelled, 0);
 });
