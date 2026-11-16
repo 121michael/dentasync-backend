@@ -110,6 +110,9 @@ function mapClinicalTreatment(row) {
     completedAt: row.completed_at || null,
     createdBy: row.created_by || null,
     createdByRole: row.created_by_role || null,
+    originatingBranchId: row.originating_branch_id != null ? Number(row.originating_branch_id) : null,
+    treatingDentistId: row.treating_dentist_id || null,
+    attributionReview: Boolean(row.attribution_review) || row.originating_branch_id == null,
     updatedBy: row.updated_by || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at || null,
@@ -1214,6 +1217,22 @@ async function addClinicalTreatment(db, recordId, input, actor = {}) {
       if (error.code !== "42703") throw error;
     }
   }
+  if (result.rows[0]?.id && input.treatingDentistId) {
+    try {
+      await withSavepoint(db, "treatment_dentist", () =>
+        db.query(
+          `UPDATE clinic_patient_treatments
+           SET treating_dentist_id = $2,
+               attribution_review = originating_branch_id IS NULL
+           WHERE id = $1`,
+          [result.rows[0].id, String(input.treatingDentistId)]
+        )
+      );
+      result.rows[0].treating_dentist_id = String(input.treatingDentistId);
+    } catch (error) {
+      if (error.code !== "42703") throw error;
+    }
+  }
   const mapped = mapClinicalTreatment(result.rows[0]);
   try {
     await dentalChartSync.syncChartFromTreatment(db, recordId, result.rows[0], actor);
@@ -1296,6 +1315,12 @@ async function updateClinicalTreatment(db, recordId, treatmentId, input, actor =
   }
 
   const current = existing.rows[0];
+  const owner = current.treating_dentist_id || current.created_by || null;
+  if (String(current.status || "").toLowerCase() === "completed" && owner && String(actor?.id || "") !== String(owner)) {
+    const error = new Error("Completed treatment records can only be corrected by the treating dentist.");
+    error.status = 403;
+    throw error;
+  }
   const provided = (key) => input[key] !== undefined;
   const amountCharged = provided("amountCharged")
     ? parseMoneyAmount(input.amountCharged, "Amount Charged")
@@ -1432,6 +1457,21 @@ async function rebuildChartAfterTreatmentChange(db, recordId, actor = {}) {
 }
 
 async function deleteClinicalTreatment(db, recordId, treatmentId, actor = {}) {
+  const existing = await db.query(
+    `SELECT * FROM clinic_patient_treatments WHERE id = $1 AND clinical_record_id = $2 LIMIT 1`,
+    [treatmentId, recordId]
+  );
+  if (!existing.rows.length) {
+    const error = new Error("Treatment history record not found.");
+    error.status = 404;
+    throw error;
+  }
+  const owner = existing.rows[0].treating_dentist_id || existing.rows[0].created_by || null;
+  if (String(existing.rows[0].status || "").toLowerCase() === "completed" && owner && String(actor?.id || "") !== String(owner)) {
+    const error = new Error("Completed treatment records can only be corrected by the treating dentist.");
+    error.status = 403;
+    throw error;
+  }
   const result = await db.query(
     `DELETE FROM clinic_patient_treatments
      WHERE id = $1

@@ -268,6 +268,40 @@ async function startDentistPortal({
             row.reviewed_at = new Date().toISOString();
             return { rows: [row] };
           }
+          if (sql.includes("patient_portal_queue_entries")) {
+            return { rows: [] };
+          }
+          if (sql.includes("FROM clinic_branch_assignments")) {
+            return {
+              rows: [
+                {
+                  id: 1,
+                  branch_id: 1,
+                  branch_code: "BR-0001",
+                  name: "Mandaluyong",
+                  status: "active",
+                  is_main: true,
+                },
+              ],
+            };
+          }
+          if (sql.includes("FROM patient_portal_appointments") || sql.includes("JOIN patient_portal_appointments")) {
+            return {
+              rows: [
+                {
+                  id: 88,
+                  branch_id: 1,
+                  status: "confirmed",
+                  dentist_id: "dentist-1",
+                  dentist_name: "Clinic dentist",
+                },
+              ],
+            };
+          }
+          if (sql.includes("record_access_")) return { rows: [] };
+          if (sql.includes("can_approve_cross_branch_access")) {
+            return { rows: [{ can_approve_cross_branch_access: false }] };
+          }
           if (sql.includes("clinic_branch")) {
             const missing = new Error("missing");
             missing.code = "42P01";
@@ -616,6 +650,7 @@ test("dentist can list and download a linked patient's medical document", async 
       service_name: "Tooth Extraction",
       appointment_date: "2099-12-16",
       appointment_time: "10:00",
+      originating_branch_id: 1,
     },
   ];
   const portal = await startDentistPortal({ documents, uploadDirectory });
@@ -674,6 +709,7 @@ test("dentist medical document list uses the patient description as the document
         service_name: "Tooth Extraction",
         appointment_date: "2099-12-18",
         appointment_time: "14:00",
+        originating_branch_id: 1,
       },
       {
         id: "doc-other",

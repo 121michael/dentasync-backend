@@ -390,6 +390,12 @@ export const api = {
   createDentistPatient: (body) => request("/dentist/patients", { method: "POST", body }),
   getDentistPatient: (patientId, options = {}) =>
     request(`/dentist/patients/${patientId}`, options),
+  getDentistRecordBranches: () => request("/dentist/record-branches"),
+  requestDentistRecordAccess: (patientId, body) =>
+    request(`/dentist/patients/${patientId}/access-requests`, { method: "POST", body }),
+  getDentistRecordAccessRequests: () => request("/dentist/record-access-requests"),
+  decideDentistRecordAccess: (requestId, decision) =>
+    request(`/dentist/record-access-requests/${requestId}/decision`, { method: "POST", body: { decision } }),
   saveDentistWellnessAssessment: (patientId, body, options = {}) =>
     request(`/dentist/patients/${patientId}/wellness-assessment`, {
       method: "PUT",
@@ -509,6 +515,9 @@ export const api = {
     const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value || value === 0));
     return request(`/admin/branches${search.size ? `?${search}` : ""}`);
   },
+  getAdminRecordAccessRequests: () => request("/admin/record-access-requests"),
+  decideAdminRecordAccess: (requestId, decision) =>
+    request(`/admin/record-access-requests/${requestId}/decision`, { method: "POST", body: { decision } }),
   getAdminBranch: (id) => request(`/admin/branches/${id}`),
   createAdminBranch: (body) => request("/admin/branches", { method: "POST", body }),
   updateAdminBranch: (id, body) => request(`/admin/branches/${id}`, { method: "PATCH", body }),

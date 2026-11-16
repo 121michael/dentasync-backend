@@ -172,6 +172,8 @@ export function AdminSyncPage() {
   const [previewZoom, setPreviewZoom] = useState(1);
   const [previewPage, setPreviewPage] = useState(1);
   const [mobilePane, setMobilePane] = useState("fields");
+  const [branches, setBranches] = useState([]);
+  const [branchId, setBranchId] = useState("");
   const focusHandledRef = useRef("");
 
   const clearPreviews = useCallback(() => {
@@ -202,6 +204,10 @@ export function AdminSyncPage() {
 
   useEffect(() => {
     load();
+    api.getAdminBranches().then((response) => {
+      const rows = response.branches || response.items || [];
+      setBranches(rows.filter((branch) => String(branch.status || "active").toLowerCase() === "active"));
+    }).catch(() => setBranches([]));
   }, [load]);
 
   useEffect(() => {
@@ -523,6 +529,7 @@ export function AdminSyncPage() {
   async function finishCommit({ confirmNewPatient = false, selectedPatientId = "", resolutions = {}, manuals = {} } = {}) {
     const response = await api.commitAdminDocumentSync(activeJob.id, {
       payload,
+      branchId: Number(branchId),
       confirmNewPatient,
       selectedPatientId: selectedPatientId || undefined,
       fieldResolutions: resolutions,
@@ -1005,6 +1012,15 @@ export function AdminSyncPage() {
 
               <section className="doc-table-card__patient" aria-label="Patient information">
                 <span className="doc-table-card__section-label">Patient Information</span>
+                <label className="doc-table-field doc-table-field--wide">
+                  <span>Branch this document came from</span>
+                  <select value={branchId} onChange={(event) => setBranchId(event.target.value)} disabled={activeJob.status === "synced"}>
+                    <option value="">Select the source branch</option>
+                    {branches.map((branch) => (
+                      <option key={branch.id} value={branch.id}>{branch.name}</option>
+                    ))}
+                  </select>
+                </label>
                 <div className="doc-table-card__patient-grid">
                   <label className={`doc-table-field doc-table-field--wide${needsReview("fullName") ? " is-needs-review" : ""}`}>
                     <span>Name{needsReview("fullName") ? " · needs review" : ""}</span>

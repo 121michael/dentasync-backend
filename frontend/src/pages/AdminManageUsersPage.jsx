@@ -25,6 +25,7 @@ const emptyForm = {
   scheduleNotes: "",
   licenseNumber: "",
   licenseVerified: false,
+  canApproveCrossBranchAccess: false,
   branchId: "",
   branchIds: [],
 };
@@ -288,6 +289,7 @@ export function AdminManageUsersPage() {
       scheduleNotes: user.scheduleNotes || "",
       licenseNumber: user.licenseNumber || "",
       licenseVerified: Boolean(user.licenseVerified),
+      canApproveCrossBranchAccess: Boolean(user.canApproveCrossBranchAccess),
       branchId: user.branches?.[0] ? String(user.branches[0].id) : "",
       branchIds: (user.branches || []).map((branch) => String(branch.id)),
     });
@@ -338,7 +340,10 @@ export function AdminManageUsersPage() {
       return;
     }
     const payload = { ...form };
-    if (tab === "staff") delete payload.branchIds;
+    if (tab === "staff") {
+      delete payload.branchIds;
+      delete payload.canApproveCrossBranchAccess;
+    }
     if (tab === "dentist") delete payload.branchId;
     saveLock.current = true;
     setBusy(true);
@@ -1166,6 +1171,16 @@ export function AdminManageUsersPage() {
                     />
                     <span>
                       I verified this license number against this dentist's professional record. Prescriptions stay blocked until this is checked. Do not enter another dentist's number.
+                    </span>
+                  </label>
+                  <label className="admin-form--manage-user__full admin-license-verify">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(form.canApproveCrossBranchAccess)}
+                      onChange={(e) => setForm({ ...form, canApproveCrossBranchAccess: e.target.checked })}
+                    />
+                    <span>
+                      Can Approve Cross-Branch Record Access. This stays off unless an administrator turns it on. It does not open charts or other branches.
                     </span>
                   </label>
                 </>

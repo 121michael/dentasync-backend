@@ -20,6 +20,7 @@ const { attachDentalAuthorizationRoutes } = require("./dentalAuthorization");
 const { attachPrescriptionRoutes } = require("./prescriptions");
 const { updatePasswordHash } = require("../services/sessionRevocation");
 const branchAccess = require("../services/branchAccess");
+const recordAccess = require("../services/recordAccess");
 const branchCheckIn = require("../services/branchCheckIn");
 
 const QUEUE_STATUS_MAP = {
@@ -1603,8 +1604,19 @@ function createStaffPortalRouter({
       let appointments = [];
       try {
         appointments = await clinicalPatients.listLinkedAppointments(db, detail.record, { limit: 100 });
+        const staffBranchId = req.branchAccess?.activeBranch?.id;
+        if (staffBranchId && detail.record.linkedUserId) {
+          const scoped = await db.query(
+            `SELECT id FROM patient_portal_appointments WHERE user_id = $1 AND branch_id = $2`,
+            [String(detail.record.linkedUserId), staffBranchId]
+          );
+          const ids = new Set(scoped.rows.map((row) => String(row.id)));
+          appointments = appointments.filter((appointment) => ids.has(String(appointment.id)));
+        }
       } catch (appointmentError) {
-        console.warn("Staff clinical appointments lookup failed:", appointmentError.message);
+        if (appointmentError.code !== "42703" && appointmentError.code !== "42P01") {
+          console.warn("Staff clinical appointments lookup failed:", appointmentError.message);
+        }
       }
 
       const nextAppointment = clinicalPatients.resolveClinicalNextAppointment(
@@ -1648,6 +1660,11 @@ function createStaffPortalRouter({
           appointments,
           treatments: detail.treatments.map((record) => {
             const payment = patientData.paymentSummary(record.amountCharged, record.amountPaid);
+            const staffBranchId = req.branchAccess?.activeBranch?.id || null;
+            const visible = recordAccess.presentTreatment(record, {
+              encounterBranchIds: staffBranchId ? [String(staffBranchId)] : [],
+              grants: [],
+            });
             return {
               id: record.id,
               treatment: record.treatment,
@@ -1657,8 +1674,10 @@ function createStaffPortalRouter({
               treatmentDate: record.treatmentDate,
               status: record.status,
               notes: "",
-              diagnosis: record.diagnosisNotes || record.diagnosis || record.notes || "",
-              diagnosisNotes: record.diagnosisNotes || record.diagnosis || record.notes || "",
+              diagnosis: visible.diagnosis,
+              diagnosisNotes: visible.diagnosisNotes,
+              originatingBranchId: visible.originatingBranchId,
+              attributionReview: visible.attributionReview,
               toothNumber: record.toothNumber,
               durationMinutes: record.durationMinutes,
               appointmentId: record.appointmentId || null,

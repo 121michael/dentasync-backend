@@ -38,6 +38,7 @@ import { AdminAnalyticsPage } from "./pages/AdminAnalyticsPage";
 import { AdminAiSettingsPage } from "./pages/AdminAiSettingsPage";
 import { AdminSettingsPage } from "./pages/AdminSettingsPage";
 import { AdminSyncPage } from "./pages/AdminSyncPage";
+import { AdminRecordAccessPage } from "./pages/AdminRecordAccessPage";
 import { AdminAuditPage } from "./pages/AdminAuditPage";
 import { AdminNotificationsPage } from "./pages/AdminNotificationsPage";
 import { AdminBackupPage } from "./pages/AdminBackupPage";
@@ -198,6 +199,7 @@ function PortalRoutes() {
           <Route path="/admin/ai-settings" element={<AdminAiSettingsPage />} />
           <Route path="/admin/settings" element={<AdminSettingsPage />} />
           <Route path="/admin/sync-data" element={<AdminSyncPage />} />
+          <Route path="/admin/record-access" element={<AdminRecordAccessPage />} />
           <Route path="/admin/audit-logs" element={<AdminAuditPage />} />
           <Route path="/admin/patients" element={<Navigate to="/admin/patient-records" replace />} />
           <Route path="/admin/staff" element={<Navigate to="/admin/users" replace />} />

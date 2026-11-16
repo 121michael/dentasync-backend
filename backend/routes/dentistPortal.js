@@ -12,6 +12,7 @@ const dentalWellness = require("../services/dentalWellness");
 const dentalChartSync = require("../services/dentalChartSync");
 const patientData = require("../services/patientData");
 const { writeAdminAudit } = require("../services/adminAudit");
+const recordAccess = require("../services/recordAccess");
 const { attachDentalAuthorizationRoutes } = require("./dentalAuthorization");
 const { attachPrescriptionRoutes } = require("./prescriptions");
 const { insertPatientNotification } = require("../services/patientPortalNotifications");
@@ -545,6 +546,18 @@ function requireDentistAccount(db) {
 
       // Database role is the authorization source of truth; never trust JWT role alone.
       req.dentist = result.rows[0];
+      req.dentist.can_approve_cross_branch_access = false;
+      try {
+        const flag = await db.query(
+          `SELECT can_approve_cross_branch_access
+           FROM admin_portal_dentist_profiles
+           WHERE user_id = $1`,
+          [String(req.dentist.id)]
+        );
+        req.dentist.can_approve_cross_branch_access = flag.rows[0]?.can_approve_cross_branch_access === true;
+      } catch {
+        req.dentist.can_approve_cross_branch_access = false;
+      }
       return next();
     } catch (error) {
       if (error.code === "42P01") {
@@ -567,6 +580,79 @@ function createDentistPortalRouter({
   uploadDirectory = path.join(process.cwd(), "uploads", "patient-portal"),
 }) {
   const router = express.Router();
+
+  function sendAccessError(res, error, fallback) {
+    if (error?.status) {
+      return res.status(error.status).json({
+        message: error.message,
+        code: error.code,
+        patient: error.patient,
+      });
+    }
+    if (clinicalPatients.isMissingRelation(error)) {
+      return res.status(503).json({
+        message: "Clinical patient records are not available. Run npm run migrate:clinical-records.",
+      });
+    }
+    console.error(fallback, error.message);
+    return res.status(500).json({ message: fallback });
+  }
+
+  async function openPatientChart(req, recordId) {
+    const detail = await clinicalPatients.getClinicalRecord(db, recordId);
+    if (!detail || detail.record.archived) {
+      const error = new Error("Patient record not found.");
+      error.status = 404;
+      throw error;
+    }
+    const relationship = await recordAccess.qualifyingRelationship(db, req.dentist, detail.record);
+    if (!relationship.allowed) {
+      const error = new Error(
+        "A confirmed appointment or an active encounter with this patient is required before the chart can be opened."
+      );
+      error.status = 403;
+      error.code = "NO_TREATMENT_RELATIONSHIP";
+      error.patient = recordAccess.identityOf(detail.record);
+      throw error;
+    }
+    const grants = await recordAccess.activeGrants(db, req.dentist.id, detail.record.id);
+    return { detail, access: { encounterBranchIds: relationship.branchIds, grants } };
+  }
+
+  async function visibleWellness(db, detail, access) {
+    let branchId = null;
+    try {
+      const row = await db.query(
+        `SELECT originating_branch_id FROM dental_wellness_assessments WHERE clinical_record_id = $1`,
+        [detail.record.id]
+      );
+      branchId = row.rows[0]?.originating_branch_id ?? null;
+    } catch (error) {
+      if (error.code !== "42P01" && error.code !== "42703") throw error;
+    }
+    if (
+      !recordAccess.restrictedAllowed({
+        originatingBranchId: branchId,
+        encounterBranchIds: access.encounterBranchIds,
+        grants: access.grants,
+        scope: "wellness",
+      })
+    ) {
+      return { restricted: true, hasAssessment: false };
+    }
+    return dentalWellness.getWellnessForClinicalRecord(db, detail.record, detail.treatments);
+  }
+
+  function visibleDocuments(rows, access, scope) {
+    return rows.filter((row) =>
+      recordAccess.restrictedAllowed({
+        originatingBranchId: row.originating_branch_id,
+        encounterBranchIds: access.encounterBranchIds,
+        grants: access.grants,
+        scope,
+      })
+    );
+  }
   router.use(authenticateToken, requireDentistAccount(db), branchAccess.attachBranchAccess(db, "dentist"));
 
   router.get("/branch-context", (req, res) => {
@@ -1767,40 +1853,24 @@ function createDentistPortalRouter({
         search,
         limit: 100,
       });
-      return res.json({
-        patients: patients.map((record) => {
-          const nextAppointment = clinicalPatients.resolveClinicalNextAppointment(record, []);
-          return {
-            id: record.id,
-            recordCode: record.recordCode,
-            patientId: record.patientId || record.recordCode || null,
-            patientCategory: record.patientCategory || null,
-            firstName: record.firstName,
-            lastName: record.lastName,
-            fullName: record.fullName,
-            patientName: record.fullName,
-            email: record.email,
-            phone: record.phone,
-            dateOfBirth: record.dateOfBirth,
-            gender: record.gender,
-            age: record.age,
-            ageSex: record.ageSex || clinicalPatients.formatAgeSex(record.age, record.gender),
-            lastVisit: record.lastTreatmentDate,
-            lastTreatment: record.lastTreatment,
-            lastTreatmentName: record.lastTreatment,
-            lastTreatmentDate: record.lastTreatmentDate,
-            amountPaid: record.lastAmountPaid,
-            nextAppointmentDate: nextAppointment?.date || record.nextAppointmentDate || null,
-            nextAppointmentTime: nextAppointment?.time || record.nextAppointmentTime || null,
-            nextAppointment: nextAppointment,
-            accountStatus: record.linkedUserId ? "linked_account" : "clinical_record",
-            linkedUserId: record.linkedUserId,
-            profileLocked: Boolean(record.profileLocked || record.linkedUserId),
-            accountLinked: Boolean(record.accountLinked || record.linkedUserId),
-            isClinicalRecord: true,
-          };
-        }),
-      });
+      const visible = [];
+      for (const record of patients) {
+        const relationship = await recordAccess.qualifyingRelationship(db, req.dentist, record);
+        const identity = recordAccess.identityOf(record);
+        if (!relationship.allowed) {
+          visible.push(identity);
+          continue;
+        }
+        visible.push({
+          ...identity,
+          recordCode: record.recordCode,
+          patientCategory: record.patientCategory || null,
+          lastTreatment: record.lastTreatment,
+          lastTreatmentDate: record.lastTreatmentDate,
+          isClinicalRecord: true,
+        });
+      }
+      return res.json({ patients: visible });
     } catch (error) {
       if (clinicalPatients.isMissingRelation(error)) {
         return res.status(503).json({
@@ -1932,22 +2002,55 @@ function createDentistPortalRouter({
     }
 
     try {
-      const detail = await clinicalPatients.getClinicalRecord(db, recordId);
-      if (!detail || detail.record.archived) {
-        return res.status(404).json({ message: "Patient record not found." });
-      }
+      const opened = await openPatientChart(req, recordId);
+      const detail = opened.detail;
+      const access = opened.access;
 
       let appointments = [];
       try {
-        appointments = await clinicalPatients.listLinkedAppointments(db, detail.record, { limit: 100 });
+        const scoped = await db.query(
+          `SELECT id, service_name, appointment_date, appointment_time, status, branch_id, dentist_id
+           FROM patient_portal_appointments
+           WHERE user_id = $1
+             AND branch_id::text = ANY($2::text[])
+             AND status = ANY($3::text[])`,
+          [
+            String(detail.record.linkedUserId || ""),
+            access.encounterBranchIds,
+            recordAccess.OPEN_APPOINTMENT_STATUSES,
+          ]
+        );
+        const dentistIds = new Set(
+          [req.dentist.id, req.dentist.catalog_dentist_id].filter(Boolean).map(String)
+        );
+        appointments = scoped.rows
+          .filter((row) => dentistIds.has(String(row.dentist_id)))
+          .map((row) => ({
+            id: row.id,
+            treatment: row.service_name,
+            date: row.appointment_date,
+            time: row.appointment_time,
+            status: row.status,
+            branchId: row.branch_id,
+          }));
       } catch (appointmentError) {
-        console.warn("Dentist clinical appointments lookup failed:", appointmentError.message);
+        if (appointmentError.code !== "42703" && appointmentError.code !== "42P01") {
+          console.warn("Dentist clinical appointments lookup failed:", appointmentError.message);
+        }
       }
 
       const patientNextAppointment = clinicalPatients.resolveClinicalNextAppointment(
         detail.record,
         appointments
       );
+
+      await recordAccess.audit(db, req, {
+        action: "cross_branch_chart_read",
+        targetType: "clinical_record",
+        targetId: String(detail.record.id),
+        targetLabel: recordAccess.identityOf(detail.record).patientId,
+        detail: `Ordinary chart read. Encounter branches ${access.encounterBranchIds.join(",")}.`,
+      });
 
       return res.json({
         patient: {
@@ -1970,53 +2073,25 @@ function createDentistPortalRouter({
         appointments,
         nextAppointment: patientNextAppointment,
         treatments: detail.treatments.map((row) => {
+          const presented = recordAccess.presentTreatment(row, access);
           const amountCharged = Number(row.amountCharged || 0);
           const amountPaid = Number(row.amountPaid || 0);
-          const nextAppointment =
-            clinicalPatients.resolveClinicalNextAppointment(
-              detail.record,
-              appointments,
-              row.treatmentDate
-            ) || patientNextAppointment;
           return {
-            id: row.id,
-            name: row.treatment,
-            treatment: row.treatment,
-            dentist: row.dentistName,
-            date: row.treatmentDate,
-            treatmentDate: row.treatmentDate,
-            status: row.status,
-            notes: "",
-            diagnosis: row.diagnosisNotes || row.diagnosis || "",
-            diagnosisNotes: row.diagnosisNotes || row.diagnosis || "",
+            ...presented,
             durationMinutes: row.durationMinutes,
-            toothNumber: row.toothNumber,
-            procedureDetails: row.procedureDetails,
             amountCharged,
             amountPaid,
             balance: Math.round((amountCharged - amountPaid) * 100) / 100,
             appointmentId: row.appointmentId,
             queueEntryId: row.queueEntryId || null,
             visitSequence: row.visitSequence || null,
-            nextAppointment: nextAppointment
-              ? {
-                  id: nextAppointment.id,
-                  date: nextAppointment.date,
-                  time: nextAppointment.time,
-                  treatment: nextAppointment.treatment,
-                  status: nextAppointment.status,
-                }
-              : null,
           };
         }),
         currentVisit: await clinicalPatients.listCurrentVisitForRecord(db, detail.record),
-        wellness: await dentalWellness.getWellnessForClinicalRecord(
-          db,
-          detail.record,
-          detail.treatments
-        ),
+        wellness: await visibleWellness(db, detail, access),
       });
     } catch (error) {
+      if (error.status) return sendAccessError(res, error, "Unable to load the patient record.");
       if (clinicalPatients.isMissingRelation(error)) {
         return res.status(503).json({
           message: "Clinical patient records are not available. Run npm run migrate:clinical-records.",
@@ -2034,10 +2109,11 @@ function createDentistPortalRouter({
     }
 
     try {
-      const detail = await clinicalPatients.getClinicalRecord(db, recordId);
-      if (!detail || detail.record.archived) {
-        return res.status(404).json({ message: "Patient record not found." });
-      }
+      const opened = await openPatientChart(req, recordId);
+      const detail = opened.detail;
+      const branchId =
+        opened.access.encounterBranchIds.find((id) => String(id) === String(req.branchAccess?.activeBranch?.id)) ||
+        opened.access.encounterBranchIds[0];
 
       const wellness = await dentalWellness.saveAssessment(
         db,
@@ -2045,6 +2121,14 @@ function createDentistPortalRouter({
         req.body || {},
         req.dentist
       );
+      try {
+        await db.query(
+          `UPDATE dental_wellness_assessments SET originating_branch_id = $2 WHERE clinical_record_id = $1`,
+          [detail.record.id, branchId]
+        );
+      } catch (error) {
+        if (error.code !== "42703" && error.code !== "42P01") throw error;
+      }
       return res.json({
         message: "Dental wellness assessment saved.",
         wellness,
@@ -2070,10 +2154,8 @@ function createDentistPortalRouter({
     }
 
     try {
-      const detail = await clinicalPatients.getClinicalRecord(db, recordId);
-      if (!detail || detail.record.archived) {
-        return res.status(404).json({ message: "Patient record not found." });
-      }
+      const opened = await openPatientChart(req, recordId);
+      const detail = opened.detail;
 
       const linkedUserId = detail.record.linkedUserId;
       if (!linkedUserId) {
@@ -2085,13 +2167,23 @@ function createDentistPortalRouter({
 
       const [documentsResult, analysesResult] = await Promise.all([
         db.query(
-          `SELECT id, original_name, mime_type, byte_size, created_at
+          `SELECT id, original_name, mime_type, byte_size, created_at, originating_branch_id
            FROM patient_portal_documents
            WHERE user_id = $1
              AND document_type = 'xray'
            ORDER BY created_at DESC`,
           [String(linkedUserId)]
-        ),
+        ).catch((error) => {
+          if (error.code !== "42703") throw error;
+          return db.query(
+            `SELECT id, original_name, mime_type, byte_size, created_at
+             FROM patient_portal_documents
+             WHERE user_id = $1
+               AND document_type = 'xray'
+             ORDER BY created_at DESC`,
+            [String(linkedUserId)]
+          );
+        }),
         db.query(
           `SELECT id, document_id, status, summary, findings_json, confidence, disclaimer, created_at, updated_at
            FROM patient_xray_analyses
@@ -2109,9 +2201,10 @@ function createDentistPortalRouter({
       const analysesByDocument = new Map(
         analysesResult.rows.map((row) => [String(row.document_id), row])
       );
+      const documents = visibleDocuments(documentsResult.rows, opened.access, "xrays");
 
       return res.json({
-        xrays: documentsResult.rows.map((document) => {
+        xrays: documents.map((document) => {
           const analysis = analysesByDocument.get(String(document.id));
           return {
             id: document.id,
@@ -2140,6 +2233,7 @@ function createDentistPortalRouter({
         }),
       });
     } catch (error) {
+      if (error.status) return sendAccessError(res, error, "Unable to load patient X-rays.");
       if (clinicalPatients.isMissingRelation(error)) {
         return res.status(503).json({
           message: "Clinical patient records are not available. Run npm run migrate:clinical-records.",
@@ -2157,10 +2251,8 @@ function createDentistPortalRouter({
     }
 
     try {
-      const detail = await clinicalPatients.getClinicalRecord(db, recordId);
-      if (!detail || detail.record.archived) {
-        return res.status(404).json({ message: "Patient record not found." });
-      }
+      const opened = await openPatientChart(req, recordId);
+      const detail = opened.detail;
       const linkedUserId = detail.record.linkedUserId;
       if (!linkedUserId) {
         return res.json({
@@ -2178,6 +2270,7 @@ function createDentistPortalRouter({
              document.mime_type,
              document.byte_size,
              document.created_at,
+             document.originating_branch_id,
              document.category,
              document.status,
              document.reviewed_at,
@@ -2207,11 +2300,14 @@ function createDentistPortalRouter({
       }
 
       return res.json({
-        documents: result.rows.map((row) => medicalDocuments.mapMedicalDocument(row)),
+        documents: visibleDocuments(result.rows, opened.access, "medical_documents").map((row) =>
+          medicalDocuments.mapMedicalDocument(row)
+        ),
         disclaimer:
           "Uploaded files are supporting documentation only. Reviewing a file does not automatically grant medical clearance.",
       });
     } catch (error) {
+      if (error.status) return sendAccessError(res, error, "Unable to load dental documents.");
       if (clinicalPatients.isMissingRelation(error)) {
         return res.status(503).json({
           message: "Clinical patient records are not available. Run npm run migrate:clinical-records.",
@@ -2229,22 +2325,40 @@ function createDentistPortalRouter({
     }
 
     try {
-      const detail = await clinicalPatients.getClinicalRecord(db, recordId);
-      if (!detail || detail.record.archived || !detail.record.linkedUserId) {
+      const opened = await openPatientChart(req, recordId);
+      const detail = opened.detail;
+      if (!detail.record.linkedUserId) {
         return res.status(404).json({ message: "Document not found." });
       }
 
-      const result = await db.query(
-        `SELECT original_name, stored_name, mime_type
-         FROM patient_portal_documents
-         WHERE id = $1
-           AND user_id = $2
-           AND document_type = $3
-         LIMIT 1`,
-        [req.params.documentId, String(detail.record.linkedUserId), medicalDocuments.DOCUMENT_TYPE]
-      );
+      let result;
+      try {
+        result = await db.query(
+          `SELECT original_name, stored_name, mime_type, originating_branch_id
+           FROM patient_portal_documents
+           WHERE id = $1
+             AND user_id = $2
+             AND document_type = $3
+           LIMIT 1`,
+          [req.params.documentId, String(detail.record.linkedUserId), medicalDocuments.DOCUMENT_TYPE]
+        );
+      } catch (error) {
+        if (error.code !== "42703") throw error;
+        result = await db.query(
+          `SELECT original_name, stored_name, mime_type
+           FROM patient_portal_documents
+           WHERE id = $1
+             AND user_id = $2
+             AND document_type = $3
+           LIMIT 1`,
+          [req.params.documentId, String(detail.record.linkedUserId), medicalDocuments.DOCUMENT_TYPE]
+        );
+      }
       if (!result.rows.length) {
         return res.status(404).json({ message: "Document not found." });
+      }
+      if (!visibleDocuments(result.rows, opened.access, "medical_documents").length) {
+        return res.status(403).json({ message: "Approval is required before this document can be opened." });
       }
 
       const document = result.rows[0];
@@ -2266,6 +2380,7 @@ function createDentistPortalRouter({
       res.setHeader("Content-Disposition", `${inline ? "inline" : "attachment"}; filename="${safeName}"`);
       return res.sendFile(filePath);
     } catch (error) {
+      if (error.status) return sendAccessError(res, error, "Unable to download the medical document.");
       console.error("Dentist medical document download error:", error.message);
       return res.status(500).json({ message: "Unable to download the medical document." });
     }
@@ -2281,8 +2396,9 @@ function createDentistPortalRouter({
     }
 
     try {
-      const detail = await clinicalPatients.getClinicalRecord(db, recordId);
-      if (!detail || detail.record.archived || !detail.record.linkedUserId) {
+      const opened = await openPatientChart(req, recordId);
+      const detail = opened.detail;
+      if (!detail.record.linkedUserId) {
         return res.status(404).json({ message: "Document not found." });
       }
 
@@ -2326,6 +2442,7 @@ function createDentistPortalRouter({
           "Marked as reviewed. This records that the file was seen; it does not automatically grant medical clearance.",
       });
     } catch (error) {
+      if (error.status) return sendAccessError(res, error, "Unable to update the medical document.");
       console.error("Dentist medical document review error:", error.message);
       return res.status(500).json({ message: "Unable to update the medical document." });
     }
@@ -2338,6 +2455,7 @@ function createDentistPortalRouter({
     }
 
     try {
+      await openPatientChart(req, recordId);
       const record = await db.query(
         `SELECT id FROM clinic_patient_records
          WHERE id = $1 AND COALESCE(is_archived, FALSE) = FALSE
@@ -2411,6 +2529,7 @@ function createDentistPortalRouter({
         }),
       });
     } catch (error) {
+      if (error.status) return sendAccessError(res, error, "Unable to load the dental chart.");
       if (clinicalPatients.isMissingRelation(error) || error?.code === "42P01") {
         return res.status(503).json({
           message: "Dental chart is not available. Run npm run migrate:paper-gaps.",
@@ -2491,6 +2610,7 @@ function createDentistPortalRouter({
       return res.status(400).json({ message: "At least one valid chart entry is required." });
     }
 
+    await openPatientChart(req, recordId);
     const client = await db.connect();
     let transactionOpen = false;
     try {
@@ -2593,6 +2713,7 @@ function createDentistPortalRouter({
       if (transactionOpen) {
         await client.query("ROLLBACK");
       }
+      if (error.status) return sendAccessError(res, error, "Unable to save the dental chart.");
       if (clinicalPatients.isMissingRelation(error) || error?.code === "42P01") {
         return res.status(503).json({
           message: "Dental chart is not available. Run npm run migrate:paper-gaps.",
@@ -2613,6 +2734,7 @@ function createDentistPortalRouter({
     }
 
     try {
+      await openPatientChart(req, recordId);
       const result = await db.query(
         `DELETE FROM clinic_dental_chart_entries
          WHERE clinical_record_id = $1
@@ -2628,6 +2750,7 @@ function createDentistPortalRouter({
         toothNumber: result.rows[0].tooth_number,
       });
     } catch (error) {
+      if (error.status) return sendAccessError(res, error, "Unable to remove the dental chart entry.");
       if (clinicalPatients.isMissingRelation(error) || error?.code === "42P01") {
         return res.status(503).json({
           message: "Dental chart is not available. Run npm run migrate:paper-gaps.",
@@ -2671,7 +2794,11 @@ function createDentistPortalRouter({
             ? Number(procedureBodies[0].queueEntryId)
             : null;
 
-      const detail = await clinicalPatients.getClinicalRecord(db, recordId).catch(() => null);
+      const opened = await openPatientChart(req, recordId);
+      const detail = opened.detail;
+      const careBranchId =
+        opened.access.encounterBranchIds.find((id) => String(id) === String(req.branchAccess?.activeBranch?.id)) ||
+        opened.access.encounterBranchIds[0];
       const requestedCurrentVisit = Boolean(
         req.body?.forCurrentVisit ?? procedureBodies.some((item) => item?.forCurrentVisit)
       );
@@ -2751,6 +2878,8 @@ function createDentistPortalRouter({
           appointmentId,
           queueEntryId: forCurrentVisit ? queueEntryId : null,
           visitSequence: sequence,
+          originatingBranchId: careBranchId,
+          treatingDentistId: req.dentist.id,
         };
       });
 
@@ -2826,6 +2955,7 @@ function createDentistPortalRouter({
     }
 
     try {
+      await openPatientChart(req, recordId);
       const row = await clinicalPatients.updateClinicalTreatment(
         db,
         recordId,
@@ -2875,6 +3005,7 @@ function createDentistPortalRouter({
     }
 
     try {
+      await openPatientChart(req, recordId);
       const row = await clinicalPatients.deleteClinicalTreatment(
         db,
         recordId,
@@ -3113,6 +3244,99 @@ function createDentistPortalRouter({
       return res.status(500).json({ message: "Unable to update the dentist profile." });
     } finally {
       client.release();
+    }
+  });
+
+  router.get("/record-branches", async (_req, res) => {
+    try {
+      const result = await db.query(
+        `SELECT id, name, branch_code FROM clinic_branches WHERE status = 'active' ORDER BY is_main DESC, name ASC`
+      );
+      return res.json({
+        branches: result.rows.map((row) => ({ id: row.id, name: row.name, code: row.branch_code })),
+      });
+    } catch (error) {
+      if (error.code === "42P01") return res.json({ branches: [] });
+      return sendAccessError(res, error, "Unable to load branches.");
+    }
+  });
+
+  router.post("/patients/:id/access-requests", async (req, res) => {
+    const recordId = numericId(req.params.id);
+    if (!recordId) return res.status(400).json({ message: "A valid patient record ID is required." });
+    try {
+      const detail = await clinicalPatients.getClinicalRecord(db, recordId);
+      if (!detail || detail.record.archived) {
+        return res.status(404).json({ message: "Patient record not found." });
+      }
+      const request = await recordAccess.createRequest(db, req, {
+        record: detail.record,
+        requestingBranchId: req.body?.requestingBranchId,
+        originatingBranchId: req.body?.originatingBranchId,
+        reason: req.body?.reason,
+        scope: req.body?.scope,
+      });
+      return res.status(201).json({
+        request: {
+          id: request.id,
+          status: "Pending",
+          createdAt: request.created_at,
+        },
+      });
+    } catch (error) {
+      return sendAccessError(res, error, "Unable to request record access.");
+    }
+  });
+
+  router.get("/record-access-requests", async (req, res) => {
+    if (req.dentist.can_approve_cross_branch_access !== true) {
+      return res.status(403).json({ message: "You cannot review cross-branch record requests." });
+    }
+    try {
+      const branches = await recordAccess.authorizedBranchIds(db, req.dentist.id);
+      const result = await db.query(
+        `SELECT id, clinical_record_id, requesting_dentist_id, requesting_branch_id,
+                originating_branch_id, scope, status, created_at, reason
+         FROM record_access_requests
+         WHERE originating_branch_id::text = ANY($1::text[])
+         ORDER BY created_at DESC
+         LIMIT 100`,
+        [branches]
+      );
+      return res.json({
+        requests: result.rows.map((row) => ({
+          id: row.id,
+          patientRecordId: row.clinical_record_id,
+          requesterId: row.requesting_dentist_id,
+          requestingBranchId: row.requesting_branch_id,
+          originatingBranchId: row.originating_branch_id,
+          scope: row.scope,
+          reason: row.reason,
+          status: row.status,
+          createdAt: row.created_at,
+        })),
+      });
+    } catch (error) {
+      return sendAccessError(res, error, "Unable to load record requests.");
+    }
+  });
+
+  router.post("/record-access-requests/:id/decision", async (req, res) => {
+    try {
+      const result = await recordAccess.decideRequest(
+        db,
+        { ...req.dentist, role: "dentist" },
+        req.params.id,
+        String(req.body?.decision || "").toLowerCase()
+      );
+      return res.json({
+        status: result.request.status,
+        grant: result.grant
+          ? { id: result.grant.id, status: result.grant.status, expiresAt: result.grant.expires_at }
+          : null,
+      });
+    } catch (error) {
+      return sendAccessError(res, error, "Unable to decide the record request.");
     }
   });
 

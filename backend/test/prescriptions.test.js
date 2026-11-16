@@ -50,6 +50,16 @@ async function createSigningDentist(label) {
        license_verified = TRUE`,
     [id]
   );
+  try {
+    await db.query(
+      `INSERT INTO clinic_branch_assignments (user_id, branch_id)
+       SELECT $1::bigint, id FROM clinic_branches WHERE is_main
+       ON CONFLICT DO NOTHING`,
+      [id]
+    );
+  } catch (error) {
+    if (error.code !== "42P01") throw error;
+  }
   return id;
 }
 

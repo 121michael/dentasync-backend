@@ -679,6 +679,23 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
         req.body?.manualFields && typeof req.body.manualFields === "object" ? req.body.manualFields : {};
       const label = sourceLabel(job.source_type, job.mime_type, job.original_name);
 
+      const requestedBranchId = Number(req.body?.branchId);
+      let originatingBranchId = null;
+      try {
+        const branch = await client.query(
+          `SELECT id FROM clinic_branches WHERE id = $1 AND status = 'active'`,
+          [requestedBranchId]
+        );
+        originatingBranchId = branch.rows[0]?.id || null;
+      } catch (error) {
+        if (error.code !== "42P01" && error.code !== "42703") throw error;
+      }
+      if (!originatingBranchId) {
+        await client.query("ROLLBACK");
+        transactionOpen = false;
+        return res.status(400).json({ message: "Choose the active branch this document came from." });
+      }
+
       if (!patient.firstName || !patient.lastName) {
         await client.query("ROLLBACK");
         transactionOpen = false;
@@ -890,6 +907,7 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
                 amountCharged: charged,
                 amountPaid: paid,
                 notes: rowNotes || "",
+                originatingBranchId,
               },
               { id: req.admin.id, role: "admin-sync" }
             );
@@ -918,6 +936,7 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
               treatmentDate: iso,
               amountCharged: Number(String(procedure.amountCharged || "0").replace(/(?:₱|php)/gi, "").replace(/,/g, "")) || 0,
               notes: procedure.notes || "",
+              originatingBranchId,
             },
             { id: req.admin.id, role: "admin-sync" }
           );
@@ -987,6 +1006,8 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
           treatment?.id ? `Treatments saved: ${savedTreatments.length}` : "No treatment row (patient info only)",
           skippedDuplicates ? `Duplicates skipped: ${skippedDuplicates}` : null,
           matchReason ? `Match: ${matchReason}` : null,
+          `Branch: ${originatingBranchId}`,
+          `Source job: ${job.id}`,
           `Approved by ${approverName}`,
           "Source document kept on the selected clinical patient",
         ]

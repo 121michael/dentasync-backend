@@ -9,6 +9,7 @@ const { attachAdminBackupRoutes } = require("./adminBackup");
 const { attachClinicBranchRoutes } = require("./clinicBranches");
 const clinicBranches = require("../services/clinicBranches");
 const { attachDentalAuthorizationRoutes } = require("./dentalAuthorization");
+const recordAccess = require("../services/recordAccess");
 const { attachAdminCommandCenterRoutes } = require("./adminCommandCenter");
 const { attachClinicScheduleRoutes } = require("./clinicSchedule");
 const { attachAdminDependentRoutes } = require("./adminDependents");
@@ -261,6 +262,9 @@ function mapAccount(row, extras = {}) {
   if (row.license_number !== undefined || extras.licenseNumber !== undefined) {
     payload.licenseNumber = extras.licenseNumber ?? row.license_number ?? "";
     payload.licenseVerified = Boolean(extras.licenseVerified ?? row.license_verified);
+  }
+  if (extras.canApproveCrossBranchAccess !== undefined) {
+    payload.canApproveCrossBranchAccess = extras.canApproveCrossBranchAccess === true;
   }
   if (row.catalog_dentist_id !== undefined || extras.catalogDentistId !== undefined) {
     payload.catalogDentistId = extras.catalogDentistId ?? row.catalog_dentist_id ?? null;
@@ -819,6 +823,27 @@ function createAdminPortalRouter({
         await overlayPatientPasswordStatus(db, accounts);
       } else if (role === "staff" || role === "dentist") {
         await clinicBranches.attachAssignments(db, accounts);
+      }
+      if (role === "dentist") {
+        for (const account of accounts) account.canApproveCrossBranchAccess = false;
+        if (accounts.length) {
+          try {
+            const flags = await db.query(
+              `SELECT user_id, can_approve_cross_branch_access
+               FROM admin_portal_dentist_profiles
+               WHERE user_id = ANY($1::text[])`,
+              [accounts.map((account) => String(account.id))]
+            );
+            const byUser = new Map(
+              flags.rows.map((row) => [String(row.user_id), row.can_approve_cross_branch_access === true])
+            );
+            for (const account of accounts) {
+              account.canApproveCrossBranchAccess = byUser.get(String(account.id)) === true;
+            }
+          } catch (error) {
+            if (error.code !== "42703" && error.code !== "42P01") throw error;
+          }
+        }
       }
       return {
         page,
@@ -1546,6 +1571,22 @@ function createAdminPortalRouter({
         await client.query("RELEASE SAVEPOINT dentist_profile");
       }
 
+      if (req.body?.canApproveCrossBranchAccess === true) {
+        await client.query("SAVEPOINT approve_flag_create");
+        try {
+          await client.query(
+            `UPDATE admin_portal_dentist_profiles
+             SET can_approve_cross_branch_access = TRUE
+             WHERE user_id = $1`,
+            [String(dentist.id)]
+          );
+          await client.query("RELEASE SAVEPOINT approve_flag_create");
+        } catch (error) {
+          await client.query("ROLLBACK TO SAVEPOINT approve_flag_create");
+          if (error.code !== "42703") throw error;
+        }
+      }
+
       await clinicBranches.replacePersonnelAssignments(client, {
         userId: dentist.id,
         role: "dentist",
@@ -1663,7 +1704,8 @@ function createAdminPortalRouter({
     }
 
     const dentistBranchChange = clinicBranches.assignmentRequested(req.body);
-    if (!fields.length && !specializationProvided && !scheduleNotesProvided && !licenseProvided && !verifiedProvided && !dentistBranchChange) {
+    const approveFlagProvided = Object.prototype.hasOwnProperty.call(req.body || {}, "canApproveCrossBranchAccess");
+    if (!fields.length && !specializationProvided && !scheduleNotesProvided && !licenseProvided && !verifiedProvided && !dentistBranchChange && !approveFlagProvided) {
       return res.status(400).json({ message: "Provide at least one dentist field to update." });
     }
     await ensureLicenseVerifiedColumn();
@@ -1761,6 +1803,22 @@ function createAdminPortalRouter({
         [String(dentist.id)]
       );
 
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, "canApproveCrossBranchAccess")) {
+        await client.query("SAVEPOINT approve_flag");
+        try {
+          await client.query(
+            `UPDATE admin_portal_dentist_profiles
+             SET can_approve_cross_branch_access = $2
+             WHERE user_id = $1`,
+            [String(dentist.id), req.body.canApproveCrossBranchAccess === true]
+          );
+          await client.query("RELEASE SAVEPOINT approve_flag");
+        } catch (error) {
+          await client.query("ROLLBACK TO SAVEPOINT approve_flag");
+          if (error.code !== "42703") throw error;
+        }
+      }
+
       if (dentistBranchChange) {
         await clinicBranches.replacePersonnelAssignments(client, {
           userId: dentist.id,
@@ -1772,12 +1830,27 @@ function createAdminPortalRouter({
       await client.query("COMMIT");
       transactionOpen = false;
 
+      let canApproveCrossBranchAccess = false;
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, "canApproveCrossBranchAccess")) {
+        canApproveCrossBranchAccess = req.body.canApproveCrossBranchAccess === true;
+      } else {
+        try {
+          const flag = await db.query(
+            `SELECT can_approve_cross_branch_access FROM admin_portal_dentist_profiles WHERE user_id = $1`,
+            [String(dentist.id)]
+          );
+          canApproveCrossBranchAccess = flag.rows[0]?.can_approve_cross_branch_access === true;
+        } catch (error) {
+          if (error.code !== "42703" && error.code !== "42P01") throw error;
+        }
+      }
       const [withBranches] = await clinicBranches.attachAssignments(db, [
         mapAccount(dentist, {
           specialization: profileResult.rows[0]?.specialization || "",
           scheduleNotes: profileResult.rows[0]?.schedule_notes || "",
           licenseNumber: profileResult.rows[0]?.license_number || "",
           licenseVerified: profileResult.rows[0]?.license_verified === true,
+          canApproveCrossBranchAccess,
         }),
       ]);
       return res.json({ dentist: withBranches });
@@ -3261,6 +3334,116 @@ function createAdminPortalRouter({
       }
       console.error("Admin RFID clear error:", error.message);
       return res.status(500).json({ message: "Unable to clear RFID tag." });
+    }
+  });
+
+  router.get("/record-access-requests", async (req, res) => {
+    try {
+      const requests = await db.query(
+        `SELECT request.id, request.clinical_record_id, request.requesting_dentist_id,
+                request.requesting_branch_id, request.originating_branch_id, request.scope,
+                request.status, request.reason, request.created_at, request.decided_at, request.decided_by,
+                requester.first_name AS requester_first_name, requester.last_name AS requester_last_name
+         FROM record_access_requests AS request
+         LEFT JOIN users AS requester ON requester.id::text = request.requesting_dentist_id
+         ORDER BY request.created_at DESC
+         LIMIT 200`
+      );
+      const ids = requests.rows.map((row) => row.id);
+      const decisions = ids.length
+        ? await db.query(
+            `SELECT request_id, actor_id, actor_role, action, created_at
+             FROM record_access_decisions
+             WHERE request_id = ANY($1::bigint[])
+             ORDER BY created_at ASC`,
+            [ids]
+          )
+        : { rows: [] };
+      const grants = ids.length
+        ? await db.query(
+            `SELECT id, request_id, status, expires_at, scope, originating_branch_id, clinical_record_id
+             FROM record_access_grants
+             WHERE request_id = ANY($1::bigint[])`,
+            [ids]
+          )
+        : { rows: [] };
+      const logs = await db.query(
+        `SELECT id, actor_id, actor_role, action, target_id, detail, created_at
+         FROM admin_portal_audit_logs
+         WHERE action LIKE 'record_access_%' OR action = 'cross_branch_chart_read' OR action = 'Document Data Import'
+         ORDER BY created_at DESC
+         LIMIT 100`
+      );
+      return res.json({
+        requests: requests.rows.map((row) => ({
+          id: row.id,
+          patientRecordId: row.clinical_record_id,
+          requesterId: row.requesting_dentist_id,
+          requesterName: `${row.requester_first_name || ""} ${row.requester_last_name || ""}`.trim(),
+          requestingBranchId: row.requesting_branch_id,
+          originatingBranchId: row.originating_branch_id,
+          scope: row.scope,
+          reason: row.reason,
+          status: row.status,
+          createdAt: row.created_at,
+          decidedAt: row.decided_at,
+          decidedBy: row.decided_by,
+          decisions: decisions.rows
+            .filter((item) => String(item.request_id) === String(row.id))
+            .map((item) => ({
+              actorId: item.actor_id,
+              actorRole: item.actor_role,
+              action: item.action,
+              createdAt: item.created_at,
+            })),
+          grant: grants.rows
+            .filter((item) => String(item.request_id) === String(row.id))
+            .map((item) => ({
+              id: item.id,
+              status: item.status,
+              expiresAt: item.expires_at,
+              scope: item.scope,
+              originatingBranchId: item.originating_branch_id,
+            }))[0] || null,
+        })),
+        accessLogs: logs.rows.map((row) => ({
+          id: row.id,
+          actorId: row.actor_id,
+          actorRole: row.actor_role,
+          action: row.action,
+          patientRecordId: row.target_id,
+          detail: row.detail,
+          createdAt: row.created_at,
+        })),
+      });
+    } catch (error) {
+      if (error.code === "42P01") {
+        return res.status(503).json({ message: "Run npm run migrate:record-access before reviewing record requests." });
+      }
+      console.error("Record access list error:", error.message);
+      return res.status(500).json({ message: "Unable to load record access requests." });
+    }
+  });
+
+  router.post("/record-access-requests/:id/decision", async (req, res) => {
+    try {
+      const result = await recordAccess.decideRequest(
+        db,
+        { ...req.admin, role: "admin" },
+        req.params.id,
+        String(req.body?.decision || "").toLowerCase()
+      );
+      return res.json({
+        status: result.request.status,
+        grant: result.grant
+          ? { id: result.grant.id, status: result.grant.status, expiresAt: result.grant.expires_at }
+          : null,
+        duplicate: Boolean(result.duplicate),
+      });
+    } catch (error) {
+      if (error.status) return res.status(error.status).json({ message: error.message });
+      console.error("Record access decision error:", error.message);
+      return res.status(500).json({ message: "Unable to decide the record request." });
     }
   });
 

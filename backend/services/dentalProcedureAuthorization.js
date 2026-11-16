@@ -161,6 +161,7 @@ function mapRow(row) {
     id: row.id,
     documentNumber: row.document_number,
     clinicalRecordId: row.clinical_record_id,
+    originatingBranchId: row.originating_branch_id != null ? Number(row.originating_branch_id) : null,
     linkedUserId: row.linked_user_id || null,
     appointmentId: row.appointment_id != null ? Number(row.appointment_id) : null,
     treatmentId: row.treatment_id != null ? Number(row.treatment_id) : null,

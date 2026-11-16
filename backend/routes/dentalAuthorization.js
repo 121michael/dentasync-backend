@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const multer = require("multer");
 const authorizations = require("../services/dentalProcedureAuthorization");
+const recordAccess = require("../services/recordAccess");
 
 function actorFrom(role, req) {
   if (role === "admin") return { ...req.admin, role: "admin" };
@@ -51,6 +52,36 @@ function attachDentalAuthorizationRoutes(router, { db, role, uploadDirectory }) 
     },
   });
 
+  async function consentReadable(req, clinicalRecordId, originatingBranchId) {
+    if (role === "admin" || role === "patient") return true;
+    let encounterBranchIds = [];
+    let grants = [];
+    if (role === "dentist") {
+      const recordResult = await db.query(
+        `SELECT id, linked_user_id FROM clinic_patient_records WHERE id = $1`,
+        [clinicalRecordId]
+      );
+      const record = recordResult.rows[0];
+      if (!record) return false;
+      const relationship = await recordAccess.qualifyingRelationship(db, req.dentist, {
+        id: record.id,
+        linkedUserId: record.linked_user_id,
+      });
+      if (!relationship.allowed) return false;
+      encounterBranchIds = relationship.branchIds;
+      grants = await recordAccess.activeGrants(db, req.dentist.id, clinicalRecordId);
+    } else if (role === "staff") {
+      const staffBranchId = req.branchAccess?.activeBranch?.id;
+      encounterBranchIds = staffBranchId ? [String(staffBranchId)] : [];
+    }
+    return recordAccess.restrictedAllowed({
+      originatingBranchId,
+      encounterBranchIds,
+      grants,
+      scope: "consent_forms",
+    });
+  }
+
   async function loadVisible(req) {
     const row = await authorizations.getById(db, req.params.id);
     if (!row) {
@@ -62,6 +93,14 @@ function attachDentalAuthorizationRoutes(router, { db, role, uploadDirectory }) 
     authorizations.assertVisibleTo(role, actor.id, row);
     if (role !== "patient") {
       await authorizations.assertStaffAccess(role, db, row.clinical_record_id, row.linked_user_id);
+    }
+    if (role === "dentist" || role === "staff") {
+      const allowed = await consentReadable(req, row.clinical_record_id, row.originating_branch_id);
+      if (!allowed) {
+        const error = new Error("Approval is required before this consent form can be opened.");
+        error.status = 403;
+        throw error;
+      }
     }
     return { row, actor };
   }
@@ -84,7 +123,14 @@ function attachDentalAuthorizationRoutes(router, { db, role, uploadDirectory }) 
           return res.status(400).json({ message: "A valid patient record ID is required." });
         }
         await authorizations.assertStaffAccess(role, db, clinicalRecordId);
-        const documents = await authorizations.listForClinicalRecord(db, clinicalRecordId);
+        let documents = await authorizations.listForClinicalRecord(db, clinicalRecordId);
+        if (role === "dentist" || role === "staff") {
+          const visible = [];
+          for (const document of documents) {
+            if (await consentReadable(req, clinicalRecordId, document.originatingBranchId)) visible.push(document);
+          }
+          documents = visible;
+        }
         return res.json({ documents, template: authorizations.TEMPLATE_TEXT });
       } catch (error) {
         return sendError(res, error, "Unable to load authorization documents.");
@@ -103,6 +149,18 @@ function attachDentalAuthorizationRoutes(router, { db, role, uploadDirectory }) 
           actor: actorFrom(role, req),
           role,
         });
+        const branchId = req.branchAccess?.activeBranch?.id;
+        if (branchId && document?.id && (role === "dentist" || role === "staff")) {
+          try {
+            await db.query(
+              `UPDATE dental_procedure_authorizations SET originating_branch_id = $2 WHERE id = $1`,
+              [document.id, branchId]
+            );
+            document.originatingBranchId = Number(branchId);
+          } catch (error) {
+            if (error.code !== "42703") throw error;
+          }
+        }
         return res.status(201).json({ document });
       } catch (error) {
         return sendError(res, error, "Unable to generate the authorization document.");

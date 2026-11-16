@@ -158,6 +158,123 @@ function listValue(value) {
   return text || "—";
 }
 
+const RECORD_SCOPES = [
+  ["diagnosis_notes", "Diagnosis notes"],
+  ["xrays", "X-rays"],
+  ["medical_documents", "Medical documents"],
+  ["wellness", "Wellness results"],
+  ["consent_forms", "Consent forms"],
+];
+
+function DelegatedRequestQueue() {
+  const [requests, setRequests] = useState(null);
+
+  useEffect(() => {
+    api
+      .getDentistRecordAccessRequests()
+      .then((response) => setRequests(response.requests || []))
+      .catch(() => setRequests(null));
+  }, []);
+
+  if (!requests) return null;
+
+  async function decide(id, decision) {
+    await api.decideDentistRecordAccess(id, decision);
+    const response = await api.getDentistRecordAccessRequests();
+    setRequests(response.requests || []);
+  }
+
+  return (
+    <section className="dentist-card">
+      <h2>Cross-branch requests you may decide</h2>
+      {!requests.length ? <p>No pending requests for your authorized branches.</p> : null}
+      {requests.map((request) => (
+        <p key={request.id}>
+          #{request.id} patient {request.patientRecordId} · {request.scope} · {request.status}
+          {request.status === "pending" ? (
+            <>
+              {" "}
+              <button type="button" onClick={() => decide(request.id, "approved")}>Approve</button>
+              <button type="button" onClick={() => decide(request.id, "denied")}>Deny</button>
+            </>
+          ) : null}
+        </p>
+      ))}
+    </section>
+  );
+}
+
+function RecordAccessRequest({ patientId }) {
+  const [branches, setBranches] = useState([]);
+  const [scope, setScope] = useState("diagnosis_notes");
+  const [reason, setReason] = useState("");
+  const [requestingBranchId, setRequestingBranchId] = useState("");
+  const [originatingBranchId, setOriginatingBranchId] = useState("");
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api.getDentistRecordBranches().then((response) => setBranches(response.branches || [])).catch(() => setBranches([]));
+  }, []);
+
+  async function submit(event) {
+    event.preventDefault();
+    setBusy(true);
+    setMessage("");
+    try {
+      const response = await api.requestDentistRecordAccess(patientId, {
+        requestingBranchId: Number(requestingBranchId),
+        originatingBranchId: Number(originatingBranchId),
+        reason,
+        scope,
+      });
+      setMessage(`Request ${response.request.id} is pending. Pending requests do not open the chart.`);
+    } catch (requestError) {
+      setMessage(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="dentist-card">
+      <h2>Request Record Access</h2>
+      <label>
+        Your branch
+        <select value={requestingBranchId} onChange={(event) => setRequestingBranchId(event.target.value)} required>
+          <option value="">Select</option>
+          {branches.map((branch) => (
+            <option key={branch.id} value={branch.id}>{branch.name}</option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Branch that holds the records
+        <select value={originatingBranchId} onChange={(event) => setOriginatingBranchId(event.target.value)} required>
+          <option value="">Select</option>
+          {branches.map((branch) => (
+            <option key={`origin-${branch.id}`} value={branch.id}>{branch.name}</option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Record type
+        <select value={scope} onChange={(event) => setScope(event.target.value)}>
+          {RECORD_SCOPES.map(([value, label]) => (
+            <option key={value} value={value}>{label}</option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Reason
+        <input value={reason} onChange={(event) => setReason(event.target.value)} required minLength={3} />
+      </label>
+      <button className="button button--primary" disabled={busy} type="submit">{busy ? "Sending…" : "Request Record Access"}</button>
+      {message ? <p>{message}</p> : null}
+    </form>
+  );
+}
+
 function formatMoney(value) {
   return `₱${Number(value || 0).toFixed(2)}`;
 }
@@ -736,6 +853,7 @@ export function DentistRecordsPage() {
     return (
       <div className="dentist-page">
         <ErrorState message={error} onRetry={() => refreshPatientDetail(patientId)} />
+        <RecordAccessRequest patientId={patientId} />
         <button
           type="button"
           className="button button--secondary"
@@ -791,6 +909,8 @@ export function DentistRecordsPage() {
       />
       )}
 
+      {!patientId ? <DelegatedRequestQueue /> : null}
+      {patientId && detail ? <RecordAccessRequest patientId={patientId} /> : null}
       {error ? <p className="inline-alert inline-alert--error">{error}</p> : null}
       {success ? <p className="inline-alert inline-alert--success">{success}</p> : null}
 

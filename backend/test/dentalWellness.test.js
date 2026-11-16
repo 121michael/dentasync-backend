@@ -279,6 +279,36 @@ async function startDentistPortal({ databaseRole = "dentist" } = {}) {
     if (sql.includes("patient_portal_queue_entries")) {
       return { rows: [] };
     }
+    if (sql.includes("FROM clinic_branch_assignments")) {
+      return {
+        rows: [
+          {
+            id: 1,
+            branch_id: 1,
+            branch_code: "BR-0001",
+            name: "Mandaluyong",
+            status: "active",
+            is_main: true,
+          },
+        ],
+      };
+    }
+    if (sql.includes("FROM patient_portal_appointments")) {
+      return {
+        rows: [
+          {
+            id: 1,
+            branch_id: 1,
+            status: "confirmed",
+            dentist_id: "dentist-1",
+            dentist_name: "Dr. Sarah Cruz",
+          },
+        ],
+      };
+    }
+    if (sql.includes("record_access_")) return { rows: [] };
+    if (sql.includes("originating_branch_id")) return { rows: [] };
+    if (sql.includes("can_approve_cross_branch_access")) return { rows: [{ can_approve_cross_branch_access: false }] };
     if (sql.includes("COUNT(*) AS count")) {
       return { rows: [{ count: "0" }] };
     }
