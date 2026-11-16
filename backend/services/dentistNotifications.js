@@ -17,7 +17,7 @@ async function listActiveDentists(db) {
        profile.catalog_dentist_id
      FROM users AS account
      LEFT JOIN admin_portal_dentist_profiles AS profile
-       ON profile.user_id = account.id
+       ON profile.user_id::text = account.id::text
      WHERE LOWER(account.role) = 'dentist'
        AND account.is_verified = TRUE
        AND COALESCE(account.is_archived, FALSE) = FALSE
