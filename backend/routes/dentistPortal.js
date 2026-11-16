@@ -2044,6 +2044,14 @@ function createDentistPortalRouter({
         appointments
       );
 
+      const branchNames = new Map();
+      try {
+        const named = await db.query(`SELECT id, name FROM clinic_branches`);
+        for (const row of named.rows) branchNames.set(String(row.id), row.name);
+      } catch (error) {
+        if (error.code !== "42P01") throw error;
+      }
+
       await recordAccess.audit(db, req, {
         action: "cross_branch_chart_read",
         targetType: "clinical_record",
@@ -2078,6 +2086,10 @@ function createDentistPortalRouter({
           const amountPaid = Number(row.amountPaid || 0);
           return {
             ...presented,
+            originatingBranchName:
+              row.originatingBranchName ||
+              branchNames.get(String(row.originatingBranchId || presented.originatingBranchId || "")) ||
+              null,
             durationMinutes: row.durationMinutes,
             amountCharged,
             amountPaid,
@@ -2087,6 +2099,13 @@ function createDentistPortalRouter({
             visitSequence: row.visitSequence || null,
           };
         }),
+        access: {
+          grantExpiresAt:
+            (access.grants || [])
+              .map((grant) => grant.expiresAt)
+              .filter(Boolean)
+              .sort()[0] || null,
+        },
         currentVisit: await clinicalPatients.listCurrentVisitForRecord(db, detail.record),
         wellness: await visibleWellness(db, detail, access),
       });
@@ -3258,6 +3277,62 @@ function createDentistPortalRouter({
     } catch (error) {
       if (error.code === "42P01") return res.json({ branches: [] });
       return sendAccessError(res, error, "Unable to load branches.");
+    }
+  });
+
+  router.post("/patients/:id/access-challenges", async (req, res) => {
+    const recordId = numericId(req.params.id);
+    if (!recordId) return res.status(400).json({ message: "A valid patient record ID is required." });
+    try {
+      const detail = await clinicalPatients.getClinicalRecord(db, recordId);
+      if (!detail || detail.record.archived) {
+        return res.status(404).json({ message: "Patient record not found." });
+      }
+      const challenge = await recordAccess.createChallenge(db, req, {
+        record: detail.record,
+        requestingBranchId: req.body?.requestingBranchId,
+        originatingBranchId: req.body?.originatingBranchId,
+        reason: req.body?.reason,
+        scope: req.body?.scope,
+      });
+      return res.status(201).json({
+        challenge: {
+          id: challenge.id,
+          expiresAt: challenge.expires_at,
+          patient: challenge.patient,
+          requestingDentistId: challenge.requesting_dentist_id,
+          requestingBranchId: challenge.requesting_branch_id,
+          originatingBranchId: challenge.originating_branch_id,
+          scope: challenge.scope,
+          reason: challenge.reason,
+        },
+      });
+    } catch (error) {
+      return sendAccessError(res, error, "Unable to start record authorization.");
+    }
+  });
+
+  router.post("/access-challenges/:id/authorize", async (req, res) => {
+    try {
+      const result = await recordAccess.authorizeChallenge(db, req, {
+        challengeId: req.params.id,
+        identifier: req.body?.identifier || req.body?.email,
+        password: req.body?.password,
+      });
+      return res.json({
+        message: "Restricted records are available for the approved scope.",
+        grant: result.grant
+          ? {
+              id: result.grant.id,
+              status: result.grant.status,
+              expiresAt: result.grant.expires_at,
+              scope: result.grant.scope,
+            }
+          : null,
+        minutes: result.minutes,
+      });
+    } catch (error) {
+      return sendAccessError(res, error, "Unable to authorize this access.");
     }
   });
 

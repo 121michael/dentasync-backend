@@ -16,11 +16,17 @@ export function AdminRecordAccessPage() {
   const [payload, setPayload] = useState(null);
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState("");
+  const [grantMinutes, setGrantMinutes] = useState(30);
 
   const load = useCallback(async () => {
     setError("");
     try {
-      setPayload(await api.getAdminRecordAccessRequests());
+      const [requests, settings] = await Promise.all([
+        api.getAdminRecordAccessRequests(),
+        api.getAdminRecordAccessSettings().catch(() => ({ grantMinutes: 30 })),
+      ]);
+      setPayload(requests);
+      setGrantMinutes(Number(settings.grantMinutes) || 30);
     } catch (loadError) {
       setError(loadError.message);
     }
@@ -30,11 +36,22 @@ export function AdminRecordAccessPage() {
     load();
   }, [load]);
 
+  async function saveDuration(event) {
+    event.preventDefault();
+    try {
+      const saved = await api.saveAdminRecordAccessSettings({ grantMinutes: Number(grantMinutes) });
+      setGrantMinutes(saved.grantMinutes);
+      pushToast(`New grants last ${saved.grantMinutes} minutes.`);
+    } catch (saveError) {
+      pushToast(saveError.message, "error");
+    }
+  }
+
   async function decide(requestId, decision) {
     setBusyId(`${requestId}:${decision}`);
     try {
       await api.decideAdminRecordAccess(requestId, decision);
-      pushToast(decision === "approved" ? "Access granted for 30 minutes." : `Request ${decision}.`);
+      pushToast(decision === "revoked" ? "Access revoked." : `Request ${decision}.`);
       await load();
     } catch (decideError) {
       pushToast(decideError.message, "error");
@@ -51,10 +68,26 @@ export function AdminRecordAccessPage() {
       <header className="admin-page__header">
         <p className="eyebrow">Admin</p>
         <h1>Cross-Branch Access Requests</h1>
-        <p>Approve, deny, or revoke read-only access. A grant lasts 30 minutes and does not allow edits.</p>
+        <p>
+          New access is authorized at the requesting workstation. Legacy pending requests stay listed until a fresh
+          independent verification. Active grants can be revoked here.
+        </p>
       </header>
+      <form onSubmit={saveDuration} className="admin-card" style={{ marginBottom: "1.5rem" }}>
+        <label>
+          New grant duration (minutes)
+          <input
+            type="number"
+            min={15}
+            max={240}
+            value={grantMinutes}
+            onChange={(event) => setGrantMinutes(event.target.value)}
+          />
+        </label>
+        <button className="button button--secondary" type="submit">Save duration</button>
+      </form>
       {!payload.requests.length ? (
-        <EmptyState title="No requests" message="Dentists request access from Patient Records." />
+        <EmptyState title="No requests" message="Dentists authorize access from Patient Records." />
       ) : (
         <div className="admin-table-wrap">
           <table className="admin-table">
@@ -83,9 +116,7 @@ export function AdminRecordAccessPage() {
                   <td>
                     {request.status === "pending" ? (
                       <>
-                        <button type="button" disabled={Boolean(busyId)} onClick={() => decide(request.id, "approved")}>
-                          Approve
-                        </button>
+                        <span>Authorize at the requesting workstation.</span>
                         <button type="button" disabled={Boolean(busyId)} onClick={() => decide(request.id, "denied")}>
                           Deny
                         </button>

@@ -14,6 +14,7 @@ import { DentalDocumentPreview } from "../components/DentalDocumentPreview";
 import { PrescriptionsPanel } from "../components/PrescriptionsPanel";
 import { formatDentistDate } from "../dentistUtils";
 import { matchesNotificationFocus } from "../notificationFocus";
+import { useAuth } from "../useAuth";
 
 const emptyForm = {
   firstName: "",
@@ -186,16 +187,18 @@ function DelegatedRequestQueue() {
 
   return (
     <section className="dentist-card">
-      <h2>Cross-branch requests you may decide</h2>
+      <h2>Cross-branch requests you may review</h2>
       {!requests.length ? <p>No pending requests for your authorized branches.</p> : null}
       {requests.map((request) => (
         <p key={request.id}>
           #{request.id} patient {request.patientRecordId} · {request.scope} · {request.status}
           {request.status === "pending" ? (
+            <span> Authorize this request at the requesting workstation.</span>
+          ) : null}
+          {request.status === "approved" ? (
             <>
               {" "}
-              <button type="button" onClick={() => decide(request.id, "approved")}>Approve</button>
-              <button type="button" onClick={() => decide(request.id, "denied")}>Deny</button>
+              <button type="button" onClick={() => decide(request.id, "revoked")}>Revoke</button>
             </>
           ) : null}
         </p>
@@ -204,31 +207,55 @@ function DelegatedRequestQueue() {
   );
 }
 
-function RecordAccessRequest({ patientId }) {
+function AccessRecordHistory({ patientId, patient, treatments, onAuthorized, grantExpiresAt }) {
+  const { user } = useAuth();
   const [branches, setBranches] = useState([]);
+  const [open, setOpen] = useState(false);
   const [scope, setScope] = useState("diagnosis_notes");
   const [reason, setReason] = useState("");
   const [requestingBranchId, setRequestingBranchId] = useState("");
   const [originatingBranchId, setOriginatingBranchId] = useState("");
+  const [identifier, setIdentifier] = useState("");
+  const [password, setPassword] = useState("");
+  const [challenge, setChallenge] = useState(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+
+  const onAuthorizedRef = useRef(onAuthorized);
+  onAuthorizedRef.current = onAuthorized;
 
   useEffect(() => {
     api.getDentistRecordBranches().then((response) => setBranches(response.branches || [])).catch(() => setBranches([]));
   }, []);
 
-  async function submit(event) {
+  useEffect(() => {
+    if (!grantExpiresAt) return undefined;
+    const wait = new Date(grantExpiresAt).getTime() - Date.now();
+    if (wait <= 0) return undefined;
+    const timer = window.setTimeout(() => onAuthorizedRef.current?.("Restricted access has expired."), wait + 250);
+    return () => window.clearTimeout(timer);
+  }, [grantExpiresAt]);
+
+  function closeModal() {
+    setOpen(false);
+    setPassword("");
+    setIdentifier("");
+    setChallenge(null);
+    setMessage("");
+  }
+
+  async function startChallenge(event) {
     event.preventDefault();
     setBusy(true);
     setMessage("");
     try {
-      const response = await api.requestDentistRecordAccess(patientId, {
+      const response = await api.createDentistRecordAccessChallenge(patientId, {
         requestingBranchId: Number(requestingBranchId),
         originatingBranchId: Number(originatingBranchId),
         reason,
         scope,
       });
-      setMessage(`Request ${response.request.id} is pending. Pending requests do not open the chart.`);
+      setChallenge(response.challenge);
     } catch (requestError) {
       setMessage(requestError.message);
     } finally {
@@ -236,42 +263,121 @@ function RecordAccessRequest({ patientId }) {
     }
   }
 
+  async function authorize(event) {
+    event.preventDefault();
+    if (!challenge?.id) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const response = await api.authorizeDentistRecordAccess(challenge.id, {
+        identifier,
+        password,
+      });
+      setPassword("");
+      closeModal();
+      setMessage("");
+      onAuthorized?.(response.message || "Restricted records are available for the approved scope.");
+    } catch (requestError) {
+      setPassword("");
+      setMessage(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const history = [...(treatments || [])].sort((left, right) => {
+    const leftDate = String(left.date || left.treatmentDate || left.createdAt || "");
+    const rightDate = String(right.date || right.treatmentDate || right.createdAt || "");
+    return leftDate.localeCompare(rightDate);
+  });
+
   return (
-    <form onSubmit={submit} className="dentist-card">
-      <h2>Request Record Access</h2>
-      <label>
-        Your branch
-        <select value={requestingBranchId} onChange={(event) => setRequestingBranchId(event.target.value)} required>
-          <option value="">Select</option>
-          {branches.map((branch) => (
-            <option key={branch.id} value={branch.id}>{branch.name}</option>
+    <section className="dentist-card">
+      <h2>Access Record History</h2>
+      <p className="muted">Ordinary history you are authorized to read. Restricted notes stay hidden until an Admin or delegated dentist authorizes them at this workstation.</p>
+      {history.length ? (
+        <ol>
+          {history.map((treatment) => (
+            <li key={treatment.id}>
+              {formatDentistDate(treatment.date || treatment.treatmentDate)} · {treatment.originatingBranchName || (treatment.attributionReview ? "Unknown" : "—")} · {treatment.dentist || "Unknown"} · {treatment.name || treatment.treatment || "—"}
+              {treatment.createdAt ? ` · recorded ${formatDentistDate(treatment.createdAt)}` : ""}
+              {treatment.diagnosisNotes ? ` · ${treatment.diagnosisNotes}` : ""}
+            </li>
           ))}
-        </select>
-      </label>
-      <label>
-        Branch that holds the records
-        <select value={originatingBranchId} onChange={(event) => setOriginatingBranchId(event.target.value)} required>
-          <option value="">Select</option>
-          {branches.map((branch) => (
-            <option key={`origin-${branch.id}`} value={branch.id}>{branch.name}</option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Record type
-        <select value={scope} onChange={(event) => setScope(event.target.value)}>
-          {RECORD_SCOPES.map(([value, label]) => (
-            <option key={value} value={value}>{label}</option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Reason
-        <input value={reason} onChange={(event) => setReason(event.target.value)} required minLength={3} />
-      </label>
-      <button className="button button--primary" disabled={busy} type="submit">{busy ? "Sending…" : "Request Record Access"}</button>
-      {message ? <p>{message}</p> : null}
-    </form>
+        </ol>
+      ) : (
+        <p>No authorized history yet.</p>
+      )}
+      <button className="button button--primary" type="button" onClick={() => setOpen(true)}>
+        Cross-Branch Record Authorization
+      </button>
+      {open ? (
+        <DentistModal title="Cross-Branch Record Authorization" onClose={closeModal}>
+          <p>Patient {patient?.fullName || patient?.patientName || "record"} · {patient?.patientId || patient?.recordCode || patientId}</p>
+          <p>Requesting dentist {user?.fullName || "this dentist"}</p>
+          {!challenge ? (
+            <form onSubmit={startChallenge}>
+              <label>
+                Your branch
+                <select value={requestingBranchId} onChange={(event) => setRequestingBranchId(event.target.value)} required>
+                  <option value="">Select</option>
+                  {branches.map((branch) => (
+                    <option key={branch.id} value={branch.id}>{branch.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Branch that holds the records
+                <select value={originatingBranchId} onChange={(event) => setOriginatingBranchId(event.target.value)} required>
+                  <option value="">Select</option>
+                  {branches.map((branch) => (
+                    <option key={`origin-${branch.id}`} value={branch.id}>{branch.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Record type
+                <select value={scope} onChange={(event) => setScope(event.target.value)}>
+                  {RECORD_SCOPES.map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Reason for access
+                <input value={reason} onChange={(event) => setReason(event.target.value)} required minLength={3} />
+              </label>
+              <button className="button button--primary" disabled={busy} type="submit">{busy ? "Preparing…" : "Continue to approver verification"}</button>
+            </form>
+          ) : (
+            <form onSubmit={authorize} autoComplete="off">
+              <p>{challenge.scope} · {challenge.reason}</p>
+              <label>
+                Approver email or mobile
+                <input
+                  value={identifier}
+                  onChange={(event) => setIdentifier(event.target.value)}
+                  autoComplete="off"
+                  required
+                />
+              </label>
+              <label>
+                Approver password
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  autoComplete="off"
+                  required
+                />
+              </label>
+              <button className="button button--primary" disabled={busy} type="submit">{busy ? "Verifying…" : "Authorize access"}</button>
+            </form>
+          )}
+          {message ? <p>{message}</p> : null}
+        </DentistModal>
+      ) : null}
+    </section>
   );
 }
 
@@ -853,7 +959,7 @@ export function DentistRecordsPage() {
     return (
       <div className="dentist-page">
         <ErrorState message={error} onRetry={() => refreshPatientDetail(patientId)} />
-        <RecordAccessRequest patientId={patientId} />
+        <AccessRecordHistory patientId={patientId} patient={null} treatments={[]} />
         <button
           type="button"
           className="button button--secondary"
@@ -910,7 +1016,18 @@ export function DentistRecordsPage() {
       )}
 
       {!patientId ? <DelegatedRequestQueue /> : null}
-      {patientId && detail ? <RecordAccessRequest patientId={patientId} /> : null}
+      {patientId && detail ? (
+        <AccessRecordHistory
+          patientId={patientId}
+          patient={detail.patient}
+          treatments={detail.treatments}
+          grantExpiresAt={detail.access?.grantExpiresAt}
+          onAuthorized={(notice) => {
+            if (notice) setSuccess(notice);
+            refreshPatientDetail(patientId);
+          }}
+        />
+      ) : null}
       {error ? <p className="inline-alert inline-alert--error">{error}</p> : null}
       {success ? <p className="inline-alert inline-alert--success">{success}</p> : null}
 
@@ -1590,6 +1707,8 @@ export function DentistRecordsPage() {
                   <thead>
                     <tr>
                       <th>Date</th>
+                      <th>Originating branch</th>
+                      <th>Recorded</th>
                       <th>Tooth</th>
                       <th>Procedure</th>
                       <th>Status</th>
@@ -1606,6 +1725,11 @@ export function DentistRecordsPage() {
                     {detail.treatments.map((treatment) => (
                       <tr key={treatment.id}>
                         <td>{formatDentistDate(treatment.date || treatment.treatmentDate)}</td>
+                        <td>
+                          {treatment.originatingBranchName ||
+                            (treatment.attributionReview ? "Unknown" : "—")}
+                        </td>
+                        <td>{treatment.createdAt ? formatDentistDate(treatment.createdAt) : "—"}</td>
                         <td>
                           {treatment.toothNumber || treatment.tooth_number
                             ? `#${treatment.toothNumber || treatment.tooth_number}`

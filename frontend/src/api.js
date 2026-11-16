@@ -393,6 +393,10 @@ export const api = {
   getDentistRecordBranches: () => request("/dentist/record-branches"),
   requestDentistRecordAccess: (patientId, body) =>
     request(`/dentist/patients/${patientId}/access-requests`, { method: "POST", body }),
+  createDentistRecordAccessChallenge: (patientId, body) =>
+    request(`/dentist/patients/${patientId}/access-challenges`, { method: "POST", body }),
+  authorizeDentistRecordAccess: (challengeId, body) =>
+    request(`/dentist/access-challenges/${challengeId}/authorize`, { method: "POST", body }),
   getDentistRecordAccessRequests: () => request("/dentist/record-access-requests"),
   decideDentistRecordAccess: (requestId, decision) =>
     request(`/dentist/record-access-requests/${requestId}/decision`, { method: "POST", body: { decision } }),
@@ -516,6 +520,8 @@ export const api = {
     return request(`/admin/branches${search.size ? `?${search}` : ""}`);
   },
   getAdminRecordAccessRequests: () => request("/admin/record-access-requests"),
+  getAdminRecordAccessSettings: () => request("/admin/record-access-settings"),
+  saveAdminRecordAccessSettings: (body) => request("/admin/record-access-settings", { method: "PUT", body }),
   decideAdminRecordAccess: (requestId, decision) =>
     request(`/admin/record-access-requests/${requestId}/decision`, { method: "POST", body: { decision } }),
   getAdminBranch: (id) => request(`/admin/branches/${id}`),

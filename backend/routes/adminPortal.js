@@ -3337,6 +3337,52 @@ function createAdminPortalRouter({
     }
   });
 
+  router.get("/record-access-settings", async (_req, res) => {
+    try {
+      const grantMinutes = await recordAccess.loadGrantMinutes(db);
+      return res.json({
+        grantMinutes,
+        minMinutes: recordAccess.GRANT_RANGE_MINUTES.min,
+        maxMinutes: recordAccess.GRANT_RANGE_MINUTES.max,
+      });
+    } catch (error) {
+      console.error("Record access settings error:", error.message);
+      return res.status(500).json({ message: "Unable to load record access settings." });
+    }
+  });
+
+  router.put("/record-access-settings", async (req, res) => {
+    const requested = Number(req.body?.grantMinutes);
+    if (!Number.isFinite(requested)) {
+      return res.status(400).json({ message: "Enter a grant duration between 15 and 240 minutes." });
+    }
+    if (requested < recordAccess.GRANT_RANGE_MINUTES.min || requested > recordAccess.GRANT_RANGE_MINUTES.max) {
+      return res.status(400).json({ message: "Grant duration must be between 15 and 240 minutes." });
+    }
+    try {
+      const grantMinutes = await recordAccess.saveGrantMinutes(db, requested, req.admin.id);
+      await writeAdminAudit(db, {
+        actorId: req.admin.id,
+        actorRole: "admin",
+        action: "record_access_grant_minutes_updated",
+        targetType: "setting",
+        targetId: "record_access_grant_minutes",
+        detail: `New grants last ${grantMinutes} minutes.`,
+      });
+      return res.json({
+        grantMinutes,
+        minMinutes: recordAccess.GRANT_RANGE_MINUTES.min,
+        maxMinutes: recordAccess.GRANT_RANGE_MINUTES.max,
+      });
+    } catch (error) {
+      if (error.code === "42P01") {
+        return res.status(503).json({ message: "Run npm run migrate:admin-portal before saving this setting." });
+      }
+      console.error("Record access settings save error:", error.message);
+      return res.status(500).json({ message: "Unable to save record access settings." });
+    }
+  });
+
   router.get("/record-access-requests", async (req, res) => {
     try {
       const requests = await db.query(

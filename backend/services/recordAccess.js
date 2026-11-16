@@ -1,11 +1,17 @@
 "use strict";
 
+const bcrypt = require("bcrypt");
 const { writeAdminAudit } = require("./adminAudit");
 
-// Grants last 30 minutes. If Admin configuration is added later, the allowed
-// range is 15 to 240 minutes. Do not expose a setting until that range is accepted.
 const GRANT_MINUTES = 30;
 const GRANT_RANGE_MINUTES = { min: 15, max: 240 };
+const CHALLENGE_MINUTES = 5;
+const GRANT_MINUTES_SETTING = "record_access_grant_minutes";
+const GENERIC_AUTH_MESSAGE = "Unable to authorize this access.";
+const AUTH_WINDOW_MS = 15 * 60 * 1000;
+const AUTH_FAIL_LIMIT = 5;
+const authFailures = new Map();
+let dummyPasswordHash = null;
 
 const RESTRICTED_SCOPES = [
   "diagnosis_notes",
@@ -151,7 +157,7 @@ async function activeGrants(db, dentistId, recordId) {
   await expireGrants(db, dentistId, recordId);
   try {
     const result = await db.query(
-      `SELECT originating_branch_id, scope
+      `SELECT originating_branch_id, scope, expires_at
        FROM record_access_grants
        WHERE requesting_dentist_id = $1
          AND clinical_record_id = $2
@@ -162,6 +168,7 @@ async function activeGrants(db, dentistId, recordId) {
     return result.rows.map((row) => ({
       branchId: String(row.originating_branch_id),
       scope: row.scope,
+      expiresAt: row.expires_at,
     }));
   } catch (error) {
     if (error.code === "42P01" || error.code === "42703") return [];
@@ -192,6 +199,8 @@ function presentTreatment(treatment, access) {
       treatment.attribution_review ||
       !(treatment.originatingBranchId || treatment.originating_branch_id)
     ),
+    createdAt: treatment.createdAt || treatment.created_at || null,
+    treatingDentistId: treatment.treatingDentistId || treatment.treating_dentist_id || null,
     notes: "",
     diagnosis: "",
     diagnosisNotes: "",
@@ -344,33 +353,17 @@ async function decideRequest(db, approver, requestId, decision) {
       );
       await client.query("COMMIT");
       return { request, grant: existing.rows[0] || null, duplicate: true };
+    } else if (decision === "approved") {
+      await client.query("ROLLBACK");
+      throw httpError("Authorize this request at the requesting workstation.", 409);
     } else if (decision === "denied") {
       await client.query(
         `UPDATE record_access_requests SET status = 'denied', decided_at = CURRENT_TIMESTAMP, decided_by = $2 WHERE id = $1`,
         [request.id, String(approver.id)]
       );
     } else {
-      await client.query(
-        `UPDATE record_access_requests SET status = 'approved', decided_at = CURRENT_TIMESTAMP, decided_by = $2 WHERE id = $1`,
-        [request.id, String(approver.id)]
-      );
-      try {
-        await client.query(
-          `INSERT INTO record_access_grants (
-             request_id, requesting_dentist_id, clinical_record_id, originating_branch_id, scope, expires_at
-           ) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP + ($6 || ' minutes')::interval)`,
-          [
-            request.id,
-            request.requesting_dentist_id,
-            request.clinical_record_id,
-            request.originating_branch_id,
-            request.scope,
-            String(GRANT_MINUTES),
-          ]
-        );
-      } catch (error) {
-        if (error.code !== "23505") throw error;
-      }
+      await client.query("ROLLBACK");
+      throw httpError("Authorize this request at the requesting workstation.", 409);
     }
     await client.query(
       `INSERT INTO record_access_decisions (request_id, actor_id, actor_role, action)
@@ -391,7 +384,397 @@ async function decideRequest(db, approver, requestId, decision) {
       `SELECT id, status, expires_at FROM record_access_grants WHERE request_id = $1 ORDER BY id DESC LIMIT 1`,
       [request.id]
     );
-    return { request: { ...request, status: decision === "approved" ? "approved" : decision }, grant: grant.rows[0] || null };
+    return { request: { ...request, status: decision }, grant: grant.rows[0] || null };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+function clampGrantMinutes(value) {
+  const minutes = Number(value);
+  if (!Number.isFinite(minutes)) return GRANT_MINUTES;
+  return Math.min(GRANT_RANGE_MINUTES.max, Math.max(GRANT_RANGE_MINUTES.min, Math.round(minutes)));
+}
+
+async function loadGrantMinutes(db) {
+  try {
+    const result = await db.query(
+      `SELECT setting_value FROM admin_portal_settings WHERE setting_key = $1 LIMIT 1`,
+      [GRANT_MINUTES_SETTING]
+    );
+    const raw = result.rows[0]?.setting_value;
+    const parsed = raw && typeof raw === "object" && !Array.isArray(raw) && raw.minutes != null ? raw.minutes : raw;
+    return clampGrantMinutes(parsed == null ? GRANT_MINUTES : parsed);
+  } catch (error) {
+    if (error.code === "42P01" || error.code === "42703") return GRANT_MINUTES;
+    throw error;
+  }
+}
+
+async function saveGrantMinutes(db, minutes, adminId) {
+  const grantMinutes = clampGrantMinutes(minutes);
+  await db.query(
+    `INSERT INTO admin_portal_settings (setting_key, setting_value, updated_at, updated_by)
+     VALUES ($1, $2::jsonb, CURRENT_TIMESTAMP, $3)
+     ON CONFLICT (setting_key) DO UPDATE SET
+       setting_value = EXCLUDED.setting_value,
+       updated_at = CURRENT_TIMESTAMP,
+       updated_by = EXCLUDED.updated_by`,
+    [GRANT_MINUTES_SETTING, JSON.stringify(grantMinutes), adminId ? String(adminId) : null]
+  );
+  return grantMinutes;
+}
+
+function resetAuthFailures() {
+  authFailures.clear();
+}
+
+function authAttemptKey(identifier, ip) {
+  return `${String(identifier || "").trim().toLowerCase()}|${String(ip || "")}`;
+}
+
+function assertAuthRateLimit(identifier, ip) {
+  const key = authAttemptKey(identifier, ip);
+  const now = Date.now();
+  const current = authFailures.get(key);
+  if (current && now - current.startedAt > AUTH_WINDOW_MS) {
+    authFailures.delete(key);
+    return;
+  }
+  if (current && current.count >= AUTH_FAIL_LIMIT) {
+    throw httpError("Too many authorization attempts. Please wait 15 minutes and try again.", 429);
+  }
+}
+
+function recordAuthFailure(identifier, ip) {
+  const key = authAttemptKey(identifier, ip);
+  const now = Date.now();
+  const current = authFailures.get(key);
+  if (!current || now - current.startedAt > AUTH_WINDOW_MS) {
+    authFailures.set(key, { startedAt: now, count: 1 });
+    return;
+  }
+  current.count += 1;
+}
+
+function clearAuthFailure(identifier, ip) {
+  authFailures.delete(authAttemptKey(identifier, ip));
+}
+
+function normalizeIdentifier(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return { email: null, phone: raw };
+  if (raw.includes("@")) return { email: raw.toLowerCase(), phone: raw };
+  return { email: null, phone: raw };
+}
+
+async function dummyHash() {
+  if (!dummyPasswordHash) dummyPasswordHash = await bcrypt.hash("record-access-dummy", 10);
+  return dummyPasswordHash;
+}
+
+async function createChallenge(db, req, payload) {
+  if (!RESTRICTED_SCOPES.includes(payload.scope)) {
+    throw httpError("Choose a restricted record type.", 400);
+  }
+  const text = String(payload.reason || "").trim();
+  if (text.length < 3) throw httpError("Enter a short reason for this request.", 400);
+  const requestBranch = Number(payload.requestingBranchId);
+  const originBranch = Number(payload.originatingBranchId);
+  if (!Number.isSafeInteger(requestBranch) || !Number.isSafeInteger(originBranch)) {
+    throw httpError("Choose the branch you are working from and the branch that holds the records.", 400);
+  }
+  const record = payload.record;
+  const relationship = await qualifyingRelationship(db, req.dentist, record);
+  if (!relationship.allowed) {
+    throw httpError(
+      "A confirmed appointment or an active encounter with this patient is required before requesting more of the chart.",
+      403,
+      { patient: identityOf(record), code: "NO_TREATMENT_RELATIONSHIP" }
+    );
+  }
+  if (!relationship.branchIds.map(String).includes(String(requestBranch))) {
+    throw httpError("Request the chart from a branch where you are seeing this patient.", 403);
+  }
+  const branches = await authorizedBranchIds(db, req.dentist.id);
+  if (!branches.includes(String(originBranch))) {
+    const known = await db.query(`SELECT id, status FROM clinic_branches WHERE id = $1`, [originBranch]);
+    if (!known.rows[0] || known.rows[0].status !== "active") {
+      throw httpError("Choose an active branch that holds the records.", 400);
+    }
+  }
+
+  const pending = await db.query(
+    `SELECT id FROM record_access_requests
+     WHERE requesting_dentist_id = $1
+       AND clinical_record_id = $2
+       AND originating_branch_id = $3
+       AND scope = $4
+       AND status = 'pending'
+     ORDER BY id DESC
+     LIMIT 1`,
+    [String(req.dentist.id), record.id, originBranch, payload.scope]
+  );
+
+  await db.query(
+    `UPDATE record_access_challenges
+     SET consumed_at = CURRENT_TIMESTAMP
+     WHERE requesting_dentist_id = $1
+       AND clinical_record_id = $2
+       AND originating_branch_id = $3
+       AND scope = $4
+       AND consumed_at IS NULL`,
+    [String(req.dentist.id), record.id, originBranch, payload.scope]
+  );
+
+  const inserted = await db.query(
+    `INSERT INTO record_access_challenges (
+       clinical_record_id, patient_user_id, requesting_dentist_id, requesting_branch_id,
+       originating_branch_id, reason, scope, legacy_request_id, expires_at
+     ) VALUES (
+       $1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP + ($9 || ' minutes')::interval
+     )
+     RETURNING id, expires_at, requesting_dentist_id, requesting_branch_id, originating_branch_id, scope, reason`,
+    [
+      record.id,
+      record.linkedUserId || record.linked_user_id || null,
+      String(req.dentist.id),
+      requestBranch,
+      originBranch,
+      text.slice(0, 500),
+      payload.scope,
+      pending.rows[0]?.id || null,
+      String(CHALLENGE_MINUTES),
+    ]
+  );
+  await audit(db, req, {
+    action: "record_access_challenge_created",
+    targetType: "clinical_record",
+    targetId: String(record.id),
+    targetLabel: identityOf(record).patientId,
+    detail: `Challenge ${inserted.rows[0].id} scope ${payload.scope} from branch ${originBranch} at branch ${requestBranch}.`,
+  });
+  return {
+    ...inserted.rows[0],
+    patient: identityOf(record),
+  };
+}
+
+async function loadApproverRow(db, identifier) {
+  const parsed = normalizeIdentifier(identifier);
+  const result = await db.query(
+    `SELECT account.id, account.first_name, account.last_name, account.email, account.phone,
+            account.role, account.status, account.is_verified, account.is_archived, account.password_hash,
+            profile.can_approve_cross_branch_access
+     FROM users AS account
+     LEFT JOIN admin_portal_dentist_profiles AS profile
+       ON profile.user_id::text = account.id::text
+     WHERE LOWER(account.email) = $1 OR account.phone = $2 OR account.phone = $3
+     LIMIT 1`,
+    [parsed.email || parsed.phone.toLowerCase(), parsed.phone, String(identifier || "").trim()]
+  );
+  return result.rows[0] || null;
+}
+
+async function verifyApproverPassword(db, identifier, password) {
+  const row = await loadApproverRow(db, identifier);
+  const hash = row?.password_hash && row.password_hash !== "synthetic-hash" && row.password_hash !== "!"
+    ? row.password_hash
+    : await dummyHash();
+  const matched = await bcrypt.compare(String(password || ""), hash);
+  if (!row || !matched || row.password_hash === "synthetic-hash" || row.password_hash === "!" || !row.password_hash) {
+    return null;
+  }
+  return row;
+}
+
+function approverAccountEligible(row) {
+  if (!row?.is_verified) return false;
+  if (row.is_archived) return false;
+  const status = String(row.status || "active").toLowerCase();
+  if (["inactive", "disabled", "suspended", "rejected", "pending", "unverified"].includes(status)) return false;
+  const role = String(row.role || "").toLowerCase();
+  if (role === "admin") return true;
+  if (role === "dentist" && row.can_approve_cross_branch_access === true) return true;
+  return false;
+}
+
+async function authorizeChallenge(db, req, { challengeId, identifier, password }) {
+  assertAuthRateLimit(identifier, req.ip);
+  const passwordText = String(password || "");
+  if (!String(identifier || "").trim() || !passwordText) {
+    recordAuthFailure(identifier, req.ip);
+    throw httpError(GENERIC_AUTH_MESSAGE, 401);
+  }
+
+  const approverRow = await verifyApproverPassword(db, identifier, passwordText);
+  if (!approverRow) {
+    recordAuthFailure(identifier, req.ip);
+    await writeAdminAudit(db, {
+      actorId: req.dentist?.id,
+      actorRole: "dentist",
+      action: "record_access_authorize_failed",
+      targetType: "record_access_challenge",
+      targetId: String(challengeId),
+      result: "failure",
+      detail: "Independent verification failed.",
+    });
+    throw httpError(GENERIC_AUTH_MESSAGE, 401);
+  }
+  if (!approverAccountEligible(approverRow)) {
+    recordAuthFailure(identifier, req.ip);
+    throw httpError("You cannot authorize this record access.", 403);
+  }
+  clearAuthFailure(identifier, req.ip);
+
+  const approver = {
+    id: approverRow.id,
+    first_name: approverRow.first_name,
+    last_name: approverRow.last_name,
+    role: String(approverRow.role || "").toLowerCase(),
+    can_approve_cross_branch_access: approverRow.can_approve_cross_branch_access === true,
+  };
+
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const locked = await client.query(
+      `SELECT * FROM record_access_challenges WHERE id = $1 FOR UPDATE`,
+      [challengeId]
+    );
+    const challenge = locked.rows[0];
+    if (!challenge) {
+      await client.query("ROLLBACK");
+      throw httpError("This authorization is no longer valid.", 404);
+    }
+    if (String(challenge.requesting_dentist_id) !== String(req.dentist.id)) {
+      await client.query("ROLLBACK");
+      throw httpError("This authorization is no longer valid.", 403);
+    }
+    if (challenge.consumed_at || new Date(challenge.expires_at).getTime() <= Date.now()) {
+      await client.query("ROLLBACK");
+      throw httpError("This authorization is no longer valid.", 409);
+    }
+    if (String(approver.id) === String(challenge.requesting_dentist_id)) {
+      await client.query("ROLLBACK");
+      throw httpError("You cannot authorize your own record access.", 403);
+    }
+    const allowed = await approverMayDecide(client, approver, {
+      requesting_dentist_id: challenge.requesting_dentist_id,
+      originating_branch_id: challenge.originating_branch_id,
+    });
+    if (!allowed) {
+      await client.query("ROLLBACK");
+      throw httpError("You cannot authorize records for this branch.", 403);
+    }
+
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext('record-grant'), hashtext($1))`, [
+      `${challenge.requesting_dentist_id}:${challenge.clinical_record_id}:${challenge.originating_branch_id}:${challenge.scope}`,
+    ]);
+
+    await client.query(
+      `UPDATE record_access_challenges SET consumed_at = CURRENT_TIMESTAMP WHERE id = $1`,
+      [challenge.id]
+    );
+
+    let requestId = challenge.legacy_request_id || null;
+    if (requestId) {
+      const pending = await client.query(
+        `SELECT id, status FROM record_access_requests WHERE id = $1 FOR UPDATE`,
+        [requestId]
+      );
+      if (!pending.rows[0] || pending.rows[0].status !== "pending") requestId = null;
+    }
+    if (!requestId) {
+      const created = await client.query(
+        `INSERT INTO record_access_requests (
+           clinical_record_id, patient_user_id, requesting_dentist_id, requesting_branch_id,
+           originating_branch_id, reason, scope, status, decided_at, decided_by
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'approved', CURRENT_TIMESTAMP, $8)
+         RETURNING id`,
+        [
+          challenge.clinical_record_id,
+          challenge.patient_user_id,
+          challenge.requesting_dentist_id,
+          challenge.requesting_branch_id,
+          challenge.originating_branch_id,
+          challenge.reason,
+          challenge.scope,
+          String(approver.id),
+        ]
+      );
+      requestId = created.rows[0].id;
+    } else {
+      await client.query(
+        `UPDATE record_access_requests
+         SET status = 'approved', decided_at = CURRENT_TIMESTAMP, decided_by = $2
+         WHERE id = $1`,
+        [requestId, String(approver.id)]
+      );
+    }
+
+    const minutes = await loadGrantMinutes(client);
+    let grant;
+    try {
+      grant = await client.query(
+        `INSERT INTO record_access_grants (
+           request_id, requesting_dentist_id, clinical_record_id, originating_branch_id, scope, expires_at
+         ) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP + ($6 || ' minutes')::interval)
+         RETURNING id, status, expires_at, scope, originating_branch_id, clinical_record_id`,
+        [
+          requestId,
+          challenge.requesting_dentist_id,
+          challenge.clinical_record_id,
+          challenge.originating_branch_id,
+          challenge.scope,
+          String(minutes),
+        ]
+      );
+    } catch (error) {
+      if (error.code !== "23505") throw error;
+      grant = await client.query(
+        `SELECT id, status, expires_at, scope, originating_branch_id, clinical_record_id
+         FROM record_access_grants
+         WHERE requesting_dentist_id = $1
+           AND clinical_record_id = $2
+           AND originating_branch_id = $3
+           AND scope = $4
+           AND status = 'active'
+         ORDER BY id DESC
+         LIMIT 1`,
+        [
+          challenge.requesting_dentist_id,
+          challenge.clinical_record_id,
+          challenge.originating_branch_id,
+          challenge.scope,
+        ]
+      );
+    }
+
+    await client.query(
+      `INSERT INTO record_access_decisions (request_id, actor_id, actor_role, action)
+       VALUES ($1, $2, $3, 'approved')`,
+      [requestId, String(approver.id), approver.role]
+    );
+    await client.query("COMMIT");
+    await writeAdminAudit(db, {
+      actorId: approver.id,
+      actorName: `${approver.first_name || ""} ${approver.last_name || ""}`.trim() || null,
+      actorRole: approver.role,
+      action: "record_access_approved",
+      targetType: "clinical_record",
+      targetId: String(challenge.clinical_record_id),
+      detail: `Grant ${grant.rows[0]?.id || ""} request ${requestId} scope ${challenge.scope} branch ${challenge.originating_branch_id}.`,
+    });
+    return {
+      grant: grant.rows[0] || null,
+      requestId,
+      minutes,
+      approverRole: approver.role,
+    };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -403,6 +786,8 @@ async function decideRequest(db, approver, requestId, decision) {
 module.exports = {
   GRANT_MINUTES,
   GRANT_RANGE_MINUTES,
+  CHALLENGE_MINUTES,
+  GENERIC_AUTH_MESSAGE,
   RESTRICTED_SCOPES,
   OPEN_APPOINTMENT_STATUSES,
   ACTIVE_ENCOUNTER_STATUSES,
@@ -413,7 +798,13 @@ module.exports = {
   restrictedAllowed,
   presentTreatment,
   createRequest,
+  createChallenge,
+  authorizeChallenge,
   decideRequest,
   approverMayDecide,
+  loadGrantMinutes,
+  saveGrantMinutes,
+  clampGrantMinutes,
+  resetAuthFailures,
   audit,
 };

@@ -1180,7 +1180,7 @@ export function AdminManageUsersPage() {
                       onChange={(e) => setForm({ ...form, canApproveCrossBranchAccess: e.target.checked })}
                     />
                     <span>
-                      Can Approve Cross-Branch Record Access. This stays off unless an administrator turns it on. It does not open charts or other branches.
+                      Can Authorize Cross-Branch Record Access. This stays off unless an administrator turns it on. It does not open charts or other branches.
                     </span>
                   </label>
                 </>

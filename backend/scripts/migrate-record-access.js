@@ -4,16 +4,29 @@ const fs = require("fs");
 const path = require("path");
 const db = require("../db");
 
-const applyPath = path.join(__dirname, "..", "migrations", "056_cross_branch_record_access.sql");
-const rollbackPath = path.join(__dirname, "..", "migrations", "056_cross_branch_record_access_rollback.sql");
+const files = [
+  "056_cross_branch_record_access.sql",
+  "057_record_access_workstation_auth.sql",
+];
+const rollbackFiles = [
+  "057_record_access_workstation_auth_rollback.sql",
+  "056_cross_branch_record_access_rollback.sql",
+];
 
 async function main() {
   const rollback = process.argv.includes("--rollback");
-  const sql = fs.readFileSync(rollback ? rollbackPath : applyPath, "utf8");
-  await db.query(sql);
-  console.log(rollback ? "Rolled back migrations/056_cross_branch_record_access.sql" : "Applied migrations/056_cross_branch_record_access.sql");
-  console.log("Grants last 30 minutes. Allowed range if configuration is added later: 15 to 240 minutes.");
-  console.log("Audit log retention is not defined in the current schema and remains for clinic review.");
+  const list = rollback ? rollbackFiles : files;
+  for (const name of list) {
+    const sql = fs.readFileSync(path.join(__dirname, "..", "migrations", name), "utf8");
+    await db.query(sql);
+    console.log(rollback ? `Rolled back ${name}` : `Applied ${name}`);
+  }
+  if (!rollback) {
+    console.log("Workstation challenges last 5 minutes and are single-use.");
+    console.log("New grants last 30 minutes unless Admin sets 15 to 240 minutes.");
+    console.log("Legacy pending requests stay visible until a fresh workstation authorization.");
+    console.log("Audit log retention is not defined in the current schema and remains for clinic review.");
+  }
   await db.end();
 }
 
