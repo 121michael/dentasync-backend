@@ -1109,7 +1109,7 @@ function createPatientPortalRouter({
     if (!isIsoDate(appointmentDate)) {
       return res.status(400).json({ message: "Please choose a valid appointment date." });
     }
-    if (!normalizedAppointmentTime) {
+    if (requestedTime != null && !normalizedAppointmentTime) {
       return res.status(400).json({ message: "Choose an available appointment time." });
     }
     if (!normalizedCoverage) {
@@ -1421,7 +1421,7 @@ function createPatientPortalRouter({
       ? null
       : String(req.body.appointmentTime);
     const appointmentTime = requestedTime == null ? null : clinicSchedule.normalizeTime(requestedTime);
-    if (!clinicSchedule.isIsoDate(appointmentDate) || !appointmentTime) {
+    if (!clinicSchedule.isIsoDate(appointmentDate) || (requestedTime != null && !appointmentTime)) {
       return res.status(400).json({ message: "Choose an available date and time. Rescheduling stays at this branch." });
     }
     if (req.body?.branchId != null && String(req.body.branchId).trim() !== "") {

@@ -359,12 +359,13 @@ function validateBooking(form, { selectedServicePrice, availability, throughStep
     if (availability?.closed) {
       return { step: 2, message: `The clinic is closed on ${displayDate(form.appointmentDate)}. Choose another date.` };
     }
-    if (!form.appointmentTime) {
-      return { step: 2, message: "Choose an available appointment time." };
-    }
-    const bookable = availability?.availableTimes || [];
-    if (availability && !bookable.includes(form.appointmentTime)) {
-      return { step: 2, message: "That time is no longer available. Choose another appointment slot." };
+    if (form.appointmentTime) {
+      const bookable = availability?.availableTimes || [];
+      if (availability && !bookable.includes(form.appointmentTime)) {
+        return { step: 2, message: "That time is no longer available. Choose another appointment slot." };
+      }
+    } else if (availability && availability.dateOnlyBookable === false) {
+      return { step: 2, message: "That date is fully booked. Choose another date or a preferred time that is still open." };
     }
   }
   if (throughStep >= 3) {
@@ -900,10 +901,12 @@ export function AppointmentsPage() {
                         {appointment.branchStatus === "inactive" ? " (inactive)" : ""}
                       </dd>
                     </div>
+                    {appointment.time ? (
                     <div>
                       <dt>Time</dt>
-                      <dd>{appointment.time ? displayTime(appointment.time) : "No preferred time"}</dd>
+                      <dd>{displayTime(appointment.time)}</dd>
                     </div>
+                    ) : null}
                     <div className="appointment-history-card__service">
                       <dt>Service</dt>
                       <dd>{displayServiceName(appointment)}</dd>
@@ -1088,7 +1091,7 @@ export function AppointmentsPage() {
             <div className="card-heading">
               <div>
                 <span className="eyebrow">02 — Schedule</span>
-                <h2>Choose date and time</h2>
+                <h2>Choose date and optional time</h2>
               </div>
               <CalendarDays className="card-heading__icon" size={21} />
             </div>
@@ -1147,7 +1150,7 @@ export function AppointmentsPage() {
             ) : null}
             <div className="schedule-fields">
               <label className="field">
-                <span>Preferred date</span>
+                <span>Appointment date</span>
                 <input
                   type="date"
                   name="appointmentDate"
@@ -1202,7 +1205,18 @@ export function AppointmentsPage() {
                   </button>
                 ))}
             </div>
-            <p className="muted">Choose an available appointment time. The visit is saved with that time.</p>
+            <p className="muted">Appointment time (optional)</p>
+            {form.appointmentTime ? (
+              <button
+                type="button"
+                className="button button--secondary button--compact"
+                onClick={() => setForm((current) => ({ ...current, appointmentTime: "" }))}
+              >
+                Clear selected time
+              </button>
+            ) : (
+              <p className="muted">Leave the time blank to book the date only.</p>
+            )}
             {availability && !availability.closed && !(availability.availableTimes || []).length ? (
               <p className="muted">No appointment slots are available on this date.</p>
             ) : null}
@@ -1521,10 +1535,12 @@ export function AppointmentsPage() {
                       <span>Date</span>
                       <strong>{form.appointmentDate ? displayDate(form.appointmentDate) : "Choose a date"}</strong>
                     </div>
+                    {form.appointmentTime ? (
                     <div className="booking-summary__line">
-                      <span>Preferred time</span>
-                      <strong>{form.appointmentTime ? displayTime(form.appointmentTime) : "No preferred time"}</strong>
+                      <span>Appointment time</span>
+                      <strong>{displayTime(form.appointmentTime)}</strong>
                     </div>
+                    ) : null}
                     <div className="booking-summary__line">
                       <span>Status</span>
                       <strong>Pending</strong>

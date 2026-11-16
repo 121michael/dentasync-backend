@@ -115,6 +115,7 @@ test("branch check-in and scheduled queue", async (t) => {
   const lateAppointment = await book(latePatient, main.rows[0].id, "11:00");
   const earlyAppointment = await book(earlyPatient, main.rows[0].id, "09:00");
   const pasigAppointment = await book(pasigPatient, pasig.rows[0].id, "10:00");
+  const dateOnlyPatient = await addUser("patient", "dateonly.check@example.test", "Dana", null);
   const legacy = await db.query(
     `INSERT INTO patient_portal_appointments (
        user_id, service_id, service_name, dentist_id, dentist_name,
@@ -123,7 +124,7 @@ test("branch check-in and scheduled queue", async (t) => {
        $1, 'cleaning', 'Cleaning', 'dr-ada', 'Dr. Ada',
        (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date, NULL, 'self_pay', 500, 'confirmed', $2
      ) RETURNING id`,
-    [String(earlyPatient), main.rows[0].id]
+    [String(dateOnlyPatient), main.rows[0].id]
   );
 
   const app = express();
@@ -253,12 +254,24 @@ test("branch check-in and scheduled queue", async (t) => {
     token: mToken,
     body: { method: "qr", appointmentId: legacy.rows[0].id },
   });
-  assert.equal(noTime.status, 409);
-  assert.match(noTime.body.message, /no confirmed time/i);
-  const legacyQueue = await db.query(`SELECT id FROM patient_portal_queue_entries WHERE appointment_id = $1`, [legacy.rows[0].id]);
-  assert.equal(legacyQueue.rows.length, 0);
-  const keptTime = await db.query(`SELECT appointment_time FROM patient_portal_appointments WHERE id = $1`, [legacy.rows[0].id]);
+  assert.equal(noTime.status, 201, JSON.stringify(noTime.body));
+  const keptTime = await db.query(`SELECT appointment_time, branch_id FROM patient_portal_appointments WHERE id = $1`, [
+    legacy.rows[0].id,
+  ]);
   assert.equal(keptTime.rows[0].appointment_time, null);
+  assert.equal(String(keptTime.rows[0].branch_id), String(main.rows[0].id));
+  const withDateOnly = await request("GET", "/api/staff/queue", { token: mToken });
+  const waitingWithDateOnly = withDateOnly.body.queue.filter(
+    (row) => row.status !== "completed" && row.status !== "no_show"
+  );
+  const dateOnlyToken = noTime.body.queue.token;
+  assert.equal(waitingWithDateOnly[waitingWithDateOnly.length - 1].token, dateOnlyToken);
+  const nineIndex = waitingWithDateOnly.findIndex((row) => String(row.appointment?.time || "").startsWith("09:00"));
+  const elevenIndex = waitingWithDateOnly.findIndex((row) => String(row.appointment?.time || "").startsWith("11:00"));
+  const dateOnlyIndex = waitingWithDateOnly.findIndex((row) => row.token === dateOnlyToken);
+  assert.ok(nineIndex >= 0 && elevenIndex >= 0);
+  assert.ok(nineIndex < elevenIndex);
+  assert.ok(elevenIndex < dateOnlyIndex);
 
   await db.query(`UPDATE patient_portal_queue_entries SET status = 'dentist' WHERE appointment_id = $1`, [pasigAppointment]);
   await db.query(`UPDATE clinic_branches SET status = 'inactive' WHERE id = $1`, [pasig.rows[0].id]);

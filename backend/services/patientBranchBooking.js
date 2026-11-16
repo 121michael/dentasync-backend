@@ -233,11 +233,12 @@ async function assertPlaceAvailable(client, { branchId, date, time, ignoreAppoin
   if (hours.closed) {
     throw bookingError("The clinic is closed on that date. Please choose another day.", 409);
   }
-  if (!time) {
-    throw bookingError("Choose an available appointment time.", 400);
-  }
-  if (!clinicSchedule.isSlotBookable(hours, defaults, savedSlots, bookedTimes, time, dateOnlyCount)) {
-    throw bookingError("That time is outside clinic hours or is not available. Please choose another slot.", 409);
+  if (time) {
+    if (!clinicSchedule.isSlotBookable(hours, defaults, savedSlots, bookedTimes, time, dateOnlyCount)) {
+      throw bookingError("That time is outside clinic hours or is not available. Please choose another slot.", 409);
+    }
+  } else if (!clinicSchedule.isDateOnlyBookable(hours, defaults, savedSlots, bookedTimes, dateOnlyCount)) {
+    throw bookingError("That date is fully booked. Please choose another day.", 409);
   }
 }
 
@@ -398,6 +399,7 @@ async function createBooking(db, input) {
       dentist,
       branchId,
       status: "pending",
+      clinicLocation: input.clinicLocation || resolved.branch?.name || "Amethyst Dental Clinic",
     });
     await client.query("COMMIT");
     open = false;

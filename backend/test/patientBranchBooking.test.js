@@ -184,44 +184,79 @@ test("patient branch booking", async (t) => {
 
   const pasigClosed = await request("POST", "/api/patient/appointments", {
     token: patientToken,
-    body: { serviceId: "cleaning", appointmentDate: day, appointmentTime: "11:00", coverageType: "self_pay", branchId: pasig.rows[0].id },
+    body: { serviceId: "cleaning", appointmentDate: day, coverageType: "self_pay", branchId: pasig.rows[0].id },
   });
   assert.equal(pasigClosed.status, 409);
 
-  const missingTime = await request("POST", "/api/patient/appointments", {
-    token: patientToken,
-    body: { serviceId: "cleaning", appointmentDate: day, coverageType: "self_pay", branchId: main.rows[0].id },
-  });
-  assert.equal(missingTime.status, 400);
-
-  const blankTime = await request("POST", "/api/patient/appointments", {
+  const invalidTime = await request("POST", "/api/patient/appointments", {
     token: patientToken,
     body: {
       serviceId: "cleaning",
       appointmentDate: day,
-      appointmentTime: "",
+      appointmentTime: "not-a-time",
       coverageType: "self_pay",
       branchId: main.rows[0].id,
     },
   });
-  assert.equal(blankTime.status, 400);
-  assert.match(blankTime.body.message || "", /appointment time/i);
+  assert.equal(invalidTime.status, 400);
+
+  const unavailableTime = await request("POST", "/api/patient/appointments", {
+    token: patientToken,
+    body: {
+      serviceId: "cleaning",
+      appointmentDate: day,
+      appointmentTime: "08:00",
+      coverageType: "self_pay",
+      branchId: main.rows[0].id,
+    },
+  });
+  assert.equal(unavailableTime.status, 409);
+
+  async function assertUnspecifiedTime(body) {
+    const booked = await request("POST", "/api/patient/appointments", {
+      token: patientToken,
+      body: {
+        serviceId: "cleaning",
+        appointmentDate: day,
+        coverageType: "self_pay",
+        branchId: main.rows[0].id,
+        ...body,
+      },
+    });
+    assert.equal(booked.status, 201, JSON.stringify(booked.body));
+    assert.equal(booked.body.appointment.time, null);
+    assert.equal(booked.body.appointment.status, "pending");
+    assert.equal(String(booked.body.appointment.branchId), String(main.rows[0].id));
+    assert.equal(String(booked.body.appointment.date).slice(0, 10), day);
+    assert.match(booked.body.message, /clinic confirmation/i);
+    assert.equal(JSON.stringify(booked.body).includes("09:00"), false);
+    const stored = await db.query(
+      `SELECT appointment_time, appointment_date, branch_id FROM patient_portal_appointments WHERE id = $1`,
+      [booked.body.appointment.id]
+    );
+    assert.equal(stored.rows[0].appointment_time, null);
+    assert.equal(String(stored.rows[0].branch_id), String(main.rows[0].id));
+    await db.query(`DELETE FROM patient_portal_appointments WHERE id = $1`, [booked.body.appointment.id]);
+  }
+
+  await assertUnspecifiedTime({});
+  await assertUnspecifiedTime({ appointmentTime: null });
+  await assertUnspecifiedTime({ appointmentTime: "" });
+  await assertUnspecifiedTime({ appointmentTime: "   " });
 
   const dateOnly = await request("POST", "/api/patient/appointments", {
     token: patientToken,
-    body: {
-      serviceId: "cleaning",
-      appointmentDate: day,
-      appointmentTime: "09:00",
-      coverageType: "self_pay",
-      branchId: main.rows[0].id,
-    },
+    body: { serviceId: "cleaning", appointmentDate: day, coverageType: "self_pay", branchId: main.rows[0].id },
   });
   assert.equal(dateOnly.status, 201, JSON.stringify(dateOnly.body));
-  assert.equal(String(dateOnly.body.appointment.time).slice(0, 5), "09:00");
-  assert.equal(dateOnly.body.appointment.status, "pending");
+  assert.equal(dateOnly.body.appointment.time, null);
   assert.equal(String(dateOnly.body.appointment.branchId), String(main.rows[0].id));
-  assert.match(dateOnly.body.message, /clinic confirmation/i);
+
+  const secondDateOnly = await request("POST", "/api/patient/appointments", {
+    token: tokenFor(secondPatientId, "patient"),
+    body: { serviceId: "extraction", appointmentDate: day, coverageType: "self_pay", branchId: main.rows[0].id },
+  });
+  assert.equal(secondDateOnly.status, 409);
 
   const timedAfterFull = await request("POST", "/api/patient/appointments", {
     token: tokenFor(secondPatientId, "patient"),
@@ -234,6 +269,21 @@ test("patient branch booking", async (t) => {
     },
   });
   assert.equal(timedAfterFull.status, 409);
+
+  await db.query(`DELETE FROM patient_portal_appointments WHERE appointment_date = $1::date`, [day]);
+  const timedOk = await request("POST", "/api/patient/appointments", {
+    token: patientToken,
+    body: {
+      serviceId: "cleaning",
+      appointmentDate: day,
+      appointmentTime: "09:00",
+      coverageType: "self_pay",
+      branchId: main.rows[0].id,
+    },
+  });
+  assert.equal(timedOk.status, 201, JSON.stringify(timedOk.body));
+  assert.equal(String(timedOk.body.appointment.time).slice(0, 5), "09:00");
+  assert.equal(String(timedOk.body.appointment.branchId), String(main.rows[0].id));
 
   await db.query(`DELETE FROM patient_portal_appointments WHERE appointment_date = $1::date`, [day]);
   const pasigDay = futureMonday().replace(/..$/, "18");
@@ -257,7 +307,7 @@ test("patient branch booking", async (t) => {
   assert.equal(pasigTimed.status, 201, JSON.stringify(pasigTimed.body));
   const mainSameDay = await request("POST", "/api/patient/appointments", {
     token: patientToken,
-    body: { serviceId: "extraction", appointmentDate: openPasig, appointmentTime: "09:00", coverageType: "self_pay", branchId: main.rows[0].id },
+    body: { serviceId: "extraction", appointmentDate: openPasig, coverageType: "self_pay", branchId: main.rows[0].id },
   });
   assert.equal(mainSameDay.status, 409);
 

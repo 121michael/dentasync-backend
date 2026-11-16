@@ -10,7 +10,7 @@ const path = require("path");
 const LATE_ARRIVAL_POLICY = "undefined";
 
 const NO_TIME_MESSAGE =
-  "This appointment has no confirmed time. It stays out of the queue until staff confirm a time with the patient.";
+  "This appointment has no preferred time. It still joins this branch queue after timed visits for the same day.";
 
 const QUEUE_ORDER_SQL = `
   CASE
@@ -124,9 +124,6 @@ async function assertCheckInAllowed(client, { appointment, branchId, method, pat
   if (!["pending", "confirmed", "checked_in"].includes(status)) {
     throw checkInError("This appointment is not eligible for check-in.");
   }
-  if (appointment.appointment_time == null) {
-    throw checkInError(NO_TIME_MESSAGE);
-  }
   const today = await client.query(
     `SELECT ($1::date = (CURRENT_TIMESTAMP AT TIME ZONE $2)::date) AS is_today`,
     [appointment.appointment_date, clinicZone()]
@@ -154,7 +151,7 @@ async function resequenceWaitingPositions(client, branchId) {
          SELECT queue.id,
                 ROW_NUMBER() OVER (
                   ORDER BY appointment.appointment_date ASC,
-                           appointment.appointment_time ASC,
+                           appointment.appointment_time ASC NULLS LAST,
                            appointment.created_at ASC,
                            appointment.id ASC,
                            queue.id ASC
@@ -166,7 +163,6 @@ async function resequenceWaitingPositions(client, branchId) {
          WHERE queue.branch_id = $1
            AND (queue.checked_in_at AT TIME ZONE $2)::date = (CURRENT_TIMESTAMP AT TIME ZONE $2)::date
            AND queue.status IN ('waiting', 'checked_in')
-           AND appointment.appointment_time IS NOT NULL
        )
        UPDATE patient_portal_queue_entries AS queue
        SET position = ordered.next_position,

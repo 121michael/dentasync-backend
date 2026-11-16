@@ -272,8 +272,8 @@ export function AdminSchedulePage() {
         {data.missingTimeReview?.length ? (
           <div className="inline-alert" role="status">
             {data.missingTimeReview.length} upcoming appointment
-            {data.missingTimeReview.length === 1 ? "" : "s"} still have no confirmed time. They stay out of the queue
-            until staff confirm a time with the patient. The saved record is unchanged.
+            {data.missingTimeReview.length === 1 ? "" : "s"} still have no preferred time. They can check in and join
+            this branch queue after timed visits for the same day. The saved record is unchanged.
             <ul>
               {data.missingTimeReview.map((appointment) => (
                 <li key={appointment.id}>
