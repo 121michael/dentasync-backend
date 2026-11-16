@@ -193,7 +193,11 @@ function DelegatedRequestQueue() {
         <p key={request.id}>
           #{request.id} patient {request.patientRecordId} · {request.scope} · {request.status}
           {request.status === "pending" ? (
-            <span> Authorize this request at the requesting workstation.</span>
+            <span>
+              {" "}
+              Authorize at the requesting workstation after signing in separately.{" "}
+              <a href="/record-access/authorize">Open authorization</a>
+            </span>
           ) : null}
           {request.status === "approved" ? (
             <>
@@ -215,8 +219,6 @@ function AccessRecordHistory({ patientId, patient, treatments, onAuthorized, gra
   const [reason, setReason] = useState("");
   const [requestingBranchId, setRequestingBranchId] = useState("");
   const [originatingBranchId, setOriginatingBranchId] = useState("");
-  const [identifier, setIdentifier] = useState("");
-  const [password, setPassword] = useState("");
   const [challenge, setChallenge] = useState(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -236,10 +238,30 @@ function AccessRecordHistory({ patientId, patient, treatments, onAuthorized, gra
     return () => window.clearTimeout(timer);
   }, [grantExpiresAt]);
 
+  useEffect(() => {
+    if (!challenge?.id || challenge.status === "approved") return undefined;
+    const timer = window.setInterval(async () => {
+      try {
+        const response = await api.getDentistRecordAccessChallenge(patientId, challenge.id);
+        const next = response.challenge;
+        if (next?.status === "approved") {
+          window.clearInterval(timer);
+          setOpen(false);
+          setChallenge(null);
+          onAuthorizedRef.current?.("Restricted records are available for the approved scope.");
+        } else if (next?.status === "expired") {
+          setChallenge(next);
+          setMessage("This authorization expired. Start a new request.");
+        }
+      } catch {
+        /* keep waiting; the dentist can retry by leaving the modal open */
+      }
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [challenge, patientId]);
+
   function closeModal() {
     setOpen(false);
-    setPassword("");
-    setIdentifier("");
     setChallenge(null);
     setMessage("");
   }
@@ -257,28 +279,6 @@ function AccessRecordHistory({ patientId, patient, treatments, onAuthorized, gra
       });
       setChallenge(response.challenge);
     } catch (requestError) {
-      setMessage(requestError.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function authorize(event) {
-    event.preventDefault();
-    if (!challenge?.id) return;
-    setBusy(true);
-    setMessage("");
-    try {
-      const response = await api.authorizeDentistRecordAccess(challenge.id, {
-        identifier,
-        password,
-      });
-      setPassword("");
-      closeModal();
-      setMessage("");
-      onAuthorized?.(response.message || "Restricted records are available for the approved scope.");
-    } catch (requestError) {
-      setPassword("");
       setMessage(requestError.message);
     } finally {
       setBusy(false);
@@ -347,32 +347,15 @@ function AccessRecordHistory({ patientId, patient, treatments, onAuthorized, gra
                 Reason for access
                 <input value={reason} onChange={(event) => setReason(event.target.value)} required minLength={3} />
               </label>
-              <button className="button button--primary" disabled={busy} type="submit">{busy ? "Preparing…" : "Continue to approver verification"}</button>
+              <button className="button button--primary" disabled={busy} type="submit">{busy ? "Preparing…" : "Create approval code"}</button>
             </form>
           ) : (
-            <form onSubmit={authorize} autoComplete="off">
+            <div>
               <p>{challenge.scope} · {challenge.reason}</p>
-              <label>
-                Approver email or mobile
-                <input
-                  value={identifier}
-                  onChange={(event) => setIdentifier(event.target.value)}
-                  autoComplete="off"
-                  required
-                />
-              </label>
-              <label>
-                Approver password
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  autoComplete="off"
-                  required
-                />
-              </label>
-              <button className="button button--primary" disabled={busy} type="submit">{busy ? "Verifying…" : "Authorize access"}</button>
-            </form>
+              <p>Ask an Admin or delegated dentist to sign in on this workstation in a separate browser profile, open Authorize record access, and enter this code:</p>
+              <p style={{ fontSize: "1.75rem", letterSpacing: "0.2rem", fontWeight: 700 }}>{challenge.approvalCode}</p>
+              <p className="muted">They sign in as themselves. Do not share your session or type their password here. This page refreshes the chart when they approve.</p>
+            </div>
           )}
           {message ? <p>{message}</p> : null}
         </DentistModal>

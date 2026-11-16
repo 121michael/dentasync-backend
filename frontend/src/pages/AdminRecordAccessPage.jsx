@@ -69,8 +69,10 @@ export function AdminRecordAccessPage() {
         <p className="eyebrow">Admin</p>
         <h1>Cross-Branch Access Requests</h1>
         <p>
-          New access is authorized at the requesting workstation. Legacy pending requests stay listed until a fresh
-          independent verification. Active grants can be revoked here.
+          New access is authorized at the requesting workstation. An Admin or delegated dentist signs in with their
+          own account in a separate browser profile and enters the approval code. Do not type an approver password
+          into the dentist session. Legacy pending requests stay listed until that verification. Active grants can be
+          revoked here.
         </p>
       </header>
       <form onSubmit={saveDuration} className="admin-card" style={{ marginBottom: "1.5rem" }}>

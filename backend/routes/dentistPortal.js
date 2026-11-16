@@ -3298,6 +3298,7 @@ function createDentistPortalRouter({
       return res.status(201).json({
         challenge: {
           id: challenge.id,
+          approvalCode: challenge.approval_code,
           expiresAt: challenge.expires_at,
           patient: challenge.patient,
           requestingDentistId: challenge.requesting_dentist_id,
@@ -3312,25 +3313,21 @@ function createDentistPortalRouter({
     }
   });
 
+  router.get("/patients/:id/access-challenges/:challengeId", async (req, res) => {
+    const recordId = numericId(req.params.id);
+    const challengeId = numericId(req.params.challengeId);
+    if (!recordId || !challengeId) return res.status(400).json({ message: "A valid authorization is required." });
+    try {
+      const challenge = await recordAccess.requesterChallengeStatus(db, req, { recordId, challengeId });
+      return res.json({ challenge });
+    } catch (error) {
+      return sendAccessError(res, error, "Unable to load this authorization.");
+    }
+  });
+
   router.post("/access-challenges/:id/authorize", async (req, res) => {
     try {
-      const result = await recordAccess.authorizeChallenge(db, req, {
-        challengeId: req.params.id,
-        identifier: req.body?.identifier || req.body?.email,
-        password: req.body?.password,
-      });
-      return res.json({
-        message: "Restricted records are available for the approved scope.",
-        grant: result.grant
-          ? {
-              id: result.grant.id,
-              status: result.grant.status,
-              expiresAt: result.grant.expires_at,
-              scope: result.grant.scope,
-            }
-          : null,
-        minutes: result.minutes,
-      });
+      recordAccess.rejectSharedSessionAuthorize();
     } catch (error) {
       return sendAccessError(res, error, "Unable to authorize this access.");
     }

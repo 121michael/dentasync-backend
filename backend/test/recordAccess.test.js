@@ -37,6 +37,7 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
   const { createAdminPortalRouter } = require("../routes/adminPortal");
   const { createDentistPortalRouter } = require("../routes/dentistPortal");
   const { createStaffPortalRouter } = require("../routes/staffPortal");
+  const { createRecordAccessApprovalRouter } = require("../routes/recordAccessApproval");
   const { authenticateToken } = require("../middleware/authMiddleware");
 
   let server;
@@ -124,6 +125,7 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
   `);
   await db.query(sqlFile("056_cross_branch_record_access.sql"));
   await db.query(sqlFile("057_record_access_workstation_auth.sql"));
+  await db.query(sqlFile("058_record_access_isolated_approver.sql"));
 
   const mandaluyong = await db.query(`SELECT id FROM clinic_branches WHERE is_main LIMIT 1`);
   const pasig = await db.query(
@@ -301,6 +303,7 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
   app.use("/api/admin", createAdminPortalRouter({ db, authenticateToken, notifyAdmin: async () => {} }));
   app.use("/api/dentist", createDentistPortalRouter({ db, authenticateToken }));
   app.use("/api/staff", createStaffPortalRouter({ db, authenticateToken, notifyStaff: async () => {}, notifyDentist: async () => {} }));
+  app.use("/api/record-access", createRecordAccessApprovalRouter({ db, authenticateToken }));
   server = http.createServer(app);
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -451,6 +454,9 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
   });
   assert.equal(challenge.status, 201, challenge.json.message);
   const challengeId = challenge.json.challenge.id;
+  const approvalCode = challenge.json.challenge.approvalCode;
+  assert.ok(approvalCode);
+  assert.equal(JSON.stringify(challenge.json).toLowerCase().includes("password"), false);
 
   const stillHidden = await api("GET", `/api/dentist/patients/${recordId}`, {
     role: "dentist",
@@ -462,52 +468,53 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
     ""
   );
 
-  const staffAuth = await api("POST", `/api/dentist/access-challenges/${challengeId}/authorize`, {
+  const sharedSession = await api("POST", `/api/dentist/access-challenges/${challengeId}/authorize`, {
     role: "dentist",
     id: treatingId,
     branchId: pasigId,
-    body: { identifier: "sam.staff@example.test", password: staffPassword },
+    body: { identifier: "ada.admin@example.test", password: adminPassword },
   });
-  assert.equal(staffAuth.status === 401 || staffAuth.status === 403, true, JSON.stringify(staffAuth.json));
+  assert.equal(sharedSession.status, 410);
+  const stillNoGrant = await db.query(
+    `SELECT id FROM record_access_grants WHERE clinical_record_id = $1 AND scope = 'diagnosis_notes'`,
+    [recordId]
+  );
+  assert.equal(stillNoGrant.rows.length, 0);
 
-  const ordinaryAuth = await api("POST", `/api/dentist/access-challenges/${challengeId}/authorize`, {
+  const anonymousCode = await api("GET", `/api/record-access/challenges/${approvalCode}`);
+  assert.equal(anonymousCode.status, 401);
+  const anonymousApprove = await api("POST", `/api/record-access/challenges/${approvalCode}/approve`, {
+    body: { originatingBranchId: pasigId, scope: "xrays", clinicalRecordId: otherRecordId },
+  });
+  assert.equal(anonymousApprove.status, 401);
+
+  const staffAuth = await api("POST", `/api/record-access/challenges/${approvalCode}/approve`, {
+    role: "staff",
+    id: staffId,
+  });
+  assert.equal(staffAuth.status, 403, JSON.stringify(staffAuth.json));
+
+  const ordinaryAuth = await api("POST", `/api/record-access/challenges/${approvalCode}/approve`, {
     role: "dentist",
-    id: treatingId,
-    branchId: pasigId,
-    body: { identifier: "cow.worker@example.test", password: coworkerPassword },
+    id: coworkerId,
   });
   assert.equal(ordinaryAuth.status, 403);
 
-  const selfAuth = await api("POST", `/api/dentist/access-challenges/${challengeId}/authorize`, {
+  const selfAuth = await api("POST", `/api/record-access/challenges/${approvalCode}/approve`, {
     role: "dentist",
     id: treatingId,
-    branchId: pasigId,
-    body: { identifier: "pat.treating@example.test", password: treatingPassword },
   });
   assert.equal(selfAuth.status, 403);
 
-  const inactiveAuth = await api("POST", `/api/dentist/access-challenges/${challengeId}/authorize`, {
-    role: "dentist",
-    id: treatingId,
-    branchId: pasigId,
-    body: { identifier: "ina.active@example.test", password: adminPassword },
+  const inactiveAuth = await api("POST", `/api/record-access/challenges/${approvalCode}/approve`, {
+    role: "admin",
+    id: inactiveAdminId,
   });
   assert.equal(inactiveAuth.status, 403);
 
-  const badPassword = await api("POST", `/api/dentist/access-challenges/${challengeId}/authorize`, {
+  const outOfScope = await api("POST", `/api/record-access/challenges/${approvalCode}/approve`, {
     role: "dentist",
-    id: treatingId,
-    branchId: pasigId,
-    body: { identifier: "ada.admin@example.test", password: "wrong-password" },
-  });
-  assert.equal(badPassword.status, 401);
-  assert.equal(JSON.stringify(badPassword.json).toLowerCase().includes("password"), false);
-
-  const outOfScope = await api("POST", `/api/dentist/access-challenges/${challengeId}/authorize`, {
-    role: "dentist",
-    id: treatingId,
-    branchId: pasigId,
-    body: { identifier: "del.egated@example.test", password: delegatePassword },
+    id: delegateId,
   });
   assert.equal(outOfScope.status, 403);
 
@@ -516,13 +523,10 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
     mandaluyongId,
   ]);
 
-  const tamper = await api("POST", `/api/dentist/access-challenges/${challengeId}/authorize`, {
-    role: "dentist",
-    id: treatingId,
-    branchId: pasigId,
+  const tamper = await api("POST", `/api/record-access/challenges/${approvalCode}/approve`, {
+    role: "admin",
+    id: adminId,
     body: {
-      identifier: "ada.admin@example.test",
-      password: adminPassword,
       originatingBranchId: pasigId,
       scope: "xrays",
       clinicalRecordId: otherRecordId,
@@ -532,13 +536,19 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
   assert.equal(tamper.json.grant.scope, "diagnosis_notes");
   assert.equal(JSON.stringify(tamper.json).includes("AdminPass"), false);
 
-  const replay = await api("POST", `/api/dentist/access-challenges/${challengeId}/authorize`, {
+  const replay = await api("POST", `/api/record-access/challenges/${approvalCode}/approve`, {
+    role: "admin",
+    id: adminId,
+  });
+  assert.equal(replay.status, 409);
+
+  const polled = await api("GET", `/api/dentist/patients/${recordId}/access-challenges/${challengeId}`, {
     role: "dentist",
     id: treatingId,
     branchId: pasigId,
-    body: { identifier: "ada.admin@example.test", password: adminPassword },
   });
-  assert.equal(replay.status, 409);
+  assert.equal(polled.status, 200);
+  assert.equal(polled.json.challenge.status, "approved");
 
   const opened = await api("GET", `/api/dentist/patients/${recordId}`, {
     role: "dentist",
@@ -681,17 +691,13 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
     },
   });
   const [first, second] = await Promise.all([
-    api("POST", `/api/dentist/access-challenges/${delegateChallenge.json.challenge.id}/authorize`, {
+    api("POST", `/api/record-access/challenges/${delegateChallenge.json.challenge.approvalCode}/approve`, {
       role: "dentist",
-      id: treatingId,
-      branchId: pasigId,
-      body: { identifier: "del.egated@example.test", password: delegatePassword },
+      id: delegateId,
     }),
-    api("POST", `/api/dentist/access-challenges/${delegateChallenge.json.challenge.id}/authorize`, {
-      role: "dentist",
-      id: treatingId,
-      branchId: pasigId,
-      body: { identifier: "ada.admin@example.test", password: adminPassword },
+    api("POST", `/api/record-access/challenges/${delegateChallenge.json.challenge.approvalCode}/approve`, {
+      role: "admin",
+      id: adminId,
     }),
   ]);
   assert.equal([first.status, second.status].sort().join(","), "200,409");

@@ -7,8 +7,10 @@ const db = require("../db");
 const files = [
   "056_cross_branch_record_access.sql",
   "057_record_access_workstation_auth.sql",
+  "058_record_access_isolated_approver.sql",
 ];
 const rollbackFiles = [
+  "058_record_access_isolated_approver_rollback.sql",
   "057_record_access_workstation_auth_rollback.sql",
   "056_cross_branch_record_access_rollback.sql",
 ];
@@ -23,6 +25,7 @@ async function main() {
   }
   if (!rollback) {
     console.log("Workstation challenges last 5 minutes and are single-use.");
+    console.log("Approvers sign in separately and enter the displayed approval code.");
     console.log("New grants last 30 minutes unless Admin sets 15 to 240 minutes.");
     console.log("Legacy pending requests stay visible until a fresh workstation authorization.");
     console.log("Audit log retention is not defined in the current schema and remains for clinic review.");

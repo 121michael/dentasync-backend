@@ -39,6 +39,7 @@ import { AdminAiSettingsPage } from "./pages/AdminAiSettingsPage";
 import { AdminSettingsPage } from "./pages/AdminSettingsPage";
 import { AdminSyncPage } from "./pages/AdminSyncPage";
 import { AdminRecordAccessPage } from "./pages/AdminRecordAccessPage";
+import { RecordAccessAuthorizePage } from "./pages/RecordAccessAuthorizePage";
 import { AdminAuditPage } from "./pages/AdminAuditPage";
 import { AdminNotificationsPage } from "./pages/AdminNotificationsPage";
 import { AdminBackupPage } from "./pages/AdminBackupPage";
@@ -222,6 +223,7 @@ function PortalRoutes() {
           <Route path="/dentist/notifications" element={<DentistNotificationsPage />} />
           <Route path="/dentist/profile" element={<DentistProfilePage />} />
         </Route>
+        <Route path="/record-access/authorize" element={<RecordAccessAuthorizePage />} />
         <Route path="/access-denied" element={<AccessDeniedPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/login" replace />} />

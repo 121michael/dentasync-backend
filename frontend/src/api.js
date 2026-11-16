@@ -395,8 +395,15 @@ export const api = {
     request(`/dentist/patients/${patientId}/access-requests`, { method: "POST", body }),
   createDentistRecordAccessChallenge: (patientId, body) =>
     request(`/dentist/patients/${patientId}/access-challenges`, { method: "POST", body }),
-  authorizeDentistRecordAccess: (challengeId, body) =>
-    request(`/dentist/access-challenges/${challengeId}/authorize`, { method: "POST", body }),
+  getDentistRecordAccessChallenge: (patientId, challengeId) =>
+    request(`/dentist/patients/${patientId}/access-challenges/${challengeId}`),
+  previewRecordAccessChallenge: (code) =>
+    request(`/record-access/challenges/${encodeURIComponent(String(code || "").trim())}`),
+  approveRecordAccessChallenge: (code) =>
+    request(`/record-access/challenges/${encodeURIComponent(String(code || "").trim())}/approve`, {
+      method: "POST",
+      body: {},
+    }),
   getDentistRecordAccessRequests: () => request("/dentist/record-access-requests"),
   decideDentistRecordAccess: (requestId, decision) =>
     request(`/dentist/record-access-requests/${requestId}/decision`, { method: "POST", body: { decision } }),

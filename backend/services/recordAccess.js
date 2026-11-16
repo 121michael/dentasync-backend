@@ -1,6 +1,6 @@
 "use strict";
 
-const bcrypt = require("bcrypt");
+const crypto = require("crypto");
 const { writeAdminAudit } = require("./adminAudit");
 
 const GRANT_MINUTES = 30;
@@ -8,10 +8,13 @@ const GRANT_RANGE_MINUTES = { min: 15, max: 240 };
 const CHALLENGE_MINUTES = 5;
 const GRANT_MINUTES_SETTING = "record_access_grant_minutes";
 const GENERIC_AUTH_MESSAGE = "Unable to authorize this access.";
+const CHALLENGE_GONE_MESSAGE = "This authorization is no longer valid.";
+const SHARED_SESSION_MESSAGE =
+  "Authorize this request from a signed-in Admin or delegated dentist account on this workstation.";
 const AUTH_WINDOW_MS = 15 * 60 * 1000;
 const AUTH_FAIL_LIMIT = 5;
+const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const authFailures = new Map();
-let dummyPasswordHash = null;
 
 const RESTRICTED_SCOPES = [
   "diagnosis_notes",
@@ -464,18 +467,6 @@ function clearAuthFailure(identifier, ip) {
   authFailures.delete(authAttemptKey(identifier, ip));
 }
 
-function normalizeIdentifier(value) {
-  const raw = String(value || "").trim();
-  if (!raw) return { email: null, phone: raw };
-  if (raw.includes("@")) return { email: raw.toLowerCase(), phone: raw };
-  return { email: null, phone: raw };
-}
-
-async function dummyHash() {
-  if (!dummyPasswordHash) dummyPasswordHash = await bcrypt.hash("record-access-dummy", 10);
-  return dummyPasswordHash;
-}
-
 async function createChallenge(db, req, payload) {
   if (!RESTRICTED_SCOPES.includes(payload.scope)) {
     throw httpError("Choose a restricted record type.", 400);
@@ -530,14 +521,16 @@ async function createChallenge(db, req, payload) {
     [String(req.dentist.id), record.id, originBranch, payload.scope]
   );
 
+  const approvalCode = await uniqueApprovalCode(db);
   const inserted = await db.query(
     `INSERT INTO record_access_challenges (
        clinical_record_id, patient_user_id, requesting_dentist_id, requesting_branch_id,
-       originating_branch_id, reason, scope, legacy_request_id, expires_at
+       originating_branch_id, reason, scope, legacy_request_id, approval_code, expires_at
      ) VALUES (
-       $1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP + ($9 || ' minutes')::interval
+       $1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP + ($10 || ' minutes')::interval
      )
-     RETURNING id, expires_at, requesting_dentist_id, requesting_branch_id, originating_branch_id, scope, reason`,
+     RETURNING id, approval_code, expires_at, requesting_dentist_id, requesting_branch_id,
+               originating_branch_id, scope, reason, clinical_record_id`,
     [
       record.id,
       record.linkedUserId || record.linked_user_id || null,
@@ -547,6 +540,7 @@ async function createChallenge(db, req, payload) {
       text.slice(0, 500),
       payload.scope,
       pending.rows[0]?.id || null,
+      approvalCode,
       String(CHALLENGE_MINUTES),
     ]
   );
@@ -563,32 +557,33 @@ async function createChallenge(db, req, payload) {
   };
 }
 
-async function loadApproverRow(db, identifier) {
-  const parsed = normalizeIdentifier(identifier);
-  const result = await db.query(
-    `SELECT account.id, account.first_name, account.last_name, account.email, account.phone,
-            account.role, account.status, account.is_verified, account.is_archived, account.password_hash,
-            profile.can_approve_cross_branch_access
-     FROM users AS account
-     LEFT JOIN admin_portal_dentist_profiles AS profile
-       ON profile.user_id::text = account.id::text
-     WHERE LOWER(account.email) = $1 OR account.phone = $2 OR account.phone = $3
-     LIMIT 1`,
-    [parsed.email || parsed.phone.toLowerCase(), parsed.phone, String(identifier || "").trim()]
-  );
-  return result.rows[0] || null;
+function normalizeApprovalCode(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .slice(0, 12);
 }
 
-async function verifyApproverPassword(db, identifier, password) {
-  const row = await loadApproverRow(db, identifier);
-  const hash = row?.password_hash && row.password_hash !== "synthetic-hash" && row.password_hash !== "!"
-    ? row.password_hash
-    : await dummyHash();
-  const matched = await bcrypt.compare(String(password || ""), hash);
-  if (!row || !matched || row.password_hash === "synthetic-hash" || row.password_hash === "!" || !row.password_hash) {
-    return null;
+function randomApprovalCode() {
+  const bytes = crypto.randomBytes(8);
+  let code = "";
+  for (let index = 0; index < 8; index += 1) {
+    code += CODE_ALPHABET[bytes[index] % CODE_ALPHABET.length];
   }
-  return row;
+  return code;
+}
+
+async function uniqueApprovalCode(db) {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const code = randomApprovalCode();
+    const existing = await db.query(
+      `SELECT id FROM record_access_challenges WHERE approval_code = $1 AND consumed_at IS NULL LIMIT 1`,
+      [code]
+    );
+    if (!existing.rows[0]) return code;
+  }
+  throw httpError("Unable to start record authorization.", 500);
 }
 
 function approverAccountEligible(row) {
@@ -602,61 +597,184 @@ function approverAccountEligible(row) {
   return false;
 }
 
-async function authorizeChallenge(db, req, { challengeId, identifier, password }) {
-  assertAuthRateLimit(identifier, req.ip);
-  const passwordText = String(password || "");
-  if (!String(identifier || "").trim() || !passwordText) {
-    recordAuthFailure(identifier, req.ip);
-    throw httpError(GENERIC_AUTH_MESSAGE, 401);
-  }
+async function loadSessionApprover(db, user) {
+  if (!user?.id) return null;
+  const result = await db.query(
+    `SELECT account.id, account.first_name, account.last_name, account.role, account.status,
+            account.is_verified, account.is_archived, profile.can_approve_cross_branch_access
+     FROM users AS account
+     LEFT JOIN admin_portal_dentist_profiles AS profile
+       ON profile.user_id::text = account.id::text
+     WHERE account.id::text = $1
+     LIMIT 1`,
+    [String(user.id)]
+  );
+  const row = result.rows[0];
+  if (!row || !approverAccountEligible(row)) return null;
+  return {
+    id: row.id,
+    first_name: row.first_name,
+    last_name: row.last_name,
+    role: String(row.role || "").toLowerCase(),
+    can_approve_cross_branch_access: row.can_approve_cross_branch_access === true,
+  };
+}
 
-  const approverRow = await verifyApproverPassword(db, identifier, passwordText);
-  if (!approverRow) {
-    recordAuthFailure(identifier, req.ip);
-    await writeAdminAudit(db, {
-      actorId: req.dentist?.id,
-      actorRole: "dentist",
-      action: "record_access_authorize_failed",
-      targetType: "record_access_challenge",
-      targetId: String(challengeId),
-      result: "failure",
-      detail: "Independent verification failed.",
-    });
-    throw httpError(GENERIC_AUTH_MESSAGE, 401);
+function rejectSharedSessionAuthorize() {
+  throw httpError(SHARED_SESSION_MESSAGE, 410);
+}
+
+async function requesterChallengeStatus(db, req, { recordId, challengeId }) {
+  const result = await db.query(
+    `SELECT id, clinical_record_id, requesting_dentist_id, requesting_branch_id, originating_branch_id,
+            scope, reason, approval_code, expires_at, consumed_at
+     FROM record_access_challenges
+     WHERE id = $1
+     LIMIT 1`,
+    [challengeId]
+  );
+  const challenge = result.rows[0];
+  if (!challenge || String(challenge.requesting_dentist_id) !== String(req.dentist.id)) {
+    throw httpError("Access request not found.", 404);
   }
-  if (!approverAccountEligible(approverRow)) {
-    recordAuthFailure(identifier, req.ip);
+  if (recordId && Number(challenge.clinical_record_id) !== Number(recordId)) {
+    throw httpError("Access request not found.", 404);
+  }
+  const grant = challenge.consumed_at
+    ? await db.query(
+        `SELECT id, status, expires_at, scope
+         FROM record_access_grants
+         WHERE requesting_dentist_id = $1
+           AND clinical_record_id = $2
+           AND originating_branch_id = $3
+           AND scope = $4
+         ORDER BY id DESC
+         LIMIT 1`,
+        [
+          challenge.requesting_dentist_id,
+          challenge.clinical_record_id,
+          challenge.originating_branch_id,
+          challenge.scope,
+        ]
+      )
+    : { rows: [] };
+  const expired = !challenge.consumed_at && new Date(challenge.expires_at).getTime() <= Date.now();
+  let status = "pending";
+  if (challenge.consumed_at && grant.rows[0]?.status === "active") status = "approved";
+  else if (challenge.consumed_at) status = "consumed";
+  else if (expired) status = "expired";
+  return {
+    id: challenge.id,
+    approvalCode: challenge.approval_code,
+    status,
+    expiresAt: challenge.expires_at,
+    scope: challenge.scope,
+    reason: challenge.reason,
+    requestingBranchId: challenge.requesting_branch_id,
+    originatingBranchId: challenge.originating_branch_id,
+    grant: grant.rows[0]
+      ? {
+          id: grant.rows[0].id,
+          status: grant.rows[0].status,
+          expiresAt: grant.rows[0].expires_at,
+          scope: grant.rows[0].scope,
+        }
+      : null,
+  };
+}
+
+async function previewChallenge(db, req, code) {
+  const approvalCode = normalizeApprovalCode(code);
+  assertAuthRateLimit(String(req.user?.id || req.ip), req.ip);
+  if (!approvalCode) {
+    recordAuthFailure(String(req.user?.id || req.ip), req.ip);
+    throw httpError(CHALLENGE_GONE_MESSAGE, 404);
+  }
+  const approver = await loadSessionApprover(db, req.user);
+  if (!approver) {
+    recordAuthFailure(String(req.user?.id || req.ip), req.ip);
     throw httpError("You cannot authorize this record access.", 403);
   }
-  clearAuthFailure(identifier, req.ip);
-
-  const approver = {
-    id: approverRow.id,
-    first_name: approverRow.first_name,
-    last_name: approverRow.last_name,
-    role: String(approverRow.role || "").toLowerCase(),
-    can_approve_cross_branch_access: approverRow.can_approve_cross_branch_access === true,
+  const result = await db.query(
+    `SELECT challenge.*, requester.first_name AS requester_first_name, requester.last_name AS requester_last_name,
+            record.record_code, record.patient_id, record.first_name AS patient_first_name, record.last_name AS patient_last_name
+     FROM record_access_challenges AS challenge
+     LEFT JOIN users AS requester ON requester.id::text = challenge.requesting_dentist_id
+     LEFT JOIN clinic_patient_records AS record ON record.id = challenge.clinical_record_id
+     WHERE challenge.approval_code = $1
+     LIMIT 1`,
+    [approvalCode]
+  );
+  const challenge = result.rows[0];
+  if (!challenge || challenge.consumed_at || new Date(challenge.expires_at).getTime() <= Date.now()) {
+    recordAuthFailure(String(req.user?.id || req.ip), req.ip);
+    throw httpError(CHALLENGE_GONE_MESSAGE, 404);
+  }
+  if (String(approver.id) === String(challenge.requesting_dentist_id)) {
+    throw httpError("You cannot authorize your own record access.", 403);
+  }
+  const allowed = await approverMayDecide(db, approver, {
+    requesting_dentist_id: challenge.requesting_dentist_id,
+    originating_branch_id: challenge.originating_branch_id,
+  });
+  if (!allowed) {
+    throw httpError("You cannot authorize records for this branch.", 403);
+  }
+  clearAuthFailure(String(req.user?.id || req.ip), req.ip);
+  return {
+    approvalCode: challenge.approval_code,
+    expiresAt: challenge.expires_at,
+    scope: challenge.scope,
+    reason: challenge.reason,
+    requestingBranchId: challenge.requesting_branch_id,
+    originatingBranchId: challenge.originating_branch_id,
+    requesterName: `${challenge.requester_first_name || ""} ${challenge.requester_last_name || ""}`.trim() || null,
+    patient: {
+      id: challenge.clinical_record_id,
+      patientId: challenge.patient_id || challenge.record_code || null,
+      fullName: `${challenge.patient_first_name || ""} ${challenge.patient_last_name || ""}`.trim() || null,
+    },
   };
+}
+
+async function authorizeChallenge(db, req, { code }) {
+  const approvalCode = normalizeApprovalCode(code);
+  assertAuthRateLimit(String(req.user?.id || req.ip), req.ip);
+  if (!approvalCode) {
+    recordAuthFailure(String(req.user?.id || req.ip), req.ip);
+    throw httpError(CHALLENGE_GONE_MESSAGE, 404);
+  }
+
+  const approver = await loadSessionApprover(db, req.user);
+  if (!approver) {
+    recordAuthFailure(String(req.user?.id || req.ip), req.ip);
+    await writeAdminAudit(db, {
+      actorId: req.user?.id,
+      actorRole: String(req.user?.role || "user").toLowerCase(),
+      action: "record_access_authorize_failed",
+      targetType: "record_access_challenge",
+      result: "failure",
+      detail: "Approver session is not eligible.",
+    });
+    throw httpError("You cannot authorize this record access.", 403);
+  }
+  clearAuthFailure(String(req.user?.id || req.ip), req.ip);
 
   const client = await db.connect();
   try {
     await client.query("BEGIN");
     const locked = await client.query(
-      `SELECT * FROM record_access_challenges WHERE id = $1 FOR UPDATE`,
-      [challengeId]
+      `SELECT * FROM record_access_challenges WHERE approval_code = $1 FOR UPDATE`,
+      [approvalCode]
     );
     const challenge = locked.rows[0];
     if (!challenge) {
       await client.query("ROLLBACK");
-      throw httpError("This authorization is no longer valid.", 404);
-    }
-    if (String(challenge.requesting_dentist_id) !== String(req.dentist.id)) {
-      await client.query("ROLLBACK");
-      throw httpError("This authorization is no longer valid.", 403);
+      throw httpError(CHALLENGE_GONE_MESSAGE, 404);
     }
     if (challenge.consumed_at || new Date(challenge.expires_at).getTime() <= Date.now()) {
       await client.query("ROLLBACK");
-      throw httpError("This authorization is no longer valid.", 409);
+      throw httpError(CHALLENGE_GONE_MESSAGE, 409);
     }
     if (String(approver.id) === String(challenge.requesting_dentist_id)) {
       await client.query("ROLLBACK");
@@ -788,6 +906,8 @@ module.exports = {
   GRANT_RANGE_MINUTES,
   CHALLENGE_MINUTES,
   GENERIC_AUTH_MESSAGE,
+  CHALLENGE_GONE_MESSAGE,
+  SHARED_SESSION_MESSAGE,
   RESTRICTED_SCOPES,
   OPEN_APPOINTMENT_STATUSES,
   ACTIVE_ENCOUNTER_STATUSES,
@@ -800,6 +920,10 @@ module.exports = {
   createRequest,
   createChallenge,
   authorizeChallenge,
+  previewChallenge,
+  requesterChallengeStatus,
+  rejectSharedSessionAuthorize,
+  loadSessionApprover,
   decideRequest,
   approverMayDecide,
   loadGrantMinutes,

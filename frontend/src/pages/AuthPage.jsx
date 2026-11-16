@@ -102,8 +102,12 @@ export function AuthPage() {
       startSession(response.token, response.user);
       const role = String(response.user?.role || "").toLowerCase();
       const nextPath = safeNextPath();
+      const authorizeNext =
+        nextPath &&
+        nextPath.startsWith("/record-access/authorize") &&
+        (role === "admin" || role === "dentist");
       const redirectTo =
-        role === "patient" && nextPath
+        (role === "patient" && nextPath) || authorizeNext
           ? nextPath
           : response.redirectTo ||
             (role === "admin"

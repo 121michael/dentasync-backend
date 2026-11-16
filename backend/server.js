@@ -52,6 +52,7 @@ const { APPROVED_HMO_PROVIDERS } = require("./services/clinicAssistant");
 const { createStaffPortalRouter } = require("./routes/staffPortal");
 const { createAdminPortalRouter } = require("./routes/adminPortal");
 const { createDentistPortalRouter } = require("./routes/dentistPortal");
+const { createRecordAccessApprovalRouter } = require("./routes/recordAccessApproval");
 const { createPostgresOtpStore } = require("./repositories/postgresOtpStore");
 const { createPostgresPasswordResetStore } = require("./repositories/postgresPasswordResetStore");
 const { createOtpService } = require("./services/otpService");
@@ -289,6 +290,14 @@ app.use(
     emailDeliveryIsConfigured,
     notifyAdmin: (notification) => notifyActiveAdmins(db, notification),
     clinicSms,
+  })
+);
+
+app.use(
+  "/api/record-access",
+  createRecordAccessApprovalRouter({
+    db,
+    authenticateToken,
   })
 );
 
