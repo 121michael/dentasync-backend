@@ -194,6 +194,19 @@ test("patient branch booking", async (t) => {
   });
   assert.equal(missingTime.status, 400);
 
+  const blankTime = await request("POST", "/api/patient/appointments", {
+    token: patientToken,
+    body: {
+      serviceId: "cleaning",
+      appointmentDate: day,
+      appointmentTime: "",
+      coverageType: "self_pay",
+      branchId: main.rows[0].id,
+    },
+  });
+  assert.equal(blankTime.status, 400);
+  assert.match(blankTime.body.message || "", /appointment time/i);
+
   const dateOnly = await request("POST", "/api/patient/appointments", {
     token: patientToken,
     body: {

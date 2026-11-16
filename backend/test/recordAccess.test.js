@@ -239,6 +239,18 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
      VALUES ('End', 'Ed', 'end.ed@example.test', '09170000009', 'synthetic-hash', 'dentist', TRUE, 'Active')
      RETURNING id`
   );
+  const bystander = await db.query(
+    `INSERT INTO users (first_name, last_name, email, phone, password_hash, role, is_verified, status)
+     VALUES ('Bye', 'Stander', 'bye.stander@example.test', '09170000010', 'synthetic-hash', 'dentist', TRUE, 'Active')
+     RETURNING id`
+  );
+  const bystanderId = String(bystander.rows[0].id);
+  await db.query(`INSERT INTO admin_portal_dentist_profiles (user_id) VALUES ($1)`, [bystanderId]);
+  await db.query(`INSERT INTO clinic_branch_assignments (user_id, branch_id) VALUES ($1, $2)`, [
+    bystanderId,
+    mandaluyongId,
+  ]);
+
   const closedId = String(closed.rows[0].id);
   await db.query(`INSERT INTO admin_portal_dentist_profiles (user_id) VALUES ($1)`, [closedId]);
   await db.query(`INSERT INTO clinic_branch_assignments (user_id, branch_id) VALUES ($1, $2)`, [closedId, pasigId]);
@@ -330,6 +342,15 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
     branchId: pasigId,
   });
   assert.equal(coworkerPasig.status, 403);
+
+  const bystanderDetail = await api("GET", `/api/dentist/patients/${recordId}`, {
+    role: "dentist",
+    id: bystanderId,
+    branchId: mandaluyongId,
+  });
+  assert.equal(bystanderDetail.status, 403);
+  assert.equal(bystanderDetail.json.patient?.fullName, "Mina Patient");
+  assert.equal(JSON.stringify(bystanderDetail.json).includes("Deep caries"), false);
 
   const ended = await api("GET", `/api/dentist/patients/${recordId}`, {
     role: "dentist",
@@ -703,6 +724,34 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
   });
   assert.equal(permission.status, 200, permission.json.message);
   assert.equal(permission.json.dentist.canApproveCrossBranchAccess, false);
+
+  const dentistExport = await api("GET", "/api/admin/clinical-records/export/preview", {
+    role: "dentist",
+    id: treatingId,
+    branchId: pasigId,
+  });
+  assert.equal(dentistExport.status, 403);
+  const dentistWorkbook = await api("GET", "/api/admin/clinical-records/export.xlsx", {
+    role: "dentist",
+    id: treatingId,
+    branchId: pasigId,
+  });
+  assert.equal(dentistWorkbook.status, 403);
+
+  const adminPreview = await api("GET", "/api/admin/clinical-records/export/preview", {
+    role: "admin",
+    id: adminId,
+  });
+  assert.equal(adminPreview.status, 200, adminPreview.json.message);
+  assert.equal(JSON.stringify(adminPreview.json).includes("Deep caries"), false);
+
+  const staffExport = await api("GET", "/api/staff/export/check-ins", {
+    role: "staff",
+    id: staffId,
+    branchId: pasigId,
+  });
+  assert.ok(staffExport.status === 200 || staffExport.status === 404, String(staffExport.status));
+  assert.equal(JSON.stringify(staffExport.json).includes("Deep caries"), false);
 
   const audit = await db.query(
     `SELECT action FROM admin_portal_audit_logs WHERE action LIKE 'record_access_%' OR action = 'cross_branch_chart_read' OR action = 'Document Data Import'`

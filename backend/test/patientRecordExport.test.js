@@ -292,7 +292,7 @@ test("patient record export refuses a search that is too large to download", asy
   }
 });
 
-test("staff and anonymous sessions cannot export patient records", async () => {
+test("staff, dentist, and anonymous sessions cannot export patient records", async () => {
   const staff = await startPortal({ databaseRole: "staff" });
   try {
     const response = await fetch(`${staff.url}/clinical-records/export.xlsx`);
@@ -302,6 +302,15 @@ test("staff and anonymous sessions cannot export patient records", async () => {
     assert.equal(preview.status, 403);
   } finally {
     await staff.close();
+  }
+
+  const dentist = await startPortal({ databaseRole: "dentist", userId: "dentist-1" });
+  try {
+    const response = await fetch(`${dentist.url}/clinical-records/export.xlsx`);
+    assert.equal(response.status, 403);
+    assert.equal(dentist.seen.some((sql) => sql.includes("clinic_patient_records")), false);
+  } finally {
+    await dentist.close();
   }
 
   const anonymous = await startPortal({ userId: "" });
