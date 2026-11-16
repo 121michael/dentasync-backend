@@ -23,7 +23,9 @@ function frontendBaseUrl(requestOrigin, env = process.env) {
   const apiOrigin = apiPublicOrigin(env);
   const envOrigin = normalizeOrigin(env.PUBLIC_WEB_URL) || normalizeOrigin(env.FRONTEND_URL);
   const headerOrigin = normalizeOrigin(requestOrigin);
-  const candidates = [envOrigin, headerOrigin].filter(Boolean);
+  // Staff Origin is the page that generated the QR, so a phone on the same LAN
+  // can open it. FRONTEND_URL is a fallback when Origin is missing or is the API host.
+  const candidates = [headerOrigin, envOrigin].filter(Boolean);
 
   for (const origin of candidates) {
     if (apiOrigin && origin === apiOrigin) continue;

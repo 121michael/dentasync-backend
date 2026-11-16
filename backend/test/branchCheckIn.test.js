@@ -135,10 +135,15 @@ test("branch check-in and scheduled queue", async (t) => {
   const base = `http://127.0.0.1:${server.address().port}`;
   const { jwtSecret } = resolveAppSecrets(process.env);
   const tokenFor = (id, role) => jwt.sign({ id: String(id), role }, jwtSecret, { expiresIn: "1h" });
-  async function request(method, urlPath, { token, body } = {}) {
+  async function request(method, urlPath, { token, body, headers: extraHeaders } = {}) {
     const response = await fetch(`${base}${urlPath}`, {
       method,
-      headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+      headers: {
+        "content-type": "application/json",
+        origin: "http://127.0.0.1:5173",
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+        ...extraHeaders,
+      },
       body: body ? JSON.stringify(body) : undefined,
     });
     const text = await response.text();
@@ -147,6 +152,14 @@ test("branch check-in and scheduled queue", async (t) => {
 
   const mToken = tokenFor(mandaluyongStaff, "staff");
   const pToken = tokenFor(pasigStaff, "staff");
+  const walkInQr = await request("POST", "/api/staff/check-in/qr-session", {
+    token: mToken,
+    headers: { "x-dentasync-branch": String(main.rows[0].id) },
+  });
+  assert.equal(walkInQr.status, 201, JSON.stringify(walkInQr.body));
+  assert.ok(String(walkInQr.body.session?.qrDataUrl || "").startsWith("data:image/png"));
+  assert.match(String(walkInQr.body.session?.checkInUrl || ""), /^http:\/\/127\.0\.0\.1:5173\/\?walkin=[a-f0-9]+$/i);
+  assert.equal(Number(walkInQr.body.session?.branchId), Number(main.rows[0].id));
   const laterFirst = await request("POST", "/api/staff/check-in", {
     token: mToken,
     body: { method: "rfid", rfidTag: "AABBCCDDEE02" },

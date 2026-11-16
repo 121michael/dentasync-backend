@@ -42,6 +42,10 @@ function clinicZone() {
 }
 
 async function optionalQuery(client, sql, params) {
+  // Pool.query is auto-commit: SAVEPOINT requires an open transaction (checked-out client).
+  if (typeof client.release !== "function") {
+    return client.query(sql, params);
+  }
   const savepoint = `branch_checkin_${Math.floor(Math.random() * 1e9)}`;
   await client.query(`SAVEPOINT ${savepoint}`);
   try {

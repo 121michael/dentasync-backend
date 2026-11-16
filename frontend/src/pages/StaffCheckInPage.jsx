@@ -445,9 +445,16 @@ export function StaffCheckInPage() {
                   </div>
                 </div>
               ) : (
-                <button type="button" className="button button--primary" onClick={generateQr} disabled={busy}>
-                  <QrCode size={16} /> Generate QR Check-In
-                </button>
+                <>
+                  <button type="button" className="button button--primary" onClick={generateQr} disabled={busy}>
+                    <QrCode size={16} /> Generate QR Check-In
+                  </button>
+                  {error ? (
+                    <p className="inline-alert inline-alert--error">
+                      {error} You can try generating the QR code again.
+                    </p>
+                  ) : null}
+                </>
               )}
             </article>
             <VerifiedPanel
