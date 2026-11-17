@@ -7,8 +7,6 @@ import { AdminModal } from "../components/AdminUI";
 import { useAdminUi } from "../components/AdminLayout";
 import { formatAdminDate } from "../adminUtils";
 import { matchesNotificationFocus } from "../notificationFocus";
-import { ProcedureAuthorizationPanel } from "../components/ProcedureAuthorizationPanel";
-
 function listValue(value) {
   const text = value == null ? "" : String(value).trim();
   return text || "—";
@@ -472,14 +470,6 @@ export function AdminPatientRecordsPage() {
             <p className="muted-copy">No imported source document is attached to this record.</p>
           )}
 
-          <ProcedureAuthorizationPanel
-            portal="admin"
-            patientId={record.id}
-            patient={record}
-            treatments={treatments}
-            appointments={appointments}
-            onToast={pushToast}
-          />
         </AdminModal>
       ) : null}
     </div>
