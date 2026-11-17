@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Eye, RotateCcw, Search, Trash2 } from "lucide-react";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
-import { AdminModal, AdminStatusBadge } from "../components/AdminUI";
+import { AdminModal, AdminStackCell, AdminStatusBadge } from "../components/AdminUI";
 import { useAdminUi } from "../components/AdminLayout";
 import { formatAdminDate } from "../adminUtils";
 
@@ -193,17 +193,19 @@ export function AdminArchivedPage() {
                 {records.map((user) => (
                   <tr key={user.id}>
                     {archiveRole === "patient" ? (
-                      <td><code>{user.patientId || user.id}</code></td>
+                      <AdminStackCell label="Patient ID"><code>{user.patientId || user.id}</code></AdminStackCell>
                     ) : null}
-                    <td><strong>{user.fullName}</strong></td>
+                    <AdminStackCell label="Name" primary><strong>{user.fullName}</strong></AdminStackCell>
                     {archiveRole === "patient" ? (
-                      <td>{categoryLabel(user.patientCategory)}</td>
+                      <AdminStackCell label="Category">{categoryLabel(user.patientCategory)}</AdminStackCell>
                     ) : (
-                      <td>{user.email}</td>
+                      <AdminStackCell label="Email">{user.email}</AdminStackCell>
                     )}
-                    <td><AdminStatusBadge status={user.originalStatus || user.status} /></td>
-                    <td>{formatAdminDate(user.archivedAt)}</td>
-                    <td>
+                    <AdminStackCell label="Original Status">
+                      <AdminStatusBadge status={user.originalStatus || user.status} />
+                    </AdminStackCell>
+                    <AdminStackCell label="Archived Date">{formatAdminDate(user.archivedAt)}</AdminStackCell>
+                    <AdminStackCell label="Actions" actions>
                       <div className="admin-row-actions">
                         <button className="button button--secondary button--compact" onClick={() => setDetail(user)}>
                           <Eye size={14} /> View
@@ -223,7 +225,7 @@ export function AdminArchivedPage() {
                           <Trash2 size={14} /> Delete
                         </button>
                       </div>
-                    </td>
+                    </AdminStackCell>
                   </tr>
                 ))}
               </tbody>

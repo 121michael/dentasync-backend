@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
-import { AdminStatusBadge } from "../components/AdminUI";
+import { AdminStackCell, AdminStatusBadge } from "../components/AdminUI";
 import { useAdminUi } from "../components/AdminLayout";
 import { formatAdminDateTime } from "../adminUtils";
 
@@ -86,13 +86,13 @@ export function AdminAuditPage() {
               <tbody>
                 {logs.map((log) => (
                   <tr key={log.id}>
-                    <td>{formatAdminDateTime(log.timestamp)}</td>
-                    <td><strong>{log.user}</strong></td>
-                    <td className="capitalize">{log.role || "—"}</td>
-                    <td>{log.action}</td>
-                    <td>{log.target || "—"}</td>
-                    <td>{log.ipAddress || log.sessionId || "—"}</td>
-                    <td><AdminStatusBadge status={log.result || "success"} /></td>
+                    <td data-label="Timestamp">{formatAdminDateTime(log.timestamp)}</td>
+                    <AdminStackCell label="User" primary><strong>{log.user}</strong></AdminStackCell>
+                    <AdminStackCell label="Role" className="capitalize">{log.role || "—"}</AdminStackCell>
+                    <AdminStackCell label="Action">{log.action}</AdminStackCell>
+                    <AdminStackCell label="Target">{log.target || "—"}</AdminStackCell>
+                    <AdminStackCell label="IP / Session">{log.ipAddress || log.sessionId || "—"}</AdminStackCell>
+                    <AdminStackCell label="Result"><AdminStatusBadge status={log.result || "success"} /></AdminStackCell>
                   </tr>
                 ))}
               </tbody>

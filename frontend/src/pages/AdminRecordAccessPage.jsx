@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
+import { AdminStackCell } from "../components/AdminUI";
 import { useAdminUi } from "../components/AdminLayout";
 
 const STATUS_LABEL = {
@@ -107,15 +108,15 @@ export function AdminRecordAccessPage() {
             <tbody>
               {payload.requests.map((request) => (
                 <tr key={request.id}>
-                  <td>#{request.id}</td>
-                  <td>{request.patientRecordId}</td>
-                  <td>{request.requesterName || request.requesterId}</td>
-                  <td>
+                  <AdminStackCell label="Request" primary>#{request.id}</AdminStackCell>
+                  <AdminStackCell label="Patient record">{request.patientRecordId}</AdminStackCell>
+                  <AdminStackCell label="Requester">{request.requesterName || request.requesterId}</AdminStackCell>
+                  <AdminStackCell label="Branches">
                     {request.requestingBranchId} → {request.originatingBranchId}
-                  </td>
-                  <td>{request.scope}</td>
-                  <td>{STATUS_LABEL[request.status] || request.status}</td>
-                  <td>
+                  </AdminStackCell>
+                  <AdminStackCell label="Scope">{request.scope}</AdminStackCell>
+                  <AdminStackCell label="Status">{STATUS_LABEL[request.status] || request.status}</AdminStackCell>
+                  <AdminStackCell label="Decision" actions>
                     {request.status === "pending" ? (
                       <>
                         <span>Authorize at the requesting workstation.</span>
@@ -134,7 +135,7 @@ export function AdminRecordAccessPage() {
                         {request.decisions.map((item) => item.action).join(", ")}
                       </small>
                     ) : null}
-                  </td>
+                  </AdminStackCell>
                 </tr>
               ))}
             </tbody>

@@ -3,7 +3,7 @@ import { Archive, Check, Circle, Eye, EyeOff, KeyRound, Pencil, Plus, Search, Tr
 import { Navigate, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
-import { AdminModal, AdminStatusBadge } from "../components/AdminUI";
+import { AdminModal, AdminStackCell, AdminStatusBadge } from "../components/AdminUI";
 import { useAdminUi } from "../components/AdminLayout";
 import { formatAdminDate } from "../adminUtils";
 import { matchesNotificationFocus } from "../notificationFocus";
@@ -733,22 +733,40 @@ export function AdminManageUsersPage() {
                       }
                     >
                       {tab === "patient" ? (
-                        <td><code>{user.patientId || user.id}</code></td>
+                        <AdminStackCell label="Patient ID"><code>{user.patientId || user.id}</code></AdminStackCell>
                       ) : null}
-                      <td><strong>{user.fullName}</strong></td>
-                      {tab !== "patient" ? <td><code>{user.id}</code></td> : null}
+                      <AdminStackCell label={tab === "patient" ? "Name" : "Account Name"} primary>
+                        <strong>{user.fullName}</strong>
+                      </AdminStackCell>
+                      {tab !== "patient" ? (
+                        <AdminStackCell label="System ID"><code>{user.id}</code></AdminStackCell>
+                      ) : null}
                       {tab === "staff" ? (
-                        <td>{user.operationalRole || user.position || "Clinic Staff"}</td>
+                        <AdminStackCell label="Operational Role">
+                          {user.operationalRole || user.position || "Clinic Staff"}
+                        </AdminStackCell>
                       ) : null}
                       {tab === "dentist" ? (
-                        <td>{user.specialization || "General Dentistry"}</td>
+                        <AdminStackCell label="Specialization">
+                          {user.specialization || "General Dentistry"}
+                        </AdminStackCell>
                       ) : null}
-                      {tab === "patient" ? <td>{user.email || "—"}</td> : null}
-                      {tab === "patient" ? <td>{user.phone || "—"}</td> : null}
-                      {tab !== "patient" ? <td>{user.email}</td> : null}
-                      {tab !== "patient" ? <td>{assignmentSummary(user)}</td> : null}
-                      {tab === "patient" ? <td>{patientPasswordStatusLabel(user)}</td> : null}
-                      <td>
+                      {tab === "patient" ? (
+                        <AdminStackCell label="Email">{user.email || "—"}</AdminStackCell>
+                      ) : null}
+                      {tab === "patient" ? (
+                        <AdminStackCell label="Phone">{user.phone || "—"}</AdminStackCell>
+                      ) : null}
+                      {tab !== "patient" ? (
+                        <AdminStackCell label="Contact Endpoint">{user.email}</AdminStackCell>
+                      ) : null}
+                      {tab !== "patient" ? (
+                        <AdminStackCell label="Assigned Branch">{assignmentSummary(user)}</AdminStackCell>
+                      ) : null}
+                      {tab === "patient" ? (
+                        <AdminStackCell label="Password Status">{patientPasswordStatusLabel(user)}</AdminStackCell>
+                      ) : null}
+                      <AdminStackCell label={tab === "patient" ? "Status" : "Operational Status"}>
                         <AdminStatusBadge
                           status={
                             rejectedUser
@@ -760,8 +778,8 @@ export function AdminManageUsersPage() {
                                   : user.status
                           }
                         />
-                      </td>
-                      <td>
+                      </AdminStackCell>
+                      <AdminStackCell label="Actions" actions>
                         <div className="admin-row-actions">
                           {tab === "patient" ? (
                             <>
@@ -832,7 +850,7 @@ export function AdminManageUsersPage() {
                             </>
                           )}
                         </div>
-                      </td>
+                      </AdminStackCell>
                     </tr>
                   );
                 })}
@@ -881,13 +899,15 @@ export function AdminManageUsersPage() {
                   <tbody>
                     {pending.map((request) => (
                       <tr key={request.id}>
-                        <td><strong>{request.fullName}</strong></td>
-                        <td>{request.email}</td>
-                        <td>{request.phone || "—"}</td>
-                        <td className="capitalize">{request.role}</td>
-                        <td>{formatAdminDate(request.createdAt)}</td>
-                        <td><AdminStatusBadge status={request.verified ? "verified" : "pending"} /></td>
-                        <td>
+                        <AdminStackCell label="Full Name" primary><strong>{request.fullName}</strong></AdminStackCell>
+                        <AdminStackCell label="Email">{request.email}</AdminStackCell>
+                        <AdminStackCell label="Contact Number">{request.phone || "—"}</AdminStackCell>
+                        <AdminStackCell label="Requested Role" className="capitalize">{request.role}</AdminStackCell>
+                        <AdminStackCell label="Registration Date">{formatAdminDate(request.createdAt)}</AdminStackCell>
+                        <AdminStackCell label="Verification Status">
+                          <AdminStatusBadge status={request.verified ? "verified" : "pending"} />
+                        </AdminStackCell>
+                        <AdminStackCell label="Action" actions>
                           <div className="admin-row-actions">
                             <button
                               className="button button--primary button--compact"
@@ -912,7 +932,7 @@ export function AdminManageUsersPage() {
                             </button>
                             <button className="button button--secondary button--compact" onClick={() => setDetail(request)}>View Details</button>
                           </div>
-                        </td>
+                        </AdminStackCell>
                       </tr>
                     ))}
                   </tbody>
@@ -950,12 +970,12 @@ export function AdminManageUsersPage() {
                   <tbody>
                     {pendingDependents.map((request) => (
                       <tr key={`dep-${request.id}`}>
-                        <td><strong>{request.fullName}</strong></td>
-                        <td className="capitalize">{request.relationship}</td>
-                        <td>{request.accountHolderName || "—"}</td>
-                        <td>{formatAdminDate(request.submittedAt || request.createdAt)}</td>
-                        <td><AdminStatusBadge status="pending" /></td>
-                        <td>
+                        <AdminStackCell label="Dependent Name" primary><strong>{request.fullName}</strong></AdminStackCell>
+                        <AdminStackCell label="Relationship" className="capitalize">{request.relationship}</AdminStackCell>
+                        <AdminStackCell label="Account Holder">{request.accountHolderName || "—"}</AdminStackCell>
+                        <AdminStackCell label="Submitted Date">{formatAdminDate(request.submittedAt || request.createdAt)}</AdminStackCell>
+                        <AdminStackCell label="Status"><AdminStatusBadge status="pending" /></AdminStackCell>
+                        <AdminStackCell label="Actions" actions>
                           <div className="admin-row-actions">
                             <button className="button button--secondary button--compact" onClick={() => setDependentDetail(request)}>
                               View
@@ -975,7 +995,7 @@ export function AdminManageUsersPage() {
                               Reject
                             </button>
                           </div>
-                        </td>
+                        </AdminStackCell>
                       </tr>
                     ))}
                   </tbody>
@@ -1012,16 +1032,16 @@ export function AdminManageUsersPage() {
                   <tbody>
                     {rejected.map((request) => (
                       <tr key={request.id}>
-                        <td><strong>{request.fullName}</strong></td>
-                        <td>{request.email}</td>
-                        <td>{request.phone || "—"}</td>
-                        <td>{formatAdminDate(request.statusChangedAt || request.createdAt)}</td>
-                        <td><AdminStatusBadge status="rejected" /></td>
-                        <td>
+                        <AdminStackCell label="Full Name" primary><strong>{request.fullName}</strong></AdminStackCell>
+                        <AdminStackCell label="Email">{request.email}</AdminStackCell>
+                        <AdminStackCell label="Contact Number">{request.phone || "—"}</AdminStackCell>
+                        <AdminStackCell label="Rejected">{formatAdminDate(request.statusChangedAt || request.createdAt)}</AdminStackCell>
+                        <AdminStackCell label="Status"><AdminStatusBadge status="rejected" /></AdminStackCell>
+                        <AdminStackCell label="Action" actions>
                           <div className="admin-row-actions">
                             <button className="button button--secondary button--compact" onClick={() => setDetail(request)}>View Details</button>
                           </div>
-                        </td>
+                        </AdminStackCell>
                       </tr>
                     ))}
                   </tbody>

@@ -3,7 +3,7 @@ import { Camera, CheckCircle2, FileText, Image as ImageIcon, Plus, RefreshCw, Tr
 import { useSearchParams } from "react-router-dom";
 import { ApiError, api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
-import { AdminModal } from "../components/AdminUI";
+import { AdminModal, AdminStackCell } from "../components/AdminUI";
 import { useAdminUi } from "../components/AdminLayout";
 import { formatAdminDateTime } from "../adminUtils";
 
@@ -1266,26 +1266,26 @@ export function AdminSyncPage() {
                     key={job.id}
                     className={String(job.id) === String(searchParams.get("focus") || "") ? "is-notification-focus" : undefined}
                   >
-                    <td>
+                    <AdminStackCell label="Scan" primary>
                       <strong>{job.extractedName || "Unnamed scan"}</strong>
                       <div className="muted-copy">{job.originalName}</div>
-                    </td>
-                    <td>{job.sourceLabel || job.sourceType.replaceAll("_", " ")}</td>
-                    <td>
+                    </AdminStackCell>
+                    <AdminStackCell label="Source">{job.sourceLabel || job.sourceType.replaceAll("_", " ")}</AdminStackCell>
+                    <AdminStackCell label="Uploaded">
                       {hoursAgo(job.uploadedAt || job.createdAt) != null
                         ? `Uploaded ${hoursAgo(job.uploadedAt || job.createdAt)} hour${
                             hoursAgo(job.uploadedAt || job.createdAt) === 1 ? "" : "s"
                           } ago`
                         : formatAdminDateTime(job.createdAt)}
-                    </td>
-                    <td>
+                    </AdminStackCell>
+                    <AdminStackCell label="Expires">
                       {job.expiresAt
                         ? `Expires in ${hoursFromNow(job.expiresAt)} hour${
                             hoursFromNow(job.expiresAt) === 1 ? "" : "s"
                           }`
                         : "Within 24 hours"}
-                    </td>
-                    <td>
+                    </AdminStackCell>
+                    <AdminStackCell label="Actions" actions>
                       <button
                         type="button"
                         className="button button--secondary button--compact"
@@ -1294,7 +1294,7 @@ export function AdminSyncPage() {
                       >
                         Open
                       </button>
-                    </td>
+                    </AdminStackCell>
                   </tr>
                 ))}
               </tbody>
@@ -1358,18 +1358,18 @@ export function AdminSyncPage() {
               <tbody>
                 {matchInfo.matches.map((row) => (
                   <tr key={row.id}>
-                    <td>
+                    <AdminStackCell label="Select">
                       <input
                         type="radio"
                         name="sync-match"
                         checked={String(selectedMatchId) === String(row.id)}
                         onChange={() => setSelectedMatchId(row.id)}
                       />
-                    </td>
-                    <td>{row.fullName}</td>
-                    <td>{row.patientId || row.id}</td>
-                    <td>{row.dateOfBirth ? String(row.dateOfBirth).slice(0, 10) : "—"}</td>
-                    <td>{row.phone || "—"}</td>
+                    </AdminStackCell>
+                    <AdminStackCell label="Name" primary>{row.fullName}</AdminStackCell>
+                    <AdminStackCell label="Patient ID">{row.patientId || row.id}</AdminStackCell>
+                    <AdminStackCell label="Birthdate">{row.dateOfBirth ? String(row.dateOfBirth).slice(0, 10) : "—"}</AdminStackCell>
+                    <AdminStackCell label="Phone">{row.phone || "—"}</AdminStackCell>
                   </tr>
                 ))}
               </tbody>

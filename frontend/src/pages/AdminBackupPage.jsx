@@ -13,7 +13,7 @@ import {
 import { api } from "../api";
 import { formatAdminDateTime } from "../adminUtils";
 import { ErrorState, LoadingState } from "../components/UI";
-import { AdminModal, AdminStatCard, AdminStatusBadge } from "../components/AdminUI";
+import { AdminModal, AdminStackCell, AdminStatCard, AdminStatusBadge } from "../components/AdminUI";
 import { useAdminUi } from "../components/AdminLayout";
 
 function bytesLabel(value) {
@@ -501,14 +501,14 @@ export function AdminBackupPage() {
               <tbody>
                 {backups.map((backup) => (
                   <tr key={backup.id}>
-                    <td><code>{String(backup.id).slice(0, 8)}</code></td>
-                    <td>{formatAdminDateTime(backup.createdAt)}</td>
-                    <td>{backup.backupType}{backup.scheduleSlot ? ` · ${backup.scheduleSlot}` : ""}</td>
-                    <td>{formatLabel(backup)}</td>
-                    <td>{bytesLabel(backup.byteSize)}</td>
-                    <td>{storageLabel(backup)}</td>
-                    <td><AdminStatusBadge status={backup.verificationStatus} /></td>
-                    <td>
+                    <AdminStackCell label="Backup ID" primary><code>{String(backup.id).slice(0, 8)}</code></AdminStackCell>
+                    <AdminStackCell label="Created">{formatAdminDateTime(backup.createdAt)}</AdminStackCell>
+                    <AdminStackCell label="Type">{backup.backupType}{backup.scheduleSlot ? ` · ${backup.scheduleSlot}` : ""}</AdminStackCell>
+                    <AdminStackCell label="Format">{formatLabel(backup)}</AdminStackCell>
+                    <AdminStackCell label="Size">{bytesLabel(backup.byteSize)}</AdminStackCell>
+                    <AdminStackCell label="Storage">{storageLabel(backup)}</AdminStackCell>
+                    <AdminStackCell label="Verification"><AdminStatusBadge status={backup.verificationStatus} /></AdminStackCell>
+                    <AdminStackCell label="Status">
                       {backup.interrupted ? (
                         <span className="admin-status admin-status--interrupted">Interrupted older job</span>
                       ) : recoveryLabel(backup) ? (
@@ -516,9 +516,9 @@ export function AdminBackupPage() {
                       ) : (
                         <AdminStatusBadge status={backup.pipelineStatus || backup.status} />
                       )}
-                    </td>
-                    <td>{backup.createdByName || "System"}</td>
-                    <td>
+                    </AdminStackCell>
+                    <AdminStackCell label="Created by">{backup.createdByName || "System"}</AdminStackCell>
+                    <AdminStackCell label="Actions" actions>
                       <div className="admin-row-actions">
                         <button type="button" className="button button--secondary button--compact" onClick={() => setDetails(backup)}>
                           <Eye size={14} /> Details
@@ -554,7 +554,7 @@ export function AdminBackupPage() {
                           <Trash2 size={14} /> Delete
                         </button>
                       </div>
-                    </td>
+                    </AdminStackCell>
                   </tr>
                 ))}
               </tbody>

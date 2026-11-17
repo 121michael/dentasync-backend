@@ -251,3 +251,14 @@ export function AdminDonutChart({ title, segments = [] }) {
     </section>
   );
 }
+
+export function AdminStackCell({ label, primary = false, actions = false, children, className = "" }) {
+  const classes = [primary ? "admin-table__primary" : "", actions ? "admin-table__actions" : "", className]
+    .filter(Boolean)
+    .join(" ");
+  return (
+    <td data-label={label} className={classes || undefined}>
+      {children}
+    </td>
+  );
+}

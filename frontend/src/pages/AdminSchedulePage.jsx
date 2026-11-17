@@ -3,7 +3,7 @@ import { Plus, Trash2 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
-import { AdminModal, AdminStatusBadge } from "../components/AdminUI";
+import { AdminModal, AdminStackCell, AdminStatusBadge } from "../components/AdminUI";
 import { useAdminUi } from "../components/AdminLayout";
 import { formatAdminDate, formatAdminTime } from "../adminUtils";
 import { matchesNotificationFocus } from "../notificationFocus";
@@ -197,27 +197,27 @@ export function AdminSchedulePage() {
               <tbody>
                 {data.schedules.map((schedule) => (
                   <tr key={schedule.id}>
-                    <td><strong>{schedule.title}</strong></td>
-                    <td className="capitalize">{String(schedule.scheduleType).replaceAll("_", " ")}</td>
-                    <td>{schedule.assigneeName || schedule.assigneeId || "—"}</td>
-                    <td>
+                    <AdminStackCell label="Title" primary><strong>{schedule.title}</strong></AdminStackCell>
+                    <AdminStackCell label="Type" className="capitalize">{String(schedule.scheduleType).replaceAll("_", " ")}</AdminStackCell>
+                    <AdminStackCell label="Assignee">{schedule.assigneeName || schedule.assigneeId || "—"}</AdminStackCell>
+                    <AdminStackCell label="When">
                       {schedule.scheduleDate
                         ? formatAdminDate(schedule.scheduleDate)
                         : schedule.dayOfWeek !== null && schedule.dayOfWeek !== undefined
                           ? DAYS[schedule.dayOfWeek]
                           : "Recurring / open"}
-                    </td>
-                    <td>
+                    </AdminStackCell>
+                    <AdminStackCell label="Window">
                       {schedule.startTime && schedule.endTime
                         ? `${formatAdminTime(schedule.startTime)} – ${formatAdminTime(schedule.endTime)}`
                         : "—"}
-                    </td>
-                    <td>{schedule.notes || "—"}</td>
-                    <td>
+                    </AdminStackCell>
+                    <AdminStackCell label="Notes">{schedule.notes || "—"}</AdminStackCell>
+                    <AdminStackCell label="Action" actions>
                       <button className="button button--danger button--compact" onClick={() => removeSchedule(schedule)}>
                         <Trash2 size={14} /> Remove
                       </button>
-                    </td>
+                    </AdminStackCell>
                   </tr>
                 ))}
               </tbody>
@@ -310,17 +310,17 @@ export function AdminSchedulePage() {
                         : undefined
                     }
                   >
-                    <td><strong>{appointment.patientName}</strong></td>
-                    <td>
+                    <AdminStackCell label="Patient" primary><strong>{appointment.patientName}</strong></AdminStackCell>
+                    <AdminStackCell label="Branch">
                       {appointment.branchName || "—"}
                       {appointment.reviewReason === "branch_inactive" ? " · needs review" : ""}
                       {appointment.reviewReason === "missing_time" ? " · confirm a time" : ""}
-                    </td>
-                    <td>{appointment.treatment}</td>
-                    <td>{appointment.dentistName}</td>
-                    <td>{formatAdminDate(appointment.date)}</td>
-                    <td>{formatAdminTime(appointment.time)}</td>
-                    <td><AdminStatusBadge status={appointment.status} /></td>
+                    </AdminStackCell>
+                    <AdminStackCell label="Treatment">{appointment.treatment}</AdminStackCell>
+                    <AdminStackCell label="Dentist">{appointment.dentistName}</AdminStackCell>
+                    <AdminStackCell label="Date">{formatAdminDate(appointment.date)}</AdminStackCell>
+                    <AdminStackCell label="Time">{formatAdminTime(appointment.time)}</AdminStackCell>
+                    <AdminStackCell label="Status"><AdminStatusBadge status={appointment.status} /></AdminStackCell>
                   </tr>
                 ))}
               </tbody>

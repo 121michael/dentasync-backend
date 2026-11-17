@@ -3,7 +3,7 @@ import { Building2, Pencil, Plus, Search } from "lucide-react";
 import { api } from "../api";
 import { formatAdminDateTime } from "../adminUtils";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
-import { AdminModal, AdminStatusBadge } from "../components/AdminUI";
+import { AdminModal, AdminStackCell, AdminStatusBadge } from "../components/AdminUI";
 import { useAdminUi } from "../components/AdminLayout";
 import { branchCheckLabel, branchContactLines } from "./adminBranchDisplay";
 
@@ -306,11 +306,11 @@ export function AdminBranchesPage() {
                 <tbody>
                   {personnel.personnel.map((person) => (
                     <tr key={person.id}>
-                      <td>{person.fullName}</td>
-                      <td className="capitalize">{person.role}</td>
-                      <td>{person.email}</td>
-                      <td className="capitalize">{person.accountStatus}</td>
-                      <td>{assignmentLabel(person)}</td>
+                      <AdminStackCell label="Name" primary>{person.fullName}</AdminStackCell>
+                      <AdminStackCell label="Role" className="capitalize">{person.role}</AdminStackCell>
+                      <AdminStackCell label="Email">{person.email}</AdminStackCell>
+                      <AdminStackCell label="Account" className="capitalize">{person.accountStatus}</AdminStackCell>
+                      <AdminStackCell label="Assignment">{assignmentLabel(person)}</AdminStackCell>
                     </tr>
                   ))}
                 </tbody>

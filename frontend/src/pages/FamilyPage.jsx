@@ -3,6 +3,7 @@ import { ArrowLeftRight, Users } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
+import { AdminStackCell } from "../components/AdminUI";
 import { useAuth } from "../useAuth";
 
 const RELATIONSHIP_OPTIONS = [
@@ -343,12 +344,12 @@ export function FamilyPage() {
                   const canSwitch = status === "approved" && String(dependent.dependentUserId || "").trim();
                   return (
                     <tr key={dependent.id || dependent.dependentUserId}>
-                      <td>
+                      <AdminStackCell label="Dependent" primary>
                         <strong>{dependent.fullName || dependent.name || "Dependent"}</strong>
                         <div><small>{relationshipLabel(dependent.relationship)}</small></div>
-                      </td>
-                      <td>{dependent.patientId || "—"}</td>
-                      <td>
+                      </AdminStackCell>
+                      <AdminStackCell label="Patient ID">{dependent.patientId || "—"}</AdminStackCell>
+                      <AdminStackCell label="Status">
                         <span className={`status-pill status-pill--${status === "approved" ? "confirmed" : status === "rejected" ? "cancelled" : "pending"}`}>
                           {statusLabel(status)}
                         </span>
@@ -357,8 +358,8 @@ export function FamilyPage() {
                             Your dependent registration is awaiting Admin approval.
                           </p>
                         ) : null}
-                      </td>
-                      <td>
+                      </AdminStackCell>
+                      <AdminStackCell label="Actions" actions>
                         <div className="family-dependent-actions">
                           <button
                             type="button"
@@ -388,7 +389,7 @@ export function FamilyPage() {
                             </button>
                           ) : null}
                         </div>
-                      </td>
+                      </AdminStackCell>
                     </tr>
                   );
                 })}
