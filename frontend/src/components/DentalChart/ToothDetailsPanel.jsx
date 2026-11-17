@@ -1,7 +1,9 @@
 import {
+  CONDITION_OPTIONS,
   STATUS_OPTIONS,
   TREATMENT_OPTIONS,
   labelFor,
+  toothAppearance,
 } from "./dentalChartData";
 import { formatDentistDateTime } from "../../dentistUtils";
 
@@ -28,6 +30,10 @@ export function ToothDetailsPanel({
   const treatmentLabels = (draft.treatments || []).map((value) =>
     labelFor(value, TREATMENT_OPTIONS)
   );
+  const conditionLabels = (draft.condition || [])
+    .map((value) => labelFor(value, CONDITION_OPTIONS))
+    .filter(Boolean);
+  const appearance = toothAppearance(draft);
 
   return (
     <aside className="fdi-panel glass-card">
@@ -36,15 +42,27 @@ export function ToothDetailsPanel({
           <span className="eyebrow">Selected tooth</span>
           <h3>Tooth {toothNumber}</h3>
         </div>
-        <span className={`status-pill status-pill--${String(draft.status || "healthy").replaceAll("_", "-")}`}>
-          {labelFor(draft.status || "healthy", STATUS_OPTIONS)}
+        <span className={`status-pill status-pill--${appearance.key.replaceAll("_", "-")}`}>
+          {appearance.label}
         </span>
       </div>
 
       <div className="fdi-readonly-block">
         <p>
+          <small>Condition</small>
+          <strong>{appearance.label}</strong>
+        </p>
+        <p>
           <small>Chart status</small>
-          <strong>{labelFor(draft.status || "healthy", STATUS_OPTIONS)}</strong>
+          <strong>
+            {appearance.key === "unrecorded"
+              ? "Not recorded"
+              : labelFor(draft.status || "healthy", STATUS_OPTIONS)}
+          </strong>
+        </p>
+        <p>
+          <small>Recorded findings</small>
+          <strong>{conditionLabels.length ? conditionLabels.join(", ") : "None yet"}</strong>
         </p>
         <p>
           <small>Treatments on chart</small>

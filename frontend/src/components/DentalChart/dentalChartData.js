@@ -181,6 +181,69 @@ export function labelFor(value, options) {
   return options.find((option) => option.value === value)?.label || value;
 }
 
+export const APPEARANCE_OPTIONS = [
+  { value: "healthy", label: "Healthy" },
+  { value: "decay", label: "Decay / Attention" },
+  { value: "treated", label: "Treated (Root Canal / Filling / Crown)" },
+  { value: "under_treatment", label: "Under Treatment" },
+  { value: "missing", label: "Extracted / Missing" },
+];
+
+export function isRecordedTooth(record) {
+  if (!record) return false;
+  const conditions = (record.condition || []).map(String).filter(Boolean);
+  const treatments = (record.treatments || []).map(String).filter(Boolean);
+  const notes = String(record.notes || "").trim();
+  const status = String(record.status || "").trim();
+  if (treatments.length) return true;
+  if (notes) return true;
+  if (conditions.some((value) => value !== "healthy")) return true;
+  if (status && status !== "healthy") return true;
+  if (record.updatedAt || record.createdAt || record.id) return true;
+  return false;
+}
+
+/**
+ * Maps chart status/conditions/treatments to the odontogram color key.
+ * Unrecorded teeth stay neutral so they are not confused with Healthy (green).
+ */
+export function toothAppearance(record) {
+  if (!isRecordedTooth(record)) {
+    return { key: "unrecorded", label: "No recorded status" };
+  }
+  const status = String(record?.status || "healthy");
+  const conditions = record?.condition || [];
+  const treatments = record?.treatments || [];
+  if (status === "missing" || conditions.includes("missing") || treatments.includes("extraction")) {
+    return { key: "missing", label: labelFor("missing", APPEARANCE_OPTIONS) };
+  }
+  if (status === "under_treatment" || treatments.includes("braces")) {
+    return { key: "under_treatment", label: labelFor("under_treatment", APPEARANCE_OPTIONS) };
+  }
+  if (
+    status === "treated" ||
+    treatments.includes("root_canal") ||
+    treatments.includes("filling") ||
+    treatments.includes("crown") ||
+    treatments.includes("bridge") ||
+    treatments.includes("sealant") ||
+    treatments.includes("denture")
+  ) {
+    return { key: "treated", label: labelFor("treated", APPEARANCE_OPTIONS) };
+  }
+  if (
+    status === "needs_attention" ||
+    conditions.includes("decay") ||
+    conditions.includes("caries") ||
+    conditions.includes("fractured") ||
+    conditions.includes("sensitive") ||
+    conditions.includes("impacted")
+  ) {
+    return { key: "decay", label: labelFor("decay", APPEARANCE_OPTIONS) };
+  }
+  return { key: "healthy", label: labelFor("healthy", APPEARANCE_OPTIONS) };
+}
+
 export function procedureRequiresTooth(procedureName) {
   const value = procedureFormValue(procedureName);
   const match = PROCEDURE_FORM_OPTIONS.find(
@@ -195,4 +258,4 @@ export {
   frontToothShape,
   isPrimaryToothNumber,
   toothTypeFromFdi,
-} from "./toothShapes";
+} from "./toothShapes.js";

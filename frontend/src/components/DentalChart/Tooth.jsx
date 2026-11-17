@@ -1,35 +1,5 @@
-import { labelFor, STATUS_OPTIONS, TREATMENT_OPTIONS } from "./dentalChartData";
+import { labelFor, STATUS_OPTIONS, TREATMENT_OPTIONS, toothAppearance } from "./dentalChartData";
 import { TOOTH_VIEW, frontToothShape, toothTypeFromFdi } from "./toothShapes";
-
-function statusKey(record) {
-  const status = record?.status || "healthy";
-  const conditions = record?.condition || [];
-  const treatments = record?.treatments || [];
-  if (status === "missing" || conditions.includes("missing") || treatments.includes("extraction")) {
-    return "missing";
-  }
-  if (status === "under_treatment" || treatments.includes("braces")) return "under_treatment";
-  if (
-    status === "treated" ||
-    treatments.includes("root_canal") ||
-    treatments.includes("filling") ||
-    treatments.includes("crown") ||
-    treatments.includes("bridge") ||
-    treatments.includes("sealant")
-  ) {
-    return "treated";
-  }
-  if (
-    status === "needs_attention" ||
-    conditions.includes("decay") ||
-    conditions.includes("caries") ||
-    conditions.includes("fractured") ||
-    conditions.includes("sensitive")
-  ) {
-    return conditions.includes("fractured") ? "fractured" : "needs_attention";
-  }
-  return "healthy";
-}
 
 /** Order decides which flat indicator is drawn when a tooth carries several treatments. */
 const MARK_PRIORITY = ["extraction", "root_canal", "crown", "bridge", "filling", "sealant", "denture", "braces"];
@@ -92,24 +62,26 @@ function ToothMark({ mark }) {
 }
 
 export function Tooth({ toothNumber, record, selected, onSelect, arch = "upper" }) {
-  const status = statusKey(record);
+  const appearance = toothAppearance(record);
   const type = toothTypeFromFdi(toothNumber);
   const shape = frontToothShape(toothNumber);
-  const missing = status === "missing";
-  const mark = markKey(record, status);
+  const missing = appearance.key === "missing";
+  const mark = markKey(record, appearance.key);
   const treatmentLabels = (record?.treatments || []).map((value) =>
     labelFor(value, TREATMENT_OPTIONS)
   );
   const statusLabel = labelFor(record?.status || "healthy", STATUS_OPTIONS);
   const title = treatmentLabels.length
-    ? `Tooth ${toothNumber} — ${statusLabel} (${treatmentLabels.join(", ")})`
-    : `Tooth ${toothNumber} — ${statusLabel}`;
+    ? `Tooth ${toothNumber} — ${appearance.label} (${treatmentLabels.join(", ")})`
+    : `Tooth ${toothNumber} — ${appearance.label}${
+        appearance.key !== "unrecorded" && statusLabel !== appearance.label ? ` · ${statusLabel}` : ""
+      }`;
 
   return (
     <div
       className={[
         "odo-tooth",
-        `odo-tooth--${status}`,
+        `odo-tooth--${appearance.key}`,
         `odo-tooth--${type}`,
         `odo-tooth--${arch}`,
         selected ? "is-selected" : "",

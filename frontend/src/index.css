@@ -9040,6 +9040,21 @@ body.is-queue-display .staff-mobile-nav {
 }
 
 .fdi-chart-shell {
+  --odo-healthy-fill: #34d399;
+  --odo-healthy-stroke: #047857;
+  --odo-healthy-ink: #065f46;
+  --odo-decay-fill: #fb923c;
+  --odo-decay-stroke: #c2410c;
+  --odo-decay-ink: #7c2d12;
+  --odo-treated-fill: #60a5fa;
+  --odo-treated-stroke: #1d4ed8;
+  --odo-treated-ink: #1e3a8a;
+  --odo-under-fill: #c4b5fd;
+  --odo-under-stroke: #6d28d9;
+  --odo-under-ink: #4c1d95;
+  --odo-missing-fill: #d1d5db;
+  --odo-missing-stroke: #6b7280;
+  --odo-missing-ink: #4b5563;
   margin: 0.5rem 0 1.25rem;
   min-width: 0;
   max-width: 100%;
@@ -9245,34 +9260,55 @@ body.is-queue-display .staff-mobile-nav {
 .odo-tooth.is-selected .odo-tooth__number {
   color: #4c1d75;
 }
-.odo-tooth--treated .odo-tooth__crown {
-  fill: #eaf3ff;
-  stroke: #2563eb;
+.odo-tooth--healthy .odo-tooth__crown,
+.odo-tooth--healthy .odo-tooth__root {
+  fill: var(--odo-healthy-fill);
+  stroke: var(--odo-healthy-stroke);
 }
-.odo-tooth--treated .odo-tooth__root {
-  fill: #f3f8ff;
-  stroke: #9dbaf0;
+.odo-tooth--healthy .odo-tooth__number {
+  color: var(--odo-healthy-ink);
 }
-.odo-tooth--under_treatment .odo-tooth__crown {
-  fill: #f6efff;
-  stroke: #7c3aed;
-}
+.odo-tooth--decay .odo-tooth__crown,
+.odo-tooth--decay .odo-tooth__root,
 .odo-tooth--needs_attention .odo-tooth__crown,
-.odo-tooth--fractured .odo-tooth__crown {
-  fill: #fff4e8;
-  stroke: #c2410c;
+.odo-tooth--needs_attention .odo-tooth__root,
+.odo-tooth--fractured .odo-tooth__crown,
+.odo-tooth--fractured .odo-tooth__root {
+  fill: var(--odo-decay-fill);
+  stroke: var(--odo-decay-stroke);
+}
+.odo-tooth--decay .odo-tooth__number,
+.odo-tooth--needs_attention .odo-tooth__number,
+.odo-tooth--fractured .odo-tooth__number {
+  color: var(--odo-decay-ink);
+}
+.odo-tooth--treated .odo-tooth__crown,
+.odo-tooth--treated .odo-tooth__root {
+  fill: var(--odo-treated-fill);
+  stroke: var(--odo-treated-stroke);
+}
+.odo-tooth--treated .odo-tooth__number {
+  color: var(--odo-treated-ink);
+}
+.odo-tooth--under_treatment .odo-tooth__crown,
+.odo-tooth--under_treatment .odo-tooth__root {
+  fill: var(--odo-under-fill);
+  stroke: var(--odo-under-stroke);
+}
+.odo-tooth--under_treatment .odo-tooth__number {
+  color: var(--odo-under-ink);
 }
 .odo-tooth--missing .odo-tooth__crown,
 .odo-tooth--missing .odo-tooth__root {
-  fill: #f4f2f6;
-  stroke: #c0b8c6;
+  fill: var(--odo-missing-fill);
+  stroke: var(--odo-missing-stroke);
   stroke-dasharray: 4 3;
 }
 .odo-tooth--missing .odo-tooth__detail {
   display: none;
 }
 .odo-tooth--missing .odo-tooth__number {
-  color: #8b8198;
+  color: var(--odo-missing-ink);
 }
 .odo-tooth__missing {
   stroke: #8b8198;
@@ -9326,18 +9362,22 @@ body.is-queue-display .staff-mobile-nav {
   border-radius: 999px;
   background: transparent;
 }
-.odo-tooth--treated .odo-tooth__flag {
-  background: #2563eb;
+.odo-tooth--healthy .odo-tooth__flag {
+  background: var(--odo-healthy-stroke);
 }
-.odo-tooth--under_treatment .odo-tooth__flag {
-  background: #7c3aed;
-}
+.odo-tooth--decay .odo-tooth__flag,
 .odo-tooth--needs_attention .odo-tooth__flag,
 .odo-tooth--fractured .odo-tooth__flag {
-  background: #ea580c;
+  background: var(--odo-decay-stroke);
+}
+.odo-tooth--treated .odo-tooth__flag {
+  background: var(--odo-treated-stroke);
+}
+.odo-tooth--under_treatment .odo-tooth__flag {
+  background: var(--odo-under-stroke);
 }
 .odo-tooth--missing .odo-tooth__flag {
-  background: #8b8198;
+  background: var(--odo-missing-stroke);
 }
 .fdi-legend {
   display: flex;
@@ -9369,16 +9409,22 @@ body.is-queue-display .staff-mobile-nav {
   border-radius: 999px;
   border: 1.5px solid currentColor;
 }
-.fdi-legend__item--healthy { color: #0f9f6e; }
-.fdi-legend__item--healthy::before { background: #eefbf5; }
-.fdi-legend__item--decay { color: #c2410c; }
-.fdi-legend__item--decay::before { background: #fff4e8; }
-.fdi-legend__item--treated { color: #2563eb; }
-.fdi-legend__item--treated::before { background: #eaf3ff; }
-.fdi-legend__item--under_treatment { color: #7c3aed; }
-.fdi-legend__item--under_treatment::before { background: #f3e8ff; }
-.fdi-legend__item--missing { color: #8b8198; }
-.fdi-legend__item--missing::before { background: #ece8f1; }
+.fdi-legend__item--healthy { color: var(--odo-healthy-ink); }
+.fdi-legend__item--healthy::before { background: var(--odo-healthy-fill); border-color: var(--odo-healthy-stroke); }
+.fdi-legend__item--decay { color: var(--odo-decay-ink); }
+.fdi-legend__item--decay::before { background: var(--odo-decay-fill); border-color: var(--odo-decay-stroke); }
+.fdi-legend__item--treated { color: var(--odo-treated-ink); }
+.fdi-legend__item--treated::before { background: var(--odo-treated-fill); border-color: var(--odo-treated-stroke); }
+.fdi-legend__item--under_treatment { color: var(--odo-under-ink); }
+.fdi-legend__item--under_treatment::before { background: var(--odo-under-fill); border-color: var(--odo-under-stroke); }
+.fdi-legend__item--missing { color: var(--odo-missing-ink); }
+.fdi-legend__item--missing::before { background: var(--odo-missing-fill); border-color: var(--odo-missing-stroke); }
+.fdi-panel .status-pill--healthy { color: var(--odo-healthy-ink); background: var(--odo-healthy-fill); }
+.fdi-panel .status-pill--decay { color: var(--odo-decay-ink); background: var(--odo-decay-fill); }
+.fdi-panel .status-pill--treated { color: var(--odo-treated-ink); background: var(--odo-treated-fill); }
+.fdi-panel .status-pill--under-treatment { color: var(--odo-under-ink); background: var(--odo-under-fill); }
+.fdi-panel .status-pill--missing { color: var(--odo-missing-ink); background: var(--odo-missing-fill); }
+.fdi-panel .status-pill--unrecorded { color: #4b5563; background: #f3f4f6; }
 
 .fdi-panel {
   min-width: 0;

@@ -4,6 +4,7 @@ import { ErrorState, LoadingState } from "../UI";
 import { Tooth } from "./Tooth";
 import { ToothDetailsPanel } from "./ToothDetailsPanel";
 import {
+  APPEARANCE_OPTIONS,
   TREATMENT_OPTIONS,
   buildDefaultChart,
   dentitionForPatient,
@@ -255,14 +256,12 @@ export function DentalChart({
             </div>
           </div>
 
-          <div className="fdi-legend">
-            <span className="fdi-legend__item fdi-legend__item--healthy">Healthy</span>
-            <span className="fdi-legend__item fdi-legend__item--decay">Decay / Attention</span>
-            <span className="fdi-legend__item fdi-legend__item--treated">
-              Treated (Root Canal / Filling / Crown)
-            </span>
-            <span className="fdi-legend__item fdi-legend__item--under_treatment">Under Treatment</span>
-            <span className="fdi-legend__item fdi-legend__item--missing">Extracted / Missing</span>
+          <div className="fdi-legend" aria-label="Tooth condition colors">
+            {APPEARANCE_OPTIONS.map((item) => (
+              <span key={item.value} className={`fdi-legend__item fdi-legend__item--${item.value}`}>
+                {item.label}
+              </span>
+            ))}
           </div>
           {!pickMode && selectedTooth && chart[selectedTooth]?.treatments?.length ? (
             <p className="muted-copy" style={{ marginTop: "0.75rem" }}>
