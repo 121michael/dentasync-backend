@@ -9,6 +9,7 @@ function recordRfidEvent( partial ) {
   sequence += 1;
   const event = {
     id: sequence,
+    branchId: partial.branchId == null || partial.branchId === "" ? null : String(partial.branchId),
     rfidTag: String(partial.rfidTag || "").trim().toUpperCase() || null,
     method: String(partial.method || "rfid").toLowerCase(),
     status: partial.status || "received",
@@ -25,13 +26,17 @@ function recordRfidEvent( partial ) {
   return event;
 }
 
-function listRfidEvents({ sinceId = 0, limit = 10 } = {}) {
+function listRfidEvents({ sinceId = 0, limit = 10, branchId = null } = {}) {
   const minId = Number(sinceId) || 0;
-  return events.filter((event) => event.id > minId).slice(0, Math.max(1, Math.min(limit, 40)));
+  if (branchId == null || branchId === "") return [];
+  return events
+    .filter((event) => event.id > minId && String(event.branchId) === String(branchId))
+    .slice(0, Math.max(1, Math.min(limit, 40)));
 }
 
-function latestRfidEvent() {
-  return events[0] || null;
+function latestRfidEvent(branchId = null) {
+  if (branchId == null || branchId === "") return null;
+  return events.find((event) => String(event.branchId) === String(branchId)) || null;
 }
 
 module.exports = {

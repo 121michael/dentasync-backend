@@ -148,6 +148,7 @@ function attachPrescriptionRoutes(router, { db, role, uploadDirectory, notifySta
               entityType: "prescription",
               entityId: String(prescription.id),
               dedupe: true,
+              branchId: req.branchAccess?.activeBranch?.id || null,
             });
           } catch (notifyError) {
             console.warn("Staff prescription notification was not created:", notifyError.message);

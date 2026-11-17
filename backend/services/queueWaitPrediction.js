@@ -490,8 +490,14 @@ function staffWaitEstimate(estimate) {
   };
 }
 
-async function loadTodayQueue(db) {
+async function loadTodayQueue(db, branchId = null) {
   try {
+    const params = [process.env.CLINIC_TIMEZONE || "Asia/Manila"];
+    let branchSql = "";
+    if (branchId != null && branchId !== "") {
+      params.push(branchId);
+      branchSql = ` AND queue.branch_id = $${params.length}`;
+    }
     const result = await db.query(
       `SELECT
          queue.id,
@@ -511,8 +517,9 @@ async function loadTodayQueue(db) {
          ON appointment.id = queue.appointment_id
        WHERE (queue.checked_in_at AT TIME ZONE $1)::date =
              (CURRENT_TIMESTAMP AT TIME ZONE $1)::date
+             ${branchSql}
        ORDER BY queue.position ASC`,
-      [process.env.CLINIC_TIMEZONE || "Asia/Manila"]
+      params
     );
     return result.rows;
   } catch (error) {
@@ -690,7 +697,7 @@ async function persistEstimate(db, entryId, estimate, waitPoint, { serving = fal
   }
 }
 
-async function recalculateQueueWaitEstimates(db, { fromPosition = 0 } = {}) {
+async function recalculateQueueWaitEstimates(db, { fromPosition = 0, branchId = null } = {}) {
   try {
     const { loadAiSettings, isAiFeatureEnabled } = require("./aiSettings");
     const aiSettings = await loadAiSettings(db);
@@ -698,7 +705,7 @@ async function recalculateQueueWaitEstimates(db, { fromPosition = 0 } = {}) {
       return { ok: true, updated: 0, skipped: "waitingTimePrediction-disabled" };
     }
     const now = new Date();
-    const rows = await loadTodayQueue(db);
+    const rows = await loadTodayQueue(db, branchId);
     const active = rows.filter((row) => ACTIVE_STATUSES.has(String(row.status || "").toLowerCase()));
     let updated = 0;
     for (const entry of active) {

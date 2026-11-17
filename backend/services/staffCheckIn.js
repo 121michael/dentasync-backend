@@ -194,10 +194,11 @@ async function concreteBranchId(client, branchId) {
 async function listCheckInLog(db, query = {}, { branchId = null } = {}) {
   const filter = resolveCheckInLogFilter(query);
   const scopedBranchId = await concreteBranchId(db, branchId);
-  if (scopedBranchId) {
-    filter.params.push(scopedBranchId);
-    filter.sql += ` AND queue.branch_id = $${filter.params.length}`;
+  if (!scopedBranchId) {
+    return { filter, rows: [] };
   }
+  filter.params.push(scopedBranchId);
+  filter.sql += ` AND queue.branch_id = $${filter.params.length}`;
   const order = filter.sort === "asc" ? "ASC" : "DESC";
   const variants = [
     { includeClinicPatientId: true, includeMethod: true },
@@ -228,6 +229,11 @@ async function restoreCheckInFromHistory(client, { sourceQueueId, staff, notifyC
     throw error;
   }
 
+  if (branchId == null || branchId === "") {
+    const error = new Error("Check-in record not found.");
+    error.status = 404;
+    throw error;
+  }
   const sourceResult = await client.query(
     `SELECT
        queue.id,
@@ -238,9 +244,9 @@ async function restoreCheckInFromHistory(client, { sourceQueueId, staff, notifyC
        queue.checked_in_at
      FROM patient_portal_queue_entries AS queue
      WHERE queue.id = $1
-       AND ($2::bigint IS NULL OR queue.branch_id = $2)
+       AND queue.branch_id = $2
      LIMIT 1`,
-    [sourceId, branchId ? Number(branchId) : null]
+    [sourceId, branchId]
   );
   const source = sourceResult.rows[0];
   if (!source) {
@@ -706,7 +712,7 @@ async function resolveAppointmentForCheckIn(client, patient, { allowWalkIn = fal
   return { appointment, walkInCreated: true };
 }
 
-async function findAppointmentsForRfidLookup(client, patientId) {
+async function findAppointmentsForRfidLookup(client, patientId, branchId = null) {
   if (!patientId) return [];
   const clinicTz = process.env.CLINIC_TIMEZONE || "Asia/Manila";
   const result = await client.query(
@@ -718,6 +724,7 @@ async function findAppointmentsForRfidLookup(client, patientId) {
      JOIN users AS patient ON patient.id::text = appointment.user_id::text
      WHERE appointment.user_id::text = $1::text
        AND LOWER(appointment.status) NOT IN ('cancelled', 'no_show')
+       AND ($3::bigint IS NULL OR appointment.branch_id = $3)
      ORDER BY
        CASE
          WHEN appointment.appointment_date = (CURRENT_TIMESTAMP AT TIME ZONE $2)::date THEN 0
@@ -733,7 +740,7 @@ async function findAppointmentsForRfidLookup(client, patientId) {
        appointment.appointment_date ASC,
        appointment.appointment_time ASC
      LIMIT 10`,
-    [String(patientId), clinicTz]
+    [String(patientId), clinicTz, branchId || null]
   );
   return result.rows;
 }
@@ -887,7 +894,12 @@ async function insertQueueEntry(client, { userId, appointmentId, token, position
 }
 
 async function performStaffCheckIn(client, { appointment, staff, notifyClinicStaff, notifyClinicDentists, checkInMethod = "rfid", branchId = null, patientId = null }) {
-  const scopedBranchId = (await concreteBranchId(client, branchId)) || appointment.branch_id || (await branchAccess.mainBranchId(client));
+  const scopedBranchId = (await concreteBranchId(client, branchId)) || appointment.branch_id || null;
+  if (!scopedBranchId) {
+    const error = new Error("This check-in has no clinic branch.");
+    error.status = 409;
+    throw error;
+  }
   if (
     appointment?.branch_id &&
     scopedBranchId &&
@@ -985,7 +997,7 @@ async function performStaffCheckIn(client, { appointment, staff, notifyClinicSta
 
   try {
     await withSavepoint(client, "queue_wait_estimates", async () => {
-      await safeRecalculateQueueWaitEstimates(client, { fromPosition: 1 });
+      await safeRecalculateQueueWaitEstimates(client, { fromPosition: 1, branchId: scopedBranchId });
     });
   } catch (error) {
     if (error.code !== "42P01" && error.code !== "42703") {
@@ -1005,6 +1017,7 @@ async function performStaffCheckIn(client, { appointment, staff, notifyClinicSta
     dentistId: appointment.dentist_id || null,
     dentistName: appointment.dentist_name || null,
     actorId: staff?.id,
+    branchId: scopedBranchId,
   };
 
   if (typeof notifyClinicStaff === "function") {

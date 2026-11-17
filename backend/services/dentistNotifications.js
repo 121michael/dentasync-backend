@@ -8,7 +8,8 @@ function notificationValue(value, maxLength = 500) {
   return normalized ? normalized.slice(0, maxLength) : null;
 }
 
-async function listActiveDentists(db) {
+async function listActiveDentists(db, branchId = null) {
+  const scopedBranchId = branchId == null || branchId === "" ? null : branchId;
   const result = await db.query(
     `SELECT
        account.id,
@@ -18,10 +19,18 @@ async function listActiveDentists(db) {
      FROM users AS account
      LEFT JOIN admin_portal_dentist_profiles AS profile
        ON profile.user_id = account.id::text
+     ${
+       scopedBranchId
+         ? `JOIN clinic_branch_assignments AS assignment
+              ON assignment.user_id::text = account.id::text
+            AND assignment.branch_id = $1`
+         : ""
+     }
      WHERE LOWER(account.role) = 'dentist'
        AND account.is_verified = TRUE
        AND COALESCE(account.is_archived, FALSE) = FALSE
-       AND LOWER(COALESCE(account.status, 'active')) NOT IN ('inactive', 'disabled', 'suspended')`
+       AND LOWER(COALESCE(account.status, 'active')) NOT IN ('inactive', 'disabled', 'suspended')`,
+    scopedBranchId ? [scopedBranchId] : []
   );
   return result.rows;
 }
@@ -49,8 +58,8 @@ function dentistMatchesAssignment(dentist, { dentistId = null, dentistName = nul
   return false;
 }
 
-async function resolveDentistRecipients(db, { dentistId = null, dentistName = null } = {}) {
-  const dentists = await listActiveDentists(db);
+async function resolveDentistRecipients(db, { dentistId = null, dentistName = null, branchId = null } = {}) {
+  const dentists = await listActiveDentists(db, branchId);
   if (!dentists.length) {
     return [];
   }
@@ -68,9 +77,15 @@ async function resolveDentistRecipients(db, { dentistId = null, dentistName = nu
   return dentists.map((dentist) => String(dentist.id));
 }
 
+function operationalNotice(type, entityType) {
+  const kind = String(type || "").toLowerCase();
+  const entity = String(entityType || "").toLowerCase();
+  return kind === "appointment" || kind === "check_in" || entity === "appointment" || entity === "queue";
+}
+
 async function notifyDentists(
   db,
-  { type, title, body, entityType = null, entityId = null, dentistId = null, dentistName = null }
+  { type, title, body, entityType = null, entityId = null, dentistId = null, dentistName = null, branchId = null }
 ) {
   const safeType = notificationValue(type, 80);
   const safeTitle = notificationValue(title, 180);
@@ -78,9 +93,12 @@ async function notifyDentists(
   if (!safeType || !safeTitle || !safeBody) {
     return 0;
   }
+  if (operationalNotice(safeType, entityType) && (branchId == null || branchId === "")) {
+    return 0;
+  }
 
   try {
-    const dentistIds = await resolveDentistRecipients(db, { dentistId, dentistName });
+    const dentistIds = await resolveDentistRecipients(db, { dentistId, dentistName, branchId });
     if (!dentistIds.length) {
       return 0;
     }

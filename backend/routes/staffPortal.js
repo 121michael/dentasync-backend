@@ -20,6 +20,7 @@ const { attachDentalAuthorizationRoutes } = require("./dentalAuthorization");
 const { attachPrescriptionRoutes } = require("./prescriptions");
 const { updatePasswordHash } = require("../services/sessionRevocation");
 const branchAccess = require("../services/branchAccess");
+const { visibleNotificationSql } = require("../services/branchNotificationScope");
 const recordAccess = require("../services/recordAccess");
 const branchCheckIn = require("../services/branchCheckIn");
 
@@ -424,8 +425,9 @@ function createStaffPortalRouter({
         db.query(
           `SELECT COUNT(*) AS count
            FROM staff_portal_notifications
-           WHERE user_id = $1 AND read_at IS NULL`,
-          [String(req.staff.id)]
+           WHERE user_id = $1 AND read_at IS NULL
+           ${visibleNotificationSql("staff_portal_notifications", branchId, 2)}`,
+          [String(req.staff.id), branchId]
         ),
         db.query(
           `SELECT
@@ -681,9 +683,11 @@ function createStaffPortalRouter({
              JOIN users AS patient ON patient.id::text = queue.user_id
              LEFT JOIN patient_portal_appointments AS appointment ON appointment.id = queue.appointment_id
              WHERE DATE(queue.checked_in_at) = CURRENT_DATE
+           AND appointment.branch_id = $1
              ORDER BY
                CASE WHEN queue.status IN ('completed', 'no_show') THEN 1 ELSE 0 END,
-               queue.position ASC`
+               queue.position ASC`,
+            [req.branchAccess.activeBranch.id]
           );
           const grouped = await clinicalPatients.listTreatmentsForQueueEntries(
             db,
@@ -826,7 +830,10 @@ function createStaffPortalRouter({
         });
       }
       await runWithoutAborting(client, () =>
-        safeRecalculateQueueWaitEstimates(client, { fromPosition: current.position })
+        safeRecalculateQueueWaitEstimates(client, {
+          fromPosition: current.position,
+          branchId: current.branch_id || req.branchAccess?.activeBranch?.id || null,
+        })
       );
 
       await client.query("COMMIT");
@@ -881,8 +888,15 @@ function createStaffPortalRouter({
         });
       }
 
-      const rows = await staffCheckIn.findAppointmentsForRfidLookup(client, patient.id);
-      const appointments = rows.map(mapAppointment);
+      const rows = await staffCheckIn.findAppointmentsForRfidLookup(
+        client,
+        patient.id,
+        req.branchAccess?.activeBranch?.id || null
+      );
+      const branchScoped = req.branchAccess?.activeBranch?.id
+        ? rows
+        : [];
+      const appointments = branchScoped.map(mapAppointment);
       const primary = appointments[0] || null;
 
       return res.json({
@@ -1404,6 +1418,7 @@ function createStaffPortalRouter({
           body: `${record.fullName} was added to the clinical patient registry (not a login account).`,
           entityType: "clinical_patient",
           entityId: record.id,
+          branchId: req.branchAccess?.activeBranch?.id || null,
         });
       } catch (notifyError) {
         console.warn("Staff registration notification was not created:", notifyError.message);
@@ -1791,6 +1806,11 @@ function createStaffPortalRouter({
   });
 
   router.get("/notifications", async (req, res) => {
+    const branchId = req.branchAccess?.legacy ? null : req.branchAccess?.activeBranch?.id || null;
+    const scopeSql = req.branchAccess?.legacy
+      ? ""
+      : visibleNotificationSql("staff_portal_notifications", branchId, branchId ? 2 : 0);
+    const scopeParams = branchId ? [String(req.staff.id), branchId] : [String(req.staff.id)];
     function mapNotification(notification) {
       const entityType = notification.entity_type || null;
       const entityId = notification.entity_id || null;
@@ -1844,15 +1864,17 @@ function createStaffPortalRouter({
         `SELECT id, type, title, body, entity_type, entity_id, action_status, read_at, created_at
          FROM staff_portal_notifications
          WHERE user_id = $1
+         ${scopeSql}
          ORDER BY CASE WHEN read_at IS NULL THEN 0 ELSE 1 END, created_at DESC
          LIMIT 200`,
-        [String(req.staff.id)]
+        scopeParams
       );
       const unread = await db.query(
         `SELECT COUNT(*)::int AS count
          FROM staff_portal_notifications
-         WHERE user_id = $1 AND read_at IS NULL`,
-        [String(req.staff.id)]
+         WHERE user_id = $1 AND read_at IS NULL
+         ${scopeSql}`,
+        scopeParams
       );
       return res.json({
         notifications: result.rows.map(mapNotification),
@@ -1865,15 +1887,17 @@ function createStaffPortalRouter({
             `SELECT id, type, title, body, entity_type, entity_id, read_at, created_at
              FROM staff_portal_notifications
              WHERE user_id = $1
+             ${scopeSql}
              ORDER BY CASE WHEN read_at IS NULL THEN 0 ELSE 1 END, created_at DESC
              LIMIT 200`,
-            [String(req.staff.id)]
+            scopeParams
           );
           const unread = await db.query(
             `SELECT COUNT(*)::int AS count
              FROM staff_portal_notifications
-             WHERE user_id = $1 AND read_at IS NULL`,
-            [String(req.staff.id)]
+             WHERE user_id = $1 AND read_at IS NULL
+             ${scopeSql}`,
+            scopeParams
           );
           return res.json({
             notifications: fallback.rows.map((notification) =>
@@ -1892,11 +1916,17 @@ function createStaffPortalRouter({
 
   router.patch("/notifications/read-all", async (req, res) => {
     try {
+      const branchId = req.branchAccess?.legacy ? null : req.branchAccess?.activeBranch?.id || null;
+      const scopeSql = req.branchAccess?.legacy
+        ? ""
+        : visibleNotificationSql("staff_portal_notifications", branchId, branchId ? 2 : 0);
+      const scopeParams = branchId ? [String(req.staff.id), branchId] : [String(req.staff.id)];
       const result = await db.query(
         `UPDATE staff_portal_notifications
          SET read_at = CURRENT_TIMESTAMP
-         WHERE user_id = $1 AND read_at IS NULL`,
-        [String(req.staff.id)]
+         WHERE user_id = $1 AND read_at IS NULL
+         ${scopeSql}`,
+        scopeParams
       );
       return res.json({ markedRead: result.rowCount || 0 });
     } catch (error) {
@@ -1912,12 +1942,20 @@ function createStaffPortalRouter({
     }
 
     try {
+      const branchId = req.branchAccess?.legacy ? null : req.branchAccess?.activeBranch?.id || null;
+      const scopeSql = req.branchAccess?.legacy
+        ? ""
+        : visibleNotificationSql("staff_portal_notifications", branchId, branchId ? 3 : 0);
+      const scopeParams = branchId
+        ? [notificationId, String(req.staff.id), branchId]
+        : [notificationId, String(req.staff.id)];
       const result = await db.query(
         `UPDATE staff_portal_notifications
          SET read_at = CURRENT_TIMESTAMP
          WHERE id = $1 AND user_id = $2
+         ${scopeSql}
          RETURNING id`,
-        [notificationId, String(req.staff.id)]
+        scopeParams
       );
       if (!result.rows.length) {
         return res.status(404).json({ message: "Notification not found." });
@@ -1940,6 +1978,13 @@ function createStaffPortalRouter({
     }
 
     try {
+      const branchId = req.branchAccess?.legacy ? null : req.branchAccess?.activeBranch?.id || null;
+      const scopeSql = req.branchAccess?.legacy
+        ? ""
+        : visibleNotificationSql("staff_portal_notifications", branchId, branchId ? 4 : 0);
+      const scopeParams = branchId
+        ? [actionStatus, notificationId, String(req.staff.id), branchId]
+        : [actionStatus, notificationId, String(req.staff.id)];
       const result = await db.query(
         `UPDATE staff_portal_notifications
          SET action_status = $1,
@@ -1949,8 +1994,9 @@ function createStaffPortalRouter({
              END
          WHERE id = $2
            AND user_id = $3
+         ${scopeSql}
          RETURNING id, type, title, body, entity_type, entity_id, action_status, read_at, created_at`,
-        [actionStatus, notificationId, String(req.staff.id)]
+        scopeParams
       );
       if (!result.rows.length) {
         return res.status(404).json({ message: "Notification not found." });
@@ -2152,6 +2198,7 @@ function createStaffPortalRouter({
           if (method === "rfid") {
             staffRfidEvents.recordRfidEvent({
               rfidTag,
+              branchId: req.branchAccess?.activeBranch?.id || null,
               status: "failed",
               message: "RFID not recognized. Ask Admin to assign this card to the patient account.",
             });
@@ -2169,6 +2216,7 @@ function createStaffPortalRouter({
           if (method === "rfid") {
             staffRfidEvents.recordRfidEvent({
               rfidTag,
+              branchId: req.branchAccess?.activeBranch?.id || null,
               status: "failed",
               message: "Patient account is not verified yet.",
               patient: {
@@ -2207,6 +2255,7 @@ function createStaffPortalRouter({
           if (method === "rfid") {
             staffRfidEvents.recordRfidEvent({
               rfidTag,
+              branchId: req.branchAccess?.activeBranch?.id || null,
               status: "failed",
               message,
               patient: {
@@ -2300,6 +2349,7 @@ function createStaffPortalRouter({
       if (method === "rfid") {
         staffRfidEvents.recordRfidEvent({
           rfidTag,
+          branchId: req.branchAccess?.activeBranch?.id || appointment.branch_id || null,
           status: "success",
           message: successPayload.message,
           patient: successPayload.patient,
@@ -2319,6 +2369,7 @@ function createStaffPortalRouter({
       if (method === "rfid") {
         staffRfidEvents.recordRfidEvent({
           rfidTag,
+          branchId: req.branchAccess?.activeBranch?.id || null,
           status: "failed",
           message: error.message || "Unable to complete patient check-in.",
         });
@@ -2337,9 +2388,10 @@ function createStaffPortalRouter({
 
   router.get("/rfid-events", async (req, res) => {
     const sinceId = Number.parseInt(String(req.query.sinceId || "0"), 10) || 0;
+    const branchId = req.branchAccess?.activeBranch?.id || null;
     return res.json({
-      latest: staffRfidEvents.latestRfidEvent(),
-      events: staffRfidEvents.listRfidEvents({ sinceId, limit: 20 }),
+      latest: staffRfidEvents.latestRfidEvent(branchId),
+      events: staffRfidEvents.listRfidEvents({ sinceId, limit: 20, branchId }),
     });
   });
 
@@ -2428,27 +2480,44 @@ function createStaffPortalRouter({
     }
   });
 
-  router.get("/queue/summary", async (_req, res) => {
+  router.get("/queue/summary", async (req, res) => {
+    const branchId = req.branchAccess?.activeBranch?.id;
+    if (!branchId) {
+      return res.json({
+        currentlyWaiting: 0,
+        inTreatment: 0,
+        completed: 0,
+        averageWaitingTime: 0,
+      });
+    }
     try {
       const [waiting, inTreatment, completed, avgWait] = await Promise.all([
         db.query(
           `SELECT COUNT(*) AS count FROM patient_portal_queue_entries
            WHERE DATE(checked_in_at) = CURRENT_DATE
-             AND status IN ('checked_in', 'waiting', 'preparing')`
+             AND status IN ('checked_in', 'waiting', 'preparing')
+             AND branch_id = $1`,
+          [branchId]
         ),
         db.query(
           `SELECT COUNT(*) AS count FROM patient_portal_queue_entries
-           WHERE DATE(checked_in_at) = CURRENT_DATE AND status IN ('dentist')`
+           WHERE DATE(checked_in_at) = CURRENT_DATE AND status IN ('dentist')
+             AND branch_id = $1`,
+          [branchId]
         ),
         db.query(
           `SELECT COUNT(*) AS count FROM patient_portal_queue_entries
-           WHERE DATE(checked_in_at) = CURRENT_DATE AND status = 'completed'`
+           WHERE DATE(checked_in_at) = CURRENT_DATE AND status = 'completed'
+             AND branch_id = $1`,
+          [branchId]
         ),
         db.query(
           `SELECT COALESCE(AVG(estimated_wait_minutes), 0) AS avg
            FROM patient_portal_queue_entries
            WHERE DATE(checked_in_at) = CURRENT_DATE
-             AND status IN ('checked_in', 'waiting', 'preparing')`
+             AND status IN ('checked_in', 'waiting', 'preparing')
+             AND branch_id = $1`,
+          [branchId]
         ),
       ]);
       return res.json({
@@ -2465,7 +2534,10 @@ function createStaffPortalRouter({
 
   router.post("/queue/recalculate-estimates", async (_req, res) => {
     try {
-      const result = await safeRecalculateQueueWaitEstimates(db, { fromPosition: 1 });
+      const result = await safeRecalculateQueueWaitEstimates(db, {
+        fromPosition: 1,
+        branchId: req.branchAccess?.activeBranch?.id || null,
+      });
       return res.json({
         message: result.ok
           ? "Queue wait estimates recalculated."
@@ -2494,7 +2566,10 @@ function createStaffPortalRouter({
          RETURNING id`,
         [req.branchAccess.activeBranch.id]
       );
-      await safeRecalculateQueueWaitEstimates(client, { fromPosition: 1 });
+      await safeRecalculateQueueWaitEstimates(client, {
+        fromPosition: 1,
+        branchId: req.branchAccess?.activeBranch?.id || null,
+      });
       await client.query("COMMIT");
       transactionOpen = false;
       return res.json({

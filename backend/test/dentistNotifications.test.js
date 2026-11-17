@@ -72,6 +72,7 @@ test("notifyDentists inserts for assigned dentist accounts", async () => {
     entityId: "88",
     dentistId: "dr-sarah-cruz",
     dentistName: "Dr. Sarah Cruz",
+    branchId: "9",
   });
 
   assert.equal(count, 1);
@@ -81,14 +82,16 @@ test("notifyDentists inserts for assigned dentist accounts", async () => {
   assert.equal(inserts[0][5], "88");
 });
 
-test("notifyDentists falls back to every active dentist when assignment is unknown", async () => {
+test("notifyDentists falls back only to dentists assigned to the appointment branch", async () => {
   const inserts = [];
+  let lookupSql = "";
   const db = {
     async query(sql, params = []) {
       if (sql.includes("FROM users AS account")) {
+        lookupSql = sql;
+        assert.equal(params[0], "4");
         return {
           rows: [
-            { id: "dentist-1", first_name: "Sarah", last_name: "Cruz", catalog_dentist_id: "dr-sarah-cruz" },
             { id: "dentist-2", first_name: "James", last_name: "Reyes", catalog_dentist_id: "dr-james-reyes" },
           ],
         };
@@ -108,8 +111,27 @@ test("notifyDentists falls back to every active dentist when assignment is unkno
     entityType: "queue",
     entityId: "12",
     dentistId: "walk-in-unknown",
+    branchId: "4",
   });
 
-  assert.equal(count, 2);
-  assert.deepEqual(inserts[0][0], ["dentist-1", "dentist-2"]);
+  assert.match(lookupSql, /clinic_branch_assignments/);
+  assert.equal(count, 1);
+  assert.deepEqual(inserts[0][0], ["dentist-2"]);
+});
+
+test("appointment notices without a branch are not sent to every dentist", async () => {
+  const db = {
+    async query() {
+      throw new Error("should not query");
+    },
+  };
+  const count = await notifyDentists(db, {
+    type: "appointment",
+    title: "New Appointment Request",
+    body: "Cleaning tomorrow.",
+    entityType: "appointment",
+    entityId: "88",
+    dentistId: "dr-sarah-cruz",
+  });
+  assert.equal(count, 0);
 });

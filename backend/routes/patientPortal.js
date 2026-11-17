@@ -1269,6 +1269,7 @@ function createPatientPortalRouter({
         body: `New appointment booking from ${patientName}. ${service.name} on ${when}.`,
         entityType: "appointment",
         entityId: appointmentId,
+        branchId: savedAppointment.branch_id,
       });
       await notifyClinicAdmins({
         type: "appointment",
@@ -1285,6 +1286,7 @@ function createPatientPortalRouter({
         entityId: appointmentId,
         dentistId: savedAppointment.dentist_id,
         dentistName: savedAppointment.dentist_name,
+        branchId: savedAppointment.branch_id,
       });
 
       return res.status(201).json({
@@ -1384,6 +1386,7 @@ function createPatientPortalRouter({
         body: `A patient cancelled ${result.rows[0].service_name} scheduled for ${patientBranchBooking.schedulePhrase(result.rows[0].appointment_date, result.rows[0].appointment_time)}.`,
         entityType: "appointment",
         entityId: result.rows[0].id,
+        branchId: result.rows[0].branch_id,
       });
       await notifyClinicDentists({
         type: "appointment",
@@ -1393,6 +1396,7 @@ function createPatientPortalRouter({
         entityId: result.rows[0].id,
         dentistId: result.rows[0].dentist_id,
         dentistName: result.rows[0].dentist_name,
+        branchId: result.rows[0].branch_id,
       });
       if (clinicSms?.handleAppointmentEvent) {
         clinicSms
@@ -1487,6 +1491,7 @@ function createPatientPortalRouter({
         body: `A patient rescheduled ${current.service_name} to ${when}.`,
         entityType: "appointment",
         entityId: nextAppointment.id,
+        branchId: saved.appointment?.branch_id || current.branch_id,
       });
       return res.json({
         message: `${current.service_name} was rescheduled to ${when}.`,
@@ -3230,6 +3235,7 @@ function createPatientPortalRouter({
 
       staffRfidEvents.recordRfidEvent({
         method: "qr",
+        branchId: sessionBranchId,
         status: "success",
         message: checkIn.alreadyCheckedIn ? "Patient already checked in." : "Patient checked in from QR scan.",
         patient: {

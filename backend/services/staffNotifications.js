@@ -16,7 +16,7 @@ function notificationValue(value, maxLength = 500) {
  */
 async function notifyActiveStaff(
   db,
-  { type, title, body, entityType = null, entityId = null, dedupe = false }
+  { type, title, body, entityType = null, entityId = null, dedupe = false, branchId = null }
 ) {
   const safeType = notificationValue(type, 80);
   const safeTitle = notificationValue(title, 180);
@@ -26,15 +26,38 @@ async function notifyActiveStaff(
     return 0;
   }
 
+  const operational =
+    safeType === "appointment" ||
+    safeType === "check_in" ||
+    String(entityType || "").toLowerCase() === "appointment" ||
+    String(entityType || "").toLowerCase() === "queue";
+  if (operational && (branchId == null || branchId === "")) {
+    return 0;
+  }
+
   try {
-    const recipients = await db.query(
-      `SELECT id
-       FROM users
-       WHERE LOWER(role) = 'staff'
-         AND is_verified = TRUE
-         AND COALESCE(is_archived, FALSE) = FALSE
-         AND LOWER(COALESCE(status, 'active')) NOT IN ('inactive', 'disabled', 'suspended')`
-    );
+    const scopedBranchId = branchId == null || branchId === "" ? null : branchId;
+    const recipients = scopedBranchId
+      ? await db.query(
+          `SELECT account.id
+           FROM users AS account
+           JOIN clinic_branch_assignments AS assignment
+             ON assignment.user_id::text = account.id::text
+           WHERE assignment.branch_id = $1
+             AND LOWER(account.role) = 'staff'
+             AND account.is_verified = TRUE
+             AND COALESCE(account.is_archived, FALSE) = FALSE
+             AND LOWER(COALESCE(account.status, 'active')) NOT IN ('inactive', 'disabled', 'suspended')`,
+          [scopedBranchId]
+        )
+      : await db.query(
+          `SELECT id
+           FROM users
+           WHERE LOWER(role) = 'staff'
+             AND is_verified = TRUE
+             AND COALESCE(is_archived, FALSE) = FALSE
+             AND LOWER(COALESCE(status, 'active')) NOT IN ('inactive', 'disabled', 'suspended')`
+        );
     const staffIds = recipients.rows.map((staff) => String(staff.id));
 
     if (!staffIds.length) {

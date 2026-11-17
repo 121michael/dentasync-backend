@@ -94,6 +94,7 @@ async function checkInByRfidTag(db, { rfidTag, notifyClinicStaff, notifyClinicDe
 
   const client = await db.connect();
   let transactionOpen = false;
+  let readerBranchId = null;
   try {
     await client.query("BEGIN");
     transactionOpen = true;
@@ -136,7 +137,7 @@ async function checkInByRfidTag(db, { rfidTag, notifyClinicStaff, notifyClinicDe
     }
 
     const reader = await branchCheckIn.resolveAuthorizedReader(client);
-    const readerBranchId = reader?.legacy ? "main" : reader?.branch_id || null;
+    readerBranchId = reader?.legacy ? "main" : reader?.branch_id || null;
     if (!readerBranchId) {
       await client.query("ROLLBACK");
       transactionOpen = false;
@@ -166,6 +167,7 @@ async function checkInByRfidTag(db, { rfidTag, notifyClinicStaff, notifyClinicDe
       staffRfidEvents.recordRfidEvent({
         rfidTag: tag,
         method: "rfid",
+        branchId: reader?.branch_id || null,
         status: "failed",
         message,
         patient: {
@@ -191,6 +193,7 @@ async function checkInByRfidTag(db, { rfidTag, notifyClinicStaff, notifyClinicDe
     staffRfidEvents.recordRfidEvent({
       rfidTag: tag,
       method: "rfid",
+      branchId: reader?.branch_id || resolved.appointment?.branch_id || null,
       status: "success",
       message: payload.message,
       patient: payload.patient,
@@ -205,6 +208,7 @@ async function checkInByRfidTag(db, { rfidTag, notifyClinicStaff, notifyClinicDe
     staffRfidEvents.recordRfidEvent({
       rfidTag: tag,
       method: "rfid",
+      branchId: readerBranchId && readerBranchId !== "main" ? readerBranchId : null,
       status: "failed",
       message: error.message || "Unable to complete patient check-in.",
     });

@@ -8,6 +8,7 @@ const express = require("express");
 const medicalDocuments = require("../services/medicalDocuments");
 const clinicalPatients = require("../services/clinicalPatients");
 const branchAccess = require("../services/branchAccess");
+const { visibleNotificationSql } = require("../services/branchNotificationScope");
 const dentalWellness = require("../services/dentalWellness");
 const dentalChartSync = require("../services/dentalChartSync");
 const patientData = require("../services/patientData");
@@ -418,9 +419,9 @@ function dentistScopeClause(alias, dentist, branchId = null) {
   return scope;
 }
 
-async function repairOrphanWalkInQueueForDentist(db, dentist) {
+async function repairOrphanWalkInQueueForDentist(db, dentist, branchId = null) {
   const catalogId = stringValue(dentist.catalog_dentist_id, 80);
-  if (!catalogId) return;
+  if (!catalogId || !branchId) return;
   const fullName = `${dentist.first_name || ""} ${dentist.last_name || ""}`.trim();
   const dentistName = fullName ? `Dr. ${fullName}` : catalogId;
   const tz = clinicTimezone();
@@ -438,8 +439,9 @@ async function repairOrphanWalkInQueueForDentist(db, dentist) {
        WHERE queue.appointment_id = appointment.id
          AND (queue.checked_in_at AT TIME ZONE $3)::date = (CURRENT_TIMESTAMP AT TIME ZONE $3)::date
          AND queue.status IN ('checked_in', 'waiting', 'preparing', 'dentist')
-         AND appointment.dentist_id LIKE 'walk-in-%'`,
-      [catalogId, dentistName, tz]
+         AND appointment.dentist_id LIKE 'walk-in-%'
+         AND queue.branch_id = $4`,
+      [catalogId, dentistName, tz, branchId]
     );
   } catch (error) {
     console.warn("Walk-in queue dentist repair skipped:", error.message);
@@ -746,8 +748,15 @@ function createDentistPortalRouter({
         db.query(
           `SELECT COUNT(*) AS count
            FROM dentist_portal_notifications
-           WHERE user_id = $1 AND read_at IS NULL`,
-          [String(req.dentist.id)]
+           WHERE user_id = $1 AND read_at IS NULL
+           ${
+             req.branchAccess?.activeBranch?.id
+               ? visibleNotificationSql("dentist_portal_notifications", req.branchAccess.activeBranch.id, 2)
+               : ""
+           }`,
+          req.branchAccess?.activeBranch?.id
+            ? [String(req.dentist.id), req.branchAccess.activeBranch.id]
+            : [String(req.dentist.id)]
         ).catch((error) => {
           if (error.code === "42P01" || error.code === "42703") {
             return { rows: [{ count: "0" }] };
@@ -802,7 +811,7 @@ function createDentistPortalRouter({
     }
 
     try {
-      await repairOrphanWalkInQueueForDentist(db, req.dentist);
+      await repairOrphanWalkInQueueForDentist(db, req.dentist, req.branchAccess?.activeBranch?.id || null);
       const result = await db.query(
         `SELECT
            queue.id,
@@ -911,7 +920,10 @@ function createDentistPortalRouter({
 
   router.post("/queue/recalculate-estimates", async (_req, res) => {
     try {
-      const result = await safeRecalculateQueueWaitEstimates(db, { fromPosition: 1 });
+      const result = await safeRecalculateQueueWaitEstimates(db, {
+        fromPosition: 1,
+        branchId: req.branchAccess?.activeBranch?.id || null,
+      });
       return res.json({
         message: result.ok
           ? "Queue wait estimates recalculated."
@@ -1634,6 +1646,7 @@ function createDentistPortalRouter({
     try {
       await safeRecalculateQueueWaitEstimates(client, {
         fromPosition: Math.max(1, Number(afterPosition) || 1),
+        branchId: req.branchAccess?.activeBranch?.id || null,
       });
       try {
         await client.query("RELEASE SAVEPOINT optional_wait_estimate");
@@ -2923,7 +2936,10 @@ function createDentistPortalRouter({
         await markQueueServingStarted(db, queueEntryId);
       }
 
-      await safeRecalculateQueueWaitEstimates(db, { fromPosition: 1 });
+      await safeRecalculateQueueWaitEstimates(db, {
+        fromPosition: 1,
+        branchId: req.branchAccess?.activeBranch?.id || null,
+      });
 
       for (const row of rows) {
         auditDentistTreatment(
@@ -2994,7 +3010,10 @@ function createDentistPortalRouter({
 
       auditDentistTreatment(db, req, "Treatment Edited", recordId, row, `Tooth: ${row.toothNumber || "—"}. Date: ${row.treatmentDate}. Chart recalculated.`);
 
-      await safeRecalculateQueueWaitEstimates(db, { fromPosition: 1 });
+      await safeRecalculateQueueWaitEstimates(db, {
+        fromPosition: 1,
+        branchId: req.branchAccess?.activeBranch?.id || null,
+      });
 
       return res.json({
         message: "Treatment updated. Dental chart recalculated from the treatment history.",
@@ -3034,7 +3053,10 @@ function createDentistPortalRouter({
 
       auditDentistTreatment(db, req, "Treatment Deleted", recordId, row, `Tooth: ${row.toothNumber || "—"}. Chart recalculated from remaining treatments.`);
 
-      await safeRecalculateQueueWaitEstimates(db, { fromPosition: 1 });
+      await safeRecalculateQueueWaitEstimates(db, {
+        fromPosition: 1,
+        branchId: req.branchAccess?.activeBranch?.id || null,
+      });
 
       return res.json({
         message: "Treatment deleted. Dental chart recalculated from the remaining treatments.",
@@ -3055,20 +3077,27 @@ function createDentistPortalRouter({
   });
 
   router.get("/notifications", async (req, res) => {
+    const branchId = req.branchAccess?.legacy ? null : req.branchAccess?.activeBranch?.id || null;
+    const scopeSql = req.branchAccess?.legacy
+      ? ""
+      : visibleNotificationSql("dentist_portal_notifications", branchId, branchId ? 2 : 0);
+    const scopeParams = branchId ? [String(req.dentist.id), branchId] : [String(req.dentist.id)];
     try {
       const result = await db.query(
         `SELECT id, type, title, body, entity_type, entity_id, read_at, created_at
          FROM dentist_portal_notifications
          WHERE user_id = $1
+         ${scopeSql}
          ORDER BY CASE WHEN read_at IS NULL THEN 0 ELSE 1 END, created_at DESC
          LIMIT 200`,
-        [String(req.dentist.id)]
+        scopeParams
       );
       const unread = await db.query(
         `SELECT COUNT(*)::int AS count
          FROM dentist_portal_notifications
-         WHERE user_id = $1 AND read_at IS NULL`,
-        [String(req.dentist.id)]
+         WHERE user_id = $1 AND read_at IS NULL
+         ${scopeSql}`,
+        scopeParams
       );
       return res.json({
         notifications: result.rows.map((notification) => ({
@@ -3095,12 +3124,18 @@ function createDentistPortalRouter({
   });
 
   router.patch("/notifications/read-all", async (req, res) => {
+    const branchId = req.branchAccess?.legacy ? null : req.branchAccess?.activeBranch?.id || null;
+    const scopeSql = req.branchAccess?.legacy
+      ? ""
+      : visibleNotificationSql("dentist_portal_notifications", branchId, branchId ? 2 : 0);
+    const scopeParams = branchId ? [String(req.dentist.id), branchId] : [String(req.dentist.id)];
     try {
       const result = await db.query(
         `UPDATE dentist_portal_notifications
          SET read_at = CURRENT_TIMESTAMP
-         WHERE user_id = $1 AND read_at IS NULL`,
-        [String(req.dentist.id)]
+         WHERE user_id = $1 AND read_at IS NULL
+         ${scopeSql}`,
+        scopeParams
       );
       return res.json({ markedRead: result.rowCount || 0 });
     } catch (error) {
@@ -3121,12 +3156,20 @@ function createDentistPortalRouter({
     }
 
     try {
+      const branchId = req.branchAccess?.legacy ? null : req.branchAccess?.activeBranch?.id || null;
+      const scopeSql = req.branchAccess?.legacy
+        ? ""
+        : visibleNotificationSql("dentist_portal_notifications", branchId, branchId ? 3 : 0);
+      const scopeParams = branchId
+        ? [notificationId, String(req.dentist.id), branchId]
+        : [notificationId, String(req.dentist.id)];
       const result = await db.query(
         `UPDATE dentist_portal_notifications
          SET read_at = CURRENT_TIMESTAMP
          WHERE id = $1 AND user_id = $2
+         ${scopeSql}
          RETURNING id`,
-        [notificationId, String(req.dentist.id)]
+        scopeParams
       );
       if (!result.rows.length) {
         return res.status(404).json({ message: "Notification not found." });
