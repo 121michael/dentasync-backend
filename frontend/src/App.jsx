@@ -120,10 +120,21 @@ function DentistPortal() {
   return <DentistLayout />;
 }
 
+function safeReturnPath(searchParams, user) {
+  const next = String(searchParams.get("next") || "").trim();
+  if (!next.startsWith("/") || next.startsWith("//")) return null;
+  const role = roleFor(user);
+  if (role === "patient") return next;
+  if (next.startsWith("/record-access/authorize") && (role === "admin" || role === "dentist")) return next;
+  return null;
+}
+
 function PublicOnly() {
   const { user, isLoading } = useAuth();
+  const [searchParams] = useSearchParams();
   if (isLoading) return <LoadingState scope="session" label="Checking your secure session" />;
-  return user ? <Navigate to={landingRoute(user)} replace /> : <Outlet />;
+  if (!user) return <Outlet />;
+  return <Navigate to={safeReturnPath(searchParams, user) || landingRoute(user)} replace />;
 }
 
 function AccessDeniedPage() {
