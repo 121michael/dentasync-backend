@@ -5,7 +5,21 @@ const test = require("node:test");
 const {
   dentistMatchesAssignment,
   notifyDentists,
+  resolveDentistRecipients,
 } = require("../services/dentistNotifications");
+
+test("active dentist lookup compares profile user id as text", async () => {
+  let sql = "";
+  const db = {
+    async query(text) {
+      sql = text;
+      return { rows: [] };
+    },
+  };
+
+  await resolveDentistRecipients(db, {});
+  assert.match(sql, /profile\.user_id = account\.id::text/);
+});
 
 test("dentist assignment matches catalog id, user id, or display name", () => {
   const dentist = {
