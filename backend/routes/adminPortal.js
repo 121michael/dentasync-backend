@@ -10,6 +10,7 @@ const { attachClinicBranchRoutes } = require("./clinicBranches");
 const clinicBranches = require("../services/clinicBranches");
 const { attachDentalAuthorizationRoutes } = require("./dentalAuthorization");
 const recordAccess = require("../services/recordAccess");
+const prescriptions = require("../services/prescriptions");
 const { attachAdminCommandCenterRoutes } = require("./adminCommandCenter");
 const { attachClinicScheduleRoutes } = require("./clinicSchedule");
 const { attachAdminDependentRoutes } = require("./adminDependents");
@@ -3334,6 +3335,24 @@ function createAdminPortalRouter({
       }
       console.error("Admin RFID clear error:", error.message);
       return res.status(500).json({ message: "Unable to clear RFID tag." });
+    }
+  });
+
+  router.get("/prescription-attribution-review", async (_req, res) => {
+    try {
+      const rows = await prescriptions.listUnattributedPrescriptions(db);
+      return res.json({
+        prescriptions: rows,
+        message: "These prescriptions have no verified originating branch and are excluded from staff processing queues.",
+      });
+    } catch (error) {
+      if (error.code === "42P01" || error.code === "42703") {
+        return res.status(503).json({
+          message: "Run npm run migrate:prescription-branches before reviewing unattributed prescriptions.",
+        });
+      }
+      console.error("Prescription attribution review error:", error.message);
+      return res.status(500).json({ message: "Unable to load unattributed prescriptions." });
     }
   });
 

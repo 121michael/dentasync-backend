@@ -65,6 +65,21 @@ test("appointment notifications are skipped when the saved status did not change
 test("staff prescription notices are not duplicated for the same send", async () => {
   const staffId = await createUser("staff", "NoticeStaff");
   const entityId = `rx-notice-${staffId}`;
+  let branchId = null;
+  try {
+    const branch = await db.query(`SELECT id FROM clinic_branches WHERE is_main ORDER BY id LIMIT 1`);
+    branchId = branch.rows[0]?.id || null;
+    if (branchId) {
+      await db.query(
+        `INSERT INTO clinic_branch_assignments (user_id, branch_id)
+         VALUES ($1, $2)
+         ON CONFLICT DO NOTHING`,
+        [staffId, branchId]
+      );
+    }
+  } catch (error) {
+    if (error.code !== "42P01") throw error;
+  }
   const payload = {
     type: "prescription",
     title: "Prescription sent to staff",
@@ -72,6 +87,7 @@ test("staff prescription notices are not duplicated for the same send", async ()
     entityType: "prescription",
     entityId,
     dedupe: true,
+    ...(branchId ? { branchId } : { unscoped: true }),
   };
   try {
     const first = await notifyActiveStaff(db, payload);

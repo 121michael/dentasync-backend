@@ -50,6 +50,7 @@ test("staff and dentist operations stay inside the assigned branch", async (t) =
   await db.query(fs.readFileSync(path.join(__dirname, "..", "migrations", "000_create_users.sql"), "utf8"));
   await db.query(fs.readFileSync(path.join(__dirname, "..", "migrations", "002_create_patient_portal.sql"), "utf8"));
   await db.query(fs.readFileSync(path.join(__dirname, "..", "migrations", "004_create_staff_portal.sql"), "utf8"));
+  await db.query(`ALTER TABLE staff_portal_notifications ADD COLUMN IF NOT EXISTS branch_id BIGINT`);
   await db.query(fs.readFileSync(path.join(__dirname, "..", "migrations", "024_dentist_portal_notifications.sql"), "utf8"));
   await db.query(`
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT FALSE;

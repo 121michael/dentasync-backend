@@ -20,7 +20,14 @@ const { attachDentalAuthorizationRoutes } = require("./dentalAuthorization");
 const { attachPrescriptionRoutes } = require("./prescriptions");
 const { updatePasswordHash } = require("../services/sessionRevocation");
 const branchAccess = require("../services/branchAccess");
-const { visibleNotificationSql } = require("../services/branchNotificationScope");
+const {
+  visibleNotificationSql: appointmentNotificationSql,
+  staffPrescriptionNoticeSql,
+} = require("../services/branchNotificationScope");
+
+function visibleNotificationSql(alias, branchId, paramIndex) {
+  return `${appointmentNotificationSql(alias, branchId, paramIndex)} ${staffPrescriptionNoticeSql(alias, branchId, paramIndex)}`;
+}
 const recordAccess = require("../services/recordAccess");
 const branchCheckIn = require("../services/branchCheckIn");
 

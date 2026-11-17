@@ -6,6 +6,7 @@ const path = require("path");
 const { generatePrescriptionPdf, rasterizePrescriptionPdf } = require("./prescriptionPdf");
 const { sendMailMessage, emailDeliveryIsConfigured } = require("./emailDelivery");
 const { withPrescriptionSchema } = require("./prescriptionSchema");
+const { listAssignments } = require("./branchAccess");
 
 const DEFAULT_UPLOAD_DIR = path.join(process.cwd(), "uploads", "prescriptions");
 const SIGNATURE_DIR = path.join(process.cwd(), "uploads", "prescription-signatures");
@@ -179,6 +180,12 @@ function serialize(row, extras = {}) {
     linkedUserId: row.linked_user_id,
     appointmentId: row.appointment_id,
     treatmentId: row.treatment_id,
+    ...(Object.prototype.hasOwnProperty.call(row, "originating_branch_id")
+      ? {
+          originatingBranchId: row.originating_branch_id != null ? Number(row.originating_branch_id) : null,
+          attributionReview: Boolean(row.attribution_review) || row.originating_branch_id == null,
+        }
+      : {}),
     currentVersion: row.current_version,
     workflowStatus: row.workflow_status,
     emailStatus: row.email_status,
@@ -505,9 +512,13 @@ async function loadDetail(db, prescriptionId) {
   });
 }
 
-async function listPrescriptions(db, { clinicalRecordId, workflowStatus, search } = {}) {
+async function listPrescriptions(db, { clinicalRecordId, workflowStatus, search, staffBranchId } = {}) {
   const clauses = [];
   const params = [];
+  if (staffBranchId != null && staffBranchId !== "") {
+    params.push(staffBranchId);
+    clauses.push(`rx.originating_branch_id = $${params.length}`);
+  }
   if (clinicalRecordId) {
     params.push(clinicalRecordId);
     clauses.push(`rx.clinical_record_id = $${params.length}`);
@@ -645,7 +656,137 @@ async function assertPatientOwnsPrescription(db, userId, prescriptionId) {
   return row;
 }
 
-async function createPrescription(db, { dentist, body }) {
+async function linkedRecordBranch(db, kind, id) {
+  if (!id) return null;
+  if (kind === "appointment") {
+    const result = await db.query(
+      `SELECT id, branch_id FROM patient_portal_appointments WHERE id = $1`,
+      [id]
+    );
+    if (!result.rows[0]) throw httpError(400, "The linked appointment was not found.");
+    return result.rows[0].branch_id || null;
+  }
+  const result = await db.query(
+    `SELECT id, originating_branch_id FROM clinic_patient_treatments WHERE id = $1`,
+    [id]
+  );
+  if (!result.rows[0]) throw httpError(400, "The linked visit was not found.");
+  return result.rows[0].originating_branch_id || null;
+}
+
+async function verifiedDentistBranch(db, dentist, branchAccess) {
+  if (branchAccess?.legacy) return { legacy: true, branchId: null };
+  if (branchAccess && !branchAccess.legacy) {
+    if (!branchAccess.activeBranch?.id) {
+      throw httpError(409, "A verified branch is required before a prescription can be created.");
+    }
+    return { legacy: false, branchId: branchAccess.activeBranch.id };
+  }
+  try {
+    const assignments = await listAssignments(db, dentist.id);
+    const active = assignments.find((branch) => branch.active) || null;
+    if (!active) {
+      throw httpError(409, "A verified branch is required before a prescription can be created.");
+    }
+    return { legacy: false, branchId: active.id };
+  } catch (error) {
+    if (error.status) throw error;
+    if (error.code === "42P01") return { legacy: true, branchId: null };
+    throw error;
+  }
+}
+
+async function resolveOriginatingBranch(db, { appointmentId, treatmentId, dentistBranchId, suppliedBranchId }) {
+  if (!dentistBranchId) {
+    throw httpError(409, "A verified branch is required before a prescription can be created.");
+  }
+  const appointmentBranch = await linkedRecordBranch(db, "appointment", appointmentId);
+  const treatmentBranch = await linkedRecordBranch(db, "treatment", treatmentId);
+  if (
+    appointmentBranch &&
+    treatmentBranch &&
+    String(appointmentBranch) !== String(treatmentBranch)
+  ) {
+    throw httpError(409, "The linked visit and appointment belong to different branches.");
+  }
+  const linked = appointmentBranch || treatmentBranch || null;
+  if ((appointmentId || treatmentId) && !linked) {
+    throw httpError(409, "The linked visit has no verified branch.");
+  }
+  if (suppliedBranchId && linked && String(suppliedBranchId) !== String(linked)) {
+    throw httpError(409, "The supplied branch does not match the linked visit.");
+  }
+  if (suppliedBranchId && !linked && String(suppliedBranchId) !== String(dentistBranchId)) {
+    throw httpError(409, "The supplied branch does not match the dentist's verified branch.");
+  }
+  if (linked && String(linked) !== String(dentistBranchId)) {
+    throw httpError(409, "This visit belongs to a different branch than the dentist's verified branch.");
+  }
+  return linked || dentistBranchId;
+}
+
+async function prescriptionBranchReady(db) {
+  const result = await db.query(
+    `SELECT 1
+     FROM information_schema.columns
+     WHERE table_schema = 'public'
+       AND table_name = 'prescriptions'
+       AND column_name = 'originating_branch_id'`
+  );
+  return result.rows.length > 0;
+}
+
+async function assertStaffBranch(db, prescriptionId, staffBranchId) {
+  const result = await db.query(
+    `SELECT id, originating_branch_id FROM prescriptions WHERE id = $1`,
+    [prescriptionId]
+  );
+  const row = result.rows[0];
+  if (!row) throw httpError(404, "That prescription was not found.");
+  if (staffBranchId == null || staffBranchId === "") {
+    throw httpError(403, "Prescription processing requires your assigned branch.");
+  }
+  if (row.originating_branch_id == null || String(row.originating_branch_id) !== String(staffBranchId)) {
+    throw httpError(403, "This prescription is outside your assigned branch.");
+  }
+  return row;
+}
+
+async function listUnattributedPrescriptions(db) {
+  const result = await db.query(
+    `SELECT
+       rx.id,
+       rx.prescription_number,
+       rx.workflow_status,
+       rx.created_by_dentist_id,
+       rx.appointment_id,
+       rx.treatment_id,
+       rx.created_at,
+       rx.attribution_review,
+       rx.originating_branch_id,
+       ver.snapshot->'patient'->>'fullName' AS patient_name
+     FROM prescriptions AS rx
+     LEFT JOIN prescription_versions AS ver
+       ON ver.prescription_id = rx.id AND ver.version = rx.current_version
+     WHERE rx.originating_branch_id IS NULL
+     ORDER BY rx.created_at DESC
+     LIMIT 200`
+  );
+  return result.rows.map((row) => ({
+    id: row.id,
+    prescriptionNumber: row.prescription_number,
+    workflowStatus: row.workflow_status,
+    createdByDentistId: row.created_by_dentist_id,
+    appointmentId: row.appointment_id,
+    treatmentId: row.treatment_id,
+    createdAt: row.created_at,
+    patientName: row.patient_name || "Patient",
+    attributionReview: true,
+    originatingBranchId: null,
+  }));
+}
+
+async function createPrescription(db, { dentist, body, branchAccess }) {
   const clinicalRecordId = numericId(body?.clinicalRecordId || body?.patientId);
   if (!clinicalRecordId) throw httpError(400, "Select an existing patient record.");
   const items = normalizeItems(body?.items);
@@ -654,6 +795,20 @@ async function createPrescription(db, { dentist, body }) {
   const treatmentId = numericId(body?.treatmentId);
   const patient = await loadPatientRecord(db, clinicalRecordId);
   const clinic = await loadClinic(db);
+  const branchReady = await prescriptionBranchReady(db);
+  const dentistBranch = branchReady ? await verifiedDentistBranch(db, dentist, branchAccess) : { legacy: true };
+  let originatingBranchId = null;
+  let attributionReview = false;
+  if (branchReady && !dentistBranch.legacy) {
+    originatingBranchId = await resolveOriginatingBranch(db, {
+      appointmentId,
+      treatmentId,
+      dentistBranchId: dentistBranch.branchId,
+      suppliedBranchId: body?.branchId ? body.branchId : null,
+    });
+  } else if (branchReady) {
+    attributionReview = true;
+  }
   let includeAftercare = Boolean(body?.includeExtractionAftercare);
   if (includeAftercare && !(await treatmentSupportsAftercare(db, treatmentId))) {
     throw httpError(
@@ -666,21 +821,26 @@ async function createPrescription(db, { dentist, body }) {
   try {
     await client.query("BEGIN");
     const number = await nextPrescriptionNumber(client);
+    const insertParams = [
+      id,
+      number,
+      patient.id,
+      patient.linkedUserId,
+      appointmentId,
+      treatmentId,
+      includeAftercare,
+      String(dentist.id),
+    ];
+    if (branchReady) {
+      insertParams.push(originatingBranchId, attributionReview);
+    }
     await client.query(
       `INSERT INTO prescriptions (
          id, prescription_number, clinical_record_id, linked_user_id, appointment_id, treatment_id,
          current_version, workflow_status, email_status, include_extraction_aftercare, created_by_dentist_id
-       ) VALUES ($1, $2, $3, $4, $5, $6, 1, 'draft', 'pending', $7, $8)`,
-      [
-        id,
-        number,
-        patient.id,
-        patient.linkedUserId,
-        appointmentId,
-        treatmentId,
-        includeAftercare,
-        String(dentist.id),
-      ]
+         ${branchReady ? ", originating_branch_id, attribution_review" : ""}
+       ) VALUES ($1, $2, $3, $4, $5, $6, 1, 'draft', 'pending', $7, $8${branchReady ? ", $9, $10" : ""})`,
+      insertParams
     );
     await insertVersion(client, {
       prescriptionId: id,
@@ -1606,6 +1766,9 @@ module.exports = {
   clinicalPayload,
   maskEmail,
   listPrescriptions: withSchema(listPrescriptions),
+  listUnattributedPrescriptions: withSchema(listUnattributedPrescriptions),
+  assertStaffBranch: withSchema(assertStaffBranch),
+  resolveOriginatingBranch,
   listForPatientUser: withSchema(listForPatientUser),
   assertPatientOwnsPrescription: withSchema(assertPatientOwnsPrescription),
   loadDetail: withSchema(loadDetail),

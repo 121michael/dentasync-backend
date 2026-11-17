@@ -37,7 +37,21 @@ function visibleNotificationSql(alias, branchId, paramIndex) {
   return `AND (NOT (${operational}) OR ${resolved} = $${paramIndex})`;
 }
 
+/**
+ * Prescription notices follow the branch stored when the dentist sent them.
+ * A notice with no branch, including older broadcasts, stays out of every
+ * branch inbox. Appointment and queue visibility is unchanged.
+ */
+function staffPrescriptionNoticeSql(alias, branchId, paramIndex) {
+  const prescription = `(COALESCE(${alias}.type, '') = 'prescription' OR COALESCE(${alias}.entity_type, '') = 'prescription')`;
+  if (branchId == null || branchId === "") {
+    return `AND NOT ${prescription}`;
+  }
+  return `AND (NOT ${prescription} OR ${alias}.branch_id = $${paramIndex})`;
+}
+
 module.exports = {
   resolvedBranchSql,
   visibleNotificationSql,
+  staffPrescriptionNoticeSql,
 };

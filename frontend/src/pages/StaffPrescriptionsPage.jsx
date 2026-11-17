@@ -40,11 +40,11 @@ export function StaffPrescriptionsPage() {
     try {
       const data = await api.getStaffPrescriptions(search ? { search } : {});
       setList(data.prescriptions || []);
-      setError("");
+      if (!focusId) setError("");
     } catch (loadError) {
       setError(loadError.message);
     }
-  }, [search]);
+  }, [search, focusId]);
 
   useEffect(() => {
     load();

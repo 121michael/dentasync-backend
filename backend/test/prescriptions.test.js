@@ -393,18 +393,23 @@ test("dentist-staff workflow authorizes a version and blocks staff clinical edit
   await ensureSchema();
   const suffix = Date.now();
   const liveDentistId = await createSigningDentist("workflow");
-  let staffRow = await db.query(
-    `SELECT id FROM users WHERE LOWER(role) = 'staff' AND is_verified = TRUE LIMIT 1`
+  const staffRow = await db.query(
+    `INSERT INTO users (first_name, last_name, email, phone, password_hash, role, status, is_verified)
+     VALUES ('Mina', 'Santos', $1, $2, 'x', 'staff', 'Active', TRUE)
+     RETURNING id`,
+    [`staff${suffix}@amethyst.test`, `63918${String(suffix).slice(-7)}`]
   );
-  if (!staffRow.rows.length) {
-    staffRow = await db.query(
-      `INSERT INTO users (first_name, last_name, email, phone, password_hash, role, status, is_verified)
-       VALUES ('Mina', 'Santos', $1, $2, 'x', 'staff', 'Active', TRUE)
-       RETURNING id`,
-      [`staff${suffix}@amethyst.test`, `63918${String(suffix).slice(-7)}`]
-    );
-  }
   const liveStaffId = String(staffRow.rows[0].id);
+  try {
+    await db.query(
+      `INSERT INTO clinic_branch_assignments (user_id, branch_id)
+       SELECT $1::bigint, id FROM clinic_branches WHERE is_main
+       ON CONFLICT DO NOTHING`,
+      [liveStaffId]
+    );
+  } catch (error) {
+    if (error.code !== "42P01") throw error;
+  }
 
   const record = await db.query(
     `INSERT INTO clinic_patient_records (

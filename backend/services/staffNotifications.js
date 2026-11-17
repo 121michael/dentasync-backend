@@ -16,7 +16,7 @@ function notificationValue(value, maxLength = 500) {
  */
 async function notifyActiveStaff(
   db,
-  { type, title, body, entityType = null, entityId = null, dedupe = false, branchId = null }
+  { type, title, body, entityType = null, entityId = null, dedupe = false, branchId = null, unscoped = false }
 ) {
   const safeType = notificationValue(type, 80);
   const safeTitle = notificationValue(title, 180);
@@ -26,17 +26,20 @@ async function notifyActiveStaff(
     return 0;
   }
 
+  const entity = String(entityType || "").toLowerCase();
+  const prescriptionNotice = safeType === "prescription" || entity === "prescription";
   const operational =
     safeType === "appointment" ||
     safeType === "check_in" ||
-    String(entityType || "").toLowerCase() === "appointment" ||
-    String(entityType || "").toLowerCase() === "queue";
-  if (operational && (branchId == null || branchId === "")) {
+    entity === "appointment" ||
+    entity === "queue";
+  if ((operational || (prescriptionNotice && !unscoped)) && (branchId == null || branchId === "")) {
     return 0;
   }
 
   try {
-    const scopedBranchId = branchId == null || branchId === "" ? null : branchId;
+    const scopedBranchId =
+      branchId == null || branchId === "" || (prescriptionNotice && unscoped) ? null : branchId;
     const recipients = scopedBranchId
       ? await db.query(
           `SELECT account.id
@@ -78,15 +81,24 @@ async function notifyActiveStaff(
              AND existing.entity_id IS NOT DISTINCT FROM $6
          )`
       : "";
-    const result = await db.query(
+    const noticeParams = [staffIds, safeType, safeTitle, safeBody, safeEntityType, safeEntityId];
+    const insertSql = (includeBranch) =>
       `INSERT INTO staff_portal_notifications (
-         user_id, type, title, body, entity_type, entity_id
+         user_id, type, title, body, entity_type, entity_id${includeBranch ? ", branch_id" : ""}
        )
-       SELECT staff_id, $2, $3, $4, $5, $6
+       SELECT staff_id, $2, $3, $4, $5, $6${includeBranch ? ", $7" : ""}
        FROM UNNEST($1::text[]) AS staff_id
-       ${dedupeSql}`,
-      [staffIds, safeType, safeTitle, safeBody, safeEntityType, safeEntityId]
-    );
+       ${dedupeSql}`;
+    let result;
+    try {
+      result = await db.query(
+        insertSql(scopedBranchId != null),
+        scopedBranchId != null ? [...noticeParams, scopedBranchId] : noticeParams
+      );
+    } catch (insertError) {
+      if (insertError.code !== "42703" || scopedBranchId == null) throw insertError;
+      result = await db.query(insertSql(false), noticeParams);
+    }
 
     if (Number.isInteger(result.rowCount)) return result.rowCount;
     return dedupe ? 0 : staffIds.length;

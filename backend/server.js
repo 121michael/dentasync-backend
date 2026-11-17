@@ -68,7 +68,10 @@ const {
   sendPasswordResetEmail,
 } = require("./services/emailDelivery");
 const { authenticateToken } = require("./middleware/authMiddleware");
-const { applyPrescriptionSchema } = require("./services/prescriptionSchema");
+const {
+  applyPrescriptionSchema,
+  applyPrescriptionBranchSchema,
+} = require("./services/prescriptionSchema");
 const { applyAdminBackupSchema } = require("./services/backupSchema");
 const {
   applyPasswordResetSchema,
@@ -380,6 +383,7 @@ if (require.main === module) {
     backupScheduleJob.start();
     unproceededAppointmentJob.start();
     applyPrescriptionSchema(db)
+      .then(() => applyPrescriptionBranchSchema(db))
       .then(() => console.log("Prescription tables ready (CREATE IF NOT EXISTS)."))
       .catch((error) => {
         console.error("Prescription schema apply failed:", error.message);

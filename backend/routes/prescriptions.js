@@ -18,12 +18,26 @@ function sendError(res, error) {
 function attachPrescriptionRoutes(router, { db, role, uploadDirectory, notifyStaff = async () => {} }) {
   const directory = uploadDirectory || prescriptions.DEFAULT_UPLOAD_DIR;
 
+  function staffBranchId(req) {
+    if (role !== "staff" || req.branchAccess?.legacy) return undefined;
+    return req.branchAccess?.activeBranch?.id || null;
+  }
+
+  async function requireStaffBranch(req, prescriptionId) {
+    const branchId = staffBranchId(req);
+    if (branchId === undefined) return;
+    await prescriptions.assertStaffBranch(db, prescriptionId, branchId);
+  }
+
   router.get("/prescriptions", async (req, res) => {
     try {
+      const branchId = staffBranchId(req);
+      if (branchId === null) return res.json({ prescriptions: [] });
       const list = await prescriptions.listPrescriptions(db, {
         clinicalRecordId: req.query.patientId || req.query.clinicalRecordId,
         workflowStatus: req.query.status,
         search: req.query.search,
+        staffBranchId: branchId,
       });
       return res.json({ prescriptions: list });
     } catch (error) {
@@ -33,8 +47,11 @@ function attachPrescriptionRoutes(router, { db, role, uploadDirectory, notifySta
 
   router.get("/patients/:patientId/prescriptions", async (req, res) => {
     try {
+      const branchId = staffBranchId(req);
+      if (branchId === null) return res.json({ prescriptions: [] });
       const list = await prescriptions.listPrescriptions(db, {
         clinicalRecordId: req.params.patientId,
+        staffBranchId: branchId,
       });
       return res.json({ prescriptions: list });
     } catch (error) {
@@ -44,6 +61,7 @@ function attachPrescriptionRoutes(router, { db, role, uploadDirectory, notifySta
 
   router.get("/prescriptions/:id", async (req, res) => {
     try {
+      await requireStaffBranch(req, req.params.id);
       const detail = await prescriptions.loadDetail(db, req.params.id);
       if (role === "staff") {
         detail.recipientEmail = undefined;
@@ -56,6 +74,7 @@ function attachPrescriptionRoutes(router, { db, role, uploadDirectory, notifySta
 
   router.get("/prescriptions/:id/pdf", async (req, res) => {
     try {
+      await requireStaffBranch(req, req.params.id);
       const actor = role === "dentist" ? req.dentist : req.staff;
       const loader =
         role === "staff" ? prescriptions.retrieveStoredPdf : prescriptions.generateOrRetrievePdf;
@@ -81,6 +100,7 @@ function attachPrescriptionRoutes(router, { db, role, uploadDirectory, notifySta
 
   router.get("/prescriptions/:id/jpeg", async (req, res) => {
     try {
+      await requireStaffBranch(req, req.params.id);
       const actor = role === "dentist" ? req.dentist : req.staff;
       const { pages, prescription } = await prescriptions.generateOrRetrieveJpeg(db, {
         actorId: String(actor.id),
@@ -108,6 +128,7 @@ function attachPrescriptionRoutes(router, { db, role, uploadDirectory, notifySta
         const prescription = await prescriptions.createPrescription(db, {
           dentist: req.dentist,
           body: req.body || {},
+          branchAccess: req.branchAccess,
         });
         return res.status(201).json({ prescription, message: "Draft prescription saved." });
       } catch (error) {
@@ -148,7 +169,8 @@ function attachPrescriptionRoutes(router, { db, role, uploadDirectory, notifySta
               entityType: "prescription",
               entityId: String(prescription.id),
               dedupe: true,
-              branchId: req.branchAccess?.activeBranch?.id || null,
+              branchId: prescription.originatingBranchId || null,
+              unscoped: Boolean(req.branchAccess?.legacy),
             });
           } catch (notifyError) {
             console.warn("Staff prescription notification was not created:", notifyError.message);
@@ -199,6 +221,7 @@ function attachPrescriptionRoutes(router, { db, role, uploadDirectory, notifySta
   if (role === "staff") {
     router.post("/prescriptions/:id/process", async (req, res) => {
       try {
+        await requireStaffBranch(req, req.params.id);
         const prescription = await prescriptions.markProcessing(db, {
           staff: req.staff,
           prescriptionId: req.params.id,
@@ -211,6 +234,7 @@ function attachPrescriptionRoutes(router, { db, role, uploadDirectory, notifySta
 
     router.post("/prescriptions/:id/generate", async (req, res) => {
       try {
+        await requireStaffBranch(req, req.params.id);
         const generated = await prescriptions.generateOrRetrievePdf(db, {
           actorId: String(req.staff.id),
           actorRole: "staff",
@@ -232,6 +256,7 @@ function attachPrescriptionRoutes(router, { db, role, uploadDirectory, notifySta
 
     router.post("/prescriptions/:id/confirm-review", async (req, res) => {
       try {
+        await requireStaffBranch(req, req.params.id);
         const prescription = await prescriptions.confirmPdfReview(db, {
           staff: req.staff,
           prescriptionId: req.params.id,
@@ -249,6 +274,7 @@ function attachPrescriptionRoutes(router, { db, role, uploadDirectory, notifySta
 
     router.post("/prescriptions/:id/return", async (req, res) => {
       try {
+        await requireStaffBranch(req, req.params.id);
         const prescription = await prescriptions.returnToDentist(db, {
           staff: req.staff,
           prescriptionId: req.params.id,
@@ -262,6 +288,7 @@ function attachPrescriptionRoutes(router, { db, role, uploadDirectory, notifySta
 
     router.post("/prescriptions/:id/prepare-send", async (req, res) => {
       try {
+        await requireStaffBranch(req, req.params.id);
         const prepared = await prescriptions.prepareSend(db, {
           staff: req.staff,
           prescriptionId: req.params.id,
@@ -278,6 +305,7 @@ function attachPrescriptionRoutes(router, { db, role, uploadDirectory, notifySta
 
     router.post("/prescriptions/:id/send", async (req, res) => {
       try {
+        await requireStaffBranch(req, req.params.id);
         const prescription = await prescriptions.sendAuthorizedEmail(db, {
           staff: req.staff,
           prescriptionId: req.params.id,
@@ -298,6 +326,7 @@ function attachPrescriptionRoutes(router, { db, role, uploadDirectory, notifySta
 
     router.post("/prescriptions/:id/retry-send", async (req, res) => {
       try {
+        await requireStaffBranch(req, req.params.id);
         const prescription = await prescriptions.retrySend(db, {
           staff: req.staff,
           prescriptionId: req.params.id,
