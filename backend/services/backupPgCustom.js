@@ -12,6 +12,9 @@ const ARCHIVE_FORMAT = "pg_dump_custom";
 const STAGE_CREATED = "backup_created";
 const STAGE_VALIDATED = "archive_validated";
 const STAGE_RESTORED = "test_restore_passed";
+const EXCLUDED_CATALOG_TABLES = ["admin_portal_backups", "admin_portal_backup_operations"];
+const EXCLUDED_CATALOG_PATTERN =
+  /\badmin_portal_backups\b|\badmin_portal_backup_operations_id_seq\b|\badmin_portal_backup_operations\b/;
 
 function liveDatabaseName(env = process.env) {
   const fromEnv = String(env.DB_NAME || env.PGDATABASE || "").trim();
@@ -177,6 +180,78 @@ async function ensurePostgresTools(env = process.env) {
   }
 }
 
+function stripCatalogToc(listText) {
+  return String(listText || "")
+    .split(/\r?\n/)
+    .filter((line) => !EXCLUDED_CATALOG_PATTERN.test(line))
+    .join("\n");
+}
+
+async function excludedCatalogNames(env = process.env) {
+  const names = new Set(EXCLUDED_CATALOG_TABLES);
+  const parts = connectionParts(env);
+  const client = new Client({
+    host: parts.host,
+    port: Number(parts.port),
+    user: parts.user,
+    password: parts.password,
+    database: parts.database,
+    ssl: postgresSslConfig(env),
+    connectionTimeoutMillis: 4000,
+  });
+  try {
+    await client.connect();
+    const seqs = await client.query(
+      `SELECT seq.relname AS name
+       FROM pg_class tbl
+       JOIN pg_namespace nsp ON nsp.oid = tbl.relnamespace
+       JOIN pg_depend dep ON dep.refobjid = tbl.oid AND dep.deptype IN ('a', 'i')
+       JOIN pg_class seq ON seq.oid = dep.objid AND seq.relkind = 'S'
+       WHERE nsp.nspname = 'public'
+         AND tbl.relname = ANY($1::text[])`,
+      [EXCLUDED_CATALOG_TABLES]
+    );
+    for (const row of seqs.rows) {
+      if (row?.name) names.add(row.name);
+    }
+  } catch {
+    names.add("admin_portal_backup_operations_id_seq");
+  } finally {
+    await client.end().catch(() => {});
+  }
+  return [...names];
+}
+
+function excludeTableArgs(names) {
+  return names.flatMap((name) => ["--exclude-table", `public.${name}`]);
+}
+
+async function restoreArchive(buffer, env, extraArgs, database) {
+  const filePath = path.join(os.tmpdir(), `ds-pgrestore-${crypto.randomBytes(8).toString("hex")}.dump`);
+  const listPath = `${filePath}.list`;
+  fs.writeFileSync(filePath, buffer, { mode: 0o600 });
+  try {
+    const listed = await runTool("pg_restore", ["--list", filePath], env);
+    if (!listed.ok || !/^\d+;/m.test(String(listed.stdout))) {
+      const error = new Error(
+        `Restore refused because pg_restore could not read this .dump. ${listed.message}`
+      );
+      error.status = 400;
+      throw error;
+    }
+    fs.writeFileSync(listPath, stripCatalogToc(listed.stdout), { mode: 0o600 });
+    return await runTool(
+      "pg_restore",
+      ["--use-list", listPath, ...extraArgs, ...connectionArgs(env, database), filePath],
+      env,
+      database
+    );
+  } finally {
+    fs.rmSync(filePath, { force: true });
+    fs.rmSync(listPath, { force: true });
+  }
+}
+
 async function createCustomDump(env = process.env) {
   await ensurePostgresTools(env);
   const filePath = path.join(os.tmpdir(), `ds-pgdump-${crypto.randomBytes(8).toString("hex")}.dump`);
@@ -186,8 +261,7 @@ async function createCustomDump(env = process.env) {
       "--format=custom",
       "--no-owner",
       "--no-acl",
-      "--exclude-table=public.admin_portal_backups",
-      "--exclude-table=public.admin_portal_backup_operations",
+      ...excludeTableArgs(await excludedCatalogNames(env)),
       "--file",
       filePath,
       ...connectionArgs(env),
@@ -244,8 +318,6 @@ async function assertArchiveReadable(buffer, env = process.env) {
 
 async function restoreCustomDump(buffer, env, destination) {
   assertSeparateDatabase(env, destination);
-  const filePath = path.join(os.tmpdir(), `ds-pgrestore-${crypto.randomBytes(8).toString("hex")}.dump`);
-  fs.writeFileSync(filePath, buffer, { mode: 0o600 });
   try {
     await withMaintenance(env, async (admin) => {
       const existing = await admin.query("SELECT 1 FROM pg_database WHERE datname = $1", [destination]);
@@ -256,10 +328,10 @@ async function restoreCustomDump(buffer, env, destination) {
       }
       await admin.query(`CREATE DATABASE ${quoteIdent(destination)}`);
     });
-    const restored = await runTool(
-      "pg_restore",
-      ["--exit-on-error", "--no-owner", "--no-acl", ...connectionArgs(env, destination), filePath],
+    const restored = await restoreArchive(
+      buffer,
       env,
+      ["--exit-on-error", "--no-owner", "--no-acl"],
       destination
     );
     if (!restored.ok) {
@@ -270,8 +342,6 @@ async function restoreCustomDump(buffer, env, destination) {
   } catch (error) {
     await dropDatabase(env, destination);
     throw error;
-  } finally {
-    fs.rmSync(filePath, { force: true });
   }
 }
 
@@ -337,30 +407,22 @@ async function dropDatabase(env, destination) {
 }
 
 async function restoreOntoLive(buffer, env = process.env) {
-  const filePath = path.join(os.tmpdir(), `ds-pglive-${crypto.randomBytes(8).toString("hex")}.dump`);
-  fs.writeFileSync(filePath, buffer, { mode: 0o600 });
-  try {
-    const restored = await runTool(
-      "pg_restore",
-      [
-        "--exit-on-error",
-        "--single-transaction",
-        "--clean",
-        "--if-exists",
-        "--no-owner",
-        "--no-acl",
-        ...connectionArgs(env),
-        filePath,
-      ],
-      env
-    );
-    if (!restored.ok) {
-      const error = new Error(`Production restore failed and was not reported as successful. ${restored.message}`);
-      error.status = 500;
-      throw error;
-    }
-  } finally {
-    fs.rmSync(filePath, { force: true });
+  const restored = await restoreArchive(
+    buffer,
+    env,
+    [
+      "--exit-on-error",
+      "--single-transaction",
+      "--clean",
+      "--if-exists",
+      "--no-owner",
+      "--no-acl",
+    ]
+  );
+  if (!restored.ok) {
+    const error = new Error(`Production restore failed and was not reported as successful. ${restored.message}`);
+    error.status = 500;
+    throw error;
   }
 }
 
@@ -454,4 +516,6 @@ module.exports = {
   compareManifest,
   dropDatabase,
   restoreOntoLive,
+  stripCatalogToc,
+  EXCLUDED_CATALOG_TABLES,
 };

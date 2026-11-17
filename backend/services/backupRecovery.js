@@ -634,7 +634,6 @@ function createBackupRecoveryService({ db, env = process.env, notifyAdmin = noti
         ]
       );
       const record = inserted.rows[0];
-      await ensurePostgresTools(env);
       if (typeof onStarted === "function") {
         try {
           onStarted(publicBackup(record));
@@ -643,6 +642,7 @@ function createBackupRecoveryService({ db, env = process.env, notifyAdmin = noti
         }
       }
       try {
+        await ensurePostgresTools(env);
         const manifest = await captureManifest(db);
         const dumped = await createCustomDump(env);
         if (dumped.buffer.length > MAX_BACKUP_BYTES) {

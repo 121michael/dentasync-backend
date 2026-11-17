@@ -4,11 +4,28 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { execFile } = require("node:child_process");
+const { promisify } = require("node:util");
 const test = require("node:test");
+const execFileAsync = promisify(execFile);
 const { Client, Pool } = require("pg");
 const { applyAdminBackupSchema } = require("../services/backupSchema");
 const { createBackupRecoveryService } = require("../services/backupRecovery");
-const { assertSeparateDatabase } = require("../services/backupPgCustom");
+const { assertSeparateDatabase, stripCatalogToc, restoreOntoLive } = require("../services/backupPgCustom");
+
+test("restore TOC omits backup catalog sequences that stay on the destination", () => {
+  const listed = [
+    "221; 1259 16389 TABLE public synth_patients postgres",
+    "222; 1259 22915 SEQUENCE public admin_portal_backup_operations_id_seq postgres",
+    "206; 1259 16384 TABLE public admin_portal_backup_operations postgres",
+    "3467; 0 0 SEQUENCE SET public admin_portal_backup_operations_id_seq postgres",
+    "3470; 0 0 SEQUENCE SET public synth_patients_id_seq postgres",
+  ].join("\n");
+  const filtered = stripCatalogToc(listed);
+  assert.match(filtered, /synth_patients_id_seq/);
+  assert.match(filtered, /TABLE public synth_patients/);
+  assert.doesNotMatch(filtered, /admin_portal_backup_operations/);
+});
 
 const DB_NAME = "dentasync_dump_src";
 const baseEnv = {
@@ -194,6 +211,46 @@ test("PostgreSQL custom dump backup and recovery", { timeout: 180000 }, async (t
   assert.ok(restored.safetyBackup?.id);
   const recovered = await pool.query("SELECT label FROM synth_patients ORDER BY id");
   assert.deepEqual(recovered.rows.map((row) => row.label), ["Synthetic Patient A"]);
+  const nextPatient = await pool.query(
+    "INSERT INTO synth_patients (label) VALUES ('Synthetic Patient B') RETURNING id, label"
+  );
+  assert.equal(nextPatient.rows[0].id, 2);
+  assert.equal(nextPatient.rows[0].label, "Synthetic Patient B");
+  const catalog = await pool.query(
+    "SELECT to_regclass('public.admin_portal_backup_operations') AS operations"
+  );
+  assert.equal(catalog.rows[0].operations, "admin_portal_backup_operations");
+
+  const olderDump = path.join(os.tmpdir(), "dentasync-older-catalog-seq.dump");
+  await execFileAsync(
+    "pg_dump",
+    [
+      "--format=custom",
+      "--no-owner",
+      "--no-acl",
+      "--exclude-table=public.admin_portal_backups",
+      "--exclude-table=public.admin_portal_backup_operations",
+      "--file",
+      olderDump,
+      "-h",
+      baseEnv.DB_HOST,
+      "-p",
+      String(baseEnv.DB_PORT),
+      "-U",
+      baseEnv.DB_USER,
+      "-d",
+      DB_NAME,
+    ],
+    { env: { ...process.env, PGPASSWORD: baseEnv.DB_PASSWORD } }
+  );
+  const olderList = (await execFileAsync("pg_restore", ["--list", olderDump], { encoding: "utf8" })).stdout;
+  assert.match(olderList, /admin_portal_backup_operations_id_seq/);
+  await pool.query("UPDATE synth_patients SET label = 'Stale before older-archive restore' WHERE id = 1");
+  await restoreOntoLive(fs.readFileSync(olderDump), baseEnv);
+  const afterOlder = await pool.query("SELECT id, label FROM synth_patients ORDER BY id");
+  assert.equal(afterOlder.rows[0].label, "Synthetic Patient A");
+  fs.rmSync(olderDump, { force: true });
+
   const safety = await pool.query(
     "SELECT COUNT(*)::int AS count FROM admin_portal_backups WHERE backup_type = 'safety' AND status = 'success'"
   );
