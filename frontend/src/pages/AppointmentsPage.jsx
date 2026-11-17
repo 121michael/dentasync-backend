@@ -20,6 +20,11 @@ import { canManageAppointment, displayAppointmentStatus } from "../utils/appoint
 import { useAuth } from "../useAuth";
 import { matchesNotificationFocus } from "../notificationFocus";
 import { applyApprovedClinicPriceOverrides, getApprovedClinicPrice } from "../clinic/approvedClinicPrices";
+import {
+  hidePatientBookingPriceLines,
+  hidePatientBookingPriceNotes,
+  isPatientBookingPriceCopy,
+} from "../clinic/patientBookingDisplay";
 import { attachServiceVisual } from "../clinic/serviceVisuals";
 
 const PERIOD_ORDER = ["Morning", "Afternoon", "Evening"];
@@ -155,8 +160,13 @@ function ServicePriceDetails({ price, open, selectedOptionId, onSelectOption, on
 
   const options = price.options || [];
   const selectedOption = options.find((option) => option.id === selectedOptionId);
-  const extraNotes = selectedOption?.notes?.length ? selectedOption.notes : price.extraNotes || [];
-  const detailLines = selectedOption?.lines?.length ? selectedOption.lines : price.lines || [];
+  const extraNotes = hidePatientBookingPriceNotes(
+    selectedOption?.notes?.length ? selectedOption.notes : price.extraNotes || []
+  );
+  const detailLines = hidePatientBookingPriceLines(
+    selectedOption?.lines?.length ? selectedOption.lines : price.lines || []
+  );
+  const compactNote = !selectedOption && !isPatientBookingPriceCopy(price.compactNote) ? price.compactNote : "";
   const hasMore = Boolean(detailLines.length || extraNotes.length);
 
   return createPortal(
@@ -194,16 +204,13 @@ function ServicePriceDetails({ price, open, selectedOptionId, onSelectOption, on
             />
           </figure>
         ) : null}
-        {price.description ? (
+        {price.description && !isPatientBookingPriceCopy(price.description) ? (
           <p className="treatment-price-panel__description">{price.description}</p>
         ) : null}
-        <p className="treatment-price-panel__price">{selectedOption?.priceLabel || price.priceLabel}</p>
         {selectedOption ? (
           <p className="treatment-price-panel__note">{selectedOption.title}</p>
         ) : null}
-        {price.compactNote && !selectedOption ? (
-          <p className="treatment-price-panel__note">{price.compactNote}</p>
-        ) : null}
+        {compactNote ? <p className="treatment-price-panel__note">{compactNote}</p> : null}
         {options.length ? (
           <div className="treatment-price-panel__options" role="radiogroup" aria-label="Orthodontic option">
             {options.map((option) => (
@@ -216,9 +223,10 @@ function ServicePriceDetails({ price, open, selectedOptionId, onSelectOption, on
                 onClick={() => onSelectOption?.(option.id)}
               >
                 <strong>{option.title}</strong>
-                {option.description ? <p>{option.description}</p> : null}
-                <span>{option.priceLabel}</span>
-                {option.lines?.map((line) => (
+                {option.description && !isPatientBookingPriceCopy(option.description) ? (
+                  <p>{option.description}</p>
+                ) : null}
+                {hidePatientBookingPriceLines(option.lines).map((line) => (
                   <small key={line.label}>
                     {line.label}: {line.value}
                   </small>
@@ -268,7 +276,6 @@ function ServicePriceDetails({ price, open, selectedOptionId, onSelectOption, on
 function TreatmentServiceOption({ service, selected, onSelect }) {
   const visual = attachServiceVisual(service);
   const photoUrl = servicePhotoUrl(visual);
-  const price = getApprovedClinicPrice(visual);
 
   return (
     <div className={`treatment-option-wrap ${selected ? "is-open" : ""}`}>
@@ -278,7 +285,7 @@ function TreatmentServiceOption({ service, selected, onSelect }) {
         aria-checked={selected}
         aria-haspopup="dialog"
         aria-expanded={selected}
-        aria-label={`${service.name}, ${price.priceLabel}`}
+        aria-label={service.name}
         className={`treatment-option ${selected ? "is-selected" : ""}`}
         onClick={onSelect}
       >
@@ -299,7 +306,6 @@ function TreatmentServiceOption({ service, selected, onSelect }) {
           </span>
         ) : null}
         <strong>{service.name}</strong>
-        <small className="treatment-option__price">{price.priceLabel}</small>
       </button>
     </div>
   );
@@ -1509,10 +1515,10 @@ export function AppointmentsPage() {
                           : "Select a service"}
                       </strong>
                     </div>
-                    {selectedBracesOption || selectedServicePrice ? (
+                    {selectedBracesOption ? (
                       <div className="booking-summary__line">
-                        <span>Price</span>
-                        <strong>{selectedBracesOption?.details || selectedServicePrice?.details}</strong>
+                        <span>Option</span>
+                        <strong>{selectedBracesOption.title}</strong>
                       </div>
                     ) : null}
                     <div className="booking-summary__line">
