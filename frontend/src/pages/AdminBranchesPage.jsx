@@ -5,6 +5,7 @@ import { formatAdminDateTime } from "../adminUtils";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { AdminModal, AdminStatusBadge } from "../components/AdminUI";
 import { useAdminUi } from "../components/AdminLayout";
+import { branchCheckLabel, branchContactLines } from "./adminBranchDisplay";
 
 const emptyForm = {
   name: "",
@@ -120,7 +121,7 @@ export function AdminBranchesPage() {
   return (
     <div className="admin-page">
       <section className="admin-panel">
-      <div className="admin-panel__heading">
+      <div className="admin-panel__heading admin-branch-heading">
         <div>
           <span className="eyebrow"><Building2 size={16} /> Branch Management</span>
           <h2>Clinic branches</h2>
@@ -130,7 +131,7 @@ export function AdminBranchesPage() {
       </div>
 
       <form
-        className="admin-toolbar"
+        className="admin-toolbar admin-branch-toolbar"
         onSubmit={(event) => {
           event.preventDefault();
           setApplied(search.trim());
@@ -142,11 +143,12 @@ export function AdminBranchesPage() {
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Search by name, ID, address, phone, or email"
+            aria-label="Search branches"
           />
         </label>
-        <label>
-          Status
-          <select value={status} onChange={(event) => setStatus(event.target.value)}>
+        <label className="admin-branch-filter">
+          <span>Status</span>
+          <select value={status} onChange={(event) => setStatus(event.target.value)} aria-label="Filter by status">
             <option value="">All</option>
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
@@ -161,16 +163,12 @@ export function AdminBranchesPage() {
         <EmptyState title="No branches match" message="Change the search or status filter, or add a branch." />
       ) : null}
       {branches?.length ? (
-        <div className="admin-table-wrap">
-          <table className="admin-table">
+        <div className="admin-table-wrap admin-branch-list">
+          <table className="admin-table admin-branch-table">
             <thead>
               <tr>
-                <th>Branch ID</th>
-                <th>Name</th>
-                <th>Address</th>
+                <th>Branch</th>
                 <th>Contact</th>
-                <th>Email</th>
-                <th>Main</th>
                 <th>Status</th>
                 <th>Check-in</th>
                 <th>Created</th>
@@ -179,18 +177,35 @@ export function AdminBranchesPage() {
             </thead>
             <tbody>
               {branches.map((branch) => (
-                <tr key={branch.id}>
-                  <td><code>{branch.branchId}</code></td>
-                  <td><strong>{branch.name}</strong></td>
-                  <td>{branch.address || "Missing address"}</td>
-                  <td>{branch.contactNumber || "Missing contact number"}</td>
-                  <td>{branch.email || "No email"}</td>
-                  <td>{branch.isMain ? "Main Branch" : "—"}</td>
-                  <td><AdminStatusBadge status={branch.status} /></td>
-                  <td>{branch.rfidEnabled ? "RFID on" : "RFID off"} · {branch.qrEnabled ? "QR on" : "QR off"}</td>
-                  <td>{formatAdminDateTime(branch.createdAt)}</td>
-                  <td>
-                    <div className="admin-row-actions">
+                <tr key={branch.id} className="admin-branch-card">
+                  <td data-label="Branch">
+                    <div className="admin-branch-identity">
+                      <strong>{branch.name}</strong>
+                      <code>{branch.branchId}</code>
+                      {branch.isMain ? <span className="admin-branch-badge">Main Branch</span> : null}
+                    </div>
+                  </td>
+                  <td data-label="Contact">
+                    <ul className="admin-branch-contact">
+                      {branchContactLines(branch).map((line, index) => (
+                        <li key={`${branch.id}-contact-${index}`}>{line}</li>
+                      ))}
+                    </ul>
+                  </td>
+                  <td data-label="Status"><AdminStatusBadge status={branch.status} /></td>
+                  <td data-label="Check-in">
+                    <div className="admin-branch-checks">
+                      <span className={`admin-branch-check ${branch.rfidEnabled ? "is-on" : "is-off"}`}>
+                        {branchCheckLabel(branch.rfidEnabled, "RFID")}
+                      </span>
+                      <span className={`admin-branch-check ${branch.qrEnabled ? "is-on" : "is-off"}`}>
+                        {branchCheckLabel(branch.qrEnabled, "QR")}
+                      </span>
+                    </div>
+                  </td>
+                  <td data-label="Created">{formatAdminDateTime(branch.createdAt)}</td>
+                  <td data-label="Actions">
+                    <div className="admin-branch-actions" role="group" aria-label={`Actions for ${branch.name}`}>
                       <button type="button" className="button button--secondary button--compact" onClick={() => openEdit(branch)}>
                         <Pencil size={14} /> Edit
                       </button>
@@ -203,7 +218,7 @@ export function AdminBranchesPage() {
                         Assigned staff
                       </button>
                       {branch.isMain ? (
-                        <span>Protected</span>
+                        <span className="admin-branch-protected">Protected</span>
                       ) : (
                         <button
                           type="button"
