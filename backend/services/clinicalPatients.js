@@ -374,6 +374,55 @@ async function enrichRecordsFromLinkedProfiles(db, records) {
   });
 }
 
+async function recordIdsAtBranch(db, branchId) {
+  const result = await db.query(
+    `SELECT record.id
+     FROM clinic_patient_records AS record
+     WHERE COALESCE(record.is_archived, FALSE) = FALSE
+       AND (
+         EXISTS (
+           SELECT 1 FROM clinic_patient_treatments AS treatment
+           WHERE treatment.clinical_record_id = record.id
+             AND treatment.originating_branch_id = $1
+         )
+         OR EXISTS (
+           SELECT 1 FROM patient_portal_appointments AS appointment
+           WHERE record.linked_user_id IS NOT NULL
+             AND appointment.user_id = record.linked_user_id
+             AND appointment.branch_id = $1
+         )
+         OR EXISTS (
+           SELECT 1 FROM patient_portal_queue_entries AS queue
+           WHERE record.linked_user_id IS NOT NULL
+             AND queue.user_id = record.linked_user_id
+             AND queue.branch_id = $1
+         )
+       )`,
+    [branchId]
+  );
+  return new Set(result.rows.map((row) => String(row.id)));
+}
+
+async function latestTreatmentAtBranch(db, recordId, branchId) {
+  try {
+    const result = await db.query(
+      `SELECT treatment, treatment_date
+       FROM clinic_patient_treatments
+       WHERE clinical_record_id = $1
+         AND originating_branch_id = $2
+       ORDER BY treatment_date DESC NULLS LAST, id DESC
+       LIMIT 1`,
+      [recordId, branchId]
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    return { treatment: row.treatment, treatmentDate: row.treatment_date };
+  } catch (error) {
+    if (error?.code === "42703" || error?.code === "42P01") return null;
+    throw error;
+  }
+}
+
 async function listClinicalRecords(db, { search = null, includeArchived = false, limit = 100, offset = 0 } = {}) {
   const params = [];
   const clauses = [];
@@ -1623,7 +1672,7 @@ async function nextVisitSequence(db, queueEntryId) {
   }
 }
 
-async function findActiveQueueForUser(db, userId) {
+async function findActiveQueueForUser(db, userId, branchId = null) {
   if (!userId) return null;
   const tz = process.env.CLINIC_TIMEZONE || "Asia/Manila";
   try {
@@ -1633,12 +1682,14 @@ async function findActiveQueueForUser(db, userId) {
        WHERE user_id = $1
          AND (checked_in_at AT TIME ZONE $2)::date = (CURRENT_TIMESTAMP AT TIME ZONE $2)::date
          AND status NOT IN ('completed', 'no_show')
+         AND ($3::bigint IS NULL OR branch_id = $3)
        ORDER BY id DESC
        LIMIT 1`,
-      [String(userId), tz]
+      [String(userId), tz, branchId]
     );
     return result.rows[0] || null;
   } catch (error) {
+    if (error?.code === "42703") return null;
     if (error?.code !== "42P01") {
       try {
         const result = await db.query(
@@ -1647,9 +1698,10 @@ async function findActiveQueueForUser(db, userId) {
            WHERE user_id = $1
              AND DATE(checked_in_at) = CURRENT_DATE
              AND status NOT IN ('completed', 'no_show')
+             AND ($2::bigint IS NULL OR branch_id = $2)
            ORDER BY id DESC
            LIMIT 1`,
-          [String(userId)]
+          [String(userId), branchId]
         );
         return result.rows[0] || null;
       } catch {
@@ -1714,9 +1766,9 @@ async function listTreatmentsForQueueEntries(db, queueEntryIds) {
   }
 }
 
-async function listCurrentVisitForRecord(db, record) {
+async function listCurrentVisitForRecord(db, record, { branchId = null } = {}) {
   if (!record) return null;
-  const queue = await findActiveQueueForUser(db, record.linkedUserId);
+  const queue = await findActiveQueueForUser(db, record.linkedUserId, branchId);
   const queueEntryId = queue?.id ? Number(queue.id) : null;
   const appointmentId = queue?.appointment_id ? Number(queue.appointment_id) : null;
   const procedures = await listTreatmentsForVisit(db, { queueEntryId, appointmentId });
@@ -1978,6 +2030,8 @@ async function findOrCreateClinicalRecordForUser(db, userId, actor = {}) {
 
 module.exports = {
   listClinicalRecords,
+  recordIdsAtBranch,
+  latestTreatmentAtBranch,
   getClinicalRecord,
   listLinkedAppointments,
   resolveNextAppointment,

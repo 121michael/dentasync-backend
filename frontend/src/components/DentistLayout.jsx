@@ -49,11 +49,14 @@ export function DentistLayout() {
     api.getDentistBranchContext({ silent: true })
       .then((context) => {
         if (cancelled) return;
-        const active = context.activeBranches || [];
-        const stored = sessionStorage.getItem("dentasync.activeBranchId");
-        const chosen = active.find((branch) => String(branch.id) === String(stored)) || active[0] || null;
-        if (chosen?.id) sessionStorage.setItem("dentasync.activeBranchId", String(chosen.id));
-        else sessionStorage.removeItem("dentasync.activeBranchId");
+        const chosen = context.branch || null;
+        if (chosen?.id) {
+          sessionStorage.setItem("dentasync.assignedBranchId", String(chosen.id));
+          sessionStorage.setItem("dentasync.activeBranchId", String(chosen.id));
+        } else {
+          sessionStorage.removeItem("dentasync.assignedBranchId");
+          sessionStorage.removeItem("dentasync.activeBranchId");
+        }
         setSelectedBranchId(chosen ? String(chosen.id) : "");
         setBranchContext(context);
       })
@@ -66,10 +69,6 @@ export function DentistLayout() {
     };
   }, []);
 
-  function chooseBranch(nextId) {
-    sessionStorage.setItem("dentasync.activeBranchId", String(nextId));
-    setSelectedBranchId(String(nextId));
-  }
   const date = new Intl.DateTimeFormat("en-US", {
     weekday: "long",
     month: "long",
@@ -185,16 +184,6 @@ export function DentistLayout() {
                 : "DentaSync"}
             </span>
             <p>{date}</p>
-            {(branchContext?.activeBranches || []).length > 1 ? (
-              <label>
-                Branch
-                <select value={selectedBranchId} onChange={(event) => chooseBranch(event.target.value)}>
-                  {branchContext.activeBranches.map((branch) => (
-                    <option key={branch.id} value={branch.id}>{branch.name}</option>
-                  ))}
-                </select>
-              </label>
-            ) : null}
             {branchContext && !branchContext.operational ? <p>{branchContext.message}</p> : null}
           </div>
           <div className="dentist-header__actions">

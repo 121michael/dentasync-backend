@@ -197,8 +197,8 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
   );
   await db.query(
     `INSERT INTO clinic_branch_assignments (user_id, branch_id) VALUES
-     ($1, $2), ($1, $3), ($4, $3), ($5, $2), ($6, $3), ($7, $3)`,
-    [treatingId, mandaluyongId, pasigId, unrelatedId, coworkerId, delegateId, staffId]
+     ($1, $2), ($3, $2), ($4, $5), ($6, $2), ($7, $2)`,
+    [treatingId, pasigId, unrelatedId, coworkerId, mandaluyongId, delegateId, staffId]
   );
 
   const record = await db.query(
@@ -338,10 +338,7 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
   });
   assert.equal(treatingChart.status, 200, treatingChart.json.message);
   const ordinary = treatingChart.json.treatments.find((row) => row.treatment === "Oral Prophylaxis");
-  assert.ok(ordinary);
-  assert.equal(ordinary.treatmentDate.slice(0, 10), "2026-01-10");
-  assert.equal(ordinary.diagnosisNotes, "");
-  assert.equal(ordinary.diagnosis, "");
+  assert.equal(ordinary, undefined);
   const legacy = treatingChart.json.treatments.find((row) => row.treatment === "Legacy Filling");
   assert.equal(legacy.attributionReview, true);
   assert.equal(legacy.diagnosisNotes, "");
@@ -351,7 +348,7 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
   assert.equal(search.status, 200);
   const listed = search.json.patients.find((row) => Number(row.id) === Number(recordId));
   assert.equal(listed.fullName, "Mina Patient");
-  assert.equal(listed.lastTreatment, "Oral Prophylaxis");
+  assert.equal(listed.lastTreatment, null);
 
   const unrelatedDetail = await api("GET", `/api/dentist/patients/${recordId}`, {
     role: "dentist",
@@ -464,8 +461,8 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
     branchId: pasigId,
   });
   assert.equal(
-    stillHidden.json.treatments.find((row) => row.treatment === "Oral Prophylaxis").diagnosisNotes,
-    ""
+    stillHidden.json.treatments.find((row) => row.treatment === "Oral Prophylaxis"),
+    undefined
   );
 
   const sharedSession = await api("POST", `/api/dentist/access-challenges/${challengeId}/authorize`, {
@@ -706,8 +703,8 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
     branchId: pasigId,
   });
   assert.equal(
-    afterRevoke.json.treatments.find((row) => row.treatment === "Oral Prophylaxis").diagnosisNotes,
-    ""
+    afterRevoke.json.treatments.find((row) => row.treatment === "Oral Prophylaxis"),
+    undefined
   );
   const downloadRevoked = await api("GET", `/api/dentist/patients/${recordId}/medical-documents/${docId}/download`, {
     role: "dentist",
@@ -777,8 +774,8 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
     branchId: pasigId,
   });
   assert.equal(
-    expired.json.treatments.find((row) => row.treatment === "Oral Prophylaxis").diagnosisNotes,
-    ""
+    expired.json.treatments.find((row) => row.treatment === "Oral Prophylaxis"),
+    undefined
   );
   const downloadExpired = await api("GET", `/api/dentist/patients/${recordId}/medical-documents/${docId}/download`, {
     role: "dentist",
@@ -815,7 +812,9 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
   });
   assert.equal(staffView.status, 200, staffView.json.message);
   const staffMandaluyong = staffView.json.patient.treatments.find((row) => row.treatment === "Oral Prophylaxis");
-  assert.equal(staffMandaluyong.diagnosisNotes, "");
+  assert.equal(staffMandaluyong, undefined);
+  const staffPasig = staffView.json.patient.treatments.find((row) => row.treatment === "Consultation");
+  assert.equal(staffPasig.diagnosisNotes, "Pasig visit note");
 
   const job = await db.query(
     `INSERT INTO admin_portal_document_sync_jobs (

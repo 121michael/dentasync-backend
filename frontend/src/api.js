@@ -40,7 +40,10 @@ async function request(path, { method = "GET", body, headers = {}, authenticated
   }
   if (path.startsWith("/staff") || path.startsWith("/dentist")) {
     const branchId = sessionStorage.getItem("dentasync.activeBranchId");
-    if (branchId) requestHeaders["X-DentaSync-Branch"] = branchId;
+    const assigned = sessionStorage.getItem("dentasync.assignedBranchId");
+    if (branchId && assigned && String(branchId) === String(assigned)) {
+      requestHeaders["X-DentaSync-Branch"] = branchId;
+    }
   }
 
   if (body && !(body instanceof FormData)) {

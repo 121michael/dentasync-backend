@@ -1346,10 +1346,19 @@ function createStaffPortalRouter({
   router.get("/patients", async (req, res) => {
     const search = stringValue(req.query.search, 100);
     try {
+      if (!req.branchAccess?.activeBranch && !req.branchAccess?.legacy) {
+        return res.json({ patients: [] });
+      }
       const patients = await clinicalPatients.listClinicalRecords(db, { search, limit: 100 });
+      const branchId = req.branchAccess?.activeBranch?.id || null;
+      const visibleIds = branchId ? await clinicalPatients.recordIdsAtBranch(db, branchId) : null;
+      const visible = visibleIds ? patients.filter((record) => visibleIds.has(String(record.id))) : patients;
       return res.json({
-        patients: patients.map((record) => {
+        patients: await Promise.all(visible.map(async (record) => {
           const nextAppointment = clinicalPatients.resolveClinicalNextAppointment(record, []);
+          const branchHistory = branchId
+            ? await clinicalPatients.latestTreatmentAtBranch(db, record.id, branchId)
+            : null;
           return {
             id: record.id,
             recordCode: record.recordCode,
@@ -1365,10 +1374,10 @@ function createStaffPortalRouter({
             gender: record.gender,
             age: record.age,
             ageSex: record.ageSex || clinicalPatients.formatAgeSex(record.age, record.gender),
-            lastVisit: record.lastTreatmentDate,
-            lastTreatment: record.lastTreatment,
-            lastTreatmentDate: record.lastTreatmentDate,
-            amountPaid: record.lastAmountPaid,
+            lastVisit: branchId ? branchHistory?.treatmentDate || null : record.lastTreatmentDate,
+            lastTreatment: branchId ? branchHistory?.treatment || null : record.lastTreatment,
+            lastTreatmentDate: branchId ? branchHistory?.treatmentDate || null : record.lastTreatmentDate,
+            amountPaid: branchId ? null : record.lastAmountPaid,
             nextAppointmentDate: nextAppointment?.date || record.nextAppointmentDate || null,
             nextAppointmentTime: nextAppointment?.time || record.nextAppointmentTime || null,
             accountStatus: record.linkedUserId ? "linked_account" : "clinical_record",
@@ -1379,7 +1388,7 @@ function createStaffPortalRouter({
             staffVerificationStatus: record.staffVerificationStatus || "pending",
             isClinicalRecord: true,
           };
-        }),
+        })),
       });
     } catch (error) {
       if (clinicalPatients.isMissingRelation(error)) {
@@ -1552,6 +1561,27 @@ function createStaffPortalRouter({
     }
 
     try {
+      if (!req.branchAccess?.legacy) {
+        const staffBranchId = req.branchAccess?.activeBranch?.id;
+        if (!staffBranchId) {
+          return res.status(409).json({
+            message: req.branchAccess?.message || "No branch is assigned to this account.",
+          });
+        }
+        const owned = await db.query(
+          `SELECT originating_branch_id
+           FROM clinic_patient_treatments
+           WHERE id = $1 AND clinical_record_id = $2`,
+          [treatmentId, recordId]
+        );
+        if (!owned.rows.length) {
+          return res.status(404).json({ message: "Treatment not found." });
+        }
+        const origin = owned.rows[0].originating_branch_id;
+        if (origin != null && String(origin) !== String(staffBranchId)) {
+          return res.status(403).json({ message: "That treatment belongs to another clinic branch." });
+        }
+      }
       const before = await db
         .query(`SELECT amount_paid FROM clinic_patient_treatments WHERE id = $1 AND clinical_record_id = $2`, [
           treatmentId,
@@ -1611,6 +1641,11 @@ function createStaffPortalRouter({
     }
 
     try {
+      if (!req.branchAccess?.activeBranch && !req.branchAccess?.legacy) {
+        return res.status(409).json({
+          message: req.branchAccess?.message || "No branch is assigned to this account.",
+        });
+      }
       const detail = await clinicalPatients.getClinicalRecord(db, recordId);
       if (!detail || detail.record.archived) {
         return res.status(404).json({ message: "Patient record not found." });
@@ -1673,7 +1708,13 @@ function createStaffPortalRouter({
             dental_concerns: detail.record.dentalConcerns,
           },
           appointments,
-          treatments: detail.treatments.map((record) => {
+          treatments: detail.treatments.filter((record) => {
+            const staffBranchId = req.branchAccess?.activeBranch?.id || null;
+            return recordAccess.treatmentVisible(record, {
+              encounterBranchIds: staffBranchId ? [String(staffBranchId)] : [],
+              grants: [],
+            });
+          }).map((record) => {
             const payment = patientData.paymentSummary(record.amountCharged, record.amountPaid);
             const staffBranchId = req.branchAccess?.activeBranch?.id || null;
             const visible = recordAccess.presentTreatment(record, {
@@ -1701,7 +1742,9 @@ function createStaffPortalRouter({
               ...payment,
             };
           }),
-          currentVisit: await clinicalPatients.listCurrentVisitForRecord(db, detail.record),
+          currentVisit: await clinicalPatients.listCurrentVisitForRecord(db, detail.record, {
+            branchId: req.branchAccess?.activeBranch?.id || null,
+          }),
         },
       });
     } catch (error) {
@@ -1723,6 +1766,12 @@ function createStaffPortalRouter({
 
     const dentalChartSync = require("../services/dentalChartSync");
     try {
+      if (!req.branchAccess?.activeBranch && !req.branchAccess?.legacy) {
+        return res.status(409).json({
+          message: req.branchAccess?.message || "No branch is assigned to this account.",
+        });
+      }
+      const detail = await clinicalPatients.getClinicalRecord(db, recordId);
       const record = await db.query(
         `SELECT id FROM clinic_patient_records
          WHERE id = $1 AND COALESCE(is_archived, FALSE) = FALSE
@@ -1767,32 +1816,17 @@ function createStaffPortalRouter({
         throw error;
       });
 
+      const staffBranchId = req.branchAccess?.activeBranch?.id || null;
+      const chartAccess = {
+        encounterBranchIds: staffBranchId ? [String(staffBranchId)] : [],
+        grants: [],
+      };
       return res.json({
         patientId: recordId,
         readOnly: true,
-        entries: result.rows.map((row) => {
-          const conditions = Array.isArray(row.conditions_json)
-            ? row.conditions_json
-            : row.condition_label
-              ? [row.condition_label]
-              : [];
-          const treatments = Array.isArray(row.treatments_json) ? row.treatments_json : [];
-          return {
-            id: row.id,
-            toothNumber: row.tooth_number,
-            conditionLabel: row.condition_label,
-            conditions,
-            condition: conditions,
-            treatments,
-            status: row.tooth_status || "healthy",
-            notes: row.notes || "",
-            createdBy: row.created_by,
-            createdByRole: row.created_by_role,
-            updatedBy: row.updated_by || row.created_by || null,
-            createdAt: row.created_at,
-            updatedAt: row.updated_at,
-          };
-        }),
+        entries: result.rows.map((row) =>
+          recordAccess.presentChartEntry(row, detail?.treatments || [], chartAccess)
+        ),
       });
     } catch (error) {
       if (clinicalPatients.isMissingRelation(error) || error?.code === "42P01") {
@@ -2946,11 +2980,17 @@ function createStaffPortalRouter({
     }
   });
 
-  router.get("/export/:report", async (_req, res) => {
-    const report = stringValue(_req.params.report, 30)?.toLowerCase();
+  router.get("/export/:report", async (req, res) => {
+    const report = stringValue(req.params.report, 30)?.toLowerCase();
     let headers;
     let rows;
     let fileName;
+    const branchId = req.branchAccess?.legacy ? null : req.branchAccess?.activeBranch?.id || null;
+    if (!branchId && !req.branchAccess?.legacy) {
+      return res.status(409).json({
+        message: req.branchAccess?.message || "No branch is assigned to this account.",
+      });
+    }
 
     try {
       if (report === "check-ins" || report === "queue") {
@@ -2967,7 +3007,9 @@ function createStaffPortalRouter({
            JOIN users AS patient ON patient.id::text = queue.user_id
            LEFT JOIN patient_portal_appointments AS appointment ON appointment.id = queue.appointment_id
            WHERE DATE(queue.checked_in_at) = CURRENT_DATE
-           ORDER BY queue.position ASC`
+             AND ($1::bigint IS NULL OR queue.branch_id = $1)
+           ORDER BY queue.position ASC`,
+          [branchId]
         );
         headers = ["Queue #", "Patient", "Dentist", "Status", "Wait Minutes", "Checked In"];
         rows = result.rows.map((row) => [
@@ -2990,8 +3032,10 @@ function createStaffPortalRouter({
              appointment.status
            FROM patient_portal_appointments AS appointment
            JOIN users AS patient ON patient.id::text = appointment.user_id
+           WHERE ($1::bigint IS NULL OR appointment.branch_id = $1)
            ORDER BY appointment.appointment_date DESC, appointment.appointment_time DESC
-           LIMIT 1000`
+           LIMIT 1000`,
+          [branchId]
         );
         headers = ["Date", "Time", "Patient", "Treatment", "Dentist", "Status"];
         rows = result.rows.map((row) => [

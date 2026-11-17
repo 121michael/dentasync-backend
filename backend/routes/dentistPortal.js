@@ -617,8 +617,20 @@ function createDentistPortalRouter({
       error.patient = recordAccess.identityOf(detail.record);
       throw error;
     }
+    const assigned = req.branchAccess?.activeBranch?.id != null ? String(req.branchAccess.activeBranch.id) : null;
+    if (!assigned && !req.branchAccess?.legacy) {
+      const error = new Error("No branch is assigned to this account. Ask an administrator to assign a branch.");
+      error.status = 409;
+      throw error;
+    }
+    const relationshipIds = relationship.branchIds.map(String);
+    const encounterBranchIds = !assigned
+      ? relationship.branchIds
+      : relationshipIds.includes(assigned)
+        ? [assigned]
+        : [];
     const grants = await recordAccess.activeGrants(db, req.dentist.id, detail.record.id);
-    return { detail, access: { encounterBranchIds: relationship.branchIds, grants } };
+    return { detail, access: { encounterBranchIds, grants } };
   }
 
   async function visibleWellness(db, detail, access) {
@@ -1862,24 +1874,29 @@ function createDentistPortalRouter({
   router.get("/patients", async (req, res) => {
     const search = stringValue(req.query.search, 100);
     try {
+      if (!req.branchAccess?.activeBranch && !req.branchAccess?.legacy) {
+        return res.json({ patients: [] });
+      }
       const patients = await clinicalPatients.listClinicalRecords(db, {
         search,
         limit: 100,
       });
+      const assigned = req.branchAccess?.activeBranch?.id != null ? String(req.branchAccess.activeBranch.id) : null;
       const visible = [];
       for (const record of patients) {
         const relationship = await recordAccess.qualifyingRelationship(db, req.dentist, record);
+        if (!relationship.allowed) continue;
+        if (assigned && !relationship.branchIds.map(String).includes(assigned)) continue;
         const identity = recordAccess.identityOf(record);
-        if (!relationship.allowed) {
-          visible.push(identity);
-          continue;
-        }
+        const branchHistory = assigned
+          ? await clinicalPatients.latestTreatmentAtBranch(db, record.id, assigned)
+          : { treatment: record.lastTreatment, treatmentDate: record.lastTreatmentDate };
         visible.push({
           ...identity,
           recordCode: record.recordCode,
           patientCategory: record.patientCategory || null,
-          lastTreatment: record.lastTreatment,
-          lastTreatmentDate: record.lastTreatmentDate,
+          lastTreatment: branchHistory?.treatment || null,
+          lastTreatmentDate: branchHistory?.treatmentDate || null,
           isClinicalRecord: true,
         });
       }
@@ -2093,7 +2110,7 @@ function createDentistPortalRouter({
         },
         appointments,
         nextAppointment: patientNextAppointment,
-        treatments: detail.treatments.map((row) => {
+        treatments: detail.treatments.filter((row) => recordAccess.treatmentVisible(row, access)).map((row) => {
           const presented = recordAccess.presentTreatment(row, access);
           const amountCharged = Number(row.amountCharged || 0);
           const amountPaid = Number(row.amountPaid || 0);
@@ -2119,7 +2136,9 @@ function createDentistPortalRouter({
               .filter(Boolean)
               .sort()[0] || null,
         },
-        currentVisit: await clinicalPatients.listCurrentVisitForRecord(db, detail.record),
+        currentVisit: await clinicalPatients.listCurrentVisitForRecord(db, detail.record, {
+          branchId: req.branchAccess?.activeBranch?.id || null,
+        }),
         wellness: await visibleWellness(db, detail, access),
       });
     } catch (error) {
@@ -2487,7 +2506,7 @@ function createDentistPortalRouter({
     }
 
     try {
-      await openPatientChart(req, recordId);
+      const opened = await openPatientChart(req, recordId);
       const record = await db.query(
         `SELECT id FROM clinic_patient_records
          WHERE id = $1 AND COALESCE(is_archived, FALSE) = FALSE
@@ -2536,29 +2555,9 @@ function createDentistPortalRouter({
 
       return res.json({
         patientId: recordId,
-        entries: result.rows.map((row) => {
-          const conditions = Array.isArray(row.conditions_json)
-            ? row.conditions_json
-            : row.condition_label
-              ? [row.condition_label]
-              : [];
-          const treatments = Array.isArray(row.treatments_json) ? row.treatments_json : [];
-          return {
-            id: row.id,
-            toothNumber: row.tooth_number,
-            conditionLabel: row.condition_label,
-            conditions,
-            condition: conditions,
-            treatments,
-            status: row.tooth_status || "healthy",
-            notes: row.notes || "",
-            createdBy: row.created_by,
-            createdByRole: row.created_by_role,
-            updatedBy: row.updated_by || row.created_by || null,
-            createdAt: row.created_at,
-            updatedAt: row.updated_at,
-          };
-        }),
+        entries: result.rows.map((row) =>
+          recordAccess.presentChartEntry(row, opened.detail.treatments, opened.access)
+        ),
       });
     } catch (error) {
       if (error.status) return sendAccessError(res, error, "Unable to load the dental chart.");

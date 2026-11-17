@@ -102,9 +102,14 @@ export function StaffLayout() {
     api.getStaffBranchContext({ silent: true })
       .then((context) => {
         if (cancelled) return;
-        const branch = context.branch || context.activeBranches?.[0] || null;
-        if (branch?.id) sessionStorage.setItem("dentasync.activeBranchId", String(branch.id));
-        else sessionStorage.removeItem("dentasync.activeBranchId");
+        const branch = context.branch || null;
+        if (branch?.id) {
+          sessionStorage.setItem("dentasync.assignedBranchId", String(branch.id));
+          sessionStorage.setItem("dentasync.activeBranchId", String(branch.id));
+        } else {
+          sessionStorage.removeItem("dentasync.assignedBranchId");
+          sessionStorage.removeItem("dentasync.activeBranchId");
+        }
         setBranchContext(context);
       })
       .catch((error) => {

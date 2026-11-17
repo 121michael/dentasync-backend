@@ -150,15 +150,17 @@ test("staff and dentist branch access", async (t) => {
   const mandaluyongStaff = await addUser("staff", "m.staff@example.test", "09170002002", "Minda");
   const pasigStaff = await addUser("staff", "p.staff@example.test", "09170002003", "Pia");
   const dentistId = await addUser("dentist", "dee.access@example.test", "09170002004", "Dee");
+  const pasigDentistId = await addUser("dentist", "pia.access@example.test", "09170002005", "Pia");
   await db.query(`INSERT INTO clinic_branch_assignments (user_id, branch_id) VALUES ($1, $2), ($3, $4)`, [
     mandaluyongStaff,
     main.rows[0].id,
     pasigStaff,
     pasig.rows[0].id,
   ]);
-  await db.query(`INSERT INTO clinic_branch_assignments (user_id, branch_id) VALUES ($1, $2), ($1, $3)`, [
+  await db.query(`INSERT INTO clinic_branch_assignments (user_id, branch_id) VALUES ($1, $2), ($3, $4)`, [
     dentistId,
     main.rows[0].id,
+    pasigDentistId,
     pasig.rows[0].id,
   ]);
   await db.query(`UPDATE patient_portal_appointments SET dentist_id = $1 WHERE branch_id = $2`, [
@@ -171,7 +173,7 @@ test("staff and dentist branch access", async (t) => {
        appointment_date, appointment_time, coverage_type, estimated_cost, status, branch_id
      ) VALUES
        ($1, 'filling', 'Filling', $2, 'Dr. Dee', CURRENT_DATE, '10:00', 'self_pay', 700, 'confirmed', $3)`,
-    [String(patient.rows[0].id), String(dentistId), pasig.rows[0].id]
+    [String(patient.rows[0].id), String(pasigDentistId), pasig.rows[0].id]
   );
   await db.query(
     `INSERT INTO patient_portal_queue_entries (user_id, appointment_id, token, position, status, branch_id)
@@ -195,6 +197,7 @@ test("staff and dentist branch access", async (t) => {
   const mToken = tokenFor(mandaluyongStaff, "staff");
   const pToken = tokenFor(pasigStaff, "staff");
   const dToken = tokenFor(dentistId, "dentist");
+  const pasigDentistToken = tokenFor(pasigDentistId, "dentist");
 
   const mQueue = await request("GET", "/api/staff/queue", { token: mToken });
   assert.equal(mQueue.status, 200);
@@ -213,7 +216,9 @@ test("staff and dentist branch access", async (t) => {
 
   const dentistMain = await request("GET", "/api/dentist/queue", { token: dToken, branchId: main.rows[0].id });
   assert.equal(dentistMain.status, 200);
-  const dentistPasig = await request("GET", "/api/dentist/queue", { token: dToken, branchId: pasig.rows[0].id });
+  const dentistPasigHeader = await request("GET", "/api/dentist/queue", { token: dToken, branchId: pasig.rows[0].id });
+  assert.equal(dentistPasigHeader.status, 403);
+  const dentistPasig = await request("GET", "/api/dentist/queue", { token: pasigDentistToken });
   assert.equal(dentistPasig.status, 200);
   assert.equal(dentistMain.body.queue.length, 1);
   assert.equal(dentistMain.body.queue[0].procedure, "Cleaning");

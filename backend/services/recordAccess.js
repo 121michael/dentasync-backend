@@ -186,6 +186,57 @@ function restrictedAllowed({ originatingBranchId, encounterBranchIds, grants, sc
   return (grants || []).some((grant) => grant.scope === scope && grant.branchId === branchId);
 }
 
+function treatmentOrigin(treatment) {
+  return treatment?.originatingBranchId || treatment?.originating_branch_id || null;
+}
+
+function treatmentVisible(treatment, access) {
+  const branchId = treatmentOrigin(treatment);
+  if (branchId == null || branchId === "") return true;
+  return restrictedAllowed({
+    originatingBranchId: branchId,
+    encounterBranchIds: access?.encounterBranchIds,
+    grants: access?.grants,
+    scope: "diagnosis_notes",
+  });
+}
+
+function presentChartEntry(row, treatments, access) {
+  const tooth = String(row.tooth_number ?? row.toothNumber ?? "").trim();
+  let allowed = false;
+  let hidden = false;
+  for (const treatment of treatments || []) {
+    const treatmentTooth = String(treatment.toothNumber || treatment.tooth_number || "").trim();
+    if (!treatmentTooth || treatmentTooth !== tooth) continue;
+    if (treatmentVisible(treatment, access)) allowed = true;
+    else hidden = true;
+  }
+  const reveal = allowed && !hidden;
+  const conditions = reveal
+    ? Array.isArray(row.conditions_json)
+      ? row.conditions_json
+      : row.condition_label
+        ? [row.condition_label]
+        : []
+    : [];
+  const chartTreatments = reveal && Array.isArray(row.treatments_json) ? row.treatments_json : [];
+  return {
+    id: row.id,
+    toothNumber: row.tooth_number ?? row.toothNumber,
+    conditionLabel: reveal ? row.condition_label : null,
+    conditions,
+    condition: conditions,
+    treatments: chartTreatments,
+    status: reveal ? row.tooth_status || "healthy" : "healthy",
+    notes: reveal ? row.notes || "" : "",
+    createdBy: row.created_by,
+    createdByRole: row.created_by_role,
+    updatedBy: row.updated_by || row.created_by || null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 function presentTreatment(treatment, access) {
   const ordinary = {
     id: treatment.id,
@@ -957,6 +1008,8 @@ module.exports = {
   qualifyingRelationship,
   activeGrants,
   restrictedAllowed,
+  treatmentVisible,
+  presentChartEntry,
   presentTreatment,
   createRequest,
   createChallenge,

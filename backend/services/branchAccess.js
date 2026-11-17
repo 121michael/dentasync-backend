@@ -96,64 +96,32 @@ async function resolveForAccount(db, { userId, role, requestedBranchId }) {
     };
   }
 
-  if (role === "staff") {
-    const branch = assignments[0] || null;
-    if (!branch) {
-      return {
-        assignments,
-        activeBranch: null,
-        message: "No branch is assigned to this account. Ask an administrator to assign a branch.",
-      };
-    }
-    if (!branch.active) {
-      return {
-        assignments,
-        activeBranch: branch,
-        branch,
-        paused: true,
-        message: `${branch.name} is inactive. New check-ins are paused. A consultation already underway can still be finished.`,
-      };
-    }
-    return { assignments, activeBranch: branch, branch, message: null };
-  }
-
-  const active = assignments.filter((branch) => branch.active);
-  if (requested && !requested.active) {
-    return {
-      assignments,
-      activeBranch: requested,
-      branch: requested,
-      paused: true,
-      requiresSelection: active.length > 1,
-      message: `${requested.name} is inactive. New check-ins are paused. A consultation already underway can still be finished.`,
-    };
-  }
-  const chosen = requested || active[0] || assignments[0] || null;
-  if (!chosen) {
+  const branch = assignments[0] || null;
+  if (requested && branch && String(requested.id) !== String(branch.id)) {
     return {
       assignments,
       activeBranch: null,
-      message: assignments.length
-        ? "Every assigned branch is inactive. An administrator can reactivate one."
-        : "No branch is assigned to this account. Ask an administrator to assign a branch.",
+      forbidden: true,
+      message: "You are not assigned to that branch.",
     };
   }
-  if (!chosen.active) {
+  if (!branch) {
     return {
       assignments,
-      activeBranch: chosen,
-      branch: chosen,
-      paused: true,
-      message: `${chosen.name} is inactive. New check-ins are paused. A consultation already underway can still be finished.`,
+      activeBranch: null,
+      message: "No branch is assigned to this account. Ask an administrator to assign a branch.",
     };
   }
-  return {
-    assignments,
-    activeBranch: chosen,
-    branch: chosen,
-    requiresSelection: active.length > 1,
-    message: null,
-  };
+  if (!branch.active) {
+    return {
+      assignments,
+      activeBranch: branch,
+      branch,
+      paused: true,
+      message: `${branch.name} is inactive. New check-ins are paused. A consultation already underway can still be finished.`,
+    };
+  }
+  return { assignments, activeBranch: branch, branch, requiresSelection: false, message: null };
 }
 
 function requestedBranchId(req) {
