@@ -8,7 +8,6 @@ import {
   ChevronLeft,
   ChevronRight,
   ExternalLink,
-  LockKeyhole,
   Mail,
   MapPin,
   Menu,
@@ -414,10 +413,6 @@ export function AboutSection({ hmoProviders }) {
             <SectionHeading id="about-title" eyebrow="About Us" title="Private dental care, beautifully connected.">
               Schedule, track, and understand your dental journey through one calm, secure patient experience.
             </SectionHeading>
-            <p className="landing-about__note" data-reveal>
-              <LockKeyhole size={16} aria-hidden="true" /> Your health information is protected with account-level access
-              controls.
-            </p>
           </div>
           <ol className="landing-about__pillars" data-reveal>
             {PORTAL_FEATURES.map((feature, index) => (

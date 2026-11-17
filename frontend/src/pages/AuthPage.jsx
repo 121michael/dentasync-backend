@@ -436,9 +436,6 @@ export function AuthPage() {
           </p>
         </form>
       )}
-      <p className="auth-security-note">
-        <LockKeyhole size={15} /> Your health information is protected with account-level access controls.
-      </p>
       <p className="auth-legal-links">
         <Link to="/terms">Terms &amp; Conditions</Link>
         <span aria-hidden="true"> · </span>
