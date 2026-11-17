@@ -36,32 +36,12 @@ const TOGGLES = [
   },
 ];
 
-function linesToText(lines) {
-  return (lines || [])
-    .map((line) => `${line.label || ""}: ${line.value || ""}`.replace(/^: /, "").trim())
-    .join("\n");
-}
-
-function textToLines(text) {
-  return String(text || "")
-    .split("\n")
-    .map((row) => row.trim())
-    .filter(Boolean)
-    .map((row) => {
-      const index = row.indexOf(":");
-      if (index < 0) return { label: row, value: "" };
-      return {
-        label: row.slice(0, index).trim(),
-        value: row.slice(index + 1).trim(),
-      };
-    });
-}
-
 export function AdminAiSettingsPage() {
   const { pushToast, confirm } = useAdminUi();
   const [settings, setSettings] = useState(null);
   const [groups, setGroups] = useState([]);
   const [services, setServices] = useState([]);
+  const [selectedServiceId, setSelectedServiceId] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -72,8 +52,12 @@ export function AdminAiSettingsPage() {
         api.getAdminClinicServices(),
       ]);
       setSettings(settingsResponse.settings);
+      const nextServices = catalogResponse.services || [];
       setGroups(catalogResponse.groups || []);
-      setServices(catalogResponse.services || []);
+      setServices(nextServices);
+      setSelectedServiceId((current) =>
+        current && nextServices.some((service) => service.id === current) ? current : ""
+      );
       setError("");
     } catch (loadError) {
       setError(loadError.message);
@@ -91,6 +75,10 @@ export function AdminAiSettingsPage() {
         services: services.filter((service) => service.group === group.id && service.adminVisible !== false),
       })).filter((group) => group.services.length),
     [groups, services]
+  );
+  const selectedService = useMemo(
+    () => services.find((service) => service.id === selectedServiceId && service.adminVisible !== false) || null,
+    [services, selectedServiceId]
   );
 
   function updateService(id, patch) {
@@ -146,18 +134,31 @@ export function AdminAiSettingsPage() {
 
   async function saveClinicServices(event) {
     event.preventDefault();
+    if (!selectedService) {
+      pushToast("Select a service before saving.", "error");
+      return;
+    }
     const ok = await confirm({
-      title: "Save clinic services",
-      message: "This updates Patient Portal prices and the AI chatbot from the same approved catalog.",
-      confirmLabel: "Save catalog",
+      title: "Save clinic service",
+      message: `This updates the Patient Portal price label and chatbot answer for ${selectedService.title}. Other catalog fields stay as stored.`,
+      confirmLabel: "Save service",
       tone: "primary",
     });
     if (!ok) return;
     setBusy(true);
     try {
-      const response = await api.updateAdminClinicServices({ services });
+      const response = await api.updateAdminClinicServices({
+        services: [
+          {
+            id: selectedService.id,
+            priceLabel: selectedService.priceLabel,
+            chatbotEn: selectedService.chatbotEn,
+          },
+        ],
+      });
       setGroups(response.groups || groups);
       setServices(response.services || services);
+      setSelectedServiceId(selectedService.id);
       pushToast(response.message || "Clinic services updated successfully.");
     } catch (saveError) {
       pushToast(saveError.message, "error");
@@ -246,69 +247,57 @@ export function AdminAiSettingsPage() {
             <span className="eyebrow">AI Knowledge</span>
             <h2>Clinic Services</h2>
             <p>
-              Official service names, prices, and chatbot answers. Changes here update the Patient Portal
-              and chatbot from the same catalog.
+              Choose a clinic service, then update its price label and chatbot answer. Patient Portal and
+              chatbot still read this same catalog. Official price details stay stored and are not shown here.
             </p>
           </div>
         </div>
         <form className="admin-form admin-clinic-services__form" onSubmit={saveClinicServices}>
-          {groupedServices.map((group) => (
-            <div key={group.id} className="admin-clinic-services__group">
-              <h3>{group.title}</h3>
-              {group.services.map((service) => (
-                <article key={service.id} className="admin-clinic-services__card">
-                  <label>
-                    Service name
-                    <input
-                      value={service.title || ""}
-                      disabled={busy}
-                      onChange={(event) => updateService(service.id, { title: event.target.value })}
-                    />
-                  </label>
-                  <label>
-                    Price label
-                    <input
-                      value={service.priceLabel || ""}
-                      disabled={busy}
-                      onChange={(event) => updateService(service.id, { priceLabel: event.target.value })}
-                    />
-                  </label>
-                  <label className="admin-clinic-services__wide">
-                    Official price / details
-                    <textarea
-                      rows={3}
-                      value={service.details || ""}
-                      disabled={busy}
-                      onChange={(event) => updateService(service.id, { details: event.target.value })}
-                    />
-                  </label>
-                  <label className="admin-clinic-services__wide">
-                    Price units and terms
-                    <textarea
-                      rows={3}
-                      value={linesToText(service.lines)}
-                      disabled={busy}
-                      onChange={(event) =>
-                        updateService(service.id, { lines: textToLines(event.target.value) })
-                      }
-                    />
-                  </label>
-                  <label className="admin-clinic-services__wide">
-                    Chatbot answer
-                    <textarea
-                      rows={4}
-                      value={service.chatbotEn || ""}
-                      disabled={busy}
-                      onChange={(event) => updateService(service.id, { chatbotEn: event.target.value })}
-                    />
-                  </label>
-                </article>
+          <label className="admin-clinic-services__picker">
+            Select a service
+            <select
+              value={selectedServiceId}
+              disabled={busy}
+              onChange={(event) => setSelectedServiceId(event.target.value)}
+            >
+              <option value="">Select a service</option>
+              {groupedServices.map((group) => (
+                <optgroup key={group.id} label={group.title}>
+                  {group.services.map((service) => (
+                    <option key={service.id} value={service.id}>
+                      {service.title}
+                    </option>
+                  ))}
+                </optgroup>
               ))}
-            </div>
-          ))}
+            </select>
+          </label>
+          {selectedService ? (
+            <article className="admin-clinic-services__card">
+              <label className="admin-clinic-services__wide">
+                Price label
+                <input
+                  value={selectedService.priceLabel || ""}
+                  disabled={busy}
+                  onChange={(event) => updateService(selectedService.id, { priceLabel: event.target.value })}
+                />
+              </label>
+              <label className="admin-clinic-services__wide">
+                Chatbot answer
+                <textarea
+                  rows={5}
+                  value={selectedService.chatbotEn || ""}
+                  disabled={busy}
+                  onChange={(event) => updateService(selectedService.id, { chatbotEn: event.target.value })}
+                />
+              </label>
+            </article>
+          ) : (
+            <p className="muted">Select a service to edit its price label and chatbot answer.</p>
+          )}
           <div className="admin-modal__actions">
-            <button className="button button--primary" disabled={busy}>
-              {busy ? "Saving…" : "Save clinic services"}
+            <button className="button button--primary" disabled={busy || !selectedService}>
+              {busy ? "Saving…" : "Save clinic service"}
             </button>
           </div>
         </form>

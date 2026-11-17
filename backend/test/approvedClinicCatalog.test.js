@@ -55,6 +55,24 @@ test("unknown service ids and html are ignored when applying admin edits", () =>
   assert.equal(catalog.services.some((item) => item.id === "not-a-real-service"), false);
 });
 
+test("saving only price label and chatbot answer keeps official details and units", () => {
+  const original = resolveCatalog(null).catalog.services.find((item) => item.id === "cleaning");
+  const catalog = applyOverrides([
+    {
+      id: "cleaning",
+      priceLabel: "₱1,111 mild",
+      chatbotEn: "Cleaning is ₱1,111 for mild cases.",
+    },
+  ]);
+  const cleaning = catalog.services.find((item) => item.id === "cleaning");
+  const filling = catalog.services.find((item) => item.id === "filling");
+  assert.equal(cleaning.priceLabel, "₱1,111 mild");
+  assert.equal(cleaning.chatbotEn, "Cleaning is ₱1,111 for mild cases.");
+  assert.equal(cleaning.details, original.details);
+  assert.deepEqual(cleaning.lines, original.lines);
+  assert.equal(filling.priceLabel, "₱1,000 per surface");
+});
+
 test("admin catalog edits flow into chatbot answers", () => {
   const resolved = resolveCatalog([
     {

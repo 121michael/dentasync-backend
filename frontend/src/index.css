@@ -10368,6 +10368,27 @@ body.is-queue-display .staff-mobile-nav {
   gap: 1.25rem;
 }
 
+.admin-clinic-services__picker {
+  display: grid;
+  gap: 0.4rem;
+  color: var(--text-strong);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.admin-clinic-services__picker select {
+  width: 100%;
+  max-width: 36rem;
+  min-height: 2.75rem;
+  border: 1px solid rgba(115, 59, 170, 0.18);
+  border-radius: 12px;
+  padding: 0.7rem 0.85rem;
+  color: var(--text-strong);
+  font-size: 0.92rem;
+  font-weight: 650;
+  background: #fff;
+}
+
 .admin-clinic-services__group {
   display: grid;
   gap: 0.75rem;
@@ -10424,6 +10445,11 @@ body.is-queue-display .staff-mobile-nav {
 @media (max-width: 720px) {
   .admin-clinic-services__card {
     grid-template-columns: 1fr;
+  }
+  .admin-clinic-services__picker select,
+  .admin-clinic-services__form .button--primary {
+    max-width: none;
+    width: 100%;
   }
 }
 
