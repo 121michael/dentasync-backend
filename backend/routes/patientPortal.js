@@ -3163,8 +3163,18 @@ function createPatientPortalRouter({
           transactionOpen = false;
           return res.status(404).json({ message: "Patient account not found." });
         }
+        const accountStatus = String(patient.status || "").toLowerCase();
+        if (
+          !patient.is_verified ||
+          patient.role?.toLowerCase() !== "patient" ||
+          ["inactive", "disabled", "suspended", "rejected", "pending"].includes(accountStatus)
+        ) {
+          await client.query("ROLLBACK");
+          transactionOpen = false;
+          return res.status(403).json({ message: "This patient account is not eligible for check-in." });
+        }
         const resolved = await staffCheckIn.resolveAppointmentForCheckIn(client, patient, {
-          allowWalkIn: false,
+          allowWalkIn: true,
           branchId: sessionBranchId,
         });
         if (!resolved.appointment) {
@@ -3267,6 +3277,9 @@ function createPatientPortalRouter({
         return res.status(503).json({
           message: "Walk-in QR check-in is not available. Ask staff for help.",
         });
+      }
+      if (error.status) {
+        return res.status(error.status).json({ message: error.message });
       }
       console.error("Walk-in QR redeem error:", error.message);
       return res.status(500).json({ message: "Unable to complete walk-in check-in." });

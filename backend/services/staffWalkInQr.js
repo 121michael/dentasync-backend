@@ -19,22 +19,38 @@ function apiPublicOrigin(env = process.env) {
   return normalizeOrigin(env.RENDER_EXTERNAL_URL) || normalizeOrigin(env.API_PUBLIC_URL) || null;
 }
 
+function approvedPatientOrigins(env = process.env) {
+  const apiOrigin = apiPublicOrigin(env);
+  const raw = [
+    env.PUBLIC_WEB_URL,
+    env.FRONTEND_URL,
+    ...String(env.CORS_ORIGINS || "").split(","),
+  ];
+  const origins = [];
+  for (const value of raw) {
+    const origin = normalizeOrigin(value);
+    if (!origin || isLocalhostOrigin(origin)) continue;
+    if (apiOrigin && origin === apiOrigin) continue;
+    if (!origins.includes(origin)) origins.push(origin);
+  }
+  return origins;
+}
+
 function frontendBaseUrl(requestOrigin, env = process.env) {
   const apiOrigin = apiPublicOrigin(env);
-  const envOrigin = normalizeOrigin(env.PUBLIC_WEB_URL) || normalizeOrigin(env.FRONTEND_URL);
   const headerOrigin = normalizeOrigin(requestOrigin);
-  // Staff Origin is the page that generated the QR, so a phone on the same LAN
-  // can open it. FRONTEND_URL is a fallback when Origin is missing or is the API host.
-  const candidates = [headerOrigin, envOrigin].filter(Boolean);
+  // A phone can open the staff page's host when it is a public site or a LAN address.
+  // Loopback and the API host cannot: use the approved patient site instead.
+  const headerReachable =
+    headerOrigin &&
+    !isLocalhostOrigin(headerOrigin) &&
+    !(apiOrigin && headerOrigin === apiOrigin);
+  if (headerReachable) return headerOrigin.replace(/\/$/, "");
 
-  for (const origin of candidates) {
-    if (apiOrigin && origin === apiOrigin) continue;
-    if (isLocalhostOrigin(origin) && headerOrigin && !isLocalhostOrigin(headerOrigin)) {
-      continue;
-    }
-    return origin.replace(/\/$/, "");
-  }
+  const approved = approvedPatientOrigins(env);
+  if (approved.length) return approved[0].replace(/\/$/, "");
 
+  const envOrigin = normalizeOrigin(env.PUBLIC_WEB_URL) || normalizeOrigin(env.FRONTEND_URL);
   return (headerOrigin || envOrigin || "http://localhost:5173").replace(/\/$/, "");
 }
 
@@ -218,5 +234,6 @@ module.exports = {
   findValidWalkInQrSession,
   buildCheckInUrl,
   frontendBaseUrl,
+  approvedPatientOrigins,
   extractWalkInQrToken,
 };
