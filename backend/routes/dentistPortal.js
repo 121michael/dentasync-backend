@@ -14,6 +14,7 @@ const dentalChartSync = require("../services/dentalChartSync");
 const patientData = require("../services/patientData");
 const { writeAdminAudit } = require("../services/adminAudit");
 const recordAccess = require("../services/recordAccess");
+const recordAccessCredential = require("../services/recordAccessCredential");
 const { attachDentalAuthorizationRoutes } = require("./dentalAuthorization");
 const { attachPrescriptionRoutes } = require("./prescriptions");
 const { insertPatientNotification } = require("../services/patientPortalNotifications");
@@ -3186,27 +3187,58 @@ function createDentistPortalRouter({
     }
   });
 
-  router.get("/profile", (req, res) => {
-    const fullName = `Dr. ${`${req.dentist.first_name || ""} ${req.dentist.last_name || ""}`.trim()}`.trim();
-    return res.json({
-      profile: {
-        id: req.dentist.id,
-        firstName: req.dentist.first_name || "",
-        lastName: req.dentist.last_name || "",
-        fullName: fullName === "Dr." ? "Dentist" : fullName,
-        email: req.dentist.email || "",
-        phone: req.dentist.phone || "",
-        role: "dentist",
-        specialization: req.dentist.specialization || "",
-        scheduleNotes: req.dentist.schedule_notes || "",
-        catalogDentistId: req.dentist.catalog_dentist_id || null,
-        licenseNumber: req.dentist.license_number || "",
-        licenseVerified: req.dentist.license_verified === true,
-        ptrNumber: req.dentist.ptr_number || "",
-        professionalDesignation: req.dentist.professional_designation || "DMD",
-        createdAt: req.dentist.created_at || null,
-      },
-    });
+  router.get("/profile", async (req, res) => {
+    try {
+      const fullName = `Dr. ${`${req.dentist.first_name || ""} ${req.dentist.last_name || ""}`.trim()}`.trim();
+      const credential = await recordAccessCredential.publicForUser(db, req.dentist.id);
+      return res.json({
+        profile: {
+          id: req.dentist.id,
+          firstName: req.dentist.first_name || "",
+          lastName: req.dentist.last_name || "",
+          fullName: fullName === "Dr." ? "Dentist" : fullName,
+          email: req.dentist.email || "",
+          phone: req.dentist.phone || "",
+          role: "dentist",
+          specialization: req.dentist.specialization || "",
+          scheduleNotes: req.dentist.schedule_notes || "",
+          catalogDentistId: req.dentist.catalog_dentist_id || null,
+          licenseNumber: req.dentist.license_number || "",
+          licenseVerified: req.dentist.license_verified === true,
+          ptrNumber: req.dentist.ptr_number || "",
+          professionalDesignation: req.dentist.professional_designation || "DMD",
+          createdAt: req.dentist.created_at || null,
+          ...credential,
+        },
+      });
+    } catch (error) {
+      console.error("Dentist profile load error:", error.message);
+      return res.status(500).json({ message: "Unable to load the dentist profile." });
+    }
+  });
+
+  router.put("/approval-credential", async (req, res) => {
+    try {
+      const credential = await recordAccessCredential.setDentistSecret(db, {
+        dentist: req.dentist,
+        secret: req.body?.secret,
+        confirmSecret: req.body?.confirmSecret,
+        currentSecret: req.body?.currentSecret,
+      });
+      if (recordAccessCredential.containsSecret(credential, req.body?.secret)) {
+        return res.status(500).json({ message: "Unable to save the approval credential." });
+      }
+      return res.json({ credential });
+    } catch (error) {
+      if (error.status) {
+        return res.status(error.status).json({ message: error.message });
+      }
+      if (error.code === "42703" || error.code === "42P01") {
+        return res.status(503).json({ message: "Run the record-access credential migration." });
+      }
+      console.error("Dentist approval credential error:", error.message);
+      return res.status(500).json({ message: "Unable to save the approval credential." });
+    }
   });
 
   router.put("/profile", async (req, res) => {
@@ -3272,6 +3304,7 @@ function createDentistPortalRouter({
       transactionOpen = false;
 
       const profile = userResult.rows[0];
+      const credential = await recordAccessCredential.publicForUser(db, profile.id);
       return res.json({
         profile: {
           id: profile.id,
@@ -3291,6 +3324,7 @@ function createDentistPortalRouter({
           ptrNumber,
           professionalDesignation,
           createdAt: profile.created_at || null,
+          ...credential,
         },
       });
     } catch (error) {

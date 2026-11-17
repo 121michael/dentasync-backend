@@ -2,6 +2,7 @@
 
 const crypto = require("crypto");
 const { writeAdminAudit } = require("./adminAudit");
+const recordAccessCredential = require("./recordAccessCredential");
 
 const GRANT_MINUTES = 30;
 const GRANT_RANGE_MINUTES = { min: 15, max: 240 };
@@ -611,13 +612,24 @@ function tokenAdminApprover(user) {
 async function sessionApproverStatus(db, user) {
   const role = String(user?.role || "").toLowerCase();
   if (role === "admin") {
-    return { eligible: true, role, canApproveCrossBranchAccess: false };
+    return {
+      eligible: true,
+      role,
+      canApproveCrossBranchAccess: false,
+      approvalCredentialStatus: null,
+      approvalCredentialIdentifier: null,
+      requiresApprovalCredential: false,
+    };
   }
   const approver = await loadSessionApprover(db, user);
+  const credential = await recordAccessCredential.publicForUser(db, user?.id);
   return {
     eligible: Boolean(approver),
     role,
-    canApproveCrossBranchAccess: Boolean(approver?.can_approve_cross_branch_access),
+    canApproveCrossBranchAccess: Boolean(approver?.can_approve_cross_branch_access || credential.canApproveCrossBranchAccess),
+    approvalCredentialStatus: credential.approvalCredentialStatus,
+    approvalCredentialIdentifier: credential.approvalCredentialIdentifier,
+    requiresApprovalCredential: Boolean(approver) && role === "dentist",
   };
 }
 
@@ -794,10 +806,31 @@ async function authorizeChallenge(db, req, { code }) {
       actorRole: String(req.user?.role || "user").toLowerCase(),
       action: "record_access_authorize_failed",
       targetType: "record_access_challenge",
-      result: "failure",
+      result: "failed",
       detail: "Approver session is not eligible.",
     });
     throw httpError("You cannot authorize this record access.", 403);
+  }
+  if (String(approver.role || "").toLowerCase() === "dentist") {
+    const profile = await recordAccessCredential.loadProfile(db, approver.id);
+    const credential = recordAccessCredential.publicCredential(profile || {});
+    if (credential.approvalCredentialStatus !== "active") {
+      recordAuthFailure(String(req.user?.id || req.ip), req.ip);
+      throw httpError("Set your approval credential before authorizing access.", 403);
+    }
+    const matched = await recordAccessCredential.verifyDentistSecret(profile, req.body?.secret);
+    if (!matched) {
+      recordAuthFailure(String(req.user?.id || req.ip), req.ip);
+      await writeAdminAudit(db, {
+        actorId: approver.id,
+        actorRole: "dentist",
+        action: "record_access_authorize_failed",
+        targetType: "record_access_challenge",
+        result: "failed",
+        detail: "Approval credential was rejected.",
+      });
+      throw httpError(GENERIC_AUTH_MESSAGE, 403);
+    }
   }
   clearAuthFailure(String(req.user?.id || req.ip), req.ip);
 
@@ -834,10 +867,22 @@ async function authorizeChallenge(db, req, { code }) {
       `${challenge.requesting_dentist_id}:${challenge.clinical_record_id}:${challenge.originating_branch_id}:${challenge.scope}`,
     ]);
 
-    await client.query(
-      `UPDATE record_access_challenges SET consumed_at = CURRENT_TIMESTAMP WHERE id = $1`,
-      [challenge.id]
-    );
+    try {
+      await client.query(
+        `UPDATE record_access_challenges
+         SET consumed_at = CURRENT_TIMESTAMP,
+             credential_verified_at = CURRENT_TIMESTAMP,
+             credential_verified_by = $2
+         WHERE id = $1`,
+        [challenge.id, String(approver.id)]
+      );
+    } catch (error) {
+      if (error.code !== "42703") throw error;
+      await client.query(
+        `UPDATE record_access_challenges SET consumed_at = CURRENT_TIMESTAMP WHERE id = $1`,
+        [challenge.id]
+      );
+    }
 
     let requestId = challenge.legacy_request_id || null;
     if (requestId) {
@@ -919,6 +964,10 @@ async function authorizeChallenge(db, req, { code }) {
       [requestId, String(approver.id), approver.role]
     );
     await client.query("COMMIT");
+    const approvalDetail = `Grant ${grant.rows[0]?.id || ""} request ${requestId} scope ${challenge.scope} branch ${challenge.originating_branch_id}.`;
+    if (recordAccessCredential.containsSecret(approvalDetail, req.body?.secret)) {
+      throw httpError(GENERIC_AUTH_MESSAGE, 500);
+    }
     await writeAdminAudit(db, {
       actorId: approver.id,
       actorName: `${approver.first_name || ""} ${approver.last_name || ""}`.trim() || null,
@@ -926,7 +975,7 @@ async function authorizeChallenge(db, req, { code }) {
       action: "record_access_approved",
       targetType: "clinical_record",
       targetId: String(challenge.clinical_record_id),
-      detail: `Grant ${grant.rows[0]?.id || ""} request ${requestId} scope ${challenge.scope} branch ${challenge.originating_branch_id}.`,
+      detail: approvalDetail,
     });
     return {
       grant: grant.rows[0] || null,

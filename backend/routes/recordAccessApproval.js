@@ -2,6 +2,7 @@
 
 const express = require("express");
 const recordAccess = require("../services/recordAccess");
+const recordAccessCredential = require("../services/recordAccessCredential");
 
 function sendAccessError(res, error, fallback) {
   if (error?.status) {
@@ -39,7 +40,7 @@ function createRecordAccessApprovalRouter({ db, authenticateToken }) {
   router.post("/challenges/:code/approve", async (req, res) => {
     try {
       const result = await recordAccess.authorizeChallenge(db, req, { code: req.params.code });
-      return res.json({
+      const payload = {
         message: "Restricted records are available for the approved scope.",
         grant: result.grant
           ? {
@@ -50,7 +51,11 @@ function createRecordAccessApprovalRouter({ db, authenticateToken }) {
             }
           : null,
         minutes: result.minutes,
-      });
+      };
+      if (recordAccessCredential.containsSecret(payload, req.body?.secret)) {
+        return res.status(500).json({ message: "Unable to authorize this access." });
+      }
+      return res.json(payload);
     } catch (error) {
       return sendAccessError(res, error, "Unable to authorize this access.");
     }

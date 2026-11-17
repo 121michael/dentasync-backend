@@ -12,6 +12,9 @@ export function DentistProfilePage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [busy, setBusy] = useState(false);
+  const [credentialForm, setCredentialForm] = useState({ currentSecret: "", secret: "", confirmSecret: "" });
+  const [credentialBusy, setCredentialBusy] = useState(false);
+  const [credentialMessage, setCredentialMessage] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -46,8 +49,28 @@ export function DentistProfilePage() {
     }
   }
 
+  async function saveCredential(event) {
+    event.preventDefault();
+    setCredentialBusy(true);
+    setCredentialMessage("");
+    try {
+      const response = await api.saveDentistApprovalCredential(credentialForm);
+      setProfile((current) => ({ ...current, ...response.credential }));
+      setCredentialForm({ currentSecret: "", secret: "", confirmSecret: "" });
+      setCredentialMessage("Approval credential saved. It is not stored in recoverable form.");
+    } catch (saveError) {
+      setCredentialMessage(saveError.message);
+    } finally {
+      setCredentialBusy(false);
+    }
+  }
+
   if (error && !profile) return <ErrorState message={error} onRetry={load} />;
   if (!profile || !form) return <LoadingState label="Loading professional profile…" />;
+
+  const credentialStatus = String(profile.approvalCredentialStatus || "not_set");
+  const credentialLabel =
+    credentialStatus === "active" ? "Active" : credentialStatus === "revoked" ? "Revoked" : "Not set";
 
   return (
     <div className="dentist-page">
@@ -160,6 +183,67 @@ export function DentistProfilePage() {
         <button className="button button--primary" disabled={busy}>
           <Save size={16} /> {busy ? "Saving…" : "Save Profile"}
         </button>
+      </form>
+
+      <form className="dentist-panel dentist-approval-credential" onSubmit={saveCredential}>
+        <h2>Cross-branch approval credential</h2>
+        <p>
+          Status: <strong>{credentialLabel}</strong>
+          {profile.canApproveCrossBranchAccess ? " · Permission enabled" : " · Permission off"}
+        </p>
+        <p>
+          Optional identifier:{" "}
+          {profile.licenseVerified && profile.licenseNumber
+            ? `Verified PRC ${profile.licenseNumber}`
+            : "Use a verified PRC license as an identifier. Never use it as the PIN."}
+        </p>
+        {profile.canApproveCrossBranchAccess && credentialStatus !== "revoked" ? (
+          <div className="dentist-approval-credential__actions">
+            {credentialStatus === "active" ? (
+              <label className="field">
+                <span>Current approval PIN or passphrase</span>
+                <input
+                  type="password"
+                  autoComplete="off"
+                  value={credentialForm.currentSecret}
+                  onChange={(event) =>
+                    setCredentialForm((current) => ({ ...current, currentSecret: event.target.value }))
+                  }
+                />
+              </label>
+            ) : null}
+            <label className="field">
+              <span>{credentialStatus === "active" ? "New approval PIN or passphrase" : "Approval PIN or passphrase"}</span>
+              <input
+                type="password"
+                autoComplete="new-password"
+                minLength={8}
+                required
+                value={credentialForm.secret}
+                onChange={(event) => setCredentialForm((current) => ({ ...current, secret: event.target.value }))}
+              />
+            </label>
+            <label className="field">
+              <span>Confirm approval PIN or passphrase</span>
+              <input
+                type="password"
+                autoComplete="new-password"
+                minLength={8}
+                required
+                value={credentialForm.confirmSecret}
+                onChange={(event) =>
+                  setCredentialForm((current) => ({ ...current, confirmSecret: event.target.value }))
+                }
+              />
+            </label>
+            <button className="button button--primary" disabled={credentialBusy} type="submit">
+              {credentialBusy ? "Saving…" : credentialStatus === "active" ? "Replace credential" : "Set credential"}
+            </button>
+          </div>
+        ) : (
+          <p>Ask an administrator to enable permission or start credential setup.</p>
+        )}
+        {credentialMessage ? <p>{credentialMessage}</p> : null}
       </form>
     </div>
   );

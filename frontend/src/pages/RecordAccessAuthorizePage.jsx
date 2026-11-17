@@ -19,6 +19,7 @@ function roleBlockedFromAuthorize(role) {
 export function RecordAccessAuthorizePage() {
   const { user } = useAuth();
   const [code, setCode] = useState("");
+  const [secret, setSecret] = useState("");
   const [challenge, setChallenge] = useState(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -66,10 +67,14 @@ export function RecordAccessAuthorizePage() {
     setBusy(true);
     setMessage("");
     try {
-      const response = await api.approveRecordAccessChallenge(challenge.approvalCode);
+      const response = await api.approveRecordAccessChallenge(
+        challenge.approvalCode,
+        eligibility?.requiresApprovalCredential ? { secret } : {}
+      );
       setMessage(response.message || "Restricted records are available for the approved scope.");
       setChallenge(null);
       setCode("");
+      setSecret("");
     } catch (approveError) {
       setMessage(approveError.message);
     } finally {
@@ -99,10 +104,17 @@ export function RecordAccessAuthorizePage() {
         <>
           <p>
             Sign in on this workstation in a separate browser profile from the requesting dentist. Enter the approval
-            code shown on their screen. This page uses your account only.
+            code shown on their screen. This page uses your account only. Do not type the credential on the requesting
+            dentist’s chart.
           </p>
           <p>Signed in as {user?.fullName || user?.email} ({role})</p>
-          <form onSubmit={loadChallenge}>
+          {eligibility?.approvalCredentialIdentifier ? (
+            <p>Optional identifier: verified PRC {eligibility.approvalCredentialIdentifier}</p>
+          ) : null}
+          {eligibility?.requiresApprovalCredential && eligibility?.approvalCredentialStatus !== "active" ? (
+            <p>Set your approval PIN on Professional Profile before authorizing access.</p>
+          ) : null}
+          <form className="record-access-authorize__fields" onSubmit={loadChallenge}>
             <label>
               Approval code
               <input
@@ -118,13 +130,26 @@ export function RecordAccessAuthorizePage() {
             </button>
           </form>
           {challenge ? (
-            <section className="admin-card" style={{ marginTop: "1.5rem" }}>
+            <section className="admin-card record-access-authorize__fields" style={{ marginTop: "1.5rem" }}>
               <p>Patient {challenge.patient?.fullName || "record"} · {challenge.patient?.patientId || challenge.patient?.id}</p>
               <p>Requesting dentist {challenge.requesterName || "clinic dentist"}</p>
               <p>
                 Branch {challenge.requestingBranchId} requesting {challenge.scope} from branch {challenge.originatingBranchId}
               </p>
               <p>Reason: {challenge.reason}</p>
+              {eligibility?.requiresApprovalCredential ? (
+                <label>
+                  Your approval PIN or passphrase
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    value={secret}
+                    onChange={(event) => setSecret(event.target.value)}
+                    required
+                    minLength={8}
+                  />
+                </label>
+              ) : null}
               <button className="button button--primary" disabled={busy} type="button" onClick={approve}>
                 {busy ? "Authorizing…" : "Authorize access"}
               </button>

@@ -10,6 +10,7 @@ const { attachClinicBranchRoutes } = require("./clinicBranches");
 const clinicBranches = require("../services/clinicBranches");
 const { attachDentalAuthorizationRoutes } = require("./dentalAuthorization");
 const recordAccess = require("../services/recordAccess");
+const recordAccessCredential = require("../services/recordAccessCredential");
 const prescriptions = require("../services/prescriptions");
 const { attachAdminCommandCenterRoutes } = require("./adminCommandCenter");
 const { attachClinicScheduleRoutes } = require("./clinicSchedule");
@@ -826,25 +827,7 @@ function createAdminPortalRouter({
         await clinicBranches.attachAssignments(db, accounts);
       }
       if (role === "dentist") {
-        for (const account of accounts) account.canApproveCrossBranchAccess = false;
-        if (accounts.length) {
-          try {
-            const flags = await db.query(
-              `SELECT user_id, can_approve_cross_branch_access
-               FROM admin_portal_dentist_profiles
-               WHERE user_id = ANY($1::text[])`,
-              [accounts.map((account) => String(account.id))]
-            );
-            const byUser = new Map(
-              flags.rows.map((row) => [String(row.user_id), row.can_approve_cross_branch_access === true])
-            );
-            for (const account of accounts) {
-              account.canApproveCrossBranchAccess = byUser.get(String(account.id)) === true;
-            }
-          } catch (error) {
-            if (error.code !== "42703" && error.code !== "42P01") throw error;
-          }
-        }
+        await recordAccessCredential.attachPublic(db, accounts);
       }
       return {
         page,
@@ -1807,16 +1790,15 @@ function createAdminPortalRouter({
       if (Object.prototype.hasOwnProperty.call(req.body || {}, "canApproveCrossBranchAccess")) {
         await client.query("SAVEPOINT approve_flag");
         try {
-          await client.query(
-            `UPDATE admin_portal_dentist_profiles
-             SET can_approve_cross_branch_access = $2
-             WHERE user_id = $1`,
-            [String(dentist.id), req.body.canApproveCrossBranchAccess === true]
-          );
+          await recordAccessCredential.applyAdminAction(client, {
+            dentistId: dentist.id,
+            action: req.body.canApproveCrossBranchAccess === true ? "enable" : "revoke",
+            admin: req.admin,
+          });
           await client.query("RELEASE SAVEPOINT approve_flag");
         } catch (error) {
           await client.query("ROLLBACK TO SAVEPOINT approve_flag");
-          if (error.code !== "42703") throw error;
+          if (error.code !== "42703" && error.code !== "42P01") throw error;
         }
       }
 
@@ -1831,29 +1813,17 @@ function createAdminPortalRouter({
       await client.query("COMMIT");
       transactionOpen = false;
 
-      let canApproveCrossBranchAccess = false;
-      if (Object.prototype.hasOwnProperty.call(req.body || {}, "canApproveCrossBranchAccess")) {
-        canApproveCrossBranchAccess = req.body.canApproveCrossBranchAccess === true;
-      } else {
-        try {
-          const flag = await db.query(
-            `SELECT can_approve_cross_branch_access FROM admin_portal_dentist_profiles WHERE user_id = $1`,
-            [String(dentist.id)]
-          );
-          canApproveCrossBranchAccess = flag.rows[0]?.can_approve_cross_branch_access === true;
-        } catch (error) {
-          if (error.code !== "42703" && error.code !== "42P01") throw error;
-        }
-      }
+      const credential = await recordAccessCredential.publicForUser(db, dentist.id);
       const [withBranches] = await clinicBranches.attachAssignments(db, [
         mapAccount(dentist, {
           specialization: profileResult.rows[0]?.specialization || "",
           scheduleNotes: profileResult.rows[0]?.schedule_notes || "",
           licenseNumber: profileResult.rows[0]?.license_number || "",
           licenseVerified: profileResult.rows[0]?.license_verified === true,
-          canApproveCrossBranchAccess,
+          ...credential,
         }),
       ]);
+      Object.assign(withBranches, credential);
       return res.json({ dentist: withBranches });
     } catch (error) {
       if (transactionOpen) {
@@ -1874,6 +1844,26 @@ function createAdminPortalRouter({
       return res.status(500).json({ message: "Unable to update the dentist account." });
     } finally {
       client.release();
+    }
+  });
+
+  router.post("/dentists/:id/approval-credential", async (req, res) => {
+    try {
+      const credential = await recordAccessCredential.applyAdminAction(db, {
+        dentistId: req.params.id,
+        action: req.body?.action,
+        admin: req.admin,
+      });
+      return res.json({ dentist: credential });
+    } catch (error) {
+      if (error.status) {
+        return res.status(error.status).json({ message: error.message });
+      }
+      if (error.code === "42703" || error.code === "42P01") {
+        return res.status(503).json({ message: "Run the record-access credential migration." });
+      }
+      console.error("Admin dentist approval credential error:", error.message);
+      return res.status(500).json({ message: "Unable to update the approval credential." });
     }
   });
 

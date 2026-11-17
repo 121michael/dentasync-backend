@@ -52,6 +52,7 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
   await db.query(sqlFile("002_create_patient_portal.sql"));
   await db.query(sqlFile("005_create_admin_portal.sql"));
   await db.query(sqlFile("006_create_dentist_portal.sql"));
+  await db.query(sqlFile("046_dentist_pad_credentials.sql"));
   await db.query(sqlFile("007_create_document_sync.sql"));
   await db.query(`
     ALTER TABLE admin_portal_document_sync_jobs
@@ -126,6 +127,7 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
   await db.query(sqlFile("056_cross_branch_record_access.sql"));
   await db.query(sqlFile("057_record_access_workstation_auth.sql"));
   await db.query(sqlFile("058_record_access_isolated_approver.sql"));
+  await db.query(sqlFile("060_record_access_approval_credential.sql"));
 
   const mandaluyong = await db.query(`SELECT id FROM clinic_branches WHERE is_main LIMIT 1`);
   const pasig = await db.query(
@@ -186,14 +188,22 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
   const patientId = String(patient.rows[0].id);
   const otherPatientId = String(otherPatient.rows[0].id);
 
+  const delegatePin = "Delegate-pin-9";
+  const delegatePinHash = await bcrypt.hash(delegatePin, 4);
   await db.query(
     `INSERT INTO admin_portal_dentist_profiles (user_id, specialization)
      VALUES ($1, 'General'), ($2, 'General'), ($3, 'General'), ($4, 'General')`,
     [treatingId, unrelatedId, coworkerId, delegateId]
   );
   await db.query(
-    `UPDATE admin_portal_dentist_profiles SET can_approve_cross_branch_access = TRUE WHERE user_id = $1`,
-    [delegateId]
+    `UPDATE admin_portal_dentist_profiles
+     SET can_approve_cross_branch_access = TRUE,
+         license_number = 'PRC-DEL-0001',
+         license_verified = TRUE,
+         cross_branch_approval_secret_hash = $2,
+         cross_branch_approval_credential_status = 'active'
+     WHERE user_id = $1`,
+    [delegateId, delegatePinHash]
   );
   await db.query(
     `INSERT INTO clinic_branch_assignments (user_id, branch_id) VALUES
@@ -566,6 +576,7 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
   const outOfScope = await api("POST", `/api/record-access/challenges/${approvalCode}/approve`, {
     role: "dentist",
     id: delegateId,
+    body: { secret: delegatePin },
   });
   assert.equal(outOfScope.status, 403);
 
@@ -745,6 +756,7 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
     api("POST", `/api/record-access/challenges/${delegateChallenge.json.challenge.approvalCode}/approve`, {
       role: "dentist",
       id: delegateId,
+      body: { secret: delegatePin },
     }),
     api("POST", `/api/record-access/challenges/${delegateChallenge.json.challenge.approvalCode}/approve`, {
       role: "admin",
@@ -934,6 +946,170 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
   });
   assert.ok(staffExport.status === 200 || staffExport.status === 404, String(staffExport.status));
   assert.equal(JSON.stringify(staffExport.json).includes("Deep caries"), false);
+
+  const setup = await api("POST", `/api/admin/dentists/${delegateId}/approval-credential`, {
+    role: "admin",
+    id: adminId,
+    body: { action: "start_setup" },
+  });
+  assert.equal(setup.status, 200, setup.json.message);
+  assert.equal(setup.json.dentist.approvalCredentialStatus, "not_set");
+  assert.equal(setup.json.dentist.canApproveCrossBranchAccess, true);
+  assert.equal(setup.json.dentist.approvalCredentialIdentifier, "PRC-DEL-0001");
+  assert.equal(JSON.stringify(setup.json).includes(delegatePin), false);
+  assert.equal(JSON.stringify(setup.json).toLowerCase().includes("secret_hash"), false);
+
+  const licenseAsPin = await api("PUT", "/api/dentist/approval-credential", {
+    role: "dentist",
+    id: delegateId,
+    body: { secret: "PRC-DEL-0001", confirmSecret: "PRC-DEL-0001" },
+  });
+  assert.equal(licenseAsPin.status, 400);
+
+  const setCredential = await api("PUT", "/api/dentist/approval-credential", {
+    role: "dentist",
+    id: delegateId,
+    body: { secret: "Fresh-pin-32", confirmSecret: "Fresh-pin-32" },
+  });
+  assert.equal(setCredential.status, 200, setCredential.json.message);
+  assert.equal(setCredential.json.credential.approvalCredentialStatus, "active");
+  assert.equal(JSON.stringify(setCredential.json).includes("Fresh-pin-32"), false);
+
+  const storedHash = await db.query(
+    `SELECT cross_branch_approval_secret_hash FROM admin_portal_dentist_profiles WHERE user_id = $1`,
+    [delegateId]
+  );
+  assert.equal(await bcrypt.compare("Fresh-pin-32", storedHash.rows[0].cross_branch_approval_secret_hash), true);
+  assert.equal(await bcrypt.compare("PRC-DEL-0001", storedHash.rows[0].cross_branch_approval_secret_hash), false);
+
+  const reset = await api("POST", `/api/admin/dentists/${delegateId}/approval-credential`, {
+    role: "admin",
+    id: adminId,
+    body: { action: "reset" },
+  });
+  assert.equal(reset.status, 200);
+  assert.equal(reset.json.dentist.approvalCredentialStatus, "not_set");
+  const afterReset = await db.query(
+    `SELECT cross_branch_approval_secret_hash FROM admin_portal_dentist_profiles WHERE user_id = $1`,
+    [delegateId]
+  );
+  assert.equal(afterReset.rows[0].cross_branch_approval_secret_hash, null);
+
+  const restoreCredential = await api("PUT", "/api/dentist/approval-credential", {
+    role: "dentist",
+    id: delegateId,
+    body: { secret: "Fresh-pin-32", confirmSecret: "Fresh-pin-32" },
+  });
+  assert.equal(restoreCredential.status, 200);
+
+  const credChallenge = await api("POST", `/api/dentist/patients/${recordId}/access-challenges`, {
+    role: "dentist",
+    id: treatingId,
+    branchId: pasigId,
+    body: {
+      requestingBranchId: pasigId,
+      originatingBranchId: mandaluyongId,
+      reason: "Need notes for credential checks",
+      scope: "diagnosis_notes",
+    },
+  });
+  assert.equal(credChallenge.status, 201, credChallenge.json.message);
+  const credCode = credChallenge.json.challenge.approvalCode;
+  assert.equal(JSON.stringify(credChallenge.json).includes("Fresh-pin-32"), false);
+
+  const invalidCredential = await api("POST", `/api/record-access/challenges/${credCode}/approve`, {
+    role: "dentist",
+    id: delegateId,
+    body: { secret: "Wrong-pin-99" },
+  });
+  assert.equal(invalidCredential.status, 403);
+  assert.equal(JSON.stringify(invalidCredential.json).includes("Fresh-pin-32"), false);
+  assert.equal(JSON.stringify(invalidCredential.json).includes("Wrong-pin-99"), false);
+
+  const selfAfterCredential = await api("POST", `/api/record-access/challenges/${credCode}/approve`, {
+    role: "dentist",
+    id: treatingId,
+    body: { secret: "Fresh-pin-32" },
+  });
+  assert.equal(selfAfterCredential.status, 403);
+
+  const wrongBranchDentist = await api("POST", `/api/record-access/challenges/${credCode}/approve`, {
+    role: "dentist",
+    id: coworkerId,
+    body: { secret: "Fresh-pin-32" },
+  });
+  assert.equal(wrongBranchDentist.status, 403);
+
+  const validCredential = await api("POST", `/api/record-access/challenges/${credCode}/approve`, {
+    role: "dentist",
+    id: delegateId,
+    body: { secret: "Fresh-pin-32" },
+  });
+  assert.equal(validCredential.status, 200, validCredential.json.message);
+  const bound = await db.query(
+    `SELECT credential_verified_by, clinical_record_id, originating_branch_id, scope
+     FROM record_access_challenges WHERE approval_code = $1`,
+    [credCode]
+  );
+  assert.equal(String(bound.rows[0].credential_verified_by), delegateId);
+  assert.equal(Number(bound.rows[0].clinical_record_id), Number(recordId));
+  assert.equal(Number(bound.rows[0].originating_branch_id), Number(mandaluyongId));
+  assert.equal(bound.rows[0].scope, "diagnosis_notes");
+
+  const grantForExpiry = await db.query(
+    `SELECT id FROM record_access_grants WHERE requesting_dentist_id = $1 AND clinical_record_id = $2 AND scope = 'diagnosis_notes' AND status = 'active' ORDER BY id DESC LIMIT 1`,
+    [treatingId, recordId]
+  );
+  await db.query(`UPDATE record_access_grants SET expires_at = CURRENT_TIMESTAMP - INTERVAL '1 minute' WHERE id = $1`, [
+    grantForExpiry.rows[0].id,
+  ]);
+  const expiredCredentialGrant = await api("GET", `/api/dentist/patients/${recordId}`, {
+    role: "dentist",
+    id: treatingId,
+    branchId: pasigId,
+  });
+  assert.equal(
+    expiredCredentialGrant.json.treatments.find((row) => row.treatment === "Oral Prophylaxis").diagnosisNotes,
+    ""
+  );
+
+  const revokePermission = await api("POST", `/api/admin/dentists/${delegateId}/approval-credential`, {
+    role: "admin",
+    id: adminId,
+    body: { action: "revoke" },
+  });
+  assert.equal(revokePermission.status, 200);
+  assert.equal(revokePermission.json.dentist.approvalCredentialStatus, "revoked");
+  assert.equal(revokePermission.json.dentist.canApproveCrossBranchAccess, false);
+
+  const revokedChallenge = await api("POST", `/api/dentist/patients/${recordId}/access-challenges`, {
+    role: "dentist",
+    id: treatingId,
+    branchId: pasigId,
+    body: {
+      requestingBranchId: pasigId,
+      originatingBranchId: mandaluyongId,
+      reason: "Need notes after revoke",
+      scope: "diagnosis_notes",
+    },
+  });
+  const revokedApprove = await api(
+    "POST",
+    `/api/record-access/challenges/${revokedChallenge.json.challenge.approvalCode}/approve`,
+    { role: "dentist", id: delegateId, body: { secret: "Fresh-pin-32" } }
+  );
+  assert.equal(revokedApprove.status, 403);
+
+  const credentialAudit = await db.query(
+    `SELECT action, detail FROM admin_portal_audit_logs WHERE action LIKE 'record_access_credential_%'`
+  );
+  assert.ok(credentialAudit.rows.some((row) => row.action === "record_access_credential_set"));
+  assert.ok(credentialAudit.rows.some((row) => row.action === "record_access_credential_reset"));
+  assert.ok(credentialAudit.rows.some((row) => row.action === "record_access_credential_revoke"));
+  assert.equal(
+    credentialAudit.rows.filter((row) => /Fresh-pin-32|Delegate-pin-9|PRC-DEL-0001/.test(JSON.stringify(row))).length,
+    0
+  );
 
   const audit = await db.query(
     `SELECT action FROM admin_portal_audit_logs WHERE action LIKE 'record_access_%' OR action = 'cross_branch_chart_read' OR action = 'Document Data Import'`

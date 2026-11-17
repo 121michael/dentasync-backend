@@ -26,9 +26,18 @@ const emptyForm = {
   licenseNumber: "",
   licenseVerified: false,
   canApproveCrossBranchAccess: false,
+  approvalCredentialStatus: "not_set",
+  approvalCredentialIdentifier: null,
   branchId: "",
   branchIds: [],
 };
+
+function credentialStatusLabel(status) {
+  const value = String(status || "not_set").toLowerCase();
+  if (value === "active") return "Active";
+  if (value === "revoked") return "Revoked";
+  return "Not set";
+}
 
 const PH_MOBILE_PATTERN = /^09[0-9]{9}$/;
 const PH_MOBILE_MESSAGE = "Enter a valid 11-digit mobile number starting with 09.";
@@ -154,6 +163,7 @@ export function AdminManageUsersPage() {
   const [detail, setDetail] = useState(null);
   const [dependentDetail, setDependentDetail] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [credentialBusy, setCredentialBusy] = useState("");
   const [phoneError, setPhoneError] = useState("");
   const [fieldErrors, setFieldErrors] = useState({});
   const [actionBusyId, setActionBusyId] = useState("");
@@ -290,6 +300,8 @@ export function AdminManageUsersPage() {
       licenseNumber: user.licenseNumber || "",
       licenseVerified: Boolean(user.licenseVerified),
       canApproveCrossBranchAccess: Boolean(user.canApproveCrossBranchAccess),
+      approvalCredentialStatus: user.approvalCredentialStatus || "not_set",
+      approvalCredentialIdentifier: user.approvalCredentialIdentifier || null,
       branchId: user.branches?.[0] ? String(user.branches[0].id) : "",
       branchIds: (user.branches || []).map((branch) => String(branch.id)),
     });
@@ -344,7 +356,12 @@ export function AdminManageUsersPage() {
       delete payload.branchIds;
       delete payload.canApproveCrossBranchAccess;
     }
-    if (tab === "dentist") delete payload.branchId;
+    if (tab === "dentist") {
+      delete payload.branchId;
+      delete payload.canApproveCrossBranchAccess;
+      delete payload.approvalCredentialStatus;
+      delete payload.approvalCredentialIdentifier;
+    }
     saveLock.current = true;
     setBusy(true);
     try {
@@ -369,6 +386,36 @@ export function AdminManageUsersPage() {
     } finally {
       saveLock.current = false;
       setBusy(false);
+    }
+  }
+
+  async function applyCredentialAction(action) {
+    if (!editing?.id || credentialBusy) return;
+    setCredentialBusy(action);
+    try {
+      const response = await api.updateAdminDentistApprovalCredential(editing.id, action);
+      const next = response.dentist || {};
+      setForm((current) => ({
+        ...current,
+        canApproveCrossBranchAccess: Boolean(next.canApproveCrossBranchAccess),
+        approvalCredentialStatus: next.approvalCredentialStatus || "not_set",
+        approvalCredentialIdentifier: next.approvalCredentialIdentifier || current.approvalCredentialIdentifier,
+      }));
+      setEditing((current) => (current ? { ...current, ...next } : current));
+      pushToast(
+        action === "reset"
+          ? "Approval credential reset. The dentist must set a new PIN after signing in."
+          : action === "revoke"
+            ? "Cross-branch approval permission revoked."
+            : action === "start_setup"
+              ? "Credential setup started. The dentist sets their own PIN after signing in."
+              : "Cross-branch approval permission enabled."
+      );
+      await load();
+    } catch (credentialError) {
+      pushToast(credentialError.message, "error");
+    } finally {
+      setCredentialBusy("");
     }
   }
 
@@ -1173,16 +1220,70 @@ export function AdminManageUsersPage() {
                       I verified this license number against this dentist's professional record. Prescriptions stay blocked until this is checked. Do not enter another dentist's number.
                     </span>
                   </label>
-                  <label className="admin-form--manage-user__full admin-license-verify">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(form.canApproveCrossBranchAccess)}
-                      onChange={(e) => setForm({ ...form, canApproveCrossBranchAccess: e.target.checked })}
-                    />
-                    <span>
-                      Can Authorize Cross-Branch Record Access. This stays off unless an administrator turns it on. It does not open charts or other branches.
-                    </span>
-                  </label>
+                  {editing ? (
+                    <div className="admin-form--manage-user__full admin-credential">
+                      <h3>Set Credential</h3>
+                      <p>
+                        Cross-branch record approval stays off unless you enable it. It does not open charts or other
+                        branches. The dentist sets their own PIN after signing in. Do not share a PIN.
+                      </p>
+                      <p>
+                        <span className="admin-credential__label">Credential status</span>
+                        <strong>{credentialStatusLabel(form.approvalCredentialStatus)}</strong>
+                      </p>
+                      <p>
+                        <span className="admin-credential__label">Account identifier</span>
+                        <strong>
+                          {form.licenseVerified && form.approvalCredentialIdentifier
+                            ? `Verified PRC ${form.approvalCredentialIdentifier}`
+                            : form.licenseVerified && form.licenseNumber
+                              ? `Verified PRC ${form.licenseNumber}`
+                              : "Optional. Verify this dentist’s PRC license to use it as an identifier."}
+                        </strong>
+                      </p>
+                      <p>
+                        Permission: {form.canApproveCrossBranchAccess ? "Enabled" : "Off"}
+                      </p>
+                      <div className="admin-credential__actions">
+                        <button
+                          type="button"
+                          className="button button--primary"
+                          disabled={Boolean(credentialBusy) || form.canApproveCrossBranchAccess}
+                          onClick={() => applyCredentialAction("enable")}
+                        >
+                          {credentialBusy === "enable" ? "Saving…" : "Enable permission"}
+                        </button>
+                        <button
+                          type="button"
+                          className="button button--secondary"
+                          disabled={Boolean(credentialBusy) || !form.canApproveCrossBranchAccess}
+                          onClick={() => applyCredentialAction("revoke")}
+                        >
+                          {credentialBusy === "revoke" ? "Saving…" : "Revoke permission"}
+                        </button>
+                        <button
+                          type="button"
+                          className="button button--secondary"
+                          disabled={Boolean(credentialBusy)}
+                          onClick={() => applyCredentialAction("start_setup")}
+                        >
+                          {credentialBusy === "start_setup" ? "Saving…" : "Start credential setup"}
+                        </button>
+                        <button
+                          type="button"
+                          className="button button--secondary"
+                          disabled={Boolean(credentialBusy) || form.approvalCredentialStatus !== "active"}
+                          onClick={() => applyCredentialAction("reset")}
+                        >
+                          {credentialBusy === "reset" ? "Saving…" : "Reset credential"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="admin-form--manage-user__full muted">
+                      Save this dentist first, then open Edit Dentist to set the cross-branch approval credential.
+                    </p>
+                  )}
                 </>
               ) : null}
             </div>

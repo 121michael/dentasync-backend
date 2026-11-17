@@ -14687,6 +14687,62 @@ body.is-queue-display .fab-menu {
   align-items: flex-start;
 }
 
+.admin-credential,
+.dentist-approval-credential,
+.record-access-authorize__fields {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.admin-credential {
+  padding: 1rem 0 0.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.admin-credential h3,
+.dentist-approval-credential h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.admin-credential p,
+.dentist-approval-credential p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  font-weight: 500;
+}
+
+.admin-credential__label {
+  display: block;
+  margin-bottom: 0.2rem;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.admin-credential__actions,
+.dentist-approval-credential__actions {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.admin-credential__actions .button,
+.dentist-approval-credential__actions .button,
+.record-access-authorize__fields .button {
+  width: 100%;
+}
+
+@media (min-width: 720px) {
+  .admin-credential__actions {
+    grid-template-columns: 1fr;
+  }
+}
+
 .admin-branch-heading { flex-wrap: wrap; }
 .admin-branch-heading > div:first-child { flex: 1 1 16rem; min-width: 0; }
 .admin-branch-heading .button--primary { flex: 0 0 auto; }
