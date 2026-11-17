@@ -534,11 +534,17 @@ export function AdminBackupPage() {
                         <button
                           type="button"
                           className="button button--secondary button--compact"
-                          disabled={!backup.restorable || jobRunning}
+                          disabled={!backup.restorable}
+                          title={[backup.restoreBlockedReason, backup.restoreNextStep].filter(Boolean).join(" ")}
                           onClick={() => openRecovery(backup)}
                         >
                           <RotateCcw size={14} /> Restore
                         </button>
+                        {!backup.restorable ? (
+                          <p className="admin-backup-row-note">
+                            {[backup.restoreBlockedReason, backup.restoreNextStep].filter(Boolean).join(" ")}
+                          </p>
+                        ) : null}
                         <button
                           type="button"
                           className="button button--secondary button--compact"
@@ -696,22 +702,37 @@ export function AdminBackupPage() {
                   ? "Restores into a separate empty database, checks schema, record counts, and foreign keys, then drops that database. The live database is not the destination."
                   : "Restores into a rolled-back transaction. Production tables are not kept changed."}
               </p>
-              {testRestoreCapability.available === false ? (
+              {recovery.backup.archiveFormat === "pg_dump_custom" &&
+              (recovery.backup.dumpTestRestoreAvailable === false || testRestoreCapability.available === false) ? (
                 <p className="admin-backup-action-note">
-                  {[testRestoreCapability.reason, testRestoreCapability.nextStep].filter(Boolean).join(" ")}
+                  {[
+                    recovery.backup.dumpTestRestoreReason || testRestoreCapability.reason,
+                    recovery.backup.dumpTestRestoreNextStep || testRestoreCapability.nextStep,
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
                 </p>
               ) : null}
               <button
                 className="button button--secondary"
                 type="button"
                 onClick={runIsolatedRecovery}
-                disabled={Boolean(busy) || !recovery.validation || testRestoreCapability.available === false}
+                disabled={
+                  Boolean(busy) ||
+                  !recovery.validation ||
+                  (recovery.backup.archiveFormat === "pg_dump_custom" &&
+                    (recovery.backup.dumpTestRestoreAvailable === false || testRestoreCapability.available === false))
+                }
               >
                 {busy === "isolated" ? "Testing…" : recovery.backup.archiveFormat === "pg_dump_custom" ? "Run test restore" : "Run isolated restore test"}
               </button>
               {recovery.isolated?.stageLabel === "Test restore passed" ? (
                 <p className="muted">
                   Test restore passed. {recovery.isolated.tableCount} tables and {recovery.isolated.foreignKeyCount} foreign keys matched. Live data was not replaced.
+                </p>
+              ) : recovery.isolated?.stageLabel === "Isolated restore test passed" ? (
+                <p className="muted">
+                  Isolated restore test passed. Production tables were rolled back. Live data was not replaced.
                 </p>
               ) : recovery.isolated ? (
                 <pre className="admin-backup-pre">{JSON.stringify(recovery.isolated.sampleCounts || recovery.isolated.verifiedRowCounts, null, 2)}</pre>

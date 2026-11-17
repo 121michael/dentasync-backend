@@ -18,6 +18,7 @@ const {
   normalizeSettings,
   createBackupRecoveryService,
   createInternalBackupCronHandler,
+  restoreEligibility,
   BACKUP_MAGIC,
   FORMAT_VERSION,
 } = require("../services/backupRecovery");
@@ -530,6 +531,72 @@ test("last known-good backup cannot be deleted and failed backups are not restor
     () => service.isolatedRestore({ backupId: backup.id, actor: { id: "admin-1" } }),
     /completed backup/
   );
+});
+
+test("restore stays visible for completed archives and explains ineligible rows", () => {
+  const missingTools = {
+    testRestore: {
+      available: false,
+      reason: "A test restore needs pg_restore on the API host.",
+      nextStep: "Install pg_restore, then open Restore on a completed backup.",
+    },
+  };
+  const dsb = restoreEligibility(
+    {
+      status: "success",
+      byteSize: 2048,
+      checksumSha256: "abc",
+      archiveFormat: "dsb",
+      fileName: "clinic.dsb",
+    },
+    { capabilities: missingTools }
+  );
+  assert.equal(dsb.restorable, true);
+  assert.equal(dsb.dumpTestRestoreAvailable, true);
+  assert.equal(dsb.restoreBlockedReason, "");
+
+  const dump = restoreEligibility(
+    {
+      status: "success",
+      byteSize: 4096,
+      checksumSha256: "def",
+      archiveFormat: "pg_dump_custom",
+      fileName: "clinic.dump",
+    },
+    { capabilities: missingTools }
+  );
+  assert.equal(dump.restorable, true);
+  assert.equal(dump.dumpTestRestoreAvailable, false);
+  assert.match(dump.dumpTestRestoreReason, /pg_restore/);
+  assert.match(dump.dumpTestRestoreNextStep, /Install pg_restore/);
+
+  const failed = restoreEligibility({
+    status: "failed",
+    byteSize: 0,
+    fileName: "broken.dsb",
+  });
+  assert.equal(failed.restorable, false);
+  assert.match(failed.restoreBlockedReason, /completed backup/);
+  assert.match(failed.restoreNextStep, /Create a new backup/);
+});
+
+test("overview keeps Restore on a .dsb when dump test restore tools are missing", async () => {
+  const db = createMemoryDb();
+  const service = createBackupRecoveryService({
+    db,
+    env: { BACKUP_SKIP_PG_DUMP: "true" },
+    notifyAdmin: async () => 0,
+  });
+  const backup = await service.createBackup({ type: "manual", actor: { id: "admin-1", first_name: "Ada" } });
+  const overview = await service.getOverview();
+  const listed = overview.backups.find((item) => item.id === backup.id);
+  assert.ok(listed);
+  assert.equal(listed.restorable, true);
+  assert.equal(listed.restoreBlockedReason, "");
+  const isolated = await service.isolatedRestore({ backupId: backup.id, actor: { id: "admin-1" } });
+  assert.equal(isolated.productionTouched, false);
+  assert.equal(isolated.stageLabel, "Isolated restore test passed");
+  assert.notEqual(isolated.stageLabel, "Test restore passed");
 });
 
 test("corrupted archives are rejected", async () => {

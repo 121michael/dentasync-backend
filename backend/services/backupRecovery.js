@@ -209,7 +209,66 @@ function publicBackup(row) {
     legacyDatabaseStored: Boolean(row.payload) || storageClass === "legacy_database" || storageClass === "both",
     downloadable: row.status === "success" && Number(row.byte_size || 0) > 0,
     restorable: row.status === "success" && Number(row.byte_size || 0) > 0 && Boolean(row.checksum_sha256),
+    restoreBlockedReason: "",
+    restoreNextStep: "",
+    dumpTestRestoreAvailable: true,
   };
+}
+
+function isDumpBackup(row = {}) {
+  const format = row.archiveFormat || row.archive_format;
+  const fileName = row.fileName || row.file_name || "";
+  return format === ARCHIVE_FORMAT || String(fileName).toLowerCase().endsWith(".dump");
+}
+
+function restoreEligibility(backup, { capabilities = {}, activeJob = false } = {}) {
+  const status = backup?.status;
+  const pipeline = backup?.pipelineStatus || backup?.pipeline_status;
+  const size = Number(backup?.byteSize ?? backup?.byte_size ?? 0);
+  const checksum = backup?.checksumSha256 || backup?.checksum_sha256;
+  const dump = isDumpBackup(backup);
+  const testRestore = capabilities.testRestore || { available: true, reason: "", nextStep: "" };
+  const running =
+    status === "in_progress" || ["queued", "running", "uploading", "verifying"].includes(String(pipeline || ""));
+
+  let blocked = { reason: "", nextStep: "" };
+  if (running) {
+    blocked = {
+      reason: "This backup is still running.",
+      nextStep: "Wait until the job finishes, then use Restore.",
+    };
+  } else if (status !== "success") {
+    blocked = {
+      reason: "Only a completed backup can be restored.",
+      nextStep: "Create a new backup, or choose a row whose status is success.",
+    };
+  } else if (size <= 0 || !checksum) {
+    blocked = {
+      reason: "This backup has no stored archive.",
+      nextStep: "Create a new backup, or upload a previously downloaded .dsb.",
+    };
+  } else if (activeJob) {
+    blocked = {
+      reason: "Another backup or restore is already running.",
+      nextStep: "Wait until that job finishes, then open Restore again.",
+    };
+  }
+
+  const dumpTestRestoreAvailable = !dump || testRestore.available !== false;
+  return {
+    restorable: !blocked.reason,
+    restoreBlockedReason: blocked.reason,
+    restoreNextStep: blocked.nextStep,
+    dumpTestRestoreAvailable,
+    dumpTestRestoreReason: dumpTestRestoreAvailable ? "" : testRestore.reason || "A test restore cannot run for this .dump.",
+    dumpTestRestoreNextStep: dumpTestRestoreAvailable
+      ? ""
+      : testRestore.nextStep || "Install pg_restore and allow a temporary database, then try Restore again.",
+  };
+}
+
+function withRestoreEligibility(backup, options) {
+  return { ...backup, ...restoreEligibility(backup, options) };
 }
 
 const SECRET_ENV_KEYS = [
@@ -1035,6 +1094,7 @@ function createBackupRecoveryService({ db, env = process.env, notifyAdmin = noti
         nextStep: "Creating a backup is still allowed. Open Restore after the tools are available.",
       },
     }));
+    backups = backups.map((item) => withRestoreEligibility(item, { capabilities, activeJob }));
 
     const storageBytes = successful.reduce((sum, item) => sum + Number(item.byteSize || 0), 0);
 
@@ -1544,6 +1604,7 @@ function createBackupRecoveryService({ db, env = process.env, notifyAdmin = noti
         return {
           isolated: true,
           productionTouched: false,
+          stageLabel: "Isolated restore test passed",
           backup: publicBackup(row),
           restoredTables: applied.restoreNames,
           verifiedRowCounts: applied.verified,
@@ -1975,4 +2036,6 @@ module.exports = {
   createBackupScheduleJob,
   createInternalBackupCronHandler,
   productionRestoreAllowed,
+  restoreEligibility,
+  isDumpBackup,
 };
