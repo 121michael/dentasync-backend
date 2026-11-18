@@ -13,6 +13,7 @@ const {
   applyLowConfidenceFields,
   documentAiIsConfigured,
 } = require("./googleCloudOcr");
+const { parseAffectedTeeth, isValidFdiTooth } = require("./dentalChartSync");
 
 const INVALID_DOCUMENT_MESSAGE =
   "Document Not Recognized. The uploaded file does not appear to be a supported patient or dental document. Please upload a valid patient record, dental treatment record, patient information form, or scanned dental document.";
@@ -150,6 +151,7 @@ function emptyPayload() {
       clinicLocation: "",
       status: "completed",
       notes: "",
+      unclearDateText: "",
       coverageStatus: "",
       visits: [],
     },
@@ -166,6 +168,7 @@ function emptyVisitRow() {
     amountPaid: "",
     balance: "",
     nextAppt: "",
+    unclearDateText: "",
   };
 }
 
@@ -251,6 +254,7 @@ function normalizeVisitRows(rows = []) {
         amountPaid: cleanLine(String(row?.amountPaid ?? "")),
         balance: cleanLine(String(row?.balance ?? "")),
         nextAppt: cleanLine(row?.nextAppt || row?.nextAppointment || ""),
+        ...(cleanLine(row?.unclearDateText || "") ? { unclearDateText: cleanLine(row.unclearDateText) } : {}),
       };
     })
     .filter(
@@ -436,12 +440,18 @@ function forceFillDentalChartTreatment(payload, rawText = "", fields = {}) {
     payload.procedure.treatment = "Oral Prophylaxis";
   }
 
-  if (!isPlausibleWrittenDate(payload.procedure.treatmentDate)) {
-    const repaired =
-      repairNoisyWrittenDate(fields.treatmentDate || "") ||
-      repairNoisyWrittenDate(fields.notes || "") ||
-      repairNoisyWrittenDate(text);
-    if (repaired) payload.procedure.treatmentDate = repaired;
+  if (!isPlausibleWrittenDate(payload.procedure.treatmentDate) && !payload.procedure.unclearDateText) {
+    const unclear = captureUnclearWrittenDate(fields.treatmentDate || "") || captureUnclearWrittenDate(text);
+    if (unclear) {
+      payload.procedure.unclearDateText = unclear;
+      payload.procedure.treatmentDate = "";
+    } else {
+      const repaired =
+        repairNoisyWrittenDate(fields.treatmentDate || "") ||
+        repairNoisyWrittenDate(fields.notes || "") ||
+        repairNoisyWrittenDate(text);
+      if (repaired) payload.procedure.treatmentDate = repaired;
+    }
   }
 
   // Age + phone from dental-chart header OCR (including common letter/digit soup).
@@ -519,12 +529,18 @@ function forceFillDentalChartTreatment(payload, rawText = "", fields = {}) {
       "";
     if (readableTreatment) first.treatment = readableTreatment;
 
-    const readableDate = isPlausibleWrittenDate(payload.procedure.treatmentDate)
+    const readableDate = payload.procedure.unclearDateText
+      ? ""
+      : isPlausibleWrittenDate(payload.procedure.treatmentDate)
       ? payload.procedure.treatmentDate
       : isPlausibleWrittenDate(first.treatmentDate)
         ? first.treatmentDate
         : (chartRow && chartRow.treatmentDate) || "";
     if (readableDate) first.treatmentDate = readableDate;
+    if (payload.procedure.unclearDateText) {
+      first.treatmentDate = "";
+      first.unclearDateText = payload.procedure.unclearDateText;
+    }
 
     // CREDIT/amount OCR sometimes lands in Amount Paid — move it to Amount Charged.
     if (
@@ -603,11 +619,20 @@ function sanitizeExtractedPayload(payload) {
     if (payload.procedure.treatment) {
       payload.procedure.treatment = toReadableClinicProcedure(payload.procedure.treatment);
     }
+    if (payload.procedure.notes && looksLikeFormDumpNotes(payload.procedure.notes)) {
+      payload.procedure.notes = "";
+    }
     if (payload.procedure.treatmentDate && !isPlausibleWrittenDate(payload.procedure.treatmentDate)) {
-      payload.procedure.treatmentDate =
-        repairNoisyWrittenDate(payload.procedure.treatmentDate) ||
-        repairNoisyWrittenDate(`${payload.procedure.treatmentDate}\n${payload.procedure.treatment || ""}`) ||
-        "";
+      const unclear = captureUnclearWrittenDate(payload.procedure.treatmentDate);
+      if (unclear) {
+        payload.procedure.unclearDateText = unclear;
+        payload.procedure.treatmentDate = "";
+      } else {
+        payload.procedure.treatmentDate =
+          repairNoisyWrittenDate(payload.procedure.treatmentDate) ||
+          repairNoisyWrittenDate(`${payload.procedure.treatmentDate}\n${payload.procedure.treatment || ""}`) ||
+          "";
+      }
     }
     if (payload.procedure.amountCharged) {
       payload.procedure.amountCharged =
@@ -621,9 +646,15 @@ function sanitizeExtractedPayload(payload) {
           .map((row) => ({
             ...row,
             treatment: toReadableClinicProcedure(row?.treatment),
+            toothNos: validateWrittenToothField(row?.toothNos || "").value,
             treatmentDate: isPlausibleWrittenDate(row?.treatmentDate)
               ? row.treatmentDate
-              : repairNoisyWrittenDate(row?.treatmentDate || "") || "",
+              : captureUnclearWrittenDate(row?.treatmentDate || "")
+                ? ""
+                : repairNoisyWrittenDate(row?.treatmentDate || "") || "",
+            unclearDateText: isPlausibleWrittenDate(row?.treatmentDate)
+              ? ""
+              : captureUnclearWrittenDate(row?.treatmentDate || "") || row?.unclearDateText || "",
             amountCharged:
               preferClinicFeeAmount(row?.amountCharged || "") ||
               repairOcrAmountToken(row?.amountCharged || "") ||
@@ -1098,12 +1129,254 @@ function stripDateTokens(text) {
 function findToothToken(text) {
   const source = String(text || "");
   const range = source.match(/#?\b(\d{1,2})\s*[-–]\s*(\d{1,2})\b(?!\d)/);
-  if (range) return `${range[1]}-${range[2]}`;
-  const labeled = source.match(/\btooth\s*(?:no\.?|#)?\s*(\d{1,2})\b/i);
-  if (labeled) return labeled[1];
+  if (range) return validateWrittenToothField(`${range[1]}-${range[2]}`).value;
+  const labeled = source.match(/\btooth\s*(?:no\.?s?|numbers?|#)?\s*[:.\-]?\s*(#?\d{1,2}(?:\s*[-–]\s*\d{1,2})?(?:\s*[,;/&+]\s*#?\d{1,2})*)\b/i);
+  if (labeled) return validateWrittenToothField(labeled[1]).value;
   const hashed = source.match(/#\s*(\d{1,2})\b/);
-  if (hashed) return hashed[1];
+  if (hashed) return validateWrittenToothField(hashed[1]).value;
   return "";
+}
+
+/** Permanent 11–48 and primary 51–85, keeping the document's written list/range. */
+function validateWrittenToothField(value) {
+  const text = cleanLine(value)
+    .replace(/^#/, "")
+    .replace(/\b(?:tooth(?:\s*(?:no\.?s?|numbers?|#))?|teeth)\b/gi, " ")
+    .replace(/[:.]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return { value: "", ok: false, unreadable: true };
+  const range = text.match(/^(\d{1,2})\s*[-–]\s*(\d{1,2})$/);
+  if (range) {
+    const start = Number(range[1]);
+    const end = Number(range[2]);
+    if (isValidFdiTooth(start) && isValidFdiTooth(end)) {
+      return { value: `${range[1]}-${range[2]}`, ok: true, unreadable: false };
+    }
+    return { value: "", ok: false, unreadable: true };
+  }
+  const parsed = parseAffectedTeeth(text);
+  const written = [...text.matchAll(/\d{1,2}/g)].map((match) => Number(match[0]));
+  if (!written.length) return { value: "", ok: false, unreadable: true };
+  if (parsed.length && parsed.length === written.filter((n) => isValidFdiTooth(n)).length && written.every((n) => isValidFdiTooth(n))) {
+    return { value: parsed.join(", "), ok: true, unreadable: false };
+  }
+  return { value: "", ok: false, unreadable: true };
+}
+
+const TOOTH_LABEL_LINE_RE = /^(?:tooth(?:\s*(?:no\.?s?|nos|number|numbers|#))?|teeth)\b/i;
+const FORM_HEADER_LINE_RE =
+  /^(?:name|date|age|address|telephone|phone|description|procedure|treatment|amount|debit|credit|balance|dentist|gender|occupation|status|complaint|notes|remarks|findings|diagnosis)\b/i;
+
+function collectLabeledToothValues(rawText) {
+  const lines = String(rawText || "")
+    .split(/\r?\n/)
+    .map((line) => cleanLine(line))
+    .filter(Boolean);
+  const found = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (!TOOTH_LABEL_LINE_RE.test(line)) continue;
+    const rest = cleanLine(line.replace(TOOTH_LABEL_LINE_RE, "").replace(/^[:.\-\s]+/, ""));
+    const next = lines[i + 1] || "";
+    const nextIsToothOnly =
+      Boolean(next) &&
+      validateWrittenToothField(next).ok &&
+      !FORM_HEADER_LINE_RE.test(next) &&
+      !isPlausibleWrittenDate(next) &&
+      !readRowProcedure(next);
+    const candidate = rest || (nextIsToothOnly ? next : "");
+    if (!candidate && !rest) continue;
+    const validated = validateWrittenToothField(candidate);
+    found.push({
+      ...validated,
+      raw: candidate,
+      labeled: true,
+    });
+  }
+  return found;
+}
+
+const UNCLEAR_WRITTEN_DATE_RE =
+  /\b((?:[0O]CT(?:OBER)?|[1lI]AN(?:UARY)?|[5S]EP(?:T(?:EMBER)?)?|[8B]EC(?:EMBER)?|[A-Z0-9]{3,9})\.?\s*[-.]?\s*\d{1,2}(?:st|nd|rd|th)?(?:,)?\s*20\d{2})\b/i;
+
+function captureUnclearWrittenDate(rawText) {
+  const source = String(rawText || "");
+  const labeled = source.match(
+    /(?:^|\n)\s*(?:treatment\s*date|procedure\s*date|date\s*performed|visit\s*date|date)\s*[:.\-]?\s*([^\n]{4,40})/im
+  );
+  const candidates = [labeled?.[1] || "", ...(source.match(UNCLEAR_WRITTEN_DATE_RE) || [])].filter(Boolean);
+  for (const candidate of candidates) {
+    const text = cleanLine(candidate);
+    if (!text || isPlausibleWrittenDate(text)) continue;
+    if (/\b[0O]CT(?:OBER)?\b/i.test(text) && /\b\d{1,2}\b/.test(text) && /\b20\d{2}\b/.test(text)) {
+      return text;
+    }
+    if (
+      /\b[A-Z0-9]{3,9}\.?\s*[-.]?\s*\d{1,2}(?:st|nd|rd|th)?(?:,)?\s*20\d{2}\b/i.test(text) &&
+      !new RegExp(`\\b(?:${MONTH_TOKEN_RE})\\b`, "i").test(text)
+    ) {
+      return text;
+    }
+  }
+  return "";
+}
+
+function looksLikeFormDumpNotes(notes, rawText = "") {
+  const text = cleanLine(notes);
+  if (!text) return false;
+  const compact = (value) =>
+    String(value || "")
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .trim();
+  if (rawText && compact(text) && compact(text) === compact(rawText)) return true;
+  const labelHits = ["name", "date", "amount", "tooth", "description", "telephone", "address"].filter((label) =>
+    new RegExp(`\\b${label}\\b`, "i").test(text)
+  );
+  if (labelHits.length >= 3) return true;
+  if (text.length > 240 && /\b(?:name|date|amount charged|tooth no)\b/i.test(text)) return true;
+  return false;
+}
+
+function extractExplicitClinicalNotes(rawText) {
+  const notes = captureLabeledBlock(
+    rawText,
+    ["clinical notes", "chief complaint", "complaint", "remarks", "findings", "diagnosis", "notes"],
+    [
+      "tooth",
+      "tooth no",
+      "tooth nos",
+      "amount charged",
+      "amount",
+      "description",
+      "procedure",
+      "treatment",
+      "date",
+      "name",
+      "age",
+      "address",
+      "telephone",
+    ]
+  );
+  const cleaned = cleanLine(notes);
+  if (!cleaned || looksLikeFormDumpNotes(cleaned, rawText) || looksLikeOcrSoup(cleaned)) return "";
+  if (/^(?:name|date|tooth|amount|description|procedure)\b/i.test(cleaned)) return "";
+  return cleaned;
+}
+
+function applyLabeledToothMapping(payload, rawText, fieldStatuses = {}) {
+  if (!payload?.procedure) return fieldStatuses;
+  const visits = normalizeVisitRows(payload.procedure.visits || []);
+  const labeled = collectLabeledToothValues(rawText);
+  const existing = visits.map((row) => validateWrittenToothField(row.toothNos));
+  const readableLabeled = labeled.filter((item) => item.ok);
+  const unreadableLabeled = labeled.some((item) => item.labeled && !item.ok);
+
+  const assign = (index, value) => {
+    if (!visits[index]) return;
+    visits[index].toothNos = value;
+  };
+
+  if (visits.length <= 1) {
+    const first = visits[0] || emptyVisitRow();
+    if (!visits.length) visits.push(first);
+    if (readableLabeled.length === 1) {
+      assign(0, readableLabeled[0].value);
+    } else if (existing[0]?.ok) {
+      assign(0, existing[0].value);
+    } else if (readableLabeled.length > 1 || (unreadableLabeled && !existing[0]?.ok)) {
+      assign(0, "");
+      fieldStatuses.toothNos = "unable_to_read";
+    } else if (!first.toothNos) {
+      const fallback = findToothToken(rawText);
+      if (fallback) assign(0, fallback);
+    }
+  } else if (readableLabeled.length === visits.length) {
+    readableLabeled.forEach((item, index) => assign(index, item.value));
+  } else {
+    visits.forEach((row, index) => {
+      if (existing[index]?.ok) {
+        assign(index, existing[index].value);
+      } else {
+        assign(index, "");
+      }
+    });
+    const filled = visits.filter((row) => row.toothNos).length;
+    if (readableLabeled.length !== filled || unreadableLabeled || (readableLabeled.length && filled !== readableLabeled.length)) {
+      if (readableLabeled.length !== visits.length) {
+        visits.forEach((_, index) => {
+          if (!existing[index]?.ok) assign(index, "");
+        });
+        if (readableLabeled.length > 0 && readableLabeled.length !== visits.length) {
+          fieldStatuses.toothNos = "unable_to_read";
+        }
+      }
+    }
+    if (unreadableLabeled) fieldStatuses.toothNos = "unable_to_read";
+  }
+
+  payload.procedure.visits = normalizeVisitRows(visits);
+  if (payload.procedure.visits[0]?.toothNos) {
+    fieldStatuses.toothNos = fieldStatuses.toothNos === "unable_to_read" ? "unable_to_read" : "detected";
+  }
+  return fieldStatuses;
+}
+
+function applyUnclearDateReview(payload, rawText, fieldStatuses = {}) {
+  if (!payload?.procedure) return fieldStatuses;
+  const unclear =
+    payload.procedure.unclearDateText ||
+    captureUnclearWrittenDate(payload.procedure.treatmentDate) ||
+    captureUnclearWrittenDate(rawText);
+  const currentDate = payload.procedure.treatmentDate || "";
+  if (unclear && !isPlausibleWrittenDate(currentDate)) {
+    payload.procedure.unclearDateText = unclear;
+    payload.procedure.treatmentDate = "";
+    fieldStatuses.treatmentDate = "unable_to_read";
+    payload.procedure.visits = normalizeVisitRows(
+      (payload.procedure.visits || []).map((row, index) => {
+        if (index === 0 || !isPlausibleWrittenDate(row.treatmentDate)) {
+          return {
+            ...row,
+            treatmentDate: isPlausibleWrittenDate(row.treatmentDate) ? row.treatmentDate : "",
+            unclearDateText: isPlausibleWrittenDate(row.treatmentDate) ? "" : unclear,
+          };
+        }
+        return row;
+      })
+    );
+  } else if (isPlausibleWrittenDate(currentDate)) {
+    payload.procedure.unclearDateText = "";
+  }
+  return fieldStatuses;
+}
+
+function stripNonExplicitClinicalNotes(payload, rawText, fieldStatuses = {}) {
+  if (!payload?.procedure) return fieldStatuses;
+  const explicit = extractExplicitClinicalNotes(rawText);
+  const current = cleanLine(payload.procedure.notes);
+  if (explicit) {
+    payload.procedure.notes = explicit;
+    fieldStatuses.notes = "detected";
+    return fieldStatuses;
+  }
+  if (!current || looksLikeFormDumpNotes(current, rawText)) {
+    payload.procedure.notes = "";
+    return fieldStatuses;
+  }
+  if (!/^(?:complaint|notes|remarks|findings|diagnosis)\b/i.test(String(rawText || ""))) {
+    payload.procedure.notes = "";
+  }
+  return fieldStatuses;
+}
+
+function finalizeDocumentFieldMapping(payload, rawText, fieldStatuses = {}) {
+  let next = { ...fieldStatuses };
+  next = applyLabeledToothMapping(payload, rawText, next);
+  next = applyUnclearDateReview(payload, rawText, next);
+  next = stripNonExplicitClinicalNotes(payload, rawText, next);
+  return next;
 }
 
 function findDentistToken(text) {
@@ -1161,7 +1434,7 @@ function rowFromTableCells(cells, columns) {
       return;
     }
     if (key === "toothNos") {
-      row.toothNos = findToothToken(value) || (/^\d{1,2}$/.test(value) ? value : "");
+      row.toothNos = validateWrittenToothField(value).value;
       if (row.toothNos) filled += 1;
       return;
     }
@@ -2204,17 +2477,23 @@ function recoverNoisyOcrFields(rawText, existingFields = {}) {
   }
 
   if (!fields.treatmentDate || !isPlausibleWrittenDate(fields.treatmentDate)) {
-    const dateMatch = text.match(
-      new RegExp(
-        `\\b(${MONTH_TOKEN_RE})\\s*[-.]?\\s*(\\d{1,2})(?:st|nd|rd|th)?(?:,)?\\s*(20\\d{2})\\b`,
-        "i"
-      )
-    );
-    if (dateMatch) {
-      fields.treatmentDate = cleanLine(dateMatch[0]);
+    const unclear = captureUnclearWrittenDate(fields.treatmentDate || "") || captureUnclearWrittenDate(text);
+    if (unclear) {
+      fields.treatmentDate = "";
+      fields.unclearDateText = unclear;
     } else {
-      const repairedDate = repairNoisyWrittenDate(text);
-      fields.treatmentDate = repairedDate || "";
+      const dateMatch = text.match(
+        new RegExp(
+          `\\b(${MONTH_TOKEN_RE})\\s*[-.]?\\s*(\\d{1,2})(?:st|nd|rd|th)?(?:,)?\\s*(20\\d{2})\\b`,
+          "i"
+        )
+      );
+      if (dateMatch) {
+        fields.treatmentDate = cleanLine(dateMatch[0]);
+      } else {
+        const repairedDate = repairNoisyWrittenDate(text);
+        fields.treatmentDate = repairedDate || "";
+      }
     }
   }
 
@@ -2352,7 +2631,13 @@ function applyExternalFields(payload, fields = {}) {
       }
     }
   }
-  if (fields.notes && !next.procedure.notes) next.procedure.notes = cleanLine(fields.notes);
+  if (fields.unclearDateText && !next.procedure.unclearDateText) {
+    next.procedure.unclearDateText = cleanLine(fields.unclearDateText);
+  }
+  if (fields.notes && !next.procedure.notes) {
+    const explicit = extractExplicitClinicalNotes(fields.notes) || cleanLine(fields.notes);
+    if (explicit && !looksLikeFormDumpNotes(explicit)) next.procedure.notes = explicit;
+  }
   if (Array.isArray(fields.visits) && fields.visits.length) {
     applyVisionVisits(next, fields.visits);
   }
@@ -2716,21 +3001,30 @@ function extractStructuredPayload(rawText) {
     }
   }
   if (!isPlausibleWrittenDate(payload.procedure.treatmentDate)) {
-    // Only attempt SEPT mangling repair on dental-chart style OCR, not TREATMENT RECORD soup.
-    const looksLikeDentalChartDate =
-      /description|debit|credit|prophylax|pr[o0].{0,10}h[il1y]|(?:\(|\b)(?:tpt|jtp|itet|5ept|sept)/i.test(
-        text
-      );
-    const repairedDate = looksLikeDentalChartDate ? repairNoisyWrittenDate(text) : "";
-    payload.procedure.treatmentDate = repairedDate || "";
+    const unclearDate = captureUnclearWrittenDate(dateBlock) || captureUnclearWrittenDate(text);
+    if (unclearDate) {
+      payload.procedure.unclearDateText = unclearDate;
+      payload.procedure.treatmentDate = "";
+      fieldStatuses.treatmentDate = "unable_to_read";
+    } else {
+      // Only attempt SEPT mangling repair on dental-chart style OCR, not TREATMENT RECORD soup.
+      const looksLikeDentalChartDate =
+        /description|debit|credit|prophylax|pr[o0].{0,10}h[il1y]|(?:\(|\b)(?:tpt|jtp|itet|5ept|sept)/i.test(
+          text
+        );
+      const repairedDate = looksLikeDentalChartDate ? repairNoisyWrittenDate(text) : "";
+      payload.procedure.treatmentDate = repairedDate || "";
+    }
   }
-  fieldStatuses.treatmentDate = fieldStatus(
-    payload.procedure.treatmentDate,
-    labelPresent(
-      text,
-      /(?:treatment\s*date|procedure\s*date|date\s*performed|date\s*of\s*service|visit\s*date|(?:^|\n)\s*date)\b/im
-    )
-  );
+  if (!fieldStatuses.treatmentDate) {
+    fieldStatuses.treatmentDate = fieldStatus(
+      payload.procedure.treatmentDate,
+      labelPresent(
+        text,
+        /(?:treatment\s*date|procedure\s*date|date\s*performed|date\s*of\s*service|visit\s*date|(?:^|\n)\s*date)\b/im
+      )
+    );
+  }
 
   const amountBlock =
     captureLabeledBlock(text, ["amount", "amount charged", "fee", "total", "price"]) ||
@@ -2768,13 +3062,7 @@ function extractStructuredPayload(rawText) {
     /(?:coverage|hmo|payment)\s*[:\-]\s*(.+)$/im,
   ]);
 
-  payload.procedure.notes =
-    captureLabeledBlock(text, ["complaint", "notes", "remarks", "findings", "diagnosis"]) ||
-    capture(text, [/(?:notes|remarks|findings|diagnosis|complaint)\s*[:\-]\s*(.+)$/im]);
-  // Never invent notes — only keep labeled document notes.
-  if (looksLikeOcrSoup(payload.procedure.notes)) {
-    payload.procedure.notes = "";
-  }
+  payload.procedure.notes = extractExplicitClinicalNotes(text);
 
   const isTableForm = isTreatmentRecordForm(text) || /treatment\s*record/i.test(text);
   payload.documentForm = isTableForm ? "treatment_record" : "generic";
@@ -2853,6 +3141,7 @@ function extractStructuredPayload(rawText) {
   mirrorPrimaryTreatmentIntoVisits(payload);
   forceFillDentalChartTreatment(payload, text, {});
   Object.assign(fieldStatuses, refreshFieldStatuses(payload, fieldStatuses));
+  Object.assign(fieldStatuses, finalizeDocumentFieldMapping(payload, text, fieldStatuses));
 
   return { payload, notes: notes.join(" "), fieldStatuses };
 }
@@ -3347,7 +3636,7 @@ async function extractDocumentDataUntracked(filePath, mimeType, originalName, op
           treatmentDate: zoneFields.treatmentDate || extracted.fields?.treatmentDate || "",
           amountCharged: zoneFields.amountCharged || extracted.fields?.amountCharged || "",
           age: zoneFields.age || extracted.fields?.age || "",
-          notes: [extracted.fields?.notes, zoneText].filter(Boolean).join("\n"),
+          notes: extracted.fields?.notes || "",
         };
         structured.payload = applyExternalFields(structured.payload, extracted.fields);
         forceFillDentalChartTreatment(structured.payload, extracted.text, extracted.fields);
@@ -3428,6 +3717,11 @@ async function extractDocumentDataUntracked(filePath, mimeType, originalName, op
   // After sanitizing junk cells, mirror any remaining readable primary fields into the table.
   mirrorPrimaryTreatmentIntoVisits(structured.payload);
   forceFillDentalChartTreatment(structured.payload, extracted.text, extracted.fields || {});
+  structured.fieldStatuses = finalizeDocumentFieldMapping(
+    structured.payload,
+    extracted.text,
+    structured.fieldStatuses
+  );
   filledCount = countReadableDocumentFields(structured.payload);
   if (Array.isArray(vision?.uncertainFields) && vision.uncertainFields.length) {
     structured.fieldStatuses = applyUncertainFields(
@@ -3530,4 +3824,8 @@ module.exports = {
   parseTreatmentRecordRows,
   pickPrimaryTreatmentRow,
   isTreatmentRecordForm,
+  validateWrittenToothField,
+  finalizeDocumentFieldMapping,
+  extractExplicitClinicalNotes,
+  looksLikeFormDumpNotes,
 };
