@@ -6,7 +6,13 @@ const path = require("path");
 const { extractBestImageText, scoreDocumentText, extractTreatmentZoneText } = require("./documentImagePrep");
 const { extractFieldsWithGemini, applyUncertainFields } = require("./documentVisionExtraction");
 const { extractTextWithOcrSpace } = require("./cloudOcrExtraction");
-const { extractTextWithGoogleCloud, googleCloudOcrIsConfigured } = require("./googleCloudOcr");
+const {
+  extractTextWithGoogleCloud,
+  googleCloudOcrIsConfigured,
+  extractHandwrittenFormWithDocumentAi,
+  applyLowConfidenceFields,
+  documentAiIsConfigured,
+} = require("./googleCloudOcr");
 
 const INVALID_DOCUMENT_MESSAGE =
   "Document Not Recognized. The uploaded file does not appear to be a supported patient or dental document. Please upload a valid patient record, dental treatment record, patient information form, or scanned dental document.";
@@ -3193,11 +3199,36 @@ async function extractTextFromFile(filePath, mimeType, originalName) {
   throw new DocumentValidationError(UNSUPPORTED_DOCUMENT_MESSAGE);
 }
 
-async function extractDocumentDataUntracked(filePath, mimeType, originalName) {
+async function extractDocumentDataUntracked(filePath, mimeType, originalName, options = {}) {
   const extension = path.extname(originalName || filePath).toLowerCase();
   const isImage =
     (mimeType && mimeType.startsWith("image/")) ||
     [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"].includes(extension);
+  const handwritten = String(options.sourceType || "").trim() === "hard_copy_scan";
+  let allowManualEntry = false;
+  let ocrError = "";
+  let documentAiTokens = [];
+  let handwrittenExtracted = null;
+
+  if (handwritten) {
+    const handwrittenOcr = await extractHandwrittenFormWithDocumentAi({
+      filePath,
+      mimeType: mimeType || (isImage ? "image/jpeg" : "application/pdf"),
+      env: process.env,
+    });
+    if (handwrittenOcr.ok) {
+      handwrittenExtracted = {
+        text: handwrittenOcr.text,
+        method: handwrittenOcr.method,
+        confidence: handwrittenOcr.confidence,
+        tokens: handwrittenOcr.tokens || [],
+      };
+      documentAiTokens = handwrittenExtracted.tokens;
+    } else {
+      ocrError = handwrittenOcr.message;
+      allowManualEntry = true;
+    }
+  }
 
   // Fast vision path for complex handwritten forms when configured.
   let vision = null;
@@ -3221,7 +3252,7 @@ async function extractDocumentDataUntracked(filePath, mimeType, originalName) {
     throw new DocumentValidationError(INVALID_DOCUMENT_MESSAGE);
   }
 
-  const extracted = await extractTextFromFile(filePath, mimeType, originalName);
+  const extracted = handwrittenExtracted || (await extractTextFromFile(filePath, mimeType, originalName));
 
   // If Gemini returned fields, also try Gemini on the upright corrected image for better accuracy.
   if (isImage && extracted.uprightPath && process.env.GEMINI_API_KEY) {
@@ -3246,7 +3277,12 @@ async function extractDocumentDataUntracked(filePath, mimeType, originalName) {
     extracted.method
   );
   if (!likeness.isDocument && !(vision && vision.isDocument)) {
-    throw new DocumentValidationError(likeness.message || INVALID_DOCUMENT_MESSAGE);
+    if (handwritten) {
+      allowManualEntry = true;
+      ocrError = ocrError || likeness.message || INVALID_DOCUMENT_MESSAGE;
+    } else {
+      throw new DocumentValidationError(likeness.message || INVALID_DOCUMENT_MESSAGE);
+    }
   }
 
   const structured = extractStructuredPayload(extracted.text);
@@ -3362,17 +3398,31 @@ async function extractDocumentDataUntracked(filePath, mimeType, originalName) {
   }
 
   structured.fieldStatuses = refreshFieldStatuses(structured.payload, structured.fieldStatuses);
+  if (documentAiTokens.length) {
+    structured.fieldStatuses = applyLowConfidenceFields(
+      structured.payload,
+      structured.fieldStatuses,
+      documentAiTokens
+    );
+  }
 
   let filledCount = 0;
   try {
     filledCount = ensureReadableExtraction(structured.payload);
   } catch (error) {
-    if (error instanceof DocumentValidationError) {
+    if (error instanceof DocumentValidationError && handwritten) {
+      filledCount = countReadableDocumentFields(structured.payload);
+      allowManualEntry = true;
+      ocrError =
+        ocrError ||
+        `${UNREADABLE_DOCUMENT_MESSAGE} Enter the fields from the original document, then Confirm & Save.`;
+    } else if (error instanceof DocumentValidationError) {
       throw new DocumentValidationError(
         `${UNREADABLE_DOCUMENT_MESSAGE} Tip: use a bright, upright photo and set GOOGLE_CLOUD_API_KEY (or a service account) so Admin Sync can read handwriting and scanned PDFs.`
       );
+    } else {
+      throw error;
     }
-    throw error;
   }
 
   // After sanitizing junk cells, mirror any remaining readable primary fields into the table.
@@ -3387,11 +3437,24 @@ async function extractDocumentDataUntracked(filePath, mimeType, originalName) {
     );
     filledCount = countReadableDocumentFields(structured.payload);
   }
+  if (documentAiTokens.length) {
+    structured.fieldStatuses = applyLowConfidenceFields(
+      structured.payload,
+      structured.fieldStatuses,
+      documentAiTokens
+    );
+    filledCount = countReadableDocumentFields(structured.payload);
+  }
 
   const notes = [
     `Document read successfully — auto-filled ${filledCount} field${filledCount === 1 ? "" : "s"} from the scan. Review them, then Confirm & Save.`,
     "autofill-build: treatment-zone-v7",
     extracted.method ? `OCR engine: ${extracted.method}.` : "",
+    handwritten
+      ? documentAiIsConfigured()
+        ? ocrError || "Handwritten scan read with Google Document AI Enterprise Document OCR."
+        : ocrError
+      : "",
     visionProviderNote,
     vision
       ? `Vision assist: on (${vision.model || "gemini"}).`
@@ -3417,18 +3480,20 @@ async function extractDocumentDataUntracked(filePath, mimeType, originalName) {
     extractionNotes: notes,
     method: vision ? `${extracted.method}+vision` : extracted.method,
     validation: likeness,
-    needsReview,
+    needsReview: needsReview || allowManualEntry || Boolean(ocrError),
     orientationDegrees: extracted.orientationDegrees || 0,
     autoFilledCount: filledCount,
+    allowManualEntry,
+    ocrError,
   };
 }
 
-async function extractDocumentData(filePath, mimeType, originalName) {
+async function extractDocumentData(filePath, mimeType, originalName, options = {}) {
   const crypto = require("crypto");
   const { withAiUsageContext, flushAiUsageAttempt } = require("./aiUsage");
   return withAiUsageContext({ feature: "document_sync", requestId: crypto.randomUUID() }, async () => {
     try {
-      return await extractDocumentDataUntracked(filePath, mimeType, originalName);
+      return await extractDocumentDataUntracked(filePath, mimeType, originalName, options);
     } finally {
       flushAiUsageAttempt();
     }

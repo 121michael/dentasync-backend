@@ -465,7 +465,10 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
             userRole: "admin",
             db,
           },
-          () => extractDocumentData(req.file.path, req.file.mimetype, req.file.originalname)
+          () =>
+            extractDocumentData(req.file.path, req.file.mimetype, req.file.originalname, {
+              sourceType,
+            })
         );
 
         const reviewFields = Object.entries(extraction.fieldStatuses || {})
@@ -508,7 +511,8 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
         });
 
         const filled = Number(extraction.autoFilledCount || 0);
-        if (filled <= 0) {
+        const allowManualEntry = Boolean(extraction.allowManualEntry);
+        if (filled <= 0 && !allowManualEntry) {
           throw new DocumentValidationError(
             "Unable to read the uploaded or scanned document. No patient or treatment fields could be detected. Please upload a clearer scan or photo and try again."
           );
@@ -516,15 +520,20 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
         const buildTag =
           (String(extraction.extractionNotes || "").match(/autofill-build:\s*[\w.-]+/i) || [])[0] ||
           "autofill-build: treatment-zone-v7";
+        const ocrError = String(extraction.ocrError || "").trim();
         return res.status(201).json({
-          message: extraction.needsReview
-            ? `Document Needs Review. We found text, but we could not confidently identify this as a patient or dental record. (${buildTag})`
-            : `Document read successfully — populated ${filled} field${filled === 1 ? "" : "s"} to match the scan. Review them, then Confirm & Save. (${buildTag})`,
+          message: ocrError
+            ? ocrError
+            : extraction.needsReview
+              ? `Document Needs Review. We found text, but we could not confidently identify this as a patient or dental record. (${buildTag})`
+              : `Document read successfully — populated ${filled} field${filled === 1 ? "" : "s"} to match the scan. Review them, then Confirm & Save. (${buildTag})`,
           job: mapJob(updated.rows[0]),
           fieldStatuses: extraction.fieldStatuses || {},
           autoFilledCount: filled,
           extractionNotes: extraction.extractionNotes || "",
-          needsReview: Boolean(extraction.needsReview),
+          needsReview: Boolean(extraction.needsReview) || allowManualEntry,
+          allowManualEntry,
+          ocrError: ocrError || null,
         });
       } catch (error) {
         const isValidation =

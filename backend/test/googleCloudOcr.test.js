@@ -8,6 +8,10 @@ const test = require("node:test");
 const PDFDocument = require("pdfkit");
 const {
   extractTextWithGoogleCloud,
+  extractHandwrittenFormWithDocumentAi,
+  documentAiProcessorName,
+  documentAiIsConfigured,
+  applyLowConfidenceFields,
   googleCloudOcrIsConfigured,
   setGoogleCloudOcrFetch,
   clearGoogleCloudOcrCache,
@@ -88,7 +92,30 @@ function mockVisionFetch(calls) {
       };
     }
     if (href.includes("documentai.googleapis.com")) {
-      return jsonResponse({ document: { text: HANDWRITING_TEXT, pages: [{}] } });
+      return jsonResponse({
+        document: {
+          text: HANDWRITING_TEXT,
+          pages: [
+            {
+              layout: { confidence: 0.92 },
+              tokens: [
+                {
+                  layout: {
+                    confidence: 0.94,
+                    textAnchor: { textSegments: [{ startIndex: String(HANDWRITING_TEXT.indexOf("Maria")), endIndex: String(HANDWRITING_TEXT.indexOf("Santos") + 6) }] },
+                  },
+                },
+                {
+                  layout: {
+                    confidence: 0.2,
+                    textAnchor: { textSegments: [{ startIndex: String(HANDWRITING_TEXT.lastIndexOf("800")), endIndex: String(HANDWRITING_TEXT.lastIndexOf("800") + 3) }] },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      });
     }
     if (href.includes("files:annotate")) {
       return jsonResponse({
@@ -132,6 +159,90 @@ test("Google Cloud OCR is skipped when credentials are missing", async () => {
     });
     assert.equal(result, null);
     assert.equal(googleCloudOcrIsConfigured({}), false);
+  } finally {
+    fs.unlink(filePath, () => {});
+  }
+});
+
+test("Document AI processor name is built from project, location, and processor id", () => {
+  assert.equal(
+    documentAiProcessorName({
+      GOOGLE_CLOUD_PROJECT: "clinic-sync",
+      GOOGLE_DOCUMENT_AI_LOCATION: "us",
+      GOOGLE_DOCUMENT_AI_PROCESSOR_ID: "proc-handwriting",
+    }),
+    "projects/clinic-sync/locations/us/processors/proc-handwriting"
+  );
+  assert.equal(documentAiIsConfigured({ GOOGLE_CLOUD_PROJECT: "clinic-sync" }), false);
+});
+
+test("Enterprise Document OCR reads a synthetic handwritten form and blanks low-confidence values", async () => {
+  clearGoogleCloudOcrCache();
+  const calls = [];
+  setGoogleCloudOcrFetch(mockVisionFetch(calls));
+  const filePath = await writeHandwritingPng();
+  const env = {
+    GOOGLE_CLOUD_API_KEY: "test-document-ai-key",
+    GOOGLE_CLOUD_PROJECT: "clinic-sync",
+    GOOGLE_DOCUMENT_AI_LOCATION: "us",
+    GOOGLE_DOCUMENT_AI_PROCESSOR_ID: "proc-handwriting",
+  };
+  const previous = {
+    GOOGLE_CLOUD_API_KEY: process.env.GOOGLE_CLOUD_API_KEY,
+    GOOGLE_CLOUD_PROJECT: process.env.GOOGLE_CLOUD_PROJECT,
+    GOOGLE_DOCUMENT_AI_LOCATION: process.env.GOOGLE_DOCUMENT_AI_LOCATION,
+    GOOGLE_DOCUMENT_AI_PROCESSOR_ID: process.env.GOOGLE_DOCUMENT_AI_PROCESSOR_ID,
+  };
+  Object.assign(process.env, env);
+  try {
+    const ocr = await extractHandwrittenFormWithDocumentAi({
+      filePath,
+      mimeType: "image/png",
+      env,
+    });
+    assert.equal(ocr.ok, true);
+    assert.equal(ocr.method, "gcp-document-ai-ocr");
+    assert.match(ocr.text, /Maria Santos/);
+    assert.ok(calls.some((call) => call.url.includes("documentai.googleapis.com")));
+    assert.match(String(calls.find((call) => call.url.includes("documentai.googleapis.com")).body), /ocrConfig/);
+
+    const extracted = await extractDocumentData(filePath, "image/png", "handwriting-chart.png", {
+      sourceType: "hard_copy_scan",
+    });
+    assert.match(String(extracted.method), /gcp-document-ai-ocr/);
+    assert.equal(extracted.payload.patient.fullName, "Maria Santos");
+    assert.equal(extracted.payload.patient.age, "28");
+    assert.equal(extracted.payload.procedure.treatment, "Oral Prophylaxis");
+    assert.equal(extracted.payload.procedure.amountCharged, "");
+    assert.equal(extracted.fieldStatuses.amountCharged, "unable_to_read");
+  } finally {
+    setGoogleCloudOcrFetch(null);
+    clearGoogleCloudOcrCache();
+    fs.unlink(filePath, () => {});
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test("missing Document AI credentials keep manual entry available", async () => {
+  const filePath = await writeHandwritingPng();
+  try {
+    const ocr = await extractHandwrittenFormWithDocumentAi({
+      filePath,
+      mimeType: "image/png",
+      env: {},
+    });
+    assert.equal(ocr.ok, false);
+    assert.equal(ocr.code, "not_configured");
+    const payload = {
+      patient: { fullName: "Guessed Name", firstName: "Guessed", lastName: "Name", age: "99" },
+      procedure: { amountCharged: "12" },
+    };
+    const statuses = applyLowConfidenceFields(payload, {}, [{ text: "Guessed", confidence: 0.1 }]);
+    assert.equal(payload.patient.fullName, "");
+    assert.equal(statuses.fullName, "unable_to_read");
   } finally {
     fs.unlink(filePath, () => {});
   }

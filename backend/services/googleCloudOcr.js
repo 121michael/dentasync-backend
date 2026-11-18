@@ -8,8 +8,17 @@
  * Env (keep secrets in backend environment variables, never the frontend):
  * - GOOGLE_CLOUD_API_KEY or GOOGLE_VISION_API_KEY
  * - GOOGLE_SERVICE_ACCOUNT_JSON or GOOGLE_APPLICATION_CREDENTIALS
- * - GOOGLE_DOCUMENT_AI_PROCESSOR (projects/.../locations/.../processors/...)
+ * - GOOGLE_CLOUD_PROJECT
+ * - GOOGLE_DOCUMENT_AI_LOCATION (default us)
+ * - GOOGLE_DOCUMENT_AI_PROCESSOR_ID  (Enterprise Document OCR processor)
+ * - GOOGLE_DOCUMENT_AI_PROCESSOR (optional full resource name)
  */
+
+const LOW_CONFIDENCE_THRESHOLD = 0.55;
+const DOCUMENT_AI_MISSING_MESSAGE =
+  "Google Document AI is not configured for handwritten forms. Set GOOGLE_CLOUD_PROJECT, GOOGLE_DOCUMENT_AI_LOCATION, GOOGLE_DOCUMENT_AI_PROCESSOR_ID, and a service account or API key on the server. You can still type the fields from the original document.";
+const DOCUMENT_AI_FAILED_MESSAGE =
+  "Document AI could not read this handwritten form. Leave unreadable values blank and enter them from the original document, then Confirm & Save.";
 
 const crypto = require("crypto");
 const fs = require("fs");
@@ -132,8 +141,200 @@ async function getAccessToken(env, scopes) {
   return token;
 }
 
+function documentAiProcessorName(env = process.env) {
+  const full = stringEnv(env, ["GOOGLE_DOCUMENT_AI_PROCESSOR", "DOCUMENT_AI_PROCESSOR_NAME"]);
+  if (full.includes("/processors/")) {
+    return full.replace(/^\/+/, "");
+  }
+  const project = stringEnv(env, [
+    "GOOGLE_CLOUD_PROJECT",
+    "GOOGLE_CLOUD_PROJECT_ID",
+    "GCLOUD_PROJECT",
+    "DOCUMENT_AI_PROJECT",
+  ]);
+  const location = stringEnv(env, ["GOOGLE_DOCUMENT_AI_LOCATION", "DOCUMENT_AI_LOCATION"]) || "us";
+  const processorId = stringEnv(env, ["GOOGLE_DOCUMENT_AI_PROCESSOR_ID", "DOCUMENT_AI_PROCESSOR_ID"]);
+  if (project && processorId) {
+    return `projects/${project}/locations/${location}/processors/${processorId}`;
+  }
+  return "";
+}
+
 function documentAiProcessor(env) {
-  return stringEnv(env, ["GOOGLE_DOCUMENT_AI_PROCESSOR", "DOCUMENT_AI_PROCESSOR_NAME"]);
+  return documentAiProcessorName(env);
+}
+
+function documentAiIsConfigured(env = process.env) {
+  return Boolean(documentAiProcessorName(env) && googleCloudOcrIsConfigured(env));
+}
+
+function collectDocumentAiTokens(document) {
+  const fullText = String(document?.text || "");
+  const tokens = [];
+  for (const page of document?.pages || []) {
+    for (const token of page?.tokens || []) {
+      const confidence = Number(token?.layout?.confidence);
+      const segments = token?.layout?.textAnchor?.textSegments || [];
+      let text = "";
+      for (const segment of segments) {
+        const start = Number(segment.startIndex || 0);
+        const end = Number(segment.endIndex || fullText.length);
+        text += fullText.slice(start, end);
+      }
+      const trimmed = text.trim();
+      if (trimmed) {
+        tokens.push({
+          text: trimmed,
+          confidence: Number.isFinite(confidence) ? confidence : null,
+        });
+      }
+    }
+  }
+  return tokens;
+}
+
+function documentAiConfidencePercent(document, tokens) {
+  const scores = [];
+  for (const token of tokens || []) {
+    if (Number.isFinite(token.confidence)) scores.push(token.confidence);
+  }
+  for (const page of document?.pages || []) {
+    const pageScore = Number(page?.layout?.confidence);
+    if (Number.isFinite(pageScore)) scores.push(pageScore);
+    for (const block of page?.blocks || []) {
+      const blockScore = Number(block?.layout?.confidence);
+      if (Number.isFinite(blockScore)) scores.push(blockScore);
+    }
+  }
+  if (!scores.length) return null;
+  return Math.round((scores.reduce((sum, value) => sum + value, 0) / scores.length) * 100);
+}
+
+function tokenConfidenceForValue(tokens, value) {
+  const needle = String(value || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!needle) return null;
+  const hits = [];
+  for (const token of tokens || []) {
+    const piece = String(token.text || "")
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!piece) continue;
+    if (needle.includes(piece) || piece.includes(needle)) {
+      if (Number.isFinite(token.confidence)) hits.push(token.confidence);
+    }
+  }
+  if (!hits.length) return null;
+  return Math.min(...hits);
+}
+
+function blankPatientName(patient) {
+  patient.fullName = "";
+  patient.firstName = "";
+  patient.lastName = "";
+}
+
+function applyLowConfidenceFields(payload, fieldStatuses, tokens, threshold = LOW_CONFIDENCE_THRESHOLD) {
+  if (!payload || !Array.isArray(tokens) || !tokens.length) {
+    return fieldStatuses || {};
+  }
+  const next = { ...(fieldStatuses || {}) };
+  const patient = payload.patient || (payload.patient = {});
+  const procedure = payload.procedure || (payload.procedure = {});
+  const fields = [
+    {
+      key: "fullName",
+      value: patient.fullName,
+      clear() {
+        blankPatientName(patient);
+      },
+    },
+    {
+      key: "dateOfBirth",
+      value: patient.dateOfBirth,
+      clear() {
+        patient.dateOfBirth = "";
+      },
+    },
+    {
+      key: "age",
+      value: patient.age,
+      clear() {
+        patient.age = "";
+      },
+    },
+    {
+      key: "phone",
+      value: patient.phone,
+      clear() {
+        patient.phone = "";
+      },
+    },
+    {
+      key: "address",
+      value: patient.address,
+      clear() {
+        patient.address = "";
+      },
+    },
+    {
+      key: "gender",
+      value: patient.gender,
+      clear() {
+        patient.gender = "";
+      },
+    },
+    {
+      key: "procedure",
+      value: procedure.treatment,
+      clear() {
+        procedure.treatment = "";
+      },
+    },
+    {
+      key: "treatmentDate",
+      value: procedure.treatmentDate,
+      clear() {
+        procedure.treatmentDate = "";
+      },
+    },
+    {
+      key: "amountCharged",
+      value: procedure.amountCharged,
+      clear() {
+        procedure.amountCharged = "";
+      },
+    },
+    {
+      key: "notes",
+      value: procedure.notes,
+      clear() {
+        procedure.notes = "";
+      },
+    },
+  ];
+  for (const field of fields) {
+    const confidence = tokenConfidenceForValue(tokens, field.value);
+    if (confidence == null) continue;
+    if (confidence < threshold) {
+      field.clear();
+      next[field.key] = "unable_to_read";
+    } else if (confidence < 0.75) {
+      next[field.key] = next[field.key] === "unable_to_read" ? "unable_to_read" : "low_confidence";
+    }
+  }
+  if (Array.isArray(procedure.visits)) {
+    for (const row of procedure.visits) {
+      if (!row || typeof row !== "object") continue;
+      if (tokenConfidenceForValue(tokens, row.amountCharged) < threshold) row.amountCharged = "";
+      if (tokenConfidenceForValue(tokens, row.treatmentDate) < threshold) row.treatmentDate = "";
+      if (tokenConfidenceForValue(tokens, row.treatment) < threshold) row.treatment = "";
+    }
+  }
+  return next;
 }
 
 async function requestGoogleJson(url, { env, scopes, body }) {
@@ -241,17 +442,51 @@ async function extractWithDocumentAi({ filePath, mimeType, env }) {
           content: buffer.toString("base64"),
           mimeType: mimeType || "image/jpeg",
         },
+        processOptions: {
+          ocrConfig: {
+            enableNativePdfParsing: true,
+            hints: { languageHints: ["en"] },
+          },
+        },
       },
     }
   );
-  const text = String(data?.document?.text || "").trim();
+  const document = data?.document || {};
+  const text = String(document.text || "").trim();
   if (!text) return null;
+  const tokens = collectDocumentAiTokens(document);
+  const confidence = documentAiConfidencePercent(document, tokens);
   return {
     text,
-    confidence: 80,
-    method: "gcp-document-ai",
-    pages: Array.isArray(data?.document?.pages) ? data.document.pages.length : 1,
+    confidence: confidence == null ? 80 : confidence,
+    method: "gcp-document-ai-ocr",
+    pages: Array.isArray(document.pages) ? document.pages.length : 1,
+    tokens,
   };
+}
+
+async function extractHandwrittenFormWithDocumentAi({ filePath, mimeType, env = process.env } = {}) {
+  if (!filePath || !fs.existsSync(filePath)) {
+    return { ok: false, code: "ocr_failed", message: DOCUMENT_AI_FAILED_MESSAGE };
+  }
+  if (!documentAiIsConfigured(env)) {
+    return { ok: false, code: "not_configured", message: DOCUMENT_AI_MISSING_MESSAGE };
+  }
+  const extension = path.extname(filePath).toLowerCase();
+  const isPdf = mimeType === "application/pdf" || extension === ".pdf";
+  try {
+    const result = await extractWithDocumentAi({
+      filePath,
+      mimeType: isPdf ? "application/pdf" : mimeType || "image/jpeg",
+      env,
+    });
+    if (!result?.text) {
+      return { ok: false, code: "ocr_failed", message: DOCUMENT_AI_FAILED_MESSAGE };
+    }
+    return { ok: true, ...result };
+  } catch {
+    return { ok: false, code: "ocr_failed", message: DOCUMENT_AI_FAILED_MESSAGE };
+  }
 }
 
 async function extractWithVisionImage({ filePath, env }) {
@@ -324,8 +559,8 @@ async function extractTextWithGoogleCloud({
       mimeType: isPdf ? "application/pdf" : mimeType || "image/png",
       env,
     });
-  } catch (error) {
-    console.warn("Document AI OCR skipped:", error.message);
+  } catch {
+    console.warn("Document AI OCR skipped.");
   }
   if (!result) {
     try {
@@ -346,13 +581,21 @@ async function extractTextWithGoogleCloud({
     confidence: Number(result.confidence || 0),
     method: result.method,
     pages: result.pages || 1,
+    tokens: Array.isArray(result.tokens) ? result.tokens : [],
   };
   cache.set(key, normalized);
   return normalized;
 }
 
 module.exports = {
+  LOW_CONFIDENCE_THRESHOLD,
+  DOCUMENT_AI_MISSING_MESSAGE,
+  DOCUMENT_AI_FAILED_MESSAGE,
   extractTextWithGoogleCloud,
+  extractHandwrittenFormWithDocumentAi,
+  documentAiProcessorName,
+  documentAiIsConfigured,
+  applyLowConfidenceFields,
   googleCloudOcrIsConfigured,
   setGoogleCloudOcrFetch,
   clearGoogleCloudOcrCache,

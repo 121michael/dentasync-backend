@@ -446,7 +446,7 @@ export function AdminSyncPage() {
         ]) || []),
       ].filter((value) => String(value || "").trim()).length;
 
-      if (filled <= 0) {
+      if (filled <= 0 && !response.allowManualEntry) {
         const unreadMessage =
           response.message ||
           "Unable to read the uploaded or scanned document. No patient or treatment fields could be detected. Please upload a clearer scan or photo and try again.";
@@ -464,9 +464,12 @@ export function AdminSyncPage() {
         response.job?.reviewFields?.length
           ? response.job.reviewFields
           : Object.entries(response.fieldStatuses || {})
-              .filter(([, status]) => status === "unable_to_read")
+              .filter(([, status]) => status === "unable_to_read" || status === "low_confidence")
               .map(([field]) => field)
       );
+      if (response.ocrError || response.allowManualEntry) {
+        setError(response.ocrError || response.message || "");
+      }
       setPreviewZoom(1);
       setPreviewPage(1);
       setEditing(true);
@@ -1023,7 +1026,7 @@ export function AdminSyncPage() {
                 </label>
                 <div className="doc-table-card__patient-grid">
                   <label className={`doc-table-field doc-table-field--wide${needsReview("fullName") ? " is-needs-review" : ""}`}>
-                    <span>Name{needsReview("fullName") ? " · needs review" : ""}</span>
+                    <span>Name{needsReview("fullName") ? " · unclear" : ""}</span>
                     <input
                       value={payload.patient.fullName}
                       placeholder={placeholderFor(payload.patient.fullName, "")}
@@ -1032,7 +1035,7 @@ export function AdminSyncPage() {
                     />
                   </label>
                   <label className={`doc-table-field doc-table-field--age${needsReview("age") ? " is-needs-review" : ""}`}>
-                    <span>Age{needsReview("age") ? " · needs review" : ""}</span>
+                    <span>Age{needsReview("age") ? " · unclear" : ""}</span>
                     <input
                       value={payload.patient.age}
                       placeholder={placeholderFor(payload.patient.age, "")}
@@ -1051,7 +1054,7 @@ export function AdminSyncPage() {
                     />
                   </label>
                   <label className={`doc-table-field${needsReview("phone") ? " is-needs-review" : ""}`}>
-                    <span>Phone / Cellphone{needsReview("phone") ? " · needs review" : ""}</span>
+                    <span>Phone / Cellphone{needsReview("phone") ? " · unclear" : ""}</span>
                     <input
                       value={payload.patient.phone}
                       placeholder={placeholderFor(payload.patient.phone, "")}
@@ -1069,7 +1072,7 @@ export function AdminSyncPage() {
                     />
                   </label>
                   <label className={`doc-table-field doc-table-field--wide${needsReview("notes") ? " is-needs-review" : ""}`}>
-                    <span>Clinical notes{needsReview("notes") ? " · needs review" : ""}</span>
+                    <span>Clinical notes{needsReview("notes") ? " · unclear" : ""}</span>
                     <textarea
                       value={payload.procedure.notes || ""}
                       placeholder={needsReview("notes") ? "Unclear handwriting — leave blank or type the written note" : ""}
@@ -1078,7 +1081,7 @@ export function AdminSyncPage() {
                     />
                   </label>
                   <label className={`doc-table-field doc-table-field--wide${needsReview("address") ? " is-needs-review" : ""}`}>
-                    <span>Address{needsReview("address") ? " · needs review" : ""}</span>
+                    <span>Address{needsReview("address") ? " · unclear" : ""}</span>
                     <input
                       value={payload.patient.address}
                       placeholder={placeholderFor(payload.patient.address, "")}
