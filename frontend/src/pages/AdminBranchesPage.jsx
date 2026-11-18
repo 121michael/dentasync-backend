@@ -5,16 +5,53 @@ import { formatAdminDateTime } from "../adminUtils";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { AdminModal, AdminStatusBadge } from "../components/AdminUI";
 import { useAdminUi } from "../components/AdminLayout";
-import { branchCheckLabel, branchContactLines } from "./adminBranchDisplay";
+import {
+  applyBranchServerError,
+  branchCheckLabel,
+  branchContactLines,
+  emptyBranchForm,
+  formFromBranch,
+  validateBranchForm,
+} from "./adminBranchDisplay";
 
-const emptyForm = {
-  name: "",
-  address: "",
-  contactNumber: "",
-  email: "",
-  rfidEnabled: false,
-  qrEnabled: false,
-};
+function BranchField({ id, label, hint, error, children }) {
+  return (
+    <label className={`field${error ? " field--warning" : ""}`} htmlFor={id}>
+      <span>
+        {label}
+        {hint ? <small>{hint}</small> : null}
+      </span>
+      {children}
+      {error ? (
+        <p className="admin-form--branch__error" id={`${id}-error`} role="alert">
+          {error}
+        </p>
+      ) : null}
+    </label>
+  );
+}
+
+function CheckInToggle({ id, label, checked, onChange }) {
+  return (
+    <label className="settings-toggle admin-form--branch__toggle" htmlFor={id}>
+      <span>
+        <span>
+          <strong>{label}</strong>
+          <small>{checked ? "On" : "Off"}</small>
+        </span>
+      </span>
+      <input
+        id={id}
+        type="checkbox"
+        role="switch"
+        aria-checked={checked}
+        checked={checked}
+        onChange={onChange}
+      />
+      <i aria-hidden="true" />
+    </label>
+  );
+}
 
 function assignmentLabel(person) {
   return person.assignmentLabel || "Assigned";
@@ -30,7 +67,8 @@ export function AdminBranchesPage() {
   const [busy, setBusy] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState(emptyForm);
+  const [form, setForm] = useState(() => emptyBranchForm());
+  const [fieldErrors, setFieldErrors] = useState({});
   const [personnel, setPersonnel] = useState(null);
 
   const load = useCallback(async () => {
@@ -47,37 +85,57 @@ export function AdminBranchesPage() {
     load();
   }, [load]);
 
+  function closeForm() {
+    setFormOpen(false);
+    setEditing(null);
+    setForm(emptyBranchForm());
+    setFieldErrors({});
+  }
+
   function openCreate() {
     setEditing(null);
-    setForm(emptyForm);
+    setForm(emptyBranchForm());
+    setFieldErrors({});
     setFormOpen(true);
   }
 
   function openEdit(branch) {
     setEditing(branch);
-    setForm({
-      name: branch.name || "",
-      address: branch.address || "",
-      contactNumber: branch.contactNumber || "",
-      email: branch.email || "",
-      rfidEnabled: Boolean(branch.rfidEnabled),
-      qrEnabled: Boolean(branch.qrEnabled),
-    });
+    setForm(formFromBranch(branch));
+    setFieldErrors({});
     setFormOpen(true);
+  }
+
+  function updateField(name, value) {
+    setForm((current) => ({ ...current, [name]: value }));
+    setFieldErrors((current) => {
+      if (!current[name] && !current.form) return current;
+      const next = { ...current };
+      delete next[name];
+      delete next.form;
+      return next;
+    });
   }
 
   async function saveBranch(event) {
     event.preventDefault();
+    const errors = validateBranchForm(form);
+    if (Object.keys(errors).length) {
+      setFieldErrors(errors);
+      return;
+    }
     setBusy("save");
     try {
       const response = editing
         ? await api.updateAdminBranch(editing.id, form)
         : await api.createAdminBranch(form);
       pushToast(response.message || (editing ? "Branch updated." : "Branch created."));
-      setFormOpen(false);
+      closeForm();
       await load();
     } catch (saveError) {
-      pushToast(saveError.message, "error");
+      const mapped = applyBranchServerError(saveError.message);
+      setFieldErrors(mapped);
+      if (mapped.form) pushToast(saveError.message, "error");
     } finally {
       setBusy("");
     }
@@ -242,44 +300,97 @@ export function AdminBranchesPage() {
       ) : null}
 
       {formOpen ? (
-        <AdminModal title={editing ? "Edit branch" : "Add branch"} onClose={() => setFormOpen(false)}>
-          <form className="admin-form" onSubmit={saveBranch}>
-            {editing?.isMain ? <p>This is the Main Branch. It stays active and keeps the main designation.</p> : null}
-            <label>
-              Branch name
-              <input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} />
-            </label>
-            <label>
-              Address
-              <textarea required value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} />
-            </label>
-            <label>
-              Contact number
-              <input required value={form.contactNumber} onChange={(event) => setForm({ ...form, contactNumber: event.target.value })} />
-            </label>
-            <label>
-              Email address
-              <input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="Optional" />
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={Boolean(form.rfidEnabled)}
-                onChange={(event) => setForm({ ...form, rfidEnabled: event.target.checked })}
-              />{" "}
-              RFID check-in
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={Boolean(form.qrEnabled)}
-                onChange={(event) => setForm({ ...form, qrEnabled: event.target.checked })}
-              />{" "}
-              QR check-in
-            </label>
+        <AdminModal
+          title={editing ? "Edit branch" : "Add branch"}
+          className="admin-modal--branch"
+          onClose={closeForm}
+        >
+          <form className="admin-form admin-form--branch" onSubmit={saveBranch} noValidate>
+            <div className="admin-form--branch__fields">
+              {editing?.isMain ? (
+                <p className="admin-form--branch__note">
+                  This is the Main Branch. It stays active and keeps the main designation.
+                </p>
+              ) : null}
+              {fieldErrors.form ? (
+                <p className="admin-form--branch__error" role="alert">
+                  {fieldErrors.form}
+                </p>
+              ) : null}
+              <BranchField id="branch-name" label="Branch name" error={fieldErrors.name}>
+                <input
+                  id="branch-name"
+                  value={form.name}
+                  onChange={(event) => updateField("name", event.target.value)}
+                  aria-invalid={Boolean(fieldErrors.name)}
+                  aria-describedby={fieldErrors.name ? "branch-name-error" : undefined}
+                  autoComplete="organization"
+                />
+              </BranchField>
+              <BranchField id="branch-address" label="Address" error={fieldErrors.address}>
+                <textarea
+                  id="branch-address"
+                  rows="4"
+                  value={form.address}
+                  onChange={(event) => updateField("address", event.target.value)}
+                  aria-invalid={Boolean(fieldErrors.address)}
+                  aria-describedby={fieldErrors.address ? "branch-address-error" : undefined}
+                  autoComplete="street-address"
+                />
+              </BranchField>
+              <div className="admin-form--branch__row">
+                <BranchField id="branch-contact" label="Contact number" error={fieldErrors.contactNumber}>
+                  <input
+                    id="branch-contact"
+                    value={form.contactNumber}
+                    onChange={(event) => updateField("contactNumber", event.target.value)}
+                    aria-invalid={Boolean(fieldErrors.contactNumber)}
+                    aria-describedby={fieldErrors.contactNumber ? "branch-contact-error" : undefined}
+                    autoComplete="tel"
+                    inputMode="tel"
+                  />
+                </BranchField>
+                <BranchField
+                  id="branch-email"
+                  label="Email address"
+                  hint="optional"
+                  error={fieldErrors.email}
+                >
+                  <input
+                    id="branch-email"
+                    type="email"
+                    value={form.email}
+                    onChange={(event) => updateField("email", event.target.value)}
+                    aria-invalid={Boolean(fieldErrors.email)}
+                    aria-describedby={fieldErrors.email ? "branch-email-error" : undefined}
+                    autoComplete="email"
+                    placeholder="Optional"
+                  />
+                </BranchField>
+              </div>
+              <fieldset className="admin-form--branch__methods">
+                <legend>Check-in methods</legend>
+                <CheckInToggle
+                  id="branch-rfid"
+                  label="RFID check-in"
+                  checked={Boolean(form.rfidEnabled)}
+                  onChange={(event) => updateField("rfidEnabled", event.target.checked)}
+                />
+                <CheckInToggle
+                  id="branch-qr"
+                  label="QR check-in"
+                  checked={Boolean(form.qrEnabled)}
+                  onChange={(event) => updateField("qrEnabled", event.target.checked)}
+                />
+              </fieldset>
+            </div>
             <div className="admin-modal__actions">
-              <button type="button" className="button button--secondary" onClick={() => setFormOpen(false)}>Cancel</button>
-              <button className="button button--primary" disabled={busy === "save"}>{editing ? "Save branch" : "Create branch"}</button>
+              <button type="button" className="button button--secondary" onClick={closeForm}>
+                Cancel
+              </button>
+              <button className="button button--primary" disabled={busy === "save"}>
+                {editing ? "Save branch" : "Create branch"}
+              </button>
             </div>
           </form>
         </AdminModal>

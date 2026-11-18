@@ -6,11 +6,11 @@ export function AdminStatusBadge({ status }) {
   return <span className={`admin-status admin-status--${safe}`}>{statusLabel(safe)}</span>;
 }
 
-export function AdminModal({ title, children, onClose, wide = false }) {
+export function AdminModal({ title, children, onClose, wide = false, className = "" }) {
   return (
     <div className="admin-modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section
-        className={`admin-modal ${wide ? "admin-modal--wide" : ""}`}
+        className={`admin-modal ${wide ? "admin-modal--wide" : ""} ${className}`.trim()}
         role="dialog"
         aria-modal="true"
         aria-label={title}
