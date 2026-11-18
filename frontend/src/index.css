@@ -7799,6 +7799,26 @@ body.is-queue-display .staff-mobile-nav {
 }
 .dentist-content { width: min(1440px, 100%); margin: 0 auto; padding: clamp(1.2rem, 3vw, 2.35rem); }
 .dentist-page { display: grid; gap: 1.15rem; }
+.dentist-access-history {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0;
+  margin: 0;
+}
+.dentist-access-history > h2,
+.dentist-access-history > .muted,
+.dentist-access-history > p {
+  margin: 0;
+}
+.dentist-access-history > .button {
+  justify-self: start;
+  margin-top: 0.15rem;
+}
+@media (max-width: 759px) {
+  .dentist-access-history {
+    gap: 0.45rem;
+  }
+}
 .dentist-page .section-heading h1 { margin-top: .2rem; font-size: clamp(1.65rem, 2.5vw, 2.15rem); letter-spacing: -.055em; }
 .dentist-heading-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .5rem; }
 .dentist-stat-grid {
