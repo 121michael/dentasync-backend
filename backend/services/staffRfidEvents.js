@@ -17,6 +17,7 @@ function recordRfidEvent( partial ) {
     patient: partial.patient || null,
     appointment: partial.appointment || null,
     queue: partial.queue || null,
+    walkInCreated: Boolean(partial.walkInCreated),
     createdAt: new Date().toISOString(),
   };
   events.unshift(event);

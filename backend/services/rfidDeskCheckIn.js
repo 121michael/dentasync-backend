@@ -84,8 +84,8 @@ function mapSuccess(appointment, checkIn, walkInCreated) {
 
 // The reader firmware does not send a branch. The authorized clinic_rfid_readers
 // row supplies the branch. A request body cannot choose a different branch.
-// Appointments at another branch are refused. Check-in requires an eligible
-// appointment; a tap with no appointment does not open a walk-in ticket.
+// Appointments at another branch are refused. A registered card with no eligible
+// appointment today is assigned the earliest remaining walk-in slot at the reader branch.
 async function checkInByRfidTag(db, { rfidTag, notifyClinicStaff, notifyClinicDentists }) {
   const tag = staffCheckIn.normalizeRfidTag(rfidTag);
   if (!tag) {
@@ -149,7 +149,7 @@ async function checkInByRfidTag(db, { rfidTag, notifyClinicStaff, notifyClinicDe
       return { ok: false, status: 409, message: "RFID check-in is turned off for this clinic branch." };
     }
     const resolved = await staffCheckIn.resolveAppointmentForCheckIn(client, patient, {
-      allowWalkIn: false,
+      allowWalkIn: true,
       branchId: readerBranchId,
     });
     if (!resolved.appointment) {
@@ -199,6 +199,7 @@ async function checkInByRfidTag(db, { rfidTag, notifyClinicStaff, notifyClinicDe
       patient: payload.patient,
       appointment: payload.appointment,
       queue: payload.queue,
+      walkInCreated: payload.walkInCreated,
     });
     return { ok: true, status: checkIn.alreadyCheckedIn ? 200 : 201, payload };
   } catch (error) {
