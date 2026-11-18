@@ -2240,7 +2240,7 @@ function createStaffPortalRouter({
             },
           });
         }
-        const allowWalkIn = false;
+        const allowWalkIn = method === "rfid";
         const resolved = await staffCheckIn.resolveAppointmentForCheckIn(client, patient, {
           allowWalkIn,
           branchId: req.branchAccess?.activeBranch?.id || null,
@@ -2362,6 +2362,7 @@ function createStaffPortalRouter({
           patient: successPayload.patient,
           appointment: successPayload.appointment,
           queue: successPayload.queue,
+          walkInCreated: successPayload.walkInCreated,
         });
       }
 

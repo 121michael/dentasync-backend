@@ -6,6 +6,13 @@ const clinicSchedule = require("./clinicSchedule");
 
 const NO_BRANCHES_MESSAGE =
   "No clinic branches are currently available for appointment booking. Please contact the clinic.";
+const NO_WALK_IN_SLOTS_MESSAGE = "No walk-in slots available today";
+const WALK_IN_DENTIST_CATALOG = [
+  { id: "dr-sarah-cruz", name: "Dr. Sarah Cruz" },
+  { id: "dr-sarah-mitchell", name: "Dr. Sarah Mitchell" },
+  { id: "dr-james-reyes", name: "Dr. James Reyes" },
+  { id: "dr-ana-santos", name: "Dr. Ana Santos" },
+];
 
 function bookingError(message, status = 400) {
   const error = new Error(message);
@@ -202,6 +209,51 @@ async function lockBookingDay(client, branchId, date) {
     `branch-booking:${branchId || "clinic"}`,
     String(date),
   ]);
+}
+
+async function claimEarliestWalkInSlot(client, { branchId, catalog } = {}) {
+  if (!branchId) {
+    throw bookingError(NO_WALK_IN_SLOTS_MESSAGE, 409);
+  }
+  const zone = process.env.CLINIC_TIMEZONE || "Asia/Manila";
+  const clock = await client.query(
+    `SELECT (CURRENT_TIMESTAMP AT TIME ZONE $1)::date::text AS clinic_today,
+            TO_CHAR((CURRENT_TIMESTAMP AT TIME ZONE $1), 'HH24:MI') AS clinic_time`,
+    [zone]
+  );
+  const date = clock.rows[0].clinic_today;
+  const floor = clinicSchedule.normalizeTime(String(clock.rows[0].clinic_time || ""));
+  await lockBookingDay(client, branchId, date);
+  const defaults = await clinicSchedule.loadDefaults(client);
+  const dayMap = await clinicSchedule.loadDayMap(client, date, date, branchId);
+  const hours = clinicSchedule.resolveOperatingHours(date, dayMap.get(date), defaults);
+  if (hours.closed) {
+    throw bookingError(NO_WALK_IN_SLOTS_MESSAGE, 409);
+  }
+  const savedSlots = await clinicSchedule.loadSlotMap(client, date, branchId);
+  const bookedTimes = await clinicSchedule.loadBookedTimes(client, date, branchId);
+  const dateOnlyCount = await clinicSchedule.loadDateOnlyCount(client, date, branchId);
+  const slots = clinicSchedule.buildSlots(hours, defaults, savedSlots, bookedTimes, dateOnlyCount);
+  const available = slots.filter((slot) => slot.bookable && (!floor || slot.time >= floor));
+  const dentistCatalog = Array.isArray(catalog) && catalog.length ? catalog : WALK_IN_DENTIST_CATALOG;
+  for (const slot of available) {
+    try {
+      const dentist = await chooseDentist(client, {
+        branchId,
+        date,
+        time: slot.time,
+        catalog: dentistCatalog,
+      });
+      await assertPlaceAvailable(client, { branchId, date, time: slot.time });
+      return { date, time: slot.time, dentist };
+    } catch (error) {
+      if (error.status === 409 || error.status === 503) {
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw bookingError(NO_WALK_IN_SLOTS_MESSAGE, 409);
 }
 
 async function assertPlaceAvailable(client, { branchId, date, time, ignoreAppointmentId }) {
@@ -531,6 +583,8 @@ async function listInactiveBranchReview(db) {
 
 module.exports = {
   NO_BRANCHES_MESSAGE,
+  NO_WALK_IN_SLOTS_MESSAGE,
+  claimEarliestWalkInSlot,
   schedulePhrase,
   applyPatientBranchBookingSchema,
   publicBranchChoices,

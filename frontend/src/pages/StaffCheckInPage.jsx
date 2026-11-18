@@ -96,6 +96,7 @@ function eventToVerified(event) {
     verified: true,
     method: event.method || "rfid",
     message: event.message || "Patient checked in successfully.",
+    walkInCreated: Boolean(event.walkInCreated),
     patient: event.patient,
     appointment: event.appointment,
     queue: event.queue,
@@ -758,7 +759,7 @@ function VerifiedPanel({ verified, emptyHint }) {
         />
         <VerifiedFact
           icon={<CalendarClock size={16} />}
-          label="Appointment"
+          label={verified.walkInCreated ? "Assigned time" : "Appointment"}
           value={
             <>
               {appointmentTime}

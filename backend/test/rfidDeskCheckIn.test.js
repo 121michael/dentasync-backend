@@ -66,6 +66,37 @@ test("public RFID routes fail closed, then accept a matching handshake and a reg
           return { rows: [] };
         }
         if (text.includes("pg_advisory_xact_lock")) return { rows: [] };
+        if (text.includes("clinic_rfid_readers")) {
+          return {
+            rows: [
+              {
+                id: 1,
+                branch_id: 1,
+                label: "Mandaluyong ESP32",
+                name: "Mandaluyong",
+                status: "active",
+                rfid_enabled: true,
+              },
+            ],
+          };
+        }
+        if (text.includes("FROM clinic_branches")) {
+          return {
+            rows: [
+              {
+                id: 1,
+                name: "Mandaluyong",
+                status: "active",
+                is_main: true,
+                rfid_enabled: true,
+                qr_enabled: true,
+              },
+            ],
+          };
+        }
+        if (text.includes("is_today")) {
+          return { rows: [{ is_today: true }] };
+        }
         if (text.includes("FROM users") && text.includes("rfid_tag")) {
           if (!String(params[0] || "").toUpperCase().includes(tag)) return { rows: [] };
           return {
@@ -96,6 +127,7 @@ test("public RFID routes fail closed, then accept a matching handshake and a reg
                 appointment_date: "2026-11-05",
                 appointment_time: "09:00:00",
                 status: "confirmed",
+                branch_id: 1,
                 patient_name: "Ada Lovelace",
                 patient_phone: "09170000000",
                 patient_email: "ada@example.test",
