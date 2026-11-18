@@ -28,7 +28,7 @@ export function AdminDashboardPage() {
   const metrics = data.metrics;
 
   return (
-    <div className="admin-page">
+    <div className="admin-page admin-dashboard-page">
       {error ? <p className="inline-alert inline-alert--error">{error}</p> : null}
 
       <section className="admin-welcome-card">
