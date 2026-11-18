@@ -218,7 +218,7 @@ function DelegatedRequestQueue() {
   );
 }
 
-function AccessRecordHistory({ patientId, patient, treatments, onAuthorized, grantExpiresAt }) {
+function AccessRecordHistory({ patientId, patient, onAuthorized, grantExpiresAt }) {
   const { user } = useAuth();
   const [branches, setBranches] = useState([]);
   const [open, setOpen] = useState(false);
@@ -292,29 +292,10 @@ function AccessRecordHistory({ patientId, patient, treatments, onAuthorized, gra
     }
   }
 
-  const history = [...(treatments || [])].sort((left, right) => {
-    const leftDate = String(left.date || left.treatmentDate || left.createdAt || "");
-    const rightDate = String(right.date || right.treatmentDate || right.createdAt || "");
-    return leftDate.localeCompare(rightDate);
-  });
-
   return (
-    <section className="dentist-card">
+    <section className="dentist-card dentist-access-history">
       <h2>Access Record History</h2>
       <p className="muted">Ordinary history you are authorized to read. Restricted notes stay hidden until an Admin or delegated dentist authorizes them at this workstation.</p>
-      {history.length ? (
-        <ol>
-          {history.map((treatment) => (
-            <li key={treatment.id}>
-              {formatDentistDate(treatment.date || treatment.treatmentDate)} · {treatment.originatingBranchName || (treatment.attributionReview ? "Unknown" : "—")} · {treatment.dentist || "Unknown"} · {treatment.name || treatment.treatment || "—"}
-              {treatment.createdAt ? ` · recorded ${formatDentistDate(treatment.createdAt)}` : ""}
-              {treatment.diagnosisNotes ? ` · ${treatment.diagnosisNotes}` : ""}
-            </li>
-          ))}
-        </ol>
-      ) : (
-        <p>No authorized history yet.</p>
-      )}
       <button className="button button--primary" type="button" onClick={() => setOpen(true)}>
         Cross-Branch Record Authorization
       </button>
@@ -949,7 +930,7 @@ export function DentistRecordsPage() {
     return (
       <div className="dentist-page">
         <ErrorState message={error} onRetry={() => refreshPatientDetail(patientId)} />
-        <AccessRecordHistory patientId={patientId} patient={null} treatments={[]} />
+        <AccessRecordHistory patientId={patientId} patient={null} />
         <button
           type="button"
           className="button button--secondary"
@@ -1010,7 +991,6 @@ export function DentistRecordsPage() {
         <AccessRecordHistory
           patientId={patientId}
           patient={detail.patient}
-          treatments={detail.treatments}
           grantExpiresAt={detail.access?.grantExpiresAt}
           onAuthorized={(notice) => {
             if (notice) setSuccess(notice);
