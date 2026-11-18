@@ -19,8 +19,11 @@ const {
   consumeAssistantRateLimit,
   looksLikeImageFollowUp,
   normalizeQuestion,
-  APPROVED_HMO_PROVIDERS,
 } = require("../services/clinicAssistant");
+const {
+  canSaveHmoProvider,
+  publicHmoProviders,
+} = require("../services/accreditedHmoProviders");
 const {
   loadAiSettings,
   isChatbotEnabled,
@@ -626,11 +629,7 @@ function createPatientPortalRouter({
       services: publicCatalogServices(),
       medicalDocumentTypes: medicalDocuments.MEDICAL_DOCUMENT_TYPES,
       dentists: DENTISTS,
-      hmoProviders: APPROVED_HMO_PROVIDERS.map((provider) => ({
-        id: provider.id,
-        name: provider.name,
-        filipinoDoctors: Boolean(provider.filipinoDoctors),
-      })),
+      hmoProviders: publicHmoProviders(),
       clinicServices,
     });
   });
@@ -1129,7 +1128,7 @@ function createPatientPortalRouter({
     }
     if (
       normalizedCoverage === "hmo" &&
-      !APPROVED_HMO_PROVIDERS.some((provider) => provider.name === normalizedProvider)
+      !canSaveHmoProvider(normalizedProvider).ok
     ) {
       return res.status(400).json({
         message: "Select an approved HMO provider. Clinic staff must still verify eligibility and coverage.",
@@ -2806,6 +2805,28 @@ function createPatientPortalRouter({
         }
       }
 
+      let currentHmoProvider = "";
+      try {
+        const current = await db.query(
+          `SELECT hmo_provider FROM patient_portal_profiles WHERE user_id = $1`,
+          [userId]
+        );
+        currentHmoProvider = current.rows[0]?.hmo_provider || "";
+      } catch (profileLookupError) {
+        if (profileLookupError?.code !== "42P01") throw profileLookupError;
+      }
+
+      const savedHmo = canSaveHmoProvider(body.hmoProvider, { currentProvider: currentHmoProvider });
+      if (!savedHmo.ok) {
+        return res.status(400).json({
+          message: "Select an accredited HMO provider from the clinic list. Clinic staff must still verify coverage.",
+        });
+      }
+      const hmoProviderValue = savedHmo.provider?.name || null;
+      const hmoMemberValue = stringValue(body.hmoMemberNumber, 120);
+      const hmoStatus = hmoProviderValue ? "enrolled" : "not_enrolled";
+      const providerChanged = String(currentHmoProvider || "") !== String(hmoProviderValue || "");
+
       const dateOfBirth = isIsoDate(body.dateOfBirth) ? body.dateOfBirth : null;
       const profileValues = [
         userId,
@@ -2819,9 +2840,9 @@ function createPatientPortalRouter({
         stringValue(body.existingConditions, 1200),
         stringValue(body.currentMedications, 1200),
         stringValue(body.dentalConcerns, 1200),
-        stringValue(body.hmoProvider, 120),
-        stringValue(body.hmoMemberNumber, 120),
-        body.hmoProvider ? "pending_verification" : "not_enrolled",
+        hmoProviderValue,
+        hmoMemberValue,
+        hmoStatus,
       ];
 
       let result;
@@ -2886,6 +2907,22 @@ function createPatientPortalRouter({
            RETURNING *`,
           profileValues
         );
+      }
+
+      if (providerChanged) {
+        try {
+          const verification = hmoProviderValue ? "pending_verification" : "not_applicable";
+          const verified = await db.query(
+            `UPDATE patient_portal_profiles
+             SET hmo_verification_status = $1
+             WHERE user_id = $2
+             RETURNING *`,
+            [verification, userId]
+          );
+          if (verified.rows[0]) result = verified;
+        } catch (verificationError) {
+          if (verificationError?.code !== "42703") throw verificationError;
+        }
       }
 
       return res.json({ message: "Your profile has been saved.", profile: result.rows[0] });

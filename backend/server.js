@@ -48,7 +48,7 @@ const branchCheckIn = require("./services/branchCheckIn");
 const { createAuthRouter } = require("./routes/auth");
 const { SERVICES: PATIENT_BOOKABLE_SERVICES, createPatientPortalRouter } = require("./routes/patientPortal");
 const { createPublicClinicInfoHandler } = require("./routes/publicClinicInfo");
-const { APPROVED_HMO_PROVIDERS } = require("./services/clinicAssistant");
+const { listAccreditedHmoProviders } = require("./services/accreditedHmoProviders");
 const { createStaffPortalRouter } = require("./routes/staffPortal");
 const { createAdminPortalRouter } = require("./routes/adminPortal");
 const { createDentistPortalRouter } = require("./routes/dentistPortal");
@@ -209,7 +209,7 @@ app.get(
   createPublicClinicInfoHandler({
     db,
     services: PATIENT_BOOKABLE_SERVICES,
-    hmoProviders: APPROVED_HMO_PROVIDERS,
+    hmoProviders: listAccreditedHmoProviders(),
   })
 );
 
