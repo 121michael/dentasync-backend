@@ -5,6 +5,9 @@ const { safeRecalculateQueueWaitEstimates } = require("./queueWaitPrediction");
 const queueNumbers = require("./queueNumbers");
 const branchAccess = require("./branchAccess");
 const branchCheckIn = require("./branchCheckIn");
+const patientBranchBooking = require("./patientBranchBooking");
+
+const NO_WALK_IN_SLOTS_MESSAGE = patientBranchBooking.NO_WALK_IN_SLOTS_MESSAGE;
 
 function stringValue(value, maxLength = 500) {
   if (typeof value !== "string" && typeof value !== "number") {
@@ -614,47 +617,54 @@ async function ensureAppointmentLinkedToCatalogDentist(client, appointment) {
 }
 
 async function createWalkInAppointmentForPatient(client, patient, { branchId = null } = {}) {
-  const clinicTz = process.env.CLINIC_TIMEZONE || "Asia/Manila";
-  const clock = await client.query(
-    `SELECT (CURRENT_TIMESTAMP AT TIME ZONE $1)::date AS clinic_today,
-            TO_CHAR((CURRENT_TIMESTAMP AT TIME ZONE $1), 'HH24:MI:SS') AS clinic_time`,
-    [clinicTz]
-  );
-  const appointmentDate = clock.rows[0].clinic_today;
-  const preferredTime = clock.rows[0].clinic_time;
-  const dentist = normalizeWalkInDentist(await resolveWalkInDentist(client));
-  const appointmentTime = await nextOpenWalkInSlot(
-    client,
-    dentist.dentistId,
-    appointmentDate,
-    preferredTime
-  );
-
   const scopedBranchId = await concreteBranchId(client, branchId);
-  const inserted = await client.query(
-    `INSERT INTO patient_portal_appointments (
-       user_id, service_id, service_name, dentist_id, dentist_name,
-       appointment_date, appointment_time, coverage_type, estimated_cost, notes, status, branch_id
-     ) VALUES (
-       $1, 'general-consultation', 'Walk-in Consultation',
-       COALESCE(NULLIF(BTRIM($2), ''), $8),
-       COALESCE(NULLIF(BTRIM($3), ''), $9),
-       $4, $5::time, 'self_pay', $6, $7, 'confirmed', $10
-     )
-     RETURNING *`,
-    [
-      String(patient.id),
-      dentist.dentistId,
-      dentist.dentistName,
-      appointmentDate,
-      appointmentTime,
-      800,
-      "Auto-created from RFID walk-in check-in.",
-      DEFAULT_WALK_IN_DENTIST_ID,
-      DEFAULT_WALK_IN_DENTIST_NAME,
-      scopedBranchId,
-    ]
-  );
+  let claimed;
+  try {
+    claimed = await patientBranchBooking.claimEarliestWalkInSlot(client, { branchId: scopedBranchId });
+  } catch (error) {
+    if (error?.code === "23505") {
+      const conflict = new Error(NO_WALK_IN_SLOTS_MESSAGE);
+      conflict.status = 409;
+      throw conflict;
+    }
+    throw error;
+  }
+  const dentist = normalizeWalkInDentist(claimed.dentist);
+
+  let inserted;
+  try {
+    inserted = await client.query(
+      `INSERT INTO patient_portal_appointments (
+         user_id, service_id, service_name, dentist_id, dentist_name,
+         appointment_date, appointment_time, coverage_type, estimated_cost, notes, status, branch_id
+       ) VALUES (
+         $1, 'general-consultation', 'Walk-in Consultation',
+         COALESCE(NULLIF(BTRIM($2), ''), $8),
+         COALESCE(NULLIF(BTRIM($3), ''), $9),
+         $4, $5::time, 'self_pay', $6, $7, 'confirmed', $10
+       )
+       RETURNING *`,
+      [
+        String(patient.id),
+        dentist.dentistId,
+        dentist.dentistName,
+        claimed.date,
+        claimed.time,
+        800,
+        "Auto-created from RFID walk-in check-in.",
+        DEFAULT_WALK_IN_DENTIST_ID,
+        DEFAULT_WALK_IN_DENTIST_NAME,
+        scopedBranchId,
+      ]
+    );
+  } catch (error) {
+    if (error?.code === "23505") {
+      const conflict = new Error(NO_WALK_IN_SLOTS_MESSAGE);
+      conflict.status = 409;
+      throw conflict;
+    }
+    throw error;
+  }
 
   const appointment = inserted.rows[0];
   appointment.patient_name = `${patient.first_name || ""} ${patient.last_name || ""}`.trim();
@@ -1044,6 +1054,7 @@ async function performStaffCheckIn(client, { appointment, staff, notifyClinicSta
 }
 
 module.exports = {
+  NO_WALK_IN_SLOTS_MESSAGE,
   parseQrPayload,
   normalizeRfidTag,
   findPatient,
