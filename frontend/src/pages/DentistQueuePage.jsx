@@ -10,7 +10,8 @@ import {
   PROCEDURE_FORM_OPTIONS,
   procedureRequiresTooth,
 } from "../components/DentalChart/dentalChartData";
-import { formatDentistDateTime } from "../dentistUtils";
+import { formatDentistAppointmentSlot, formatDentistDateTime } from "../dentistUtils";
+import { displayAppointmentStatus } from "../utils/appointmentStatus";
 import { matchesNotificationFocus } from "../notificationFocus";
 import {
   callRangeFromEntry,
@@ -20,6 +21,7 @@ import {
 } from "../utils/queueWaitEstimate";
 
 const tabs = [
+  { id: "booked", label: "Booked · Not checked in" },
   { id: "ongoing", label: "On Going" },
   { id: "inline", label: "In Line" },
   { id: "completed", label: "Completed" },
@@ -526,6 +528,8 @@ export function DentistQueuePage() {
   if (!data) return <LoadingState label="Loading live patient treatment queue…" />;
 
   const queue = data.queue || [];
+  const bookedNotCheckedIn = data.bookedNotCheckedIn || [];
+  const bookedTab = tab === "booked";
   const treatmentEntry = queue.find((entry) => String(entry.id) === String(treatmentEntryId)) || null;
 
   return (
@@ -551,7 +555,7 @@ export function DentistQueuePage() {
               type="button"
               className="button button--primary"
               onClick={callNext}
-              disabled={Boolean(busy)}
+              disabled={Boolean(busy) || !(data.counts?.inline)}
             >
               <PhoneCall size={16} /> {busy === "call-next" ? "Calling…" : "+ Call Next Patient"}
             </button>
@@ -719,7 +723,38 @@ export function DentistQueuePage() {
           </div>
         </div>
 
-        {queue.length ? (
+        {bookedTab ? (
+          bookedNotCheckedIn.length ? (
+            <div className="dentist-table-wrap">
+              <table className="dentist-table">
+                <thead>
+                  <tr>
+                    <th>Patient</th>
+                    <th>Time</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bookedNotCheckedIn.map((booking) => (
+                    <tr key={booking.id}>
+                      <td>
+                        <strong>{booking.patientName}</strong>
+                        <small>{booking.treatment}</small>
+                      </td>
+                      <td>{formatDentistAppointmentSlot(booking.time)}</td>
+                      <td>{displayAppointmentStatus(booking.status)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <EmptyState
+              title="No booked patients waiting to check in"
+              detail="Patients who booked for today appear here until staff RFID or desk check-in. After check-in they move to In Line."
+            />
+          )
+        ) : queue.length ? (
           <div className="dentist-table-wrap">
             <table className="dentist-table">
               <thead>
@@ -839,7 +874,11 @@ export function DentistQueuePage() {
         ) : (
           <EmptyState
             title="No records found."
-            detail="After staff RFID or desk check-in, patients appear under In Line for your dentist schedule. Use Call Next to move them to On Going."
+            detail={
+              tab === "inline"
+                ? "After staff RFID or desk check-in, patients appear under In Line for your dentist schedule. Use Call Next to move them to On Going."
+                : "No patients in this queue view."
+            }
           />
         )}
       </section>

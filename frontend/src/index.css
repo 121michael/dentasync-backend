@@ -7803,6 +7803,17 @@ body.is-queue-display .staff-mobile-nav {
 }
 .dentist-stat-card--emerald .dentist-stat-card__icon { color: var(--emerald); background: var(--emerald-wash); }
 .dentist-stat-card--violet .dentist-stat-card__icon { color: #6a2ea2; background: #f1e7fb; }
+.dentist-booking-total {
+  display: grid;
+  min-width: 3.2rem;
+  min-height: 3.2rem;
+  place-items: center;
+  border-radius: 14px;
+  color: var(--amethyst-800);
+  background: var(--amethyst-100);
+  font-size: 1.25rem;
+  letter-spacing: -0.04em;
+}
 .dentist-next-card {
   display: flex;
   align-items: flex-end;

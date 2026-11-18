@@ -17,6 +17,11 @@ export function formatDentistDate(value, fallback = "—") {
   }).format(date);
 }
 
+export function formatDentistAppointmentSlot(time, fallback = "Date only") {
+  if (time == null || String(time).trim() === "") return fallback;
+  return formatDentistTime(String(time).slice(0, 5), fallback);
+}
+
 export function formatDentistTime(value, fallback = "—") {
   if (typeof value !== "string") return fallback;
   const [hours, minutes] = value.split(":");

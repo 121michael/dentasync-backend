@@ -40,6 +40,10 @@ async function startDentistPortal({ tokenRole, databaseRole, catalogDentistId = 
         return { rows: [{ count: "0" }] };
       }
 
+      if (sql.includes("CONCAT_WS") && sql.includes("patient_portal_appointments")) {
+        return { rows: [] };
+      }
+
       if (sql.includes("dentist_portal_notifications")) {
         if (sql.includes("UPDATE dentist_portal_notifications")) {
           return { rowCount: 1, rows: [{ id: 4 }] };
@@ -133,6 +137,7 @@ test("dentist dashboard authorizes the live database role instead of a token rol
     assert.equal(body.metrics.remainingQueue, 0);
     assert.equal(body.metrics.completedToday, 0);
     assert.equal(body.metrics.unreadNotifications, 0);
+    assert.deepEqual(body.todayBookings, []);
   } finally {
     await portal.close();
   }

@@ -2,9 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import { CheckCircle2, ClipboardList, RefreshCw, Users } from "lucide-react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
-import { ErrorState, LoadingState, SectionHeading } from "../components/UI";
+import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
 import { DentistSummaryCard } from "../components/DentistUI";
-import { formatDentistDateTime } from "../dentistUtils";
+import { formatDentistAppointmentSlot, formatDentistDateTime } from "../dentistUtils";
+import { displayAppointmentStatus } from "../utils/appointmentStatus";
 
 export function DentistDashboardPage() {
   const [data, setData] = useState(null);
@@ -48,6 +49,8 @@ export function DentistDashboardPage() {
 
   const next = data.nextPatient;
   const inChair = next?.status === "in_chair";
+  const todayBookings = data.todayBookings || [];
+  const bookingTotal = todayBookings.length;
 
   return (
     <div className="dentist-page">
@@ -68,7 +71,7 @@ export function DentistDashboardPage() {
       <section className="dentist-stat-grid">
         <DentistSummaryCard
           label="Today's Target"
-          value={`${data.metrics.todaysTarget} Patients`}
+          value={`${bookingTotal} Patients`}
           icon={Users}
           tone="purple"
         />
@@ -84,6 +87,55 @@ export function DentistDashboardPage() {
           icon={CheckCircle2}
           tone="emerald"
         />
+      </section>
+
+      <section className="dentist-panel dentist-panel--table">
+        <div className="dentist-panel__heading">
+          <div>
+            <span className="eyebrow">Today at this branch</span>
+            <h2>Today’s Bookings</h2>
+            <p>
+              {bookingTotal === 1
+                ? "1 booked patient for your schedule."
+                : `${bookingTotal} booked patients for your schedule.`}
+            </p>
+          </div>
+          <strong className="dentist-booking-total">{bookingTotal}</strong>
+        </div>
+        {bookingTotal ? (
+          <div className="dentist-table-wrap">
+            <table className="dentist-table">
+              <thead>
+                <tr>
+                  <th>Patient</th>
+                  <th>Time</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {todayBookings.map((booking) => (
+                  <tr key={booking.id}>
+                    <td>
+                      <strong>{booking.patientName}</strong>
+                      <small>{booking.treatment}</small>
+                    </td>
+                    <td>{formatDentistAppointmentSlot(booking.time)}</td>
+                    <td>
+                      {booking.checkedIn
+                        ? "Checked In"
+                        : displayAppointmentStatus(booking.status)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <EmptyState
+            title="No bookings today"
+            detail="Confirmed visits for your assigned branch will appear here. Cancelled and no-show appointments stay in appointment history."
+          />
+        )}
       </section>
 
       <section className="dentist-next-card">
