@@ -18,7 +18,7 @@ const PATIENT_STATUS_LABELS = {
   completed: "Completed",
   cancelled: "Cancelled",
   rescheduled: "Rescheduled",
-  no_show: "Cancelled",
+  no_show: "No-show",
 };
 
 function clinicTimezone() {
@@ -95,21 +95,45 @@ function normalizeClock(value) {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
 }
 
-// Timed visits cancel after the scheduled clock time in clinic TZ.
-// Date-only visits stay eligible through that clinic date and cancel the next local day.
+function minutesFromClock(clock) {
+  const [hours, minutes] = String(clock).split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+/**
+ * Clinic-local cutoff for an automatic no-show.
+ * Default is 18:00 on the appointment date (timed and date-only).
+ * If a visit is booked at or after 18:00, wait until that scheduled time so
+ * after-hours bookings are not cancelled before they start.
+ */
+function noShowCutoffClock(appointmentTime) {
+  const clock = normalizeClock(appointmentTime);
+  if (clock && minutesFromClock(clock) >= AUTO_CANCEL_HOUR * 60) return clock;
+  return `${String(AUTO_CANCEL_HOUR).padStart(2, "0")}:00`;
+}
+
+function formatClinicDate(value) {
+  const ymd = String(value instanceof Date ? value.toISOString().slice(0, 10) : value || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return "";
+  const [year, month, day] = ymd.split("-").map(Number);
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(Date.UTC(year, month - 1, day));
+}
+
+// Timed and date-only visits become no-shows at 18:00 Asia/Manila on the
+// appointment date. Bookings at/after 18:00 wait until their scheduled time.
 function missedCutoffPassed({ appointmentDate, appointmentTime, now = new Date(), timeZone = clinicTimezone() }) {
   const parts = clinicParts(now, timeZone);
   const date = String(appointmentDate || "").slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
-  const clock = normalizeClock(appointmentTime);
-  if (!clock) {
-    return parts.date > date;
-  }
   if (parts.date > date) return true;
   if (parts.date < date) return false;
-  const nowMinutes = parts.hour * 60 + parts.minute;
-  const [hours, minutes] = clock.split(":").map(Number);
-  return nowMinutes > hours * 60 + minutes;
+  const cutoff = noShowCutoffClock(appointmentTime);
+  return parts.hour * 60 + parts.minute >= minutesFromClock(cutoff);
 }
 
 function appointmentOwnershipSql(alias = "appointments") {
@@ -176,6 +200,8 @@ module.exports = {
   waitedTooLong,
   shouldRunAutoCancel,
   missedCutoffPassed,
+  noShowCutoffClock,
+  formatClinicDate,
   appointmentOwnershipSql,
   loadActiveQueueForAppointment,
   closeQueueForAppointment,

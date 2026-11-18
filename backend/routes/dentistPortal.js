@@ -357,6 +357,8 @@ function mapAppointment(row) {
     location: row.clinic_location,
     status: row.status,
     notes: row.notes || "",
+    cancellationReason: row.cancellation_reason || null,
+    cancelledBy: row.cancelled_by || null,
     createdAt: row.created_at,
   };
 }
@@ -1831,7 +1833,7 @@ function createDentistPortalRouter({
            JOIN users AS patient ON patient.id::text = appointment.user_id
            WHERE ${scope.sql}
              AND appointment.appointment_date = CURRENT_DATE
-             AND appointment.status NOT IN ('cancelled')
+             AND appointment.status NOT IN ('cancelled', 'no_show')
            ORDER BY appointment.appointment_time ASC`,
           scope.params
         ),

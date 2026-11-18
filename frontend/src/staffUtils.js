@@ -9,7 +9,7 @@ const statusLabels = {
   in_treatment: "In Treatment",
   completed: "Completed",
   cancelled: "Cancelled",
-  no_show: "Skipped",
+  no_show: "No-show",
   skipped: "Skipped",
   confirmed: "Confirmed",
   pending: "Pending",

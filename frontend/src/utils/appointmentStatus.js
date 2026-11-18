@@ -6,7 +6,7 @@ const LABELS = {
   completed: "Completed",
   cancelled: "Cancelled",
   rescheduled: "Rescheduled",
-  no_show: "Cancelled",
+  no_show: "No-show",
 };
 
 export function displayAppointmentStatus(status) {

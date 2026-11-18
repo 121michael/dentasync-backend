@@ -210,6 +210,9 @@ function mapAppointment(row) {
     location: row.clinic_location,
     status: row.status,
     notes: row.notes || "",
+    cancellationReason: row.cancellation_reason || null,
+    cancelledAt: row.cancelled_at || null,
+    cancelledBy: row.cancelled_by || null,
     coverageType: row.coverage_type || null,
     hmoProvider: row.hmo_provider || null,
     hmoMemberNumber: row.hmo_member_number || null,
@@ -953,7 +956,7 @@ function createStaffPortalRouter({
       } else if (tab === "confirmed") {
         whereSql = `appointment.status = 'confirmed'`;
       } else if (tab === "today") {
-        whereSql = `appointment.appointment_date = (CURRENT_TIMESTAMP AT TIME ZONE '${clinicTz.replace(/'/g, "''")}')::date AND appointment.status NOT IN ('cancelled')`;
+        whereSql = `appointment.appointment_date = (CURRENT_TIMESTAMP AT TIME ZONE '${clinicTz.replace(/'/g, "''")}')::date AND appointment.status NOT IN ('cancelled', 'no_show')`;
       } else if (tab === "completed") {
         whereSql = `appointment.status = 'completed'`;
       } else if (tab === "cancelled") {

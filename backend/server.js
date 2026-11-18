@@ -401,7 +401,7 @@ if (require.main === module) {
         ? "Backup scheduler: external cron is marked active (BACKUP_EXTERNAL_SCHEDULER=true)."
         : "Backup scheduler: in-process timer only. Render Free sleep can skip jobs unless a Cron Job calls /api/internal/backups/run."
     );
-    console.log("Pending and confirmed appointments are cancelled after their scheduled clinic time if the patient has not checked in.");
+    console.log("Pending and confirmed appointments are marked No-show after 6:00 PM Asia/Manila if the patient has not checked in.");
       });
     })
     .catch((error) => {
