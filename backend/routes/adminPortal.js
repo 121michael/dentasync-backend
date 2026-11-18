@@ -318,6 +318,8 @@ function mapAppointment(row) {
     location: row.clinic_location,
     status: row.status,
     notes: row.notes || "",
+    cancellationReason: row.cancellation_reason || null,
+    cancelledBy: row.cancelled_by || null,
     estimatedCost: row.estimated_cost === undefined ? undefined : Number(row.estimated_cost),
     createdAt: row.created_at,
   };

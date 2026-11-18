@@ -40,6 +40,12 @@ export function formatDentistDateTime(value = new Date()) {
   }).format(date);
 }
 
+const STATUS_LABELS = {
+  no_show: "No-show",
+  cancelled: "Cancelled",
+};
+
 export function statusLabel(value) {
-  return String(value || "unknown").replaceAll("_", " ");
+  const key = String(value || "unknown").toLowerCase().replaceAll(" ", "_");
+  return STATUS_LABELS[key] || String(value || "unknown").replaceAll("_", " ");
 }
