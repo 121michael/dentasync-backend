@@ -12,6 +12,7 @@ const TABS = [
   { id: "pending", label: "Pending" },
   { id: "confirmed", label: "Confirmed" },
   { id: "today", label: "Today" },
+  { id: "hmo", label: "HMO" },
   { id: "completed", label: "Completed" },
   { id: "cancelled", label: "Cancelled" },
 ];
@@ -35,12 +36,12 @@ export function StaffAppointmentsPage() {
 
   const load = useCallback(async () => {
     try {
-      setData(await api.getStaffAppointments(tab));
+      setData(await api.getStaffAppointments(tab, searchParams.get("patient") || ""));
       setError("");
     } catch (loadError) {
       setError(loadError.message);
     }
-  }, [tab]);
+  }, [tab, searchParams]);
 
   useEffect(() => {
     load();
@@ -137,6 +138,8 @@ export function StaffAppointmentsPage() {
         else if (status === "cancelled" || status === "no_show") nextTab = "cancelled";
         else if (status === "checked_in") nextTab = "today";
 
+        const hmoTab = searchParams.get("tab") === "hmo" || appointment.coverageType === "hmo";
+        if (hmoTab) nextTab = "hmo";
         focusHandledRef.current = focusId;
         setTab(nextTab);
         setDetail(appointment);
@@ -144,6 +147,8 @@ export function StaffAppointmentsPage() {
 
         const next = new URLSearchParams();
         next.set("tab", nextTab);
+        const patient = searchParams.get("patient");
+        if (patient) next.set("patient", patient);
         setSearchParams(next, { replace: true });
       } catch (focusError) {
         if (cancelled) return;
@@ -160,6 +165,15 @@ export function StaffAppointmentsPage() {
   }, [searchParams, setSearchParams, pushToast]);
 
   const rows = useMemo(() => data?.appointments || [], [data]);
+
+  useEffect(() => {
+    if (searchParams.get("focus") || !searchParams.get("patient") || !rows.length || detail) return;
+    const patient = String(searchParams.get("patient"));
+    const match =
+      rows.find((appointment) => String(appointment.patientId) === patient && appointment.coverageType === "hmo") ||
+      rows.find((appointment) => String(appointment.patientId) === patient);
+    if (match) setDetail(match);
+  }, [detail, rows, searchParams]);
 
   function changeTab(nextTab) {
     setTab(nextTab);
@@ -263,8 +277,8 @@ export function StaffAppointmentsPage() {
       <section className="staff-panel">
         <div className="staff-panel__heading">
           <div>
-            <span className="eyebrow">Scheduling desk</span>
-            <h2>Appointment Management</h2>
+            <span className="eyebrow">{tab === "hmo" ? "Coverage desk" : "Scheduling desk"}</span>
+            <h2>{tab === "hmo" ? "HMO Verification" : "Appointment Management"}</h2>
           </div>
           <button className="button button--secondary" onClick={load}>
             <RefreshCw size={16} /> Refresh
@@ -346,7 +360,9 @@ export function StaffAppointmentsPage() {
                         <>
                           <strong>{appointment.hmoProvider || "HMO"}</strong>
                           <small>
-                            {(appointment.hmoVerificationStatus || "pending").replaceAll("_", " ")}
+                            <StaffStatusBadge
+                              status={appointment.hmoVerificationStatus || "pending_verification"}
+                            />
                           </small>
                         </>
                       ) : (
@@ -438,12 +454,12 @@ export function StaffAppointmentsPage() {
             </p>
             <p>
               <small>HMO verification</small>
-              <strong>
-                {(detail.hmoVerificationStatus || (detail.coverageType === "hmo" ? "pending" : "not_applicable")).replaceAll(
-                  "_",
-                  " "
-                )}
-              </strong>
+              <StaffStatusBadge
+                status={
+                  detail.hmoVerificationStatus ||
+                  (detail.coverageType === "hmo" ? "pending_verification" : "not_applicable")
+                }
+              />
             </p>
           </div>
           {detail.notes ? <p className="staff-detail-copy">{detail.notes}</p> : null}

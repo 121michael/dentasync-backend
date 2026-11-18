@@ -13,6 +13,7 @@ import { DentistModal } from "../components/DentistUI";
 import { DentalDocumentPreview } from "../components/DentalDocumentPreview";
 import { PrescriptionsPanel } from "../components/PrescriptionsPanel";
 import { formatDentistDate } from "../dentistUtils";
+import { hmoDisplayStatus, hmoStatusLabel } from "../hmoStatus";
 import { matchesNotificationFocus } from "../notificationFocus";
 import { useAuth } from "../useAuth";
 
@@ -1271,6 +1272,20 @@ export function DentistRecordsPage() {
               </p>
               <p>
                 <strong>Category:</strong> <span>{detail.patient.patientCategory || "—"}</span>
+              </p>
+              <p>
+                <strong>HMO provider:</strong>{" "}
+                <span>{detail.patient.hmoProvider || "—"}</span>
+              </p>
+              <p>
+                <strong>HMO ID:</strong>{" "}
+                <span>{detail.patient.hmoMemberNumber || "—"}</span>
+              </p>
+              <p>
+                <strong>HMO verification:</strong>{" "}
+                <span className={`staff-status staff-status--${hmoDisplayStatus(detail.patient)}`}>
+                  {hmoStatusLabel(detail.patient)}
+                </span>
               </p>
               <p>
                 <strong>Emergency Contact Name:</strong>{" "}

@@ -25,6 +25,11 @@ const statusLabelFallback = {
   processing: "Processing",
   delivered: "Delivered",
   queued: "Queued",
+  pending_verification: "Pending verification",
+  verified: "Verified",
+  rejected: "Rejected",
+  not_applicable: "Not applicable",
+  no_hmo_on_file: "No HMO on file",
 };
 
 export function statusLabel(value) {

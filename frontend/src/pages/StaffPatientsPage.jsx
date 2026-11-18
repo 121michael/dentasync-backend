@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Plus, Search, Eye } from "lucide-react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api";
+import { hmoDisplayStatus } from "../hmoStatus";
 import { DentalChart } from "../components/DentalChart";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { StaffModal, StaffStatusBadge } from "../components/StaffUI";
@@ -185,6 +186,20 @@ export function StaffPatientsPage() {
     setDetail(refreshed.patient);
     seedStaffManagedFields(refreshed.patient);
     await load();
+  }
+
+  async function verifyHmo(status) {
+    if (!detail?.id) return;
+    setBusy(`hmo-${status}`);
+    try {
+      const response = await api.verifyStaffPatientHmo(detail.id, { status });
+      pushToast(response.message || `HMO marked as ${status.replaceAll("_", " ")}.`);
+      await refreshDetail();
+    } catch (verifyError) {
+      pushToast(verifyError.message, "error");
+    } finally {
+      setBusy("");
+    }
   }
 
   async function saveAppointment(event) {
@@ -461,6 +476,46 @@ export function StaffPatientsPage() {
               <p>
                 <strong>Next Appointment:</strong> {nextAppointmentLabel(detail)}
               </p>
+              <p>
+                <strong>HMO provider:</strong> {detail.hmoProvider || "—"}
+              </p>
+              <p>
+                <strong>HMO ID:</strong> {detail.hmoMemberNumber || "—"}
+              </p>
+              <p>
+                <strong>HMO verification:</strong>{" "}
+                <StaffStatusBadge status={hmoDisplayStatus(detail)} />
+              </p>
+            </div>
+            <div className="staff-row-actions" style={{ marginTop: "0.75rem" }}>
+              {detail.hasHmoOnFile ? (
+                <>
+                  <button
+                    type="button"
+                    className="button button--primary button--compact"
+                    disabled={Boolean(busy)}
+                    onClick={() => verifyHmo("verified")}
+                  >
+                    Verify HMO
+                  </button>
+                  <button
+                    type="button"
+                    className="button button--danger button--compact"
+                    disabled={Boolean(busy)}
+                    onClick={() => verifyHmo("rejected")}
+                  >
+                    Reject HMO
+                  </button>
+                </>
+              ) : null}
+              {detail.linkedUserId ? (
+                <Link
+                  className="button button--secondary button--compact"
+                  to={`/staff/appointments?tab=hmo&patient=${detail.linkedUserId}`}
+                >
+                  Open HMO record
+                </Link>
+              ) : null}
             </div>
             {!isProfileLocked(detail) ? (
               <p className="muted-copy">

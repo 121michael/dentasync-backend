@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { CalendarDays, CheckCircle2, Clock3, RefreshCw, UserRoundCheck, Users } from "lucide-react";
+import { CalendarDays, CheckCircle2, Clock3, RefreshCw, ShieldCheck, UserRoundCheck, Users } from "lucide-react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
@@ -144,6 +144,7 @@ export function StaffDashboardPage() {
           <div className="staff-quick-links">
             <Link to="/staff/appointments">Appointments</Link>
             <Link to="/staff/queue">Queue</Link>
+            <Link to="/staff/appointments?tab=hmo">HMO</Link>
           </div>
         </div>
 
@@ -188,6 +189,14 @@ export function StaffDashboardPage() {
                         >
                           View
                         </Link>
+                        {row.coverageType === "hmo" ? (
+                          <Link
+                            className="button button--primary button--compact"
+                            to={`/staff/appointments?tab=hmo&patient=${row.patientId}&focus=${row.appointmentId}`}
+                          >
+                            HMO
+                          </Link>
+                        ) : null}
                         {row.appointmentStatus === "pending" ? (
                           <button
                             className="button button--primary button--compact"
@@ -271,6 +280,14 @@ export function StaffDashboardPage() {
             <p>Maintain permitted patient information.</p>
           </div>
           <Link to="/staff/patient-records">Open</Link>
+        </article>
+        <article>
+          <ShieldCheck size={18} />
+          <div>
+            <strong>HMO</strong>
+            <p>Verify patient HMO coverage on file.</p>
+          </div>
+          <Link to="/staff/appointments?tab=hmo">Open</Link>
         </article>
       </section>
     </div>

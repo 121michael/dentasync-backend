@@ -316,8 +316,11 @@ export const api = {
   resetStaffQueue: () => request("/staff/queue/reset", { method: "POST" }),
   updateStaffQueue: (queueEntryId, body) =>
     request(`/staff/queue/${queueEntryId}`, { method: "PATCH", body }),
-  getStaffAppointments: (tab = "today") =>
-    request(`/staff/appointments?tab=${encodeURIComponent(tab)}`),
+  getStaffAppointments: (tab = "today", patient = "") => {
+    const params = new URLSearchParams({ tab });
+    if (patient) params.set("patient", String(patient));
+    return request(`/staff/appointments?${params.toString()}`);
+  },
   lookupStaffRfid: (rfidTag) =>
     request(`/staff/rfid-lookup?rfidTag=${encodeURIComponent(rfidTag)}`),
   getStaffAppointment: (appointmentId) => request(`/staff/appointments/${appointmentId}`),
@@ -365,6 +368,8 @@ export const api = {
   },
   verifyStaffAppointmentHmo: (appointmentId, body) =>
     request(`/staff/appointments/${appointmentId}/hmo-verification`, { method: "PATCH", body }),
+  verifyStaffPatientHmo: (patientId, body) =>
+    request(`/staff/patients/${patientId}/hmo-verification`, { method: "PATCH", body }),
   getStaffProfile: () => request("/staff/profile"),
   updateStaffProfile: (body) => request("/staff/profile", { method: "PUT", body }),
   updateStaffPassword: (body) => request("/staff/profile/password", { method: "POST", body }),

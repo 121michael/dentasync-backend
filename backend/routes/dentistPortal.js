@@ -14,6 +14,7 @@ const dentalChartSync = require("../services/dentalChartSync");
 const patientData = require("../services/patientData");
 const { writeAdminAudit } = require("../services/adminAudit");
 const recordAccess = require("../services/recordAccess");
+const hmoVerification = require("../services/hmoVerification");
 const recordAccessCredential = require("../services/recordAccessCredential");
 const { attachDentalAuthorizationRoutes } = require("./dentalAuthorization");
 const { attachPrescriptionRoutes } = require("./prescriptions");
@@ -2091,6 +2092,14 @@ function createDentistPortalRouter({
           amountPaid: detail.record.lastAmountPaid,
           nextAppointmentDate: detail.record.nextAppointmentDate || patientNextAppointment?.date || null,
           nextAppointmentTime: detail.record.nextAppointmentTime || patientNextAppointment?.time || null,
+          ...(await hmoVerification
+            .loadHmoSnapshot(db, {
+              record: detail.record,
+              branchId: req.branchAccess?.activeBranch?.id || null,
+            })
+            .catch(() =>
+              hmoVerification.buildHmoSnapshot({ recordStatus: detail.record.hmoVerificationStatus })
+            )),
         },
         appointments,
         nextAppointment: patientNextAppointment,

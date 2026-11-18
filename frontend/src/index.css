@@ -5109,10 +5109,15 @@ body.is-queue-display .staff-mobile-nav {
 .staff-status--completed,
 .staff-status--confirmed,
 .staff-status--available,
-.staff-status--active { color: var(--emerald); background: var(--emerald-wash); }
+.staff-status--active,
+.staff-status--verified { color: var(--emerald); background: var(--emerald-wash); }
 .staff-status--waiting,
 .staff-status--preparing,
-.staff-status--pending { color: var(--amber); background: var(--amber-wash); }
+.staff-status--pending,
+.staff-status--pending_verification { color: var(--amber); background: var(--amber-wash); }
+.staff-status--rejected { color: var(--danger); background: var(--danger-wash); }
+.staff-status--not_applicable,
+.staff-status--no_hmo_on_file { color: var(--text-muted); background: #f3eef8; }
 .staff-status--in_chair,
 .staff-status--dentist,
 .staff-status--checked_in { color: #3974ad; background: #eaf3ff; }
