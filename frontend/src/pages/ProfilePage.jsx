@@ -90,6 +90,10 @@ function Toggle({ checked, onChange, label, detail, disabled = false }) {
   );
 }
 
+function accreditedHmoOptions(providers) {
+  return (providers || []).filter((provider) => provider && provider.active !== false && provider.name);
+}
+
 function profileToForm(profile) {
   return {
     firstName: profile.firstName || "",
@@ -134,6 +138,23 @@ export function ProfilePage() {
   const [isSaving, setIsSaving] = useState(false);
   const [passwords, setPasswords] = useState({ currentPassword: "", newPassword: "" });
   const [activeSection, setActiveSection] = useState(null);
+  const [hmoProviders, setHmoProviders] = useState(null);
+  const [hmoCatalogError, setHmoCatalogError] = useState("");
+  const [isLoadingHmoCatalog, setIsLoadingHmoCatalog] = useState(false);
+
+  const loadHmoCatalog = useCallback(async () => {
+    setIsLoadingHmoCatalog(true);
+    setHmoCatalogError("");
+    try {
+      const catalog = await api.getCatalog();
+      setHmoProviders(accreditedHmoOptions(catalog?.hmoProviders));
+    } catch (catalogError) {
+      setHmoProviders(null);
+      setHmoCatalogError(catalogError.message || "Unable to load accredited HMO providers.");
+    } finally {
+      setIsLoadingHmoCatalog(false);
+    }
+  }, []);
 
   const load = useCallback(async () => {
     setError("");
@@ -154,6 +175,12 @@ export function ProfilePage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (activeSection === "coverage") {
+      loadHmoCatalog();
+    }
+  }, [activeSection, loadHmoCatalog]);
 
   function updateForm(event) {
     setForm((current) => ({ ...current, [event.target.name]: event.target.value }));
@@ -475,16 +502,68 @@ export function ProfilePage() {
                       <h2>Care preferences</h2>
                     </div>
                   </div>
-                  <div className="field-grid field-grid--two">
-                    <label className="field">
+                  {hmoCatalogError ? (
+                    <div className="profile-hmo-catalog-error">
+                      <p className="inline-alert inline-alert--error">{hmoCatalogError}</p>
+                      <button
+                        type="button"
+                        className="button button--secondary profile-hmo-retry"
+                        onClick={loadHmoCatalog}
+                        disabled={isLoadingHmoCatalog}
+                      >
+                        {isLoadingHmoCatalog ? "Loading providers…" : "Retry HMO list"}
+                      </button>
+                    </div>
+                  ) : null}
+                  <div className="field-grid field-grid--two profile-hmo-fields">
+                    <label className="field booking-select-field">
                       <span>HMO provider</span>
-                      <input name="hmoProvider" value={form.hmoProvider} onChange={updateForm} />
+                      <select
+                        name="hmoProvider"
+                        value={form.hmoProvider}
+                        onChange={updateForm}
+                        disabled={Boolean(hmoCatalogError) || isLoadingHmoCatalog}
+                        aria-label="Select accredited HMO provider"
+                      >
+                        <option value="">No HMO on file</option>
+                        {(hmoProviders || []).map((provider) => (
+                          <option key={provider.id || provider.name} value={provider.name}>
+                            {provider.name}
+                          </option>
+                        ))}
+                        {Array.isArray(hmoProviders) &&
+                        form.hmoProvider &&
+                        !hmoProviders.some((provider) => provider.name === form.hmoProvider) ? (
+                          <option value={form.hmoProvider}>
+                            {form.hmoProvider} (no longer accredited)
+                          </option>
+                        ) : !Array.isArray(hmoProviders) && form.hmoProvider ? (
+                          <option value={form.hmoProvider}>{form.hmoProvider}</option>
+                        ) : null}
+                      </select>
                     </label>
                     <label className="field">
                       <span>HMO member number</span>
-                      <input name="hmoMemberNumber" value={form.hmoMemberNumber} onChange={updateForm} />
+                      <input
+                        name="hmoMemberNumber"
+                        value={form.hmoMemberNumber}
+                        onChange={updateForm}
+                        autoComplete="off"
+                      />
                     </label>
                   </div>
+                  {Array.isArray(hmoProviders) &&
+                  form.hmoProvider &&
+                  !hmoProviders.some((provider) => provider.name === form.hmoProvider) ? (
+                    <p className="muted profile-hmo-note profile-hmo-note--warning">
+                      {form.hmoProvider} is no longer on the clinic’s accredited HMO list. Your saved
+                      selection is kept until you choose a replacement.
+                    </p>
+                  ) : null}
+                  <p className="muted profile-hmo-note">
+                    Choosing a provider here does not verify coverage. Clinic staff still confirm your
+                    account, plan benefits, and the requested dental service.
+                  </p>
                   <div className="care-summary">
                     <span>
                       <small>Oral health score</small>
@@ -502,7 +581,10 @@ export function ProfilePage() {
                 </section>
               ) : null}
 
-              <button className="button button--primary profile-save-button" disabled={isSaving}>
+              <button
+                className="button button--primary profile-save-button"
+                disabled={isSaving || (activeSection === "coverage" && Boolean(hmoCatalogError))}
+              >
                 <Save size={18} /> {isSaving ? "Saving changes…" : "Save changes"}
               </button>
             </form>

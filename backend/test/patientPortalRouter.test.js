@@ -73,6 +73,14 @@ test("patient portal exposes the booking catalog only to patient accounts", asyn
     );
     assert.equal(body.hmoProviders.find((provider) => provider.name === "Pacific Cross").filipinoDoctors, true);
     assert.equal(body.hmoProviders.find((provider) => provider.name === "Maxicare").filipinoDoctors, false);
+    assert.equal(
+      body.hmoProviders.every((provider) => provider.active !== false),
+      true
+    );
+    assert.equal(
+      body.hmoProviders.some((provider) => /medicard|intellicare/i.test(provider.name)),
+      false
+    );
   } finally {
     await portal.close();
   }

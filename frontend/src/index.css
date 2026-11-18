@@ -4070,7 +4070,32 @@ body.booking-summary-open .patient-assistant__panel {
 .activity-list > div { display: grid; gap: .18rem; padding: .65rem 0; border-top: 1px solid var(--border); }
 .activity-list span { color: var(--text-strong); font-size: .68rem; font-weight: 750; text-transform: capitalize; }
 .activity-list small { color: var(--text-muted); font-size: .61rem; }
-.profile-save-button { grid-column: 1 / -1; justify-self: end; min-width: 170px; }
+.profile-save-button {
+  grid-column: 1 / -1;
+  justify-self: end;
+  min-width: 170px;
+  min-height: 44px;
+}
+.profile-hmo-fields .field input,
+.profile-hmo-fields .field select {
+  min-height: 44px;
+}
+.profile-hmo-retry {
+  min-height: 44px;
+}
+.profile-hmo-catalog-error {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 0.85rem;
+}
+.profile-hmo-note {
+  margin: 0.75rem 0 0;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+.profile-hmo-note--warning {
+  color: var(--amber);
+}
 
 /* Notifications and support */
 .notification-list { display: grid; overflow: hidden; }

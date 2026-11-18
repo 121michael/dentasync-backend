@@ -16,18 +16,7 @@ const DEFAULT_CLINIC = {
   operatingHours: "Monday–Friday 9:00 AM–4:00 PM · Saturday–Sunday and holidays 11:00 AM–4:00 PM",
 };
 
-// Clinic-approved HMO catalog. Update this list (and aliases) to change chatbot answers without retraining Gemini.
-const APPROVED_HMO_PROVIDERS = [
-  { id: "maxicare", name: "Maxicare", aliases: ["maxicare"], filipinoDoctors: false },
-  { id: "icare", name: "iCare", aliases: ["icare", "i care"], filipinoDoctors: true },
-  { id: "pacific-cross", name: "Pacific Cross", aliases: ["pacific cross", "pacificcross"], filipinoDoctors: true },
-  { id: "etiqa", name: "Etiqa", aliases: ["etiqa"], filipinoDoctors: true },
-  { id: "lacson", name: "Lacson & Lacson", aliases: ["lacson", "lacson & lacson", "lacson and lacson"], filipinoDoctors: true },
-  { id: "hppi", name: "HPPI", aliases: ["hppi"], filipinoDoctors: true },
-  { id: "flexicare", name: "Flexicare", aliases: ["flexicare", "flexi care"], filipinoDoctors: true },
-  { id: "cocolife", name: "Cocolife", aliases: ["cocolife", "coco life"], filipinoDoctors: false },
-  { id: "valucare", name: "ValuCare", aliases: ["valucare", "valuecare", "valu care", "value care"], filipinoDoctors: false },
-];
+const { APPROVED_HMO_PROVIDERS, listAccreditedHmoProviders } = require("./accreditedHmoProviders");
 
 const UNLISTED_HMO_HINTS = [
   "medicard",
@@ -42,7 +31,7 @@ const UNLISTED_HMO_HINTS = [
   "medicare",
 ];
 
-function formatHmoProviderList(providers = APPROVED_HMO_PROVIDERS) {
+function formatHmoProviderList(providers = listAccreditedHmoProviders()) {
   const names = providers.map((item) => item.name);
   if (names.length === 0) return "";
   if (names.length === 1) return names[0];
@@ -989,8 +978,8 @@ function answerApprovedClinicService(service, normalized, lang) {
 function matchApprovedHmo(normalized) {
   let best = null;
   let bestLen = 0;
-  for (const provider of APPROVED_HMO_PROVIDERS) {
-    for (const alias of provider.aliases) {
+  for (const provider of listAccreditedHmoProviders()) {
+    for (const alias of provider.aliases || []) {
       if (normalized.includes(alias) && alias.length >= bestLen) {
         best = provider;
         bestLen = alias.length;
@@ -1734,7 +1723,7 @@ Dentists:
 ${dentistLines || "(assigned by the clinic)"}
 
 Approved HMO providers (do not add others; listing is not a coverage guarantee):
-${APPROVED_HMO_PROVIDERS.map((item) => `- ${item.name}${item.filipinoDoctors ? " (listed under Filipino Doctors; accreditation/verification arrangements apply)" : ""}`).join("\n")}
+${listAccreditedHmoProviders().map((item) => `- ${item.name}${item.filipinoDoctors ? " (listed under Filipino Doctors; accreditation/verification arrangements apply)" : ""}`).join("\n")}
 Staff must verify account, eligibility, benefits, and the requested service after the patient books. Never claim an HMO is verified, never invent copays or covered procedures, and never ask for HMO passwords or PINs.`;
 }
 

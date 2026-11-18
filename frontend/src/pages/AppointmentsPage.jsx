@@ -30,15 +30,15 @@ import { attachServiceVisual } from "../clinic/serviceVisuals";
 const PERIOD_ORDER = ["Morning", "Afternoon", "Evening"];
 
 const APPROVED_HMO_PROVIDERS = [
-  { id: "maxicare", name: "Maxicare", filipinoDoctors: false },
-  { id: "icare", name: "iCare", filipinoDoctors: true },
-  { id: "pacific-cross", name: "Pacific Cross", filipinoDoctors: true },
-  { id: "etiqa", name: "Etiqa", filipinoDoctors: true },
-  { id: "lacson", name: "Lacson & Lacson", filipinoDoctors: true },
-  { id: "hppi", name: "HPPI", filipinoDoctors: true },
-  { id: "flexicare", name: "Flexicare", filipinoDoctors: true },
-  { id: "cocolife", name: "Cocolife", filipinoDoctors: false },
-  { id: "valucare", name: "ValuCare", filipinoDoctors: false },
+  { id: "maxicare", name: "Maxicare", filipinoDoctors: false, active: true },
+  { id: "icare", name: "iCare", filipinoDoctors: true, active: true },
+  { id: "pacific-cross", name: "Pacific Cross", filipinoDoctors: true, active: true },
+  { id: "etiqa", name: "Etiqa", filipinoDoctors: true, active: true },
+  { id: "lacson", name: "Lacson & Lacson", filipinoDoctors: true, active: true },
+  { id: "hppi", name: "HPPI", filipinoDoctors: true, active: true },
+  { id: "flexicare", name: "Flexicare", filipinoDoctors: true, active: true },
+  { id: "cocolife", name: "Cocolife", filipinoDoctors: false, active: true },
+  { id: "valucare", name: "ValuCare", filipinoDoctors: false, active: true },
 ];
 
 const LEGACY_SERVICE_NAMES = {
@@ -605,7 +605,9 @@ export function AppointmentsPage() {
   const selectedBracesOption = selectedServicePrice?.options?.find((option) => option.id === form.bracesOption);
   const detailsOpen = Boolean(selectedServicePrice && !detailsDismissed);
   const closeServiceDetails = useCallback(() => setDetailsDismissed(true), []);
-  const hmoProviders = catalog?.hmoProviders?.length ? catalog.hmoProviders : APPROVED_HMO_PROVIDERS;
+  const hmoProviders = (catalog?.hmoProviders?.length ? catalog.hmoProviders : APPROVED_HMO_PROVIDERS).filter(
+    (provider) => provider && provider.active !== false
+  );
   const selectedHmo = hmoProviders.find((provider) => provider.name === form.hmoProvider);
   const medicalDocumentTypes = catalog?.medicalDocumentTypes?.length
     ? catalog.medicalDocumentTypes
