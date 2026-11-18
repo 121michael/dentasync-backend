@@ -13,6 +13,8 @@ const {
   normalizeAmount,
   DocumentValidationError,
   UNSUPPORTED_DOCUMENT_MESSAGE,
+  looksLikeFormDumpNotes,
+  validateWrittenToothField,
 } = require("../services/documentSyncExtraction");
 const clinicalPatients = require("../services/clinicalPatients");
 const patientData = require("../services/patientData");
@@ -105,7 +107,7 @@ function mapJob(row) {
     sourceType: row.source_type,
     sourceLabel: sourceLabel(row.source_type, row.mime_type, row.original_name),
     status: row.status,
-    rawText: "",
+    rawText: String(row.raw_text || "").slice(0, 20000),
     extractedPayload: extracted,
     editedPayload: edited,
     extractionNotes: row.extraction_notes || "",
@@ -195,12 +197,14 @@ function sanitizePayload(input) {
       status: ["planned", "in_progress", "completed"].includes(String(procedure.status || "").toLowerCase())
         ? String(procedure.status).toLowerCase()
         : "completed",
-      notes: stringValue(procedure.notes, 2000) || "",
+      notes: looksLikeFormDumpNotes(procedure.notes) ? "" : stringValue(procedure.notes, 2000) || "",
+      unclearDateText: stringValue(procedure.unclearDateText, 80) || "",
       coverageStatus: stringValue(procedure.coverageStatus, 120) || "",
       visits: Array.isArray(procedure.visits)
         ? procedure.visits.slice(0, MAX_VISIT_ROWS).map((row) => ({
             treatmentDate: stringValue(row?.treatmentDate || row?.date || "", 40) || "",
-            toothNos: stringValue(row?.toothNos || row?.toothNumber || "", 40) || "",
+            toothNos: validateWrittenToothField(row?.toothNos || row?.toothNumber || "").value,
+            unclearDateText: stringValue(row?.unclearDateText, 80) || "",
             treatment: stringValue(row?.treatment || row?.procedure || "", 180) || "",
             dentistName: stringValue(row?.dentistName || row?.dentist || "", 120) || "",
             amountCharged: stringValue(String(row?.amountCharged ?? row?.amount ?? ""), 40) || "",
@@ -724,8 +728,7 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
       }
       patient.dateOfBirth = dateOfBirthIso;
 
-      const recoveredDateIso =
-        toIsoDocumentDate(procedure.treatmentDate) || toIsoDocumentDate(job.raw_text || "");
+      const recoveredDateIso = toIsoDocumentDate(procedure.treatmentDate);
       const primaryDateIso = recoveredDateIso;
       const visitRows = Array.isArray(procedure.visits)
         ? procedure.visits
@@ -895,9 +898,13 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
             skippedDuplicates += 1;
             continue;
           }
+          const clinicalNotes = looksLikeFormDumpNotes(procedure.notes, job.raw_text)
+            ? ""
+            : stringValue(procedure.notes, 2000) || "";
           const rowNotes = [
             row.balance ? `Balance: ${row.balance}` : null,
             row.nextAppt ? `Next Appt.: ${row.nextAppt}` : null,
+            clinicalNotes,
           ]
             .filter(Boolean)
             .join(". ");
@@ -944,7 +951,7 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
               status: procedure.status || "completed",
               treatmentDate: iso,
               amountCharged: Number(String(procedure.amountCharged || "0").replace(/(?:₱|php)/gi, "").replace(/,/g, "")) || 0,
-              notes: procedure.notes || "",
+              notes: looksLikeFormDumpNotes(procedure.notes, job.raw_text) ? "" : procedure.notes || "",
               originatingBranchId,
             },
             { id: req.admin.id, role: "admin-sync" }

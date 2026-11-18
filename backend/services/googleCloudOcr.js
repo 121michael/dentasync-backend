@@ -332,6 +332,7 @@ function applyLowConfidenceFields(payload, fieldStatuses, tokens, threshold = LO
       if (tokenConfidenceForValue(tokens, row.amountCharged) < threshold) row.amountCharged = "";
       if (tokenConfidenceForValue(tokens, row.treatmentDate) < threshold) row.treatmentDate = "";
       if (tokenConfidenceForValue(tokens, row.treatment) < threshold) row.treatment = "";
+      if (tokenConfidenceForValue(tokens, row.toothNos) < threshold) row.toothNos = "";
     }
   }
   return next;

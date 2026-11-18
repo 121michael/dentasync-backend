@@ -30,6 +30,8 @@ DESCRIPTION
 ORAL PROPHYLAXIS
 DATE
 SEPT 7, 2024
+TOOTH NO.
+14
 AMOUNT
 800`;
 
@@ -146,6 +148,21 @@ test("handwritten Document AI extract, save, duplicate skip, and OCR failure", a
       ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
       ADD COLUMN IF NOT EXISTS updated_by TEXT;
   `);
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS clinic_dental_chart_entries (
+      id BIGSERIAL PRIMARY KEY,
+      clinical_record_id BIGINT,
+      tooth_number TEXT NOT NULL,
+      condition_label TEXT,
+      notes TEXT,
+      created_by TEXT,
+      created_by_role TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (clinical_record_id, tooth_number)
+    )
+  `);
+  await db.query(fs.readFileSync(path.join(__dirname, "..", "migrations", "014_dental_chart_enrichment.sql"), "utf8"));
   await applyClinicBranchSchema(db);
   await db.query(
     `ALTER TABLE clinic_patient_treatments
@@ -203,6 +220,9 @@ test("handwritten Document AI extract, save, duplicate skip, and OCR failure", a
   assert.equal(extracted.status, 201, JSON.stringify(extracted.body));
   assert.equal(extracted.body.job.status, "extracted");
   assert.match(String(extracted.body.job.extractedPayload?.patient?.fullName || ""), /Maria Santos/i);
+  assert.equal(extracted.body.job.extractedPayload?.procedure?.visits?.[0]?.toothNos, "14");
+  assert.equal(extracted.body.job.extractedPayload?.procedure?.notes || "", "");
+  assert.match(String(extracted.body.job.rawText || ""), /TOOTH NO\.\s*14/i);
   const patientsAfterExtract = await db.query(`SELECT COUNT(*)::int AS count FROM clinic_patient_records`);
   const treatmentsAfterExtract = await db.query(`SELECT COUNT(*)::int AS count FROM clinic_patient_treatments`);
   assert.equal(patientsAfterExtract.rows[0].count, patientsBefore.rows[0].count);
@@ -215,10 +235,12 @@ test("handwritten Document AI extract, save, duplicate skip, and OCR failure", a
   payload.patient.lastName = "Santos";
   payload.procedure.treatment = "Oral Prophylaxis";
   payload.procedure.treatmentDate = "2024-09-07";
+  payload.procedure.notes = HANDWRITING_TEXT.replace(/\n/g, " ");
   payload.procedure.visits = [
     {
       treatment: "Oral Prophylaxis",
       treatmentDate: "2024-09-07",
+      toothNos: "14",
       amountCharged: "800",
     },
   ];
@@ -246,11 +268,15 @@ test("handwritten Document AI extract, save, duplicate skip, and OCR failure", a
     await db.query(`SELECT id FROM clinic_patient_records WHERE LOWER(last_name) = 'santos' LIMIT 1`)
   ).rows[0].id;
   const rows = await db.query(
-    `SELECT id, treatment FROM clinic_patient_treatments WHERE clinical_record_id = $1`,
+    `SELECT id, treatment, tooth_number, notes, diagnosis_notes
+     FROM clinic_patient_treatments WHERE clinical_record_id = $1`,
     [recordId]
   );
   assert.equal(rows.rows.length, 1);
   assert.equal(rows.rows[0].treatment, "Oral Prophylaxis");
+  assert.equal(rows.rows[0].tooth_number, "14");
+  assert.doesNotMatch(String(rows.rows[0].notes || ""), /AMOUNT CHARGED|TOOTH NO/i);
+  assert.doesNotMatch(String(rows.rows[0].diagnosis_notes || ""), /AMOUNT CHARGED|TOOTH NO/i);
 
   const retry = await fetch(`${base}/api/admin/sync/documents/${jobId}/commit`, {
     method: "POST",

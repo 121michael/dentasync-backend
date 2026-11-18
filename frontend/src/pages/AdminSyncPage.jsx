@@ -29,6 +29,7 @@ function emptyVisitRow() {
     amountPaid: "",
     balance: "",
     nextAppt: "",
+    unclearDateText: "",
   };
 }
 
@@ -53,6 +54,7 @@ const emptyPayload = {
     clinicLocation: "",
     status: "completed",
     notes: "",
+    unclearDateText: "",
     coverageStatus: "",
     visits: [],
   },
@@ -95,6 +97,9 @@ function seedVisitsFromProcedure(procedure = {}) {
       first.amountPaid = "";
     }
     if (procedure.dentistName && !first.dentistName) first.dentistName = procedure.dentistName;
+    if (procedure.unclearDateText && !first.treatmentDate) {
+      first.unclearDateText = procedure.unclearDateText;
+    }
     return [first];
   }
   const seeded = {
@@ -1002,6 +1007,12 @@ export function AdminSyncPage() {
                     : "Temporary preview unavailable. Keep the upload selected or re-upload the photo."}
                 </p>
               )}
+              {activeJob.rawText ? (
+                <details className="admin-doc-ocr">
+                  <summary>OCR transcript (review only — not a clinical note)</summary>
+                  <pre className="admin-doc-ocr__text">{activeJob.rawText}</pre>
+                </details>
+              ) : null}
             </div>
 
             <div className="admin-doc-fields doc-table-card">
@@ -1072,10 +1083,14 @@ export function AdminSyncPage() {
                     />
                   </label>
                   <label className={`doc-table-field doc-table-field--wide${needsReview("notes") ? " is-needs-review" : ""}`}>
-                    <span>Clinical notes{needsReview("notes") ? " · unclear" : ""}</span>
+                    <span>Clinical notes{needsReview("notes") ? " · Needs review" : ""}</span>
                     <textarea
                       value={payload.procedure.notes || ""}
-                      placeholder={needsReview("notes") ? "Unclear handwriting — leave blank or type the written note" : ""}
+                      placeholder={
+                        needsReview("notes")
+                          ? "Unclear handwriting — leave blank or type the written note"
+                          : "Only notes printed as Notes / Remarks / Complaint / Findings"
+                      }
                       disabled={!editing || activeJob.status === "synced"}
                       onChange={(event) => updateProcedure("notes", event.target.value)}
                     />
@@ -1125,22 +1140,33 @@ export function AdminSyncPage() {
                     <tbody>
                       {(payload.procedure.visits || [emptyVisitRow()]).map((visit, index) => (
                         <tr key={`visit-${index}`}>
-                          <td className="is-date">
+                          <td className={`is-date${needsReview("treatmentDate") || visit.unclearDateText ? " is-needs-review" : ""}`}>
                             <input
                               value={visit.treatmentDate || ""}
                               placeholder=""
-                              title={visit.treatmentDate || ""}
+                              title={visit.treatmentDate || visit.unclearDateText || ""}
                               aria-label="Date"
                               disabled={!editing || activeJob.status === "synced"}
                               onChange={(event) => updateVisit(index, "treatmentDate", event.target.value)}
                             />
+                            {visit.unclearDateText || (index === 0 && payload.procedure.unclearDateText) ? (
+                              <small className="doc-table-card__review-hint">
+                                Needs review: {visit.unclearDateText || payload.procedure.unclearDateText}
+                              </small>
+                            ) : needsReview("treatmentDate") && !visit.treatmentDate ? (
+                              <small className="doc-table-card__review-hint">Needs review</small>
+                            ) : null}
                           </td>
                           <td className={needsReview("toothNos") ? "is-needs-review" : undefined}>
                             <input
                               value={visit.toothNos || ""}
                               disabled={!editing || activeJob.status === "synced"}
                               onChange={(event) => updateVisit(index, "toothNos", event.target.value)}
+                              aria-label="Tooth Nos"
                             />
+                            {needsReview("toothNos") && !visit.toothNos ? (
+                              <small className="doc-table-card__review-hint">Needs review</small>
+                            ) : null}
                           </td>
                           <td className="is-procedure">
                             <input

@@ -7000,6 +7000,28 @@ body.is-queue-display .staff-mobile-nav {
   border-radius: 10px;
   background: #fff;
 }
+.admin-doc-ocr {
+  margin-top: 0.75rem;
+  padding: 0.65rem 0.8rem;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: var(--surface-muted, #f6f3f8);
+}
+.admin-doc-ocr__text {
+  margin: 0.5rem 0 0;
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+.doc-table-card__review-hint {
+  display: block;
+  margin-top: 0.2rem;
+  color: #8a4b12;
+  font-size: 0.72rem;
+  line-height: 1.25;
+}
 .admin-doc-switch {
   display: none;
   margin-top: 1rem;
