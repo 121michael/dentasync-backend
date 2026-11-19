@@ -70,7 +70,8 @@ function AdminClinicCalendarPanel({ branchId, onBranchChange, onBranchLoaded, on
   const [month, setMonth] = useState(today.getMonth() + 1);
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
-  const [selectedDate, setSelectedDate] = useState("");
+  const [searchParams] = useSearchParams();
+  const [selectedDate, setSelectedDate] = useState(searchParams.get("date") || "");
   const [dayDetail, setDayDetail] = useState(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -100,10 +101,13 @@ function AdminClinicCalendarPanel({ branchId, onBranchChange, onBranchLoaded, on
   }, [branchId, month, onBranchLoaded, year]);
 
   useEffect(() => {
-    setSelectedDate("");
-    setDayDetail(null);
     setEditorOpen(false);
-  }, [branchId]);
+    const date = searchParams.get("date");
+    if (!date) {
+      setSelectedDate("");
+      setDayDetail(null);
+    }
+  }, [branchId, searchParams]);
 
   useEffect(() => {
     load();
@@ -146,6 +150,19 @@ function AdminClinicCalendarPanel({ branchId, onBranchChange, onBranchLoaded, on
       setBusy(false);
     }
   }
+
+  const requestedDate = searchParams.get("date") || "";
+  useEffect(() => {
+    if (!requestedDate) return;
+    const [yearPart, monthPart] = requestedDate.split("-").map(Number);
+    if (yearPart && monthPart) {
+      setYear(yearPart);
+      setMonth(monthPart);
+    }
+    openDate(requestedDate);
+    // openDate is recreated each render; date + branch are the inputs that should retrigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestedDate, branchId]);
 
   async function saveDay(event) {
     event.preventDefault();

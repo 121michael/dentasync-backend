@@ -6233,18 +6233,27 @@ body.is-queue-display .staff-mobile-nav {
 }
 .admin-stat-grid--compact { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
 .admin-stat-card {
+  position: relative;
   display: grid;
   gap: .45rem;
   min-width: 0;
-  padding: 1rem 1.05rem;
+  padding: 1rem 1.05rem 1.15rem;
   border: 1px solid var(--border);
   border-radius: 18px;
   background: var(--surface-solid);
   box-shadow: var(--shadow-sm);
 }
 .admin-stat-card span { color: var(--text-muted); font-size: .68rem; font-weight: 800; letter-spacing: .06em; line-height: 1.3; text-transform: uppercase; overflow-wrap: anywhere; }
-.admin-stat-card strong { color: var(--amethyst-800); font-size: 1.55rem; letter-spacing: -.04em; line-height: 1.15; overflow-wrap: anywhere; }
-.admin-stat-card small { color: var(--emerald); font-size: .68rem; font-weight: 700; }
+.admin-stat-card strong { color: var(--amethyst-800); font-size: clamp(1.45rem, 4vw, 1.85rem); letter-spacing: -.04em; line-height: 1.15; overflow-wrap: anywhere; }
+.admin-stat-card small { color: var(--text-muted); font-size: .68rem; font-weight: 700; line-height: 1.4; }
+.admin-stat-card__top { display: flex; align-items: flex-start; justify-content: space-between; gap: .45rem; }
+.admin-stat-card__arrow {
+  position: absolute;
+  right: .7rem;
+  bottom: .7rem;
+  color: var(--amethyst-600);
+  opacity: .45;
+}
 .admin-stat-card--violet strong { color: #5b2a86; }
 .admin-stat-card--emerald strong { color: var(--emerald); }
 .admin-stat-card--amber strong { color: var(--amber); }
@@ -15178,6 +15187,53 @@ body.is-queue-display .fab-menu {
   color: inherit;
   text-decoration: none;
   cursor: pointer;
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+.admin-stat-card--link:hover,
+.admin-stat-card--link:focus-visible,
+.ops-schedule__row--link:hover,
+.ops-schedule__row--link:focus-visible,
+.ops-availability__row--link:hover,
+.ops-availability__row--link:focus-visible {
+  border-color: var(--amethyst-500);
+  box-shadow: 0 12px 28px rgba(91, 42, 134, .14);
+  outline: 2px solid rgba(152, 100, 215, .35);
+  outline-offset: 2px;
+}
+.admin-stat-card--link:active,
+.ops-schedule__row--link:active,
+.ops-availability__row--link:active {
+  transform: translateY(1px);
+  box-shadow: var(--shadow-sm);
+}
+.ops-group-scope {
+  margin: .35rem 0 0;
+  color: var(--text-muted);
+  font-size: .72rem;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.ops-schedule-empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: .84rem;
+  line-height: 1.5;
+}
+.ops-schedule-empty a,
+.ops-availability a {
+  color: var(--amethyst-700);
+  font-weight: 800;
+}
+.ops-schedule__row--link,
+.ops-availability__row--link {
+  color: inherit;
+  text-decoration: none;
+}
+.ops-schedule__arrow {
+  justify-self: end;
+  color: var(--amethyst-600);
+  opacity: .45;
 }
 .admin-stat-card.is-actionable,
 .staff-summary-card.is-actionable,

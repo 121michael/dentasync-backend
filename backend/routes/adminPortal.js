@@ -2130,25 +2130,45 @@ function createAdminPortalRouter({
     const search = stringValue(req.query.search, 100);
     const date = stringValue(req.query.date, 10);
     const status = stringValue(req.query.status, 40)?.toLowerCase();
+    const metric = stringValue(req.query.metric, 40)?.toLowerCase();
     const { page, limit, offset } = parsePagination(req.query);
     const params = [];
     const clauses = ["1=1"];
+    let joinQueue = false;
 
-    if (date) {
-      if (!isIsoDate(date)) {
-        return res.status(400).json({ message: "Provide a valid appointment date (YYYY-MM-DD)." });
-      }
-      params.push(date);
-      clauses.push(`appointment.appointment_date = $${params.length}`);
+    if (date && !isIsoDate(date)) {
+      return res.status(400).json({ message: "Provide a valid appointment date (YYYY-MM-DD)." });
     }
-    if (status) {
-      params.push(status);
-      clauses.push(`LOWER(appointment.status) = $${params.length}`);
-    }
+
     const branchFilter = stringValue(req.query.branchId, 40);
-    if (branchFilter) {
-      params.push(branchFilter);
-      clauses.push(`appointment.branch_id::text = $${params.length}`);
+    if (metric) {
+      try {
+        const filter = dashboardOps.buildAdminAppointmentMetricFilter(metric, {
+          date: date || undefined,
+          branchId: branchFilter || undefined,
+        });
+        joinQueue = filter.joinQueue;
+        if (filter.sql && filter.sql !== "TRUE") clauses.push(filter.sql);
+        params.push(...filter.params);
+      } catch (error) {
+        if (error.status === 400) {
+          return res.status(400).json({ message: error.message });
+        }
+        throw error;
+      }
+    } else {
+      if (date) {
+        params.push(date);
+        clauses.push(`appointment.appointment_date = $${params.length}`);
+      }
+      if (status) {
+        params.push(status);
+        clauses.push(`LOWER(appointment.status) = $${params.length}`);
+      }
+      if (branchFilter) {
+        params.push(branchFilter);
+        clauses.push(`appointment.branch_id::text = $${params.length}`);
+      }
     }
     const review = stringValue(req.query.review, 40);
     if (review === "inactive-branch") {
@@ -2180,6 +2200,7 @@ function createAdminPortalRouter({
          FROM patient_portal_appointments AS appointment
          JOIN users AS patient ON patient.id::text = appointment.user_id
          LEFT JOIN clinic_branches AS branch ON branch.id = appointment.branch_id
+         ${joinQueue ? "JOIN patient_portal_queue_entries AS queue ON queue.appointment_id = appointment.id" : ""}
          WHERE ${whereSql}`,
         params
       );
@@ -2192,9 +2213,11 @@ function createAdminPortalRouter({
            patient.phone AS patient_phone,
            branch.name AS branch_name,
            branch.status AS branch_status
+           ${joinQueue ? ", queue.status AS queue_status, queue.token AS queue_token, queue.id AS queue_entry_id" : ""}
          FROM patient_portal_appointments AS appointment
          JOIN users AS patient ON patient.id::text = appointment.user_id
          LEFT JOIN clinic_branches AS branch ON branch.id = appointment.branch_id
+         ${joinQueue ? "JOIN patient_portal_queue_entries AS queue ON queue.appointment_id = appointment.id" : ""}
          WHERE ${whereSql}
          ORDER BY appointment.appointment_date DESC, appointment.appointment_time DESC NULLS LAST
          LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`,
@@ -2204,8 +2227,18 @@ function createAdminPortalRouter({
       return res.json({
         page,
         limit,
+        metric: metric || null,
+        date: date || null,
+        branchId: branchFilter || null,
         total: count(countResult.rows[0]),
-        appointments: result.rows.map(mapAppointment),
+        appointments: result.rows.map((row) => ({
+          ...mapAppointment(row),
+          queueStatus: row.queue_status || null,
+          queueNumber: row.queue_token || null,
+          queueEntryId: row.queue_entry_id || null,
+          hmoVerificationStatus: row.hmo_verification_status || null,
+          coverageType: row.coverage_type || null,
+        })),
       });
     } catch (error) {
       if (isMissingRelation(error)) {

@@ -197,8 +197,12 @@ export function AdminManageUsersPage() {
   const users = useMemo(() => {
     if (!data) return [];
     const list = (tab === "patient" ? data.patients : tab === "staff" ? data.staff : data.dentists) || [];
-    if (searchParams.get("filter") === "pending") {
+    const filter = searchParams.get("filter");
+    if (filter === "pending") {
       return list.filter((user) => isPendingAccount(user));
+    }
+    if (filter === "active") {
+      return list.filter((user) => isApprovedAccount(user));
     }
     return list;
   }, [data, tab, searchParams]);
@@ -696,9 +700,13 @@ export function AdminManageUsersPage() {
             <span className="eyebrow">Account operations</span>
             <h2>{heading}</h2>
             <p>
-              {tab === "patient"
-                ? "Patients create their own accounts. Approve them here so they can sign in, open the dashboard, and book appointments. Admin does not create patient accounts."
-                : "Admin can create dentist and staff accounts only. Active accounts can be edited or archived."}
+              {searchParams.get("filter") === "pending"
+                ? "Pending accounts in this category. Switch tabs to review staff or dentist approvals."
+                : searchParams.get("filter") === "active"
+                  ? "Verified operational accounts in this category."
+                  : tab === "patient"
+                    ? "Patients create their own accounts. Approve them here so they can sign in, open the dashboard, and book appointments. Admin does not create patient accounts."
+                    : "Admin can create dentist and staff accounts only. Active accounts can be edited or archived."}
             </p>
           </div>
           {tab !== "patient" ? (

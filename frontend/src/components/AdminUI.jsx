@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { ChevronRight, X } from "lucide-react";
 import { Link } from "react-router-dom";
 import { statusLabel } from "../adminUtils";
 
@@ -96,20 +96,22 @@ export function AdminStatCard({
   const className = `admin-stat-card admin-stat-card--${tone}${to ? " admin-stat-card--link" : ""}${
     actionable ? " is-actionable" : ""
   }`;
+  const ariaLabel = [label, value, detail].filter(Boolean).map(String).join(". ");
   const body = (
     <>
       <div className="admin-stat-card__top">
         <span>{label}</span>
-        {Icon ? <Icon size={16} aria-hidden="true" /> : null}
+        {Icon ? <Icon size={18} aria-hidden="true" /> : null}
       </div>
       <strong>{value}</strong>
       {timeframe ? <em className="ops-metric-timeframe">{timeframe}</em> : null}
       {detail ? <small>{detail}</small> : null}
+      {to ? <ChevronRight className="admin-stat-card__arrow" size={18} aria-hidden="true" /> : null}
     </>
   );
   if (to) {
     return (
-      <Link to={to} className={className}>
+      <Link to={to} className={className} aria-label={ariaLabel}>
         {body}
       </Link>
     );

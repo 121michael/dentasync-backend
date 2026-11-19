@@ -22,6 +22,16 @@ const emptySchedule = {
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
+const METRIC_COPY = {
+  booked: { title: "Booked Today", detail: "Scheduled visits, excluding cancelled and no-show." },
+  checked_in: { title: "Checked In", detail: "Arrived and not yet waiting or in treatment." },
+  waiting: { title: "Waiting", detail: "Patients in the live waiting queue." },
+  in_treatment: { title: "In Treatment", detail: "Preparing or with a dentist." },
+  completed: { title: "Completed", detail: "Finished visits for the clinic date." },
+  no_show: { title: "No-show", detail: "Marked no-show for the clinic date." },
+  hmo: { title: "Pending HMO Verification", detail: "HMO bookings waiting for authorized review." },
+};
+
 export function AdminSchedulePage() {
   const { pushToast, confirm } = useAdminUi();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -33,22 +43,35 @@ export function AdminSchedulePage() {
   const [focusKey, setFocusKey] = useState(() => searchParams.get("focus") || "");
   const [focusedAppointment, setFocusedAppointment] = useState(null);
   const [branches, setBranches] = useState([]);
-  const [branchId, setBranchId] = useState("");
+  const [branchId, setBranchId] = useState(() => searchParams.get("branchId") || "");
+  const [filteredList, setFilteredList] = useState(null);
   const focusedRowRef = useRef(null);
+  const metric = searchParams.get("metric") || "";
+  const dateFilter = searchParams.get("date") || "";
+  const metricCopy = METRIC_COPY[metric] || null;
 
   const load = useCallback(async () => {
     try {
-      const [schedules, branchList] = await Promise.all([
+      const [schedules, branchList, appointments] = await Promise.all([
         api.getAdminSchedules(branchId ? { branchId } : {}),
         api.getAdminBranches().catch(() => ({ branches: [] })),
+        metric || dateFilter
+          ? api.getAdminAppointments({
+              metric: metric || undefined,
+              date: dateFilter || undefined,
+              branchId: branchId || undefined,
+              limit: 200,
+            })
+          : Promise.resolve(null),
       ]);
       setData(schedules);
       setBranches(branchList.branches || []);
+      setFilteredList(appointments);
       setError("");
     } catch (loadError) {
       setError(loadError.message);
     }
-  }, [branchId]);
+  }, [branchId, dateFilter, metric]);
 
   useEffect(() => {
     load();
@@ -61,7 +84,7 @@ export function AdminSchedulePage() {
 
   useEffect(() => {
     if (!focusKey) return;
-    const listed = data?.appointments?.find((appointment) =>
+    const listed = (filteredList?.appointments || data?.appointments || []).find((appointment) =>
       matchesNotificationFocus(appointment, focusKey, ["id"])
     );
     if (listed) {
@@ -96,7 +119,7 @@ export function AdminSchedulePage() {
     return () => {
       cancelled = true;
     };
-  }, [focusKey, data, searchParams, setSearchParams]);
+  }, [focusKey, data, filteredList, searchParams, setSearchParams]);
 
   async function saveSchedule(event) {
     event.preventDefault();
@@ -232,8 +255,11 @@ export function AdminSchedulePage() {
         <div className="admin-panel__heading">
           <div>
             <span className="eyebrow">Appointment sync</span>
-            <h2>Current Appointments</h2>
-            <p>Live appointments synchronized with the booking system for the next two weeks.</p>
+            <h2>{metricCopy?.title || "Current Appointments"}</h2>
+            <p>
+              {metricCopy?.detail ||
+                "Live appointments synchronized with the booking system for the next two weeks."}
+            </p>
           </div>
         </div>
         {focusedAppointment && !data.appointments?.some((item) => String(item.id) === String(focusedAppointment.id)) ? (
@@ -242,9 +268,27 @@ export function AdminSchedulePage() {
             ({focusedAppointment.status}).
           </p>
         ) : null}
+        {metricCopy || dateFilter ? (
+          <p className="inline-alert" role="status">
+            Showing {metricCopy?.title || "appointments"}
+            {dateFilter ? ` for ${dateFilter}` : ""}
+            {branchId ? " at the selected branch" : " across all branches"}.
+            {metricCopy ? ` ${metricCopy.detail}` : ""}
+          </p>
+        ) : null}
         <label className="field" style={{ maxWidth: "320px", marginBottom: "1rem" }}>
           <span>Clinic branch</span>
-          <select value={branchId} onChange={(event) => setBranchId(event.target.value)}>
+          <select
+            value={branchId}
+            onChange={(event) => {
+              const nextId = event.target.value;
+              setBranchId(nextId);
+              const next = new URLSearchParams(searchParams);
+              if (nextId) next.set("branchId", nextId);
+              else next.delete("branchId");
+              setSearchParams(next, { replace: true });
+            }}
+          >
             <option value="">All branches</option>
             {branches.map((branch) => (
               <option key={branch.id} value={branch.id}>
@@ -283,7 +327,7 @@ export function AdminSchedulePage() {
             </ul>
           </div>
         ) : null}
-        {data.appointments?.length ? (
+        {(filteredList?.appointments || data.appointments)?.length ? (
           <div className="admin-table-wrap">
             <table className="admin-table">
               <thead>
@@ -295,10 +339,11 @@ export function AdminSchedulePage() {
                   <th>Date</th>
                   <th>Time</th>
                   <th>Status</th>
+                  <th>Details</th>
                 </tr>
               </thead>
               <tbody>
-                {data.appointments.map((appointment) => (
+                {(filteredList?.appointments || data.appointments).map((appointment) => (
                   <tr
                     key={appointment.id}
                     ref={
@@ -317,19 +362,69 @@ export function AdminSchedulePage() {
                       {appointment.reviewReason === "missing_time" ? " · confirm a time" : ""}
                     </td>
                     <td>{appointment.treatment}</td>
-                    <td>{appointment.dentistName}</td>
+                    <td>{appointment.dentistName || appointment.dentist || "—"}</td>
                     <td>{formatAdminDate(appointment.date)}</td>
-                    <td>{formatAdminTime(appointment.time)}</td>
-                    <td><AdminStatusBadge status={appointment.status} /></td>
+                    <td>{appointment.time ? formatAdminTime(appointment.time) : "Date only"}</td>
+                    <td>
+                      <AdminStatusBadge status={appointment.queueStatus || appointment.status} />
+                      {appointment.hmoVerificationStatus &&
+                      appointment.hmoVerificationStatus !== "not_applicable" ? (
+                        <small> · {String(appointment.hmoVerificationStatus).replaceAll("_", " ")}</small>
+                      ) : null}
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="button button--secondary button--compact"
+                        onClick={() => setFocusedAppointment(appointment)}
+                      >
+                        View
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         ) : (
-          <EmptyState title="No upcoming appointments" detail="Appointment availability will appear here as bookings arrive." />
+          <EmptyState
+            title={metricCopy ? `No ${metricCopy.title.toLowerCase()} records` : "No upcoming appointments"}
+            detail={
+              metricCopy
+                ? "This list matches the dashboard card for the selected branch and clinic date."
+                : "Appointment availability will appear here as bookings arrive."
+            }
+          />
         )}
       </section>
+
+      {focusedAppointment ? (
+        <AdminModal
+          title={focusedAppointment.patientName || "Appointment"}
+          onClose={() => setFocusedAppointment(null)}
+        >
+          <div className="admin-detail-grid">
+            <p><small>Treatment</small><strong>{focusedAppointment.treatment || "—"}</strong></p>
+            <p><small>Dentist</small><strong>{focusedAppointment.dentistName || focusedAppointment.dentist || "—"}</strong></p>
+            <p><small>Date</small><strong>{formatAdminDate(focusedAppointment.date)}</strong></p>
+            <p><small>Time</small><strong>{focusedAppointment.time ? formatAdminTime(focusedAppointment.time) : "Date only"}</strong></p>
+            <p><small>Status</small><strong>{focusedAppointment.queueStatus || focusedAppointment.status}</strong></p>
+            <p><small>Branch</small><strong>{focusedAppointment.branchName || "—"}</strong></p>
+            {focusedAppointment.hmoVerificationStatus &&
+            focusedAppointment.hmoVerificationStatus !== "not_applicable" ? (
+              <p>
+                <small>HMO review</small>
+                <strong>{String(focusedAppointment.hmoVerificationStatus).replaceAll("_", " ")}</strong>
+              </p>
+            ) : null}
+          </div>
+          <div className="admin-modal__actions">
+            <button type="button" className="button button--secondary" onClick={() => setFocusedAppointment(null)}>
+              Close
+            </button>
+          </div>
+        </AdminModal>
+      ) : null}
 
       {formOpen ? (
         <AdminModal title="Add schedule" onClose={() => setFormOpen(false)} wide>

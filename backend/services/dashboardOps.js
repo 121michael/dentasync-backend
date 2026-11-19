@@ -466,12 +466,70 @@ async function resolveAdminDashboardBranch(db, rawId) {
   };
 }
 
+function clinicQueueOnDateSql(alias, dateRef) {
+  const tz = clinicTimezone().replace(/'/g, "''");
+  return `(${alias}.checked_in_at AT TIME ZONE '${tz}')::date = ${dateRef}::date`;
+}
+
+function buildAdminAppointmentMetricFilter(metric, { date, branchId } = {}) {
+  const normalized = String(metric || "").toLowerCase();
+  const clauses = [];
+  const params = [];
+  let joinQueue = false;
+  const dateRef = date
+    ? (() => {
+        params.push(date);
+        return `$${params.length}`;
+      })()
+    : clinicDateSql();
+
+  if (branchId) {
+    params.push(branchId);
+    clauses.push(`appointment.branch_id::text = $${params.length}`);
+  }
+
+  if (normalized === "booked") {
+    clauses.push(`appointment.appointment_date = ${dateRef}::date`);
+    clauses.push(`appointment.status NOT IN ('cancelled', 'no_show')`);
+  } else if (normalized === "completed") {
+    clauses.push(`appointment.appointment_date = ${dateRef}::date`);
+    clauses.push(`appointment.status = 'completed'`);
+  } else if (normalized === "no_show") {
+    clauses.push(`appointment.appointment_date = ${dateRef}::date`);
+    clauses.push(`appointment.status = 'no_show'`);
+  } else if (normalized === "checked_in" || normalized === "waiting" || normalized === "in_treatment") {
+    joinQueue = true;
+    clauses.push(clinicQueueOnDateSql("queue", dateRef));
+    clauses.push(queueStatusSql("queue", normalized));
+    if (branchId) {
+      clauses.push(`queue.branch_id::text = $${params.length}`);
+    }
+  } else if (normalized === "hmo") {
+    clauses.push(`LOWER(COALESCE(appointment.coverage_type, '')) = 'hmo'`);
+    clauses.push(`appointment.hmo_verification_status = 'pending_verification'`);
+    clauses.push(`appointment.status NOT IN ('cancelled')`);
+  } else if (normalized) {
+    const error = new Error("Unknown dashboard metric filter.");
+    error.status = 400;
+    throw error;
+  }
+
+  return {
+    metric: normalized || null,
+    joinQueue,
+    sql: clauses.length ? clauses.join(" AND ") : "TRUE",
+    params,
+  };
+}
+
 module.exports = {
   clinicTimezone,
   clinicDateSql,
   clinicQueueTodaySql,
+  clinicQueueOnDateSql,
   appointmentTodaySql,
   queueStatusSql,
+  buildAdminAppointmentMetricFilter,
   loadFloorMetrics,
   loadSchedulePreview,
   loadDentistAvailability,

@@ -314,6 +314,47 @@ test("dashboard metrics, links, branch isolation, and dentist availability", asy
   assert.equal(adminTaguig.body.metrics.pendingHmoVerification, 0);
   assert.ok(!adminTaguig.body.dentistAvailability.dentists.some((row) => row.catalogDentistId === "dr-marco"));
 
+  const clinicDate = adminMain.body.clinicDate;
+  const bookedList = await request(
+    "GET",
+    `/api/admin/appointments?metric=booked&date=${clinicDate}&branchId=${mainId}&limit=200`,
+    { token: adminToken }
+  );
+  assert.equal(bookedList.status, 200, JSON.stringify(bookedList.body));
+  assert.equal(bookedList.body.total, adminMain.body.metrics.bookedToday);
+  const hmoAdminList = await request(
+    "GET",
+    `/api/admin/appointments?metric=hmo&branchId=${mainId}&limit=200`,
+    { token: adminToken }
+  );
+  assert.equal(hmoAdminList.body.total, adminMain.body.metrics.pendingHmoVerification);
+  const completedAdminList = await request(
+    "GET",
+    `/api/admin/appointments?metric=completed&date=${clinicDate}&branchId=${mainId}&limit=200`,
+    { token: adminToken }
+  );
+  assert.equal(completedAdminList.body.total, adminMain.body.metrics.completedToday);
+  const noShowAdminList = await request(
+    "GET",
+    `/api/admin/appointments?metric=no_show&date=${clinicDate}&branchId=${mainId}&limit=200`,
+    { token: adminToken }
+  );
+  assert.equal(noShowAdminList.body.total, adminMain.body.metrics.noShowToday);
+  const checkedAdminList = await request(
+    "GET",
+    `/api/admin/appointments?metric=checked_in&date=${clinicDate}&branchId=${mainId}&limit=200`,
+    { token: adminToken }
+  );
+  assert.equal(checkedAdminList.body.total, afterCheck.body.metrics.checkedIn);
+  const taguigHmo = await request(
+    "GET",
+    `/api/admin/appointments?metric=hmo&branchId=${taguigId}&limit=200`,
+    { token: adminToken }
+  );
+  assert.equal(taguigHmo.body.total, 0);
+  const badMetric = await request("GET", "/api/admin/appointments?metric=not-a-metric", { token: adminToken });
+  assert.equal(badMetric.status, 400);
+
   void pendingPatient;
   assert.equal(dashboardOps.clinicTimezone(), "Asia/Manila");
 });
