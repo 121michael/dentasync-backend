@@ -1232,6 +1232,16 @@ export function DentistRecordsPage() {
                 <span>{detail.patient.dentalConcerns?.trim() || "—"}</span>
               </p>
               <p>
+                <strong>HMO coverage:</strong>{" "}
+                <span>
+                  {detail.patient.hmoStatus === "verified"
+                    ? `HMO Verified${detail.patient.hmoProvider ? ` · ${detail.patient.hmoProvider}` : ""}${
+                        detail.patient.hmoVerifiedAt ? ` · ${formatDentistDate(detail.patient.hmoVerifiedAt)}` : ""
+                      }`
+                    : (detail.patient.hmoStatus || "not_enrolled").replaceAll("_", " ")}
+                </span>
+              </p>
+              <p>
                 <strong>Record type:</strong>{" "}
                 <span>
                   {isProfileLocked(detail.patient)

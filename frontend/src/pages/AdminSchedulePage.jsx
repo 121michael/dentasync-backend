@@ -29,7 +29,7 @@ const METRIC_COPY = {
   in_treatment: { title: "In Treatment", detail: "Preparing or with a dentist." },
   completed: { title: "Completed", detail: "Finished visits for the clinic date." },
   no_show: { title: "No-show", detail: "Marked no-show for the clinic date." },
-  hmo: { title: "Pending HMO Verification", detail: "HMO bookings waiting for authorized review." },
+  hmo: { title: "Pending HMO Verification", detail: "HMO submissions waiting for Staff review." },
 };
 
 export function AdminSchedulePage() {

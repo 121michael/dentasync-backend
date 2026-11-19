@@ -2,6 +2,7 @@
 
 const clinicSchedule = require("./clinicSchedule");
 const clinicBranches = require("./clinicBranches");
+const hmoVerification = require("./hmoVerification");
 
 function clinicTimezone() {
   const raw = process.env.CLINIC_TIMEZONE || "Asia/Manila";
@@ -148,18 +149,37 @@ async function loadFloorMetrics(db, options = {}) {
          AND appointment.status = 'pending'`,
       appointmentScope.params
     ),
-    db.query(
-      `SELECT COUNT(*) AS count
-       FROM patient_portal_appointments AS appointment
-       WHERE ${appointmentScope.sql}
-         AND LOWER(COALESCE(appointment.coverage_type, '')) = 'hmo'
-         AND appointment.hmo_verification_status = 'pending_verification'
-         AND appointment.status NOT IN ('cancelled')`,
-      appointmentScope.params
-    ).catch((error) => {
-      if (error?.code === "42703") return { rows: [{ count: "0" }] };
-      throw error;
-    }),
+    options.dentistScope
+      ? db.query(
+          `SELECT COUNT(*) AS count
+           FROM patient_portal_appointments AS appointment
+           WHERE ${appointmentScope.sql}
+             AND LOWER(COALESCE(appointment.coverage_type, '')) = 'hmo'
+             AND appointment.hmo_verification_status = 'pending_verification'
+             AND appointment.status NOT IN ('cancelled')`,
+          appointmentScope.params
+        ).catch((error) => {
+          if (error?.code === "42703") return { rows: [{ count: "0" }] };
+          throw error;
+        })
+      : hmoVerification
+          .countPendingUnique(db, { branchId: options.branchId || null })
+          .then((uniqueCount) => {
+            if (uniqueCount != null) return { rows: [{ count: String(uniqueCount) }] };
+            return db.query(
+              `SELECT COUNT(*) AS count
+               FROM patient_portal_appointments AS appointment
+               WHERE ${appointmentScope.sql}
+                 AND LOWER(COALESCE(appointment.coverage_type, '')) = 'hmo'
+                 AND appointment.hmo_verification_status = 'pending_verification'
+                 AND appointment.status NOT IN ('cancelled')`,
+              appointmentScope.params
+            );
+          })
+          .catch((error) => {
+            if (error?.code === "42703" || error?.code === "42P01") return { rows: [{ count: "0" }] };
+            throw error;
+          }),
     db.query(
       `SELECT COUNT(*) AS count
        FROM patient_portal_queue_entries AS queue

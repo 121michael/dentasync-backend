@@ -31,6 +31,7 @@ function visibleNotificationSql(alias, branchId, paramIndex) {
 const recordAccess = require("../services/recordAccess");
 const branchCheckIn = require("../services/branchCheckIn");
 const dashboardOps = require("../services/dashboardOps");
+const hmoVerification = require("../services/hmoVerification");
 
 const QUEUE_STATUS_MAP = {
   checked_in: "checked_in",
@@ -1235,76 +1236,134 @@ function createStaffPortalRouter({
     }
   });
 
+  router.get("/hmo-submissions", async (req, res) => {
+    const branchId = req.branchAccess?.activeBranch?.id;
+    const status = stringValue(req.query.status, 40)?.toLowerCase() || "pending_verification";
+    if (!branchId) {
+      return res.json({
+        ...branchAccess.publicContext(req.branchAccess),
+        submissions: [],
+      });
+    }
+    try {
+      const submissions = await hmoVerification.listSubmissions(db, { branchId, status });
+      return res.json({
+        ...branchAccess.publicContext(req.branchAccess),
+        submissions,
+      });
+    } catch (error) {
+      if (isMissingRelation(error) || error?.code === "42P01") {
+        return res.status(503).json({
+          message: "HMO verification is not available. Run npm run migrate:hmo-verification.",
+        });
+      }
+      console.error("Staff HMO submissions error:", error.message);
+      return res.status(500).json({ message: "Unable to load HMO submissions." });
+    }
+  });
+
+  router.patch("/hmo-submissions/:id", async (req, res) => {
+    const submissionId = numericId(req.params.id);
+    const status = stringValue(req.body?.status, 40)?.toLowerCase();
+    const branchId = req.branchAccess?.activeBranch?.id;
+    if (!submissionId || !branchId || !HMO_VERIFICATION_STATUSES.has(status) || status === "pending_verification" || status === "not_applicable") {
+      return res.status(400).json({
+        message: "Provide a valid HMO verification status: verified or rejected.",
+      });
+    }
+    try {
+      const result = await hmoVerification.verifySubmission(db, {
+        id: submissionId,
+        branchId,
+        staffId: req.staff?.id,
+        status,
+        clinicSms,
+      });
+      if (result.submission?.userId) {
+        await notifyPatient(db, {
+          userId: result.submission.userId,
+          type: "hmo",
+          title: status === "verified" ? "HMO coverage verified" : "HMO coverage needs attention",
+          body:
+            status === "verified"
+              ? "Clinic staff verified your HMO coverage. Open your Patient Dashboard to view the status."
+              : "Clinic staff could not verify your HMO coverage. Please contact the front desk.",
+          entityType: "hmo_submission",
+          entityId: result.submission.id,
+        }).catch(() => {});
+      }
+      return res.json({
+        submission: result.submission,
+        sms: result.sms,
+        alreadyRecorded: Boolean(result.alreadyRecorded),
+      });
+    } catch (error) {
+      if (error?.status) return res.status(error.status).json({ message: error.message });
+      if (isMissingRelation(error) || error?.code === "42P01") {
+        return res.status(503).json({
+          message: "HMO verification is not available. Run npm run migrate:hmo-verification.",
+        });
+      }
+      console.error("Staff HMO verification error:", error.message);
+      return res.status(500).json({ message: "Unable to update HMO verification." });
+    }
+  });
+
   router.patch("/appointments/:id/hmo-verification", async (req, res) => {
     const appointmentId = numericId(req.params.id);
     const status = stringValue(req.body?.status, 40)?.toLowerCase();
+    const branchId = req.branchAccess?.activeBranch?.id;
 
-    if (!appointmentId || !HMO_VERIFICATION_STATUSES.has(status)) {
+    if (!appointmentId || !branchId || !HMO_VERIFICATION_STATUSES.has(status) || status === "pending_verification" || status === "not_applicable") {
       return res.status(400).json({
-        message:
-          "Provide a valid HMO verification status: pending_verification, verified, rejected, or not_applicable.",
+        message: "Provide a valid HMO verification status: verified or rejected.",
       });
     }
 
     try {
-      const result = await db.query(
-        `UPDATE patient_portal_appointments
-         SET hmo_verification_status = $1,
-             updated_at = CURRENT_TIMESTAMP
-         WHERE id = $2
-           AND branch_id = $3
-         RETURNING *`,
-        [status, appointmentId, req.branchAccess.activeBranch.id]
-      );
-      if (!result.rows.length) {
-        return res.status(404).json({ message: "Appointment not found." });
-      }
-
-      const patientResult = await db.query(
-        `SELECT CONCAT_WS(' ', first_name, last_name) AS patient_name,
-                phone AS patient_phone,
-                email AS patient_email
-         FROM users
-         WHERE id::text = $1
-         LIMIT 1`,
-        [String(result.rows[0].user_id)]
-      );
-
-      if (result.rows[0].user_id) {
-        const title =
-          status === "verified"
-            ? "HMO coverage verified"
-            : status === "rejected"
-              ? "HMO coverage needs attention"
-              : "HMO verification updated";
-        const body =
-          status === "verified"
-            ? "Clinic staff verified your HMO details for this appointment."
-            : status === "rejected"
-              ? "Clinic staff could not verify your HMO details. Please contact the front desk."
-              : `Your HMO verification status is now ${status.replaceAll("_", " ")}.`;
+      const result = await hmoVerification.verifyByAppointment(db, {
+        appointmentId,
+        branchId,
+        staffId: req.staff?.id,
+        status,
+        clinicSms,
+      });
+      if (result.submission?.userId) {
         await notifyPatient(db, {
-          userId: result.rows[0].user_id,
-          type: "appointment",
-          title,
-          body,
-          entityType: "appointment",
-          entityId: result.rows[0].id,
+          userId: result.submission.userId,
+          type: "hmo",
+          title: status === "verified" ? "HMO coverage verified" : "HMO coverage needs attention",
+          body:
+            status === "verified"
+              ? "Clinic staff verified your HMO coverage. Open your Patient Dashboard to view the status."
+              : "Clinic staff could not verify your HMO coverage. Please contact the front desk.",
+          entityType: "hmo_submission",
+          entityId: result.submission.id,
         }).catch(() => {});
       }
-
+      const appointmentResult = await db.query(
+        `SELECT
+           appointment.*,
+           CONCAT_WS(' ', patient.first_name, patient.last_name) AS patient_name,
+           patient.phone AS patient_phone,
+           patient.email AS patient_email
+         FROM patient_portal_appointments AS appointment
+         JOIN users AS patient ON patient.id::text = appointment.user_id
+         WHERE appointment.id = $1
+         LIMIT 1`,
+        [appointmentId]
+      );
       return res.json({
-        appointment: mapAppointment({
-          ...result.rows[0],
-          patient_name: patientResult.rows[0]?.patient_name,
-          patient_phone: patientResult.rows[0]?.patient_phone,
-          patient_email: patientResult.rows[0]?.patient_email,
-        }),
+        appointment: mapAppointment(appointmentResult.rows[0]),
+        submission: result.submission,
+        sms: result.sms,
+        alreadyRecorded: Boolean(result.alreadyRecorded),
       });
     } catch (error) {
+      if (error?.status) return res.status(error.status).json({ message: error.message });
       if (isMissingRelation(error)) {
         return res.status(503).json({
-          message: "HMO verification fields are not available. Run npm run migrate:paper-gaps.",
+          message: "HMO verification is not available. Run npm run migrate:hmo-verification.",
         });
       }
       console.error("Staff HMO verification error:", error.message);

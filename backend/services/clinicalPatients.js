@@ -266,7 +266,11 @@ async function enrichRecordsFromLinkedProfiles(db, records) {
          profile.allergies,
          profile.existing_conditions,
          profile.current_medications,
-         profile.dental_concerns
+         profile.dental_concerns,
+         profile.hmo_provider,
+         profile.hmo_member_number,
+         profile.hmo_status,
+         profile.hmo_verified_at
        FROM users AS account
        LEFT JOIN patient_portal_profiles AS profile
          ON profile.user_id::text = account.id::text
@@ -368,6 +372,10 @@ async function enrichRecordsFromLinkedProfiles(db, records) {
       currentMedications:
         stringValue(account.current_medications, 1200) || record.currentMedications || "",
       dentalConcerns: stringValue(account.dental_concerns, 1200) || record.dentalConcerns || "",
+      hmoProvider: stringValue(account.hmo_provider, 120) || record.hmoProvider || "",
+      hmoMemberNumber: stringValue(account.hmo_member_number, 120) || record.hmoMemberNumber || "",
+      hmoStatus: stringValue(account.hmo_status, 40) || record.hmoStatus || "not_enrolled",
+      hmoVerifiedAt: account.hmo_verified_at || record.hmoVerifiedAt || null,
       profileLocked: true,
       accountLinked: true,
     };

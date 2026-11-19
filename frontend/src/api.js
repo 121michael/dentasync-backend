@@ -375,6 +375,10 @@ export const api = {
   },
   verifyStaffAppointmentHmo: (appointmentId, body) =>
     request(`/staff/appointments/${appointmentId}/hmo-verification`, { method: "PATCH", body }),
+  getStaffHmoSubmissions: (status = "pending_verification") =>
+    request(`/staff/hmo-submissions?status=${encodeURIComponent(status)}`),
+  verifyStaffHmoSubmission: (submissionId, body) =>
+    request(`/staff/hmo-submissions/${submissionId}`, { method: "PATCH", body }),
   getStaffProfile: () => request("/staff/profile"),
   updateStaffProfile: (body) => request("/staff/profile", { method: "PUT", body }),
   updateStaffPassword: (body) => request("/staff/profile/password", { method: "POST", body }),

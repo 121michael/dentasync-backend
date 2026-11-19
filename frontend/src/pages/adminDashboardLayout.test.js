@@ -26,6 +26,7 @@ test("dashboard cards keep existing metrics and desktop sidebar navigation", () 
   assert.match(page, /In Treatment/);
   assert.match(page, /No-show/);
   assert.match(page, /Pending HMO Verification/);
+  assert.match(page, /HMO submissions waiting for Staff review\./);
   assert.match(page, /Dentist Availability/);
   assert.match(page, /View Full Schedule/);
   assert.match(page, /floorMetricHref\("booked"/);
