@@ -40,6 +40,10 @@ async function startDentistPortal({ tokenRole, databaseRole, catalogDentistId = 
         return { rows: [{ count: "0" }] };
       }
 
+      if (sql.includes("AS appointment_id") && sql.includes("patient_portal_appointments")) {
+        return { rows: [] };
+      }
+
       if (sql.includes("dentist_portal_notifications")) {
         if (sql.includes("UPDATE dentist_portal_notifications")) {
           return { rowCount: 1, rows: [{ id: 4 }] };

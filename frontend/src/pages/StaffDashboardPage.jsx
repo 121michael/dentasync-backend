@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { StaffStatusBadge, StaffSummaryCard } from "../components/StaffUI";
+import { DashboardSchedulePreview } from "../components/DashboardSchedulePreview";
 import { useStaffUi } from "../components/StaffLayout";
 import { formatStaffTime } from "../staffUtils";
 
@@ -78,9 +79,13 @@ export function StaffDashboardPage() {
 
   const metrics = data.metrics || {};
   const activity = data.todaysActivity || [];
+  const clinicDate = data.clinicDate || data.date;
+  const timezone = data.timezone || "Asia/Manila";
+  const timeframe = `Today · ${clinicDate} (${timezone})`;
+  const branchName = data.branch?.name || data.activeBranch?.name;
 
   return (
-    <div className="staff-page">
+    <div className="staff-page ops-dashboard-clearance">
       {error ? <p className="inline-alert inline-alert--error">{error}</p> : null}
 
       <section className="staff-welcome-card">
@@ -88,8 +93,8 @@ export function StaffDashboardPage() {
           <span className="eyebrow eyebrow--light">Day-to-day clinic floor</span>
           <h2>Clinic Operations Overview</h2>
           <p>
-            Monitor today’s appointments, check-ins, waiting patients, and pending requests from one
-            operations panel.
+            {branchName ? `${branchName} branch · ` : ""}
+            Clinic date {clinicDate} ({timezone}). Counts match the filtered lists they open.
           </p>
         </div>
         <div className="staff-heading-actions">
@@ -104,34 +109,85 @@ export function StaffDashboardPage() {
 
       <section className="staff-stat-grid">
         <StaffSummaryCard
-          label="Today's Appointments"
-          value={metrics.todaysAppointments ?? 0}
-          detail="Scheduled for today"
+          label="Booked Today"
+          value={metrics.bookedToday ?? metrics.todaysAppointments ?? 0}
+          timeframe={timeframe}
+          detail="Scheduled visits, excluding cancelled and no-show"
           tone="purple"
+          to="/staff/appointments?tab=today"
         />
         <StaffSummaryCard
           label="Checked In"
-          value={metrics.checkedIn ?? metrics.todayCheckIns ?? 0}
-          detail="Patients arrived"
+          value={metrics.checkedIn ?? 0}
+          timeframe={timeframe}
+          detail="Arrived and not yet waiting or in treatment"
           tone="violet"
+          to="/staff/queue?status=checked_in"
         />
         <StaffSummaryCard
-          label="Waiting Queue"
-          value={metrics.waitingQueue ?? metrics.activeQueue ?? 0}
-          detail="Currently waiting"
+          label="Waiting"
+          value={metrics.waiting ?? metrics.waitingQueue ?? 0}
+          timeframe={timeframe}
+          detail="In the live waiting queue"
           tone="amber"
+          to="/staff/queue?status=waiting"
+          actionable={Number(metrics.waiting ?? metrics.waitingQueue ?? 0) > 0}
         />
         <StaffSummaryCard
-          label="Completed Today"
+          label="In Treatment"
+          value={metrics.inTreatment ?? 0}
+          timeframe={timeframe}
+          detail="Preparing or with a dentist"
+          tone="violet"
+          to="/staff/queue?status=in_treatment"
+        />
+        <StaffSummaryCard
+          label="Completed"
           value={metrics.completedToday ?? 0}
-          detail="Finished visits"
+          timeframe={timeframe}
+          detail="Finished visits for this clinic date"
           tone="emerald"
+          to="/staff/appointments?tab=completed&when=today"
+        />
+        <StaffSummaryCard
+          label="No-show"
+          value={metrics.noShowToday ?? 0}
+          timeframe={timeframe}
+          detail="Marked no-show for this clinic date"
+          tone="rose"
+          to="/staff/appointments?tab=no_show"
         />
         <StaffSummaryCard
           label="Pending Requests"
           value={metrics.pendingRequests ?? 0}
-          detail="Needs staff action"
+          timeframe="Open requests"
+          detail="Appointment requests waiting for staff confirmation"
           tone="rose"
+          to="/staff/appointments?tab=pending"
+          actionable={Number(metrics.pendingRequests ?? 0) > 0}
+        />
+        <StaffSummaryCard
+          label="Pending HMO Verification"
+          value={metrics.pendingHmoVerification ?? 0}
+          timeframe="Needs review"
+          detail="HMO bookings waiting for staff verification"
+          tone="amber"
+          to="/staff/appointments?tab=hmo"
+          actionable={Number(metrics.pendingHmoVerification ?? 0) > 0}
+        />
+      </section>
+
+      <section className="staff-panel">
+        <div className="staff-panel__heading">
+          <div>
+            <span className="eyebrow">Clinic date {clinicDate}</span>
+            <h2>Today’s Schedule</h2>
+          </div>
+        </div>
+        <DashboardSchedulePreview
+          rows={data.schedulePreview || []}
+          appointmentBase="/staff/appointments?tab=today"
+          queueBase="/staff/queue"
         />
       </section>
 

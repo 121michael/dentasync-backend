@@ -1,4 +1,5 @@
 import { X } from "lucide-react";
+import { Link } from "react-router-dom";
 const statusLabelFallback = {
   checked_in: "Checked In",
   not_checked_in: "Not Checked In",
@@ -37,14 +38,34 @@ export function StaffStatusBadge({ status }) {
   return <span className={`staff-status staff-status--${safeStatus}`}>{statusLabel(safeStatus)}</span>;
 }
 
-export function StaffSummaryCard({ label, value, detail, tone = "purple" }) {
-  return (
-    <article className={`staff-summary-card staff-summary-card--${tone}`}>
+export function StaffSummaryCard({
+  label,
+  value,
+  detail,
+  timeframe,
+  tone = "purple",
+  to,
+  actionable = false,
+}) {
+  const className = `staff-summary-card staff-summary-card--${tone}${to ? " staff-summary-card--link" : ""}${
+    actionable ? " is-actionable" : ""
+  }`;
+  const body = (
+    <>
       <span>{label}</span>
       <strong>{value}</strong>
+      {timeframe ? <em className="ops-metric-timeframe">{timeframe}</em> : null}
       {detail ? <small>{detail}</small> : null}
-    </article>
+    </>
   );
+  if (to) {
+    return (
+      <Link to={to} className={className}>
+        {body}
+      </Link>
+    );
+  }
+  return <article className={className}>{body}</article>;
 }
 
 export function StaffModal({ title, children, onClose, wide = false, record = false }) {

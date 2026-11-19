@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Maximize2, MessageSquare, RefreshCw, RotateCcw } from "lucide-react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { StaffStatusBadge, StaffSummaryCard } from "../components/StaffUI";
@@ -61,10 +61,15 @@ export function StaffQueuePage() {
   const [focusKey, setFocusKey] = useState(() => searchParams.get("focus") || "");
   const focusedRowRef = useRef(null);
 
+  const statusFilter = searchParams.get("status") || "";
+
   const load = useCallback(async (options = {}) => {
     try {
       const [queueResponse, summaryResponse] = await Promise.all([
-        api.getStaffQueue(options),
+        api.getStaffQueue({
+          ...options,
+          query: statusFilter ? { status: statusFilter } : {},
+        }),
         api.getStaffQueueSummary(options).catch(() => null),
       ]);
       setQueue(queueResponse.queue || []);
@@ -73,7 +78,7 @@ export function StaffQueuePage() {
     } catch (loadError) {
       setError(loadError.message);
     }
-  }, []);
+  }, [statusFilter]);
 
   useEffect(() => {
     load();
@@ -183,6 +188,19 @@ export function StaffQueuePage() {
           tone="purple"
         />
       </section>
+
+      {statusFilter ? (
+        <section className="staff-panel staff-focus-banner" aria-live="polite">
+          <div>
+            <span className="eyebrow">Dashboard filter</span>
+            <h2>{statusFilter.replaceAll("_", " ")} patients</h2>
+            <p>This list matches the dashboard card count for the assigned branch.</p>
+          </div>
+          <Link className="button button--secondary" to="/staff/queue">
+            Clear filter
+          </Link>
+        </section>
+      ) : null}
 
       {focusedEntry ? (
         <section className="staff-panel staff-focus-banner" aria-live="polite">

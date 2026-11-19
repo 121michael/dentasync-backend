@@ -309,15 +309,25 @@ export const api = {
     request(`/public/walk-in-check-in/${encodeURIComponent(token)}`, { authenticated: false }),
   redeemWalkInQr: (token) =>
     request("/patient/walk-in-check-in", { method: "POST", body: { token } }),
-  getStaffQueue: (options = {}) => request("/staff/queue", options),
+  getStaffQueue: (options = {}) => {
+    const { query = {}, ...requestOptions } = options;
+    const params = new URLSearchParams();
+    if (query.status) params.set("status", query.status);
+    const suffix = params.toString() ? `?${params.toString()}` : "";
+    return request(`/staff/queue${suffix}`, requestOptions);
+  },
   getStaffQueueSummary: (options = {}) => request("/staff/queue/summary", options),
   recalculateStaffQueueEstimates: () =>
     request("/staff/queue/recalculate-estimates", { method: "POST" }),
   resetStaffQueue: () => request("/staff/queue/reset", { method: "POST" }),
   updateStaffQueue: (queueEntryId, body) =>
     request(`/staff/queue/${queueEntryId}`, { method: "PATCH", body }),
-  getStaffAppointments: (tab = "today") =>
-    request(`/staff/appointments?tab=${encodeURIComponent(tab)}`),
+  getStaffAppointments: (tab = "today", extra = {}) => {
+    const params = new URLSearchParams();
+    params.set("tab", tab);
+    if (extra.when) params.set("when", extra.when);
+    return request(`/staff/appointments?${params.toString()}`);
+  },
   lookupStaffRfid: (rfidTag) =>
     request(`/staff/rfid-lookup?rfidTag=${encodeURIComponent(rfidTag)}`),
   getStaffAppointment: (appointmentId) => request(`/staff/appointments/${appointmentId}`),
@@ -441,7 +451,13 @@ export const api = {
   getDentistNotifications: (options = {}) => request("/dentist/notifications", options),
   markDentistNotificationRead: (id) => request(`/dentist/notifications/${id}/read`, { method: "PATCH" }),
   markAllDentistNotificationsRead: () => request("/dentist/notifications/read-all", { method: "PATCH" }),
-  getAdminDashboard: (options = {}) => request("/admin/dashboard", options),
+  getAdminDashboard: (options = {}) => {
+    const { query = {}, ...requestOptions } = options;
+    const params = new URLSearchParams();
+    if (query.branchId) params.set("branchId", String(query.branchId));
+    const suffix = params.toString() ? `?${params.toString()}` : "";
+    return request(`/admin/dashboard${suffix}`, requestOptions);
+  },
   getAdminStatus: (options = {}) => request("/admin/status", options),
   getAdminPatients: (params = {}) => {
     const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value || value === 0));

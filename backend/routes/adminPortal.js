@@ -22,6 +22,7 @@ const { renderAdminAnalyticsExport } = require("../services/adminAnalyticsExport
 const patientRecordExport = require("../services/patientRecordExport");
 const { buildAdminOtpMailStatus } = require("../services/otpMailStatus");
 const { updatePasswordHash } = require("../services/sessionRevocation");
+const dashboardOps = require("../services/dashboardOps");
 
 const APPOINTMENT_ACTIONS = new Set([
   "approve",
@@ -507,17 +508,19 @@ function createAdminPortalRouter({
 
   router.get("/dashboard", async (req, res) => {
     try {
+      const selected = await dashboardOps.resolveAdminDashboardBranch(db, req.query.branchId);
+      const floor = await dashboardOps.loadFloorMetrics(db, { branchId: selected.branchId });
+      const schedulePreview = await dashboardOps.loadSchedulePreview(db, { branchId: selected.branchId });
+      const dentistAvailability = await dashboardOps.loadDentistAvailability(db, {
+        branchId: selected.branchId,
+      });
       const [
         patientsResult,
-        appointmentsTodayResult,
         dentistsResult,
         staffResult,
         totalUsersResult,
         pendingAccountsResult,
-        pendingResult,
-        completedTodayResult,
         cancelledTodayResult,
-        queueResult,
         archivedResult,
         alertsResult,
         thisMonthResult,
@@ -529,12 +532,6 @@ function createAdminPortalRouter({
            FROM users
            WHERE LOWER(role) = 'patient'
              AND COALESCE(is_archived, FALSE) = FALSE`
-        ),
-        db.query(
-          `SELECT COUNT(*) AS count
-           FROM patient_portal_appointments
-           WHERE appointment_date = CURRENT_DATE
-             AND status NOT IN ('cancelled', 'no_show')`
         ),
         db.query(
           `SELECT COUNT(*) AS count
@@ -570,29 +567,12 @@ function createAdminPortalRouter({
         ),
         db.query(
           `SELECT COUNT(*) AS count
-           FROM patient_portal_appointments
-           WHERE status = 'pending'`
+           FROM patient_portal_appointments AS appointment
+           WHERE ${dashboardOps.appointmentTodaySql("appointment")}
+             AND appointment.status = 'cancelled'
+             ${selected.branchId ? "AND appointment.branch_id = $1" : ""}`,
+          selected.branchId ? [selected.branchId] : []
         ),
-        db.query(
-          `SELECT COUNT(*) AS count
-           FROM patient_portal_appointments
-           WHERE appointment_date = CURRENT_DATE
-             AND status = 'completed'`
-        ),
-        db.query(
-          `SELECT COUNT(*) AS count
-           FROM patient_portal_appointments
-           WHERE appointment_date = CURRENT_DATE
-             AND status = 'cancelled'`
-        ),
-        db.query(
-          `SELECT COUNT(*) AS count
-           FROM patient_portal_queue_entries
-           WHERE status IN ('checked_in', 'waiting', 'preparing', 'dentist')`
-        ).catch((error) => {
-          if (isMissingRelation(error)) return { rows: [{ count: "0" }] };
-          throw error;
-        }),
         db.query(
           `SELECT COUNT(*) AS count
            FROM users
@@ -631,19 +611,40 @@ function createAdminPortalRouter({
       return res.json({
         welcomeName:
           `${req.admin.first_name || ""} ${req.admin.last_name || ""}`.trim() || "Administrator",
-        date: new Date().toISOString().slice(0, 10),
+        date: floor.clinicDate,
+        clinicDate: floor.clinicDate,
+        timezone: floor.timezone,
+        selectedBranch: {
+          id: selected.branchId,
+          name: selected.label,
+          allBranches: !selected.branchId,
+        },
+        branches: selected.branches.map((branch) => ({
+          id: branch.id,
+          name: branch.name,
+          status: branch.status,
+          isMain: Boolean(branch.isMain),
+        })),
         systemStatus: healthCheck ? "online" : "offline",
+        schedulePreview,
+        dentistAvailability,
         metrics: {
           totalUsers: count(totalUsersResult.rows[0]),
           totalPatients: count(patientsResult.rows[0]),
           activePatients: count(patientsResult.rows[0]),
-          appointmentsToday: count(appointmentsTodayResult.rows[0]),
+          appointmentsToday: floor.bookedToday,
+          bookedToday: floor.bookedToday,
+          checkedIn: floor.checkedIn,
+          waiting: floor.waiting,
+          inTreatment: floor.inTreatment,
+          patientsInQueue: floor.checkedIn + floor.waiting + floor.inTreatment,
           activeDentists: count(dentistsResult.rows[0]),
           activeStaff: count(staffResult.rows[0]),
           pendingAccountApprovals: count(pendingAccountsResult.rows[0]),
-          pendingRequests: count(pendingResult.rows[0]),
-          patientsInQueue: count(queueResult.rows[0]),
-          completedToday: count(completedTodayResult.rows[0]),
+          pendingRequests: floor.pendingRequests,
+          pendingHmoVerification: floor.pendingHmoVerification,
+          completedToday: floor.completedToday,
+          noShowToday: floor.noShowToday,
           cancelledToday: count(cancelledTodayResult.rows[0]),
           archivedRecords: count(archivedResult.rows[0]),
           systemAlerts: count(alertsResult.rows[0]),
@@ -651,6 +652,9 @@ function createAdminPortalRouter({
         },
       });
     } catch (error) {
+      if (error.status === 400) {
+        return res.status(400).json({ message: error.message });
+      }
       if (isMissingRelation(error)) {
         return migrationUnavailable(res);
       }

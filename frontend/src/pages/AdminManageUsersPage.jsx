@@ -196,8 +196,12 @@ export function AdminManageUsersPage() {
 
   const users = useMemo(() => {
     if (!data) return [];
-    return (tab === "patient" ? data.patients : tab === "staff" ? data.staff : data.dentists) || [];
-  }, [data, tab]);
+    const list = (tab === "patient" ? data.patients : tab === "staff" ? data.staff : data.dentists) || [];
+    if (searchParams.get("filter") === "pending") {
+      return list.filter((user) => isPendingAccount(user));
+    }
+    return list;
+  }, [data, tab, searchParams]);
 
   useEffect(() => {
     const urlTab = searchParams.get("tab");
