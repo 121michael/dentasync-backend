@@ -296,11 +296,7 @@ async function enrichRecordsFromLinkedProfiles(db, records) {
            profile.allergies,
            profile.existing_conditions,
            profile.current_medications,
-           profile.dental_concerns,
-           profile.hmo_provider,
-           profile.hmo_member_number,
-           profile.hmo_status,
-           profile.hmo_verified_at
+           profile.dental_concerns
          FROM users AS account
          LEFT JOIN patient_portal_profiles AS profile
            ON profile.user_id::text = account.id::text
