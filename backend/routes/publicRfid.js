@@ -33,6 +33,7 @@ function registerPublicRfidRoutes(app, { db, notifyActiveStaff, notifyDentists }
       if (!result.ok) {
         return res.status(result.status).json({
           message: result.message,
+          errorCode: result.errorCode || undefined,
           patient: result.patient || undefined,
           diagnosis: result.diagnosis || undefined,
         });

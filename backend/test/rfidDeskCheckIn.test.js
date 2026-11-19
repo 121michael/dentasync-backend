@@ -234,6 +234,11 @@ test("public RFID routes fail closed, then accept a matching handshake and a reg
       body: { rfidTag: "DEADBEEF" },
     });
     assert.equal(unknown.status, 404);
+    assert.equal(unknown.json.errorCode, "RFID_UNASSIGNED");
+    assert.equal(
+      unknown.json.message,
+      "RFID card is not assigned to a patient. Please ask an administrator to register this card."
+    );
   } finally {
     server.close();
     if (previous === undefined) delete process.env.RFID_DEVICE_SECRET;

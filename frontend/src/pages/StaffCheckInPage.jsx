@@ -15,6 +15,7 @@ import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { StaffModal, StaffStatusBadge } from "../components/StaffUI";
 import { useStaffUi } from "../components/StaffLayout";
 import { formatStaffDateTime, formatStaffLogDate, formatStaffLogTime, formatStaffTime } from "../staffUtils";
+import { isRfidReaderConnectionFailure, RFID_SCAN_HOLD_MS, staffReaderStatusLabel } from "../staffRfidFeedback";
 
 const MONTHS = [
   { value: 1, label: "January" },
@@ -128,6 +129,19 @@ export function StaffCheckInPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [scannerState, setScannerState] = useState("ready");
+  const [readerOffline, setReaderOffline] = useState(false);
+  const scanHoldTimerRef = useRef(null);
+
+  function holdScanFeedback(nextState) {
+    if (scanHoldTimerRef.current) {
+      window.clearTimeout(scanHoldTimerRef.current);
+    }
+    setScannerState(nextState);
+    scanHoldTimerRef.current = window.setTimeout(() => {
+      setScannerState("ready");
+      rfidInputRef.current?.focus();
+    }, RFID_SCAN_HOLD_MS);
+  }
 
   const loadLog = useCallback(async (options = {}) => {
     const query = options.query || logFilter;
@@ -181,22 +195,23 @@ export function StaffCheckInPage() {
 
       if (newest.status === "success") {
         setVerified(eventToVerified(newest));
-        setScannerState("success");
+        setReaderOffline(false);
         setError("");
+        holdScanFeedback("success");
         pushToast(newest.message || "Patient checked in from RFID tap.");
         const today = defaultLogFilter();
         setFilterTab("today");
         setDraftFilter(today);
         setLogFilter(today);
         await loadLog({ query: today });
-        window.setTimeout(() => setScannerState("ready"), 1800);
         return;
       }
 
-      setScannerState("error");
+      const readerFailure = isRfidReaderConnectionFailure(newest.errorCode);
+      setReaderOffline(readerFailure);
       setError(newest.message || "RFID tap failed.");
+      holdScanFeedback("error");
       pushToast(newest.message || "RFID tap failed.", "error");
-      window.setTimeout(() => setScannerState("ready"), 2200);
     } catch {
       // Keep listening even if the live feed briefly fails.
     }
@@ -220,6 +235,7 @@ export function StaffCheckInPage() {
     return () => {
       window.clearInterval(logTimer);
       window.clearInterval(eventTimer);
+      if (scanHoldTimerRef.current) window.clearTimeout(scanHoldTimerRef.current);
     };
   }, [loadLog, loadQrSession, pollRfidEvents]);
 
@@ -265,7 +281,9 @@ export function StaffCheckInPage() {
     try {
       const response = await api.staffCheckIn({ method: "rfid", rfidTag: tag });
       setVerified({ ...response, method: "rfid" });
-      setScannerState("success");
+      setReaderOffline(false);
+      setError("");
+      holdScanFeedback("success");
       pushToast(response.message || "Patient checked in successfully.");
       setRfidCode("");
       const today = defaultLogFilter();
@@ -274,20 +292,17 @@ export function StaffCheckInPage() {
       setLogFilter(today);
       await loadLog({ query: today });
     } catch (checkInError) {
-      setScannerState("error");
       const detail = checkInError?.data?.detail || checkInError?.data?.diagnosis?.hint;
       const message = detail
         ? `${checkInError.message}${checkInError.message.includes(detail) ? "" : ` (${detail})`}`
         : checkInError.message;
+      setReaderOffline(isRfidReaderConnectionFailure(checkInError?.data?.errorCode));
       setError(message);
+      holdScanFeedback("error");
       pushToast(message, "error");
       setRfidCode("");
     } finally {
       setBusy(false);
-      window.setTimeout(() => {
-        setScannerState("ready");
-        rfidInputRef.current?.focus();
-      }, 1600);
     }
   }
 
@@ -410,19 +425,19 @@ export function StaffCheckInPage() {
                       ? "Tap failed"
                       : "Listening for card tap"}
               </h3>
-              <div className={`staff-rfid-status staff-rfid-status--${scannerState}`}>
+              <div
+                className={`staff-rfid-status staff-rfid-status--${
+                  readerOffline ? "error" : scannerState === "scanning" || scannerState === "success" ? scannerState : "ready"
+                }`}
+              >
                 <ShieldCheck size={16} />
                 <span>
-                  Reader status:{" "}
-                  {scannerState === "scanning"
-                    ? "Reading"
-                    : scannerState === "success"
-                      ? "Success"
-                      : scannerState === "error"
-                        ? "Error"
-                        : "Ready — tap the ESP32 reader"}
+                  Reader status: {staffReaderStatusLabel({ readerOffline, scannerState })}
                 </span>
               </div>
+              {scannerState === "ready" && !error ? (
+                <p className="staff-rfid-hint">Ready — tap the ESP32 reader</p>
+              ) : null}
             </article>
             <VerifiedPanel verified={verified} />
           </div>
