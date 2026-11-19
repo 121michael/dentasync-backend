@@ -30,6 +30,7 @@ const {
   recordTreatmentComplete,
   recordTreatmentStart,
 } = require("../services/treatmentDuration");
+const dashboardOps = require("../services/dashboardOps");
 
 const QUEUE_STATUS_MAP = {
   checked_in: "checked_in",
@@ -674,41 +675,26 @@ function createDentistPortalRouter({
           fullName: `Dr. ${`${req.dentist.first_name || ""} ${req.dentist.last_name || ""}`.trim()}`.trim(),
           specialization: req.dentist.specialization || "Dental Specialist",
         },
-        metrics: { todaysTarget: 0, remainingQueue: 0, completedToday: 0, unreadNotifications: 0 },
+        metrics: {
+          todaysTarget: 0,
+          bookedToday: 0,
+          remainingQueue: 0,
+          checkedIn: 0,
+          waiting: 0,
+          inTreatment: 0,
+          completedToday: 0,
+          noShowToday: 0,
+          unreadNotifications: 0,
+        },
         nextPatient: null,
+        schedulePreview: [],
       });
     }
     const scope = dentistScopeClause("appointment", req.dentist, req.branchAccess.activeBranch?.id);
     try {
-      const [targetResult, remainingResult, completedResult, nextResult, unreadResult] = await Promise.all([
-        db.query(
-          `SELECT COUNT(*) AS count
-           FROM patient_portal_appointments AS appointment
-           WHERE ${scope.sql}
-             AND appointment.appointment_date = CURRENT_DATE
-             AND appointment.status NOT IN ('cancelled')`,
-          scope.params
-        ),
-        db.query(
-          `SELECT COUNT(*) AS count
-           FROM patient_portal_queue_entries AS queue
-           JOIN patient_portal_appointments AS appointment
-             ON appointment.id = queue.appointment_id
-           WHERE ${scope.sql}
-             AND ${clinicTodayQueueSql("queue")}
-             AND queue.status IN ('checked_in', 'waiting')`,
-          scope.params
-        ),
-        db.query(
-          `SELECT COUNT(*) AS count
-           FROM patient_portal_queue_entries AS queue
-           JOIN patient_portal_appointments AS appointment
-             ON appointment.id = queue.appointment_id
-           WHERE ${scope.sql}
-             AND ${clinicTodayQueueSql("queue")}
-             AND queue.status = 'completed'`,
-          scope.params
-        ),
+      const [floor, schedulePreview, nextResult, unreadResult] = await Promise.all([
+        dashboardOps.loadFloorMetrics(db, { dentistScope: scope }),
+        dashboardOps.loadSchedulePreview(db, { dentistScope: scope }),
         db.query(
           `SELECT
              queue.id,
@@ -770,7 +756,10 @@ function createDentistPortalRouter({
       const fullName = `Dr. ${`${req.dentist.first_name || ""} ${req.dentist.last_name || ""}`.trim()}`.trim();
 
       return res.json({
-        date: new Date().toISOString(),
+        ...branchAccess.publicContext(req.branchAccess),
+        date: floor.clinicDate,
+        clinicDate: floor.clinicDate,
+        timezone: floor.timezone,
         dentist: {
           id: req.dentist.id,
           fullName: fullName === "Dr." ? "Dentist" : fullName,
@@ -778,11 +767,17 @@ function createDentistPortalRouter({
           catalogDentistId: req.dentist.catalog_dentist_id || null,
         },
         metrics: {
-          todaysTarget: count(targetResult.rows[0]),
-          remainingQueue: count(remainingResult.rows[0]),
-          completedToday: count(completedResult.rows[0]),
+          todaysTarget: floor.bookedToday,
+          bookedToday: floor.bookedToday,
+          remainingQueue: floor.checkedIn + floor.waiting,
+          checkedIn: floor.checkedIn,
+          waiting: floor.waiting,
+          inTreatment: floor.inTreatment,
+          completedToday: floor.queueCompletedToday,
+          noShowToday: floor.queueNoShowToday,
           unreadNotifications: count(unreadResult.rows[0]),
         },
+        schedulePreview,
         nextPatient: nextResult.rows[0] ? mapQueueEntry(nextResult.rows[0]) : null,
       });
     } catch (error) {
@@ -805,7 +800,13 @@ function createDentistPortalRouter({
     if (tab === "inline" || tab === "in_line") {
       statusFilter = `queue.status IN ('checked_in', 'waiting')`;
     } else if (tab === "completed") {
-      statusFilter = `queue.status IN ('completed', 'no_show')`;
+      statusFilter = `queue.status = 'completed'`;
+    } else if (tab === "no_show") {
+      statusFilter = `queue.status IN ('no_show', 'skipped')`;
+    } else if (tab === "waiting") {
+      statusFilter = `queue.status = 'waiting'`;
+    } else if (tab === "checked_in") {
+      statusFilter = `queue.status = 'checked_in'`;
     } else {
       statusFilter = `queue.status IN ('preparing', 'dentist')`;
     }
@@ -1828,9 +1829,9 @@ function createDentistPortalRouter({
            FROM patient_portal_appointments AS appointment
            JOIN users AS patient ON patient.id::text = appointment.user_id
            WHERE ${scope.sql}
-             AND appointment.appointment_date = CURRENT_DATE
+             AND ${dashboardOps.appointmentTodaySql("appointment")}
              AND appointment.status NOT IN ('cancelled')
-           ORDER BY appointment.appointment_time ASC`,
+           ORDER BY appointment.appointment_time ASC NULLS LAST`,
           scope.params
         ),
         db.query(
@@ -1841,7 +1842,7 @@ function createDentistPortalRouter({
            FROM patient_portal_appointments AS appointment
            JOIN users AS patient ON patient.id::text = appointment.user_id
            WHERE ${scope.sql}
-             AND appointment.appointment_date > CURRENT_DATE
+             AND appointment.appointment_date > ${dashboardOps.clinicDateSql()}
              AND appointment.status IN ('pending', 'confirmed')
            ORDER BY appointment.appointment_date ASC, appointment.appointment_time ASC
            LIMIT 50`,

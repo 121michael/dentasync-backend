@@ -22,6 +22,7 @@ const { renderAdminAnalyticsExport } = require("../services/adminAnalyticsExport
 const patientRecordExport = require("../services/patientRecordExport");
 const { buildAdminOtpMailStatus } = require("../services/otpMailStatus");
 const { updatePasswordHash } = require("../services/sessionRevocation");
+const dashboardOps = require("../services/dashboardOps");
 
 const APPOINTMENT_ACTIONS = new Set([
   "approve",
@@ -507,17 +508,19 @@ function createAdminPortalRouter({
 
   router.get("/dashboard", async (req, res) => {
     try {
+      const selected = await dashboardOps.resolveAdminDashboardBranch(db, req.query.branchId);
+      const floor = await dashboardOps.loadFloorMetrics(db, { branchId: selected.branchId });
+      const schedulePreview = await dashboardOps.loadSchedulePreview(db, { branchId: selected.branchId });
+      const dentistAvailability = await dashboardOps.loadDentistAvailability(db, {
+        branchId: selected.branchId,
+      });
       const [
         patientsResult,
-        appointmentsTodayResult,
         dentistsResult,
         staffResult,
         totalUsersResult,
         pendingAccountsResult,
-        pendingResult,
-        completedTodayResult,
         cancelledTodayResult,
-        queueResult,
         archivedResult,
         alertsResult,
         thisMonthResult,
@@ -529,12 +532,6 @@ function createAdminPortalRouter({
            FROM users
            WHERE LOWER(role) = 'patient'
              AND COALESCE(is_archived, FALSE) = FALSE`
-        ),
-        db.query(
-          `SELECT COUNT(*) AS count
-           FROM patient_portal_appointments
-           WHERE appointment_date = CURRENT_DATE
-             AND status NOT IN ('cancelled', 'no_show')`
         ),
         db.query(
           `SELECT COUNT(*) AS count
@@ -570,29 +567,12 @@ function createAdminPortalRouter({
         ),
         db.query(
           `SELECT COUNT(*) AS count
-           FROM patient_portal_appointments
-           WHERE status = 'pending'`
+           FROM patient_portal_appointments AS appointment
+           WHERE ${dashboardOps.appointmentTodaySql("appointment")}
+             AND appointment.status = 'cancelled'
+             ${selected.branchId ? "AND appointment.branch_id = $1" : ""}`,
+          selected.branchId ? [selected.branchId] : []
         ),
-        db.query(
-          `SELECT COUNT(*) AS count
-           FROM patient_portal_appointments
-           WHERE appointment_date = CURRENT_DATE
-             AND status = 'completed'`
-        ),
-        db.query(
-          `SELECT COUNT(*) AS count
-           FROM patient_portal_appointments
-           WHERE appointment_date = CURRENT_DATE
-             AND status = 'cancelled'`
-        ),
-        db.query(
-          `SELECT COUNT(*) AS count
-           FROM patient_portal_queue_entries
-           WHERE status IN ('checked_in', 'waiting', 'preparing', 'dentist')`
-        ).catch((error) => {
-          if (isMissingRelation(error)) return { rows: [{ count: "0" }] };
-          throw error;
-        }),
         db.query(
           `SELECT COUNT(*) AS count
            FROM users
@@ -631,19 +611,40 @@ function createAdminPortalRouter({
       return res.json({
         welcomeName:
           `${req.admin.first_name || ""} ${req.admin.last_name || ""}`.trim() || "Administrator",
-        date: new Date().toISOString().slice(0, 10),
+        date: floor.clinicDate,
+        clinicDate: floor.clinicDate,
+        timezone: floor.timezone,
+        selectedBranch: {
+          id: selected.branchId,
+          name: selected.label,
+          allBranches: !selected.branchId,
+        },
+        branches: selected.branches.map((branch) => ({
+          id: branch.id,
+          name: branch.name,
+          status: branch.status,
+          isMain: Boolean(branch.isMain),
+        })),
         systemStatus: healthCheck ? "online" : "offline",
+        schedulePreview,
+        dentistAvailability,
         metrics: {
           totalUsers: count(totalUsersResult.rows[0]),
           totalPatients: count(patientsResult.rows[0]),
           activePatients: count(patientsResult.rows[0]),
-          appointmentsToday: count(appointmentsTodayResult.rows[0]),
+          appointmentsToday: floor.bookedToday,
+          bookedToday: floor.bookedToday,
+          checkedIn: floor.checkedIn,
+          waiting: floor.waiting,
+          inTreatment: floor.inTreatment,
+          patientsInQueue: floor.checkedIn + floor.waiting + floor.inTreatment,
           activeDentists: count(dentistsResult.rows[0]),
           activeStaff: count(staffResult.rows[0]),
           pendingAccountApprovals: count(pendingAccountsResult.rows[0]),
-          pendingRequests: count(pendingResult.rows[0]),
-          patientsInQueue: count(queueResult.rows[0]),
-          completedToday: count(completedTodayResult.rows[0]),
+          pendingRequests: floor.pendingRequests,
+          pendingHmoVerification: floor.pendingHmoVerification,
+          completedToday: floor.completedToday,
+          noShowToday: floor.noShowToday,
           cancelledToday: count(cancelledTodayResult.rows[0]),
           archivedRecords: count(archivedResult.rows[0]),
           systemAlerts: count(alertsResult.rows[0]),
@@ -651,6 +652,9 @@ function createAdminPortalRouter({
         },
       });
     } catch (error) {
+      if (error.status === 400) {
+        return res.status(400).json({ message: error.message });
+      }
       if (isMissingRelation(error)) {
         return migrationUnavailable(res);
       }
@@ -2126,25 +2130,45 @@ function createAdminPortalRouter({
     const search = stringValue(req.query.search, 100);
     const date = stringValue(req.query.date, 10);
     const status = stringValue(req.query.status, 40)?.toLowerCase();
+    const metric = stringValue(req.query.metric, 40)?.toLowerCase();
     const { page, limit, offset } = parsePagination(req.query);
     const params = [];
     const clauses = ["1=1"];
+    let joinQueue = false;
 
-    if (date) {
-      if (!isIsoDate(date)) {
-        return res.status(400).json({ message: "Provide a valid appointment date (YYYY-MM-DD)." });
-      }
-      params.push(date);
-      clauses.push(`appointment.appointment_date = $${params.length}`);
+    if (date && !isIsoDate(date)) {
+      return res.status(400).json({ message: "Provide a valid appointment date (YYYY-MM-DD)." });
     }
-    if (status) {
-      params.push(status);
-      clauses.push(`LOWER(appointment.status) = $${params.length}`);
-    }
+
     const branchFilter = stringValue(req.query.branchId, 40);
-    if (branchFilter) {
-      params.push(branchFilter);
-      clauses.push(`appointment.branch_id::text = $${params.length}`);
+    if (metric) {
+      try {
+        const filter = dashboardOps.buildAdminAppointmentMetricFilter(metric, {
+          date: date || undefined,
+          branchId: branchFilter || undefined,
+        });
+        joinQueue = filter.joinQueue;
+        if (filter.sql && filter.sql !== "TRUE") clauses.push(filter.sql);
+        params.push(...filter.params);
+      } catch (error) {
+        if (error.status === 400) {
+          return res.status(400).json({ message: error.message });
+        }
+        throw error;
+      }
+    } else {
+      if (date) {
+        params.push(date);
+        clauses.push(`appointment.appointment_date = $${params.length}`);
+      }
+      if (status) {
+        params.push(status);
+        clauses.push(`LOWER(appointment.status) = $${params.length}`);
+      }
+      if (branchFilter) {
+        params.push(branchFilter);
+        clauses.push(`appointment.branch_id::text = $${params.length}`);
+      }
     }
     const review = stringValue(req.query.review, 40);
     if (review === "inactive-branch") {
@@ -2176,6 +2200,7 @@ function createAdminPortalRouter({
          FROM patient_portal_appointments AS appointment
          JOIN users AS patient ON patient.id::text = appointment.user_id
          LEFT JOIN clinic_branches AS branch ON branch.id = appointment.branch_id
+         ${joinQueue ? "JOIN patient_portal_queue_entries AS queue ON queue.appointment_id = appointment.id" : ""}
          WHERE ${whereSql}`,
         params
       );
@@ -2188,9 +2213,11 @@ function createAdminPortalRouter({
            patient.phone AS patient_phone,
            branch.name AS branch_name,
            branch.status AS branch_status
+           ${joinQueue ? ", queue.status AS queue_status, queue.token AS queue_token, queue.id AS queue_entry_id" : ""}
          FROM patient_portal_appointments AS appointment
          JOIN users AS patient ON patient.id::text = appointment.user_id
          LEFT JOIN clinic_branches AS branch ON branch.id = appointment.branch_id
+         ${joinQueue ? "JOIN patient_portal_queue_entries AS queue ON queue.appointment_id = appointment.id" : ""}
          WHERE ${whereSql}
          ORDER BY appointment.appointment_date DESC, appointment.appointment_time DESC NULLS LAST
          LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`,
@@ -2200,8 +2227,18 @@ function createAdminPortalRouter({
       return res.json({
         page,
         limit,
+        metric: metric || null,
+        date: date || null,
+        branchId: branchFilter || null,
         total: count(countResult.rows[0]),
-        appointments: result.rows.map(mapAppointment),
+        appointments: result.rows.map((row) => ({
+          ...mapAppointment(row),
+          queueStatus: row.queue_status || null,
+          queueNumber: row.queue_token || null,
+          queueEntryId: row.queue_entry_id || null,
+          hmoVerificationStatus: row.hmo_verification_status || null,
+          coverageType: row.coverage_type || null,
+        })),
       });
     } catch (error) {
       if (isMissingRelation(error)) {

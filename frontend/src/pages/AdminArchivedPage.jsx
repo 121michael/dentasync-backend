@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Eye, RotateCcw, Search, Trash2 } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { AdminModal, AdminStatusBadge } from "../components/AdminUI";
@@ -23,7 +24,11 @@ function categoryLabel(value) {
 
 export function AdminArchivedPage() {
   const { pushToast, confirm } = useAdminUi();
-  const [archiveRole, setArchiveRole] = useState("staff");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [archiveRole, setArchiveRole] = useState(() => {
+    const role = searchParams.get("role");
+    return ARCHIVE_ROLES.some((item) => item.id === role) ? role : "staff";
+  });
   const [data, setData] = useState(null);
   const [search, setSearch] = useState("");
   const [applied, setApplied] = useState("");
@@ -55,6 +60,9 @@ export function AdminArchivedPage() {
     setSearch("");
     setApplied("");
     setData(null);
+    const next = new URLSearchParams(searchParams);
+    next.set("role", nextRole);
+    setSearchParams(next, { replace: true });
   }
 
   async function restoreUser(user) {

@@ -12,7 +12,9 @@ const TABS = [
   { id: "pending", label: "Pending" },
   { id: "confirmed", label: "Confirmed" },
   { id: "today", label: "Today" },
+  { id: "hmo", label: "HMO Review" },
   { id: "completed", label: "Completed" },
+  { id: "no_show", label: "No-show" },
   { id: "cancelled", label: "Cancelled" },
 ];
 
@@ -20,6 +22,7 @@ export function StaffAppointmentsPage() {
   const { pushToast, confirm } = useStaffUi();
   const [searchParams, setSearchParams] = useSearchParams();
   const [tab, setTab] = useState(searchParams.get("tab") || "today");
+  const when = searchParams.get("when") || "";
   const [data, setData] = useState(null);
   const [detail, setDetail] = useState(null);
   const [highlightId, setHighlightId] = useState(null);
@@ -35,12 +38,12 @@ export function StaffAppointmentsPage() {
 
   const load = useCallback(async () => {
     try {
-      setData(await api.getStaffAppointments(tab));
+      setData(await api.getStaffAppointments(tab, when ? { when } : {}));
       setError("");
     } catch (loadError) {
       setError(loadError.message);
     }
-  }, [tab]);
+  }, [tab, when]);
 
   useEffect(() => {
     load();

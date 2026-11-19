@@ -6233,18 +6233,27 @@ body.is-queue-display .staff-mobile-nav {
 }
 .admin-stat-grid--compact { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
 .admin-stat-card {
+  position: relative;
   display: grid;
   gap: .45rem;
   min-width: 0;
-  padding: 1rem 1.05rem;
+  padding: 1rem 1.05rem 1.15rem;
   border: 1px solid var(--border);
   border-radius: 18px;
   background: var(--surface-solid);
   box-shadow: var(--shadow-sm);
 }
 .admin-stat-card span { color: var(--text-muted); font-size: .68rem; font-weight: 800; letter-spacing: .06em; line-height: 1.3; text-transform: uppercase; overflow-wrap: anywhere; }
-.admin-stat-card strong { color: var(--amethyst-800); font-size: 1.55rem; letter-spacing: -.04em; line-height: 1.15; overflow-wrap: anywhere; }
-.admin-stat-card small { color: var(--emerald); font-size: .68rem; font-weight: 700; }
+.admin-stat-card strong { color: var(--amethyst-800); font-size: clamp(1.45rem, 4vw, 1.85rem); letter-spacing: -.04em; line-height: 1.15; overflow-wrap: anywhere; }
+.admin-stat-card small { color: var(--text-muted); font-size: .68rem; font-weight: 700; line-height: 1.4; }
+.admin-stat-card__top { display: flex; align-items: flex-start; justify-content: space-between; gap: .45rem; }
+.admin-stat-card__arrow {
+  position: absolute;
+  right: .7rem;
+  bottom: .7rem;
+  color: var(--amethyst-600);
+  opacity: .45;
+}
 .admin-stat-card--violet strong { color: #5b2a86; }
 .admin-stat-card--emerald strong { color: var(--emerald); }
 .admin-stat-card--amber strong { color: var(--amber); }
@@ -15162,4 +15171,268 @@ body.is-queue-display .fab-menu {
     text-transform: uppercase;
   }
   .admin-branch-actions { max-width: none; }
+}
+
+.ops-metric-timeframe {
+  display: block;
+  color: var(--text-muted);
+  font-size: .62rem;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: .02em;
+}
+.admin-stat-card--link,
+.staff-summary-card--link,
+.dentist-stat-card--link {
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+.admin-stat-card--link:hover,
+.admin-stat-card--link:focus-visible,
+.ops-schedule__row--link:hover,
+.ops-schedule__row--link:focus-visible,
+.ops-availability__row--link:hover,
+.ops-availability__row--link:focus-visible {
+  border-color: var(--amethyst-500);
+  box-shadow: 0 12px 28px rgba(91, 42, 134, .14);
+  outline: 2px solid rgba(152, 100, 215, .35);
+  outline-offset: 2px;
+}
+.admin-stat-card--link:active,
+.ops-schedule__row--link:active,
+.ops-availability__row--link:active {
+  transform: translateY(1px);
+  box-shadow: var(--shadow-sm);
+}
+.ops-group-scope {
+  margin: .35rem 0 0;
+  color: var(--text-muted);
+  font-size: .72rem;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.ops-schedule-empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: .84rem;
+  line-height: 1.5;
+}
+.ops-schedule-empty a,
+.ops-availability a {
+  color: var(--amethyst-700);
+  font-weight: 800;
+}
+.ops-schedule__row--link,
+.ops-availability__row--link {
+  color: inherit;
+  text-decoration: none;
+}
+.ops-schedule__arrow {
+  justify-self: end;
+  color: var(--amethyst-600);
+  opacity: .45;
+}
+.admin-stat-card.is-actionable,
+.staff-summary-card.is-actionable,
+.dentist-stat-card.is-actionable {
+  border-color: rgba(184, 107, 19, .45);
+  box-shadow: 0 0 0 1px rgba(184, 107, 19, .18);
+}
+.admin-dashboard-scope {
+  margin-top: .45rem;
+  max-width: 36rem;
+  color: rgba(255,255,255,.8);
+  font-size: .82rem;
+}
+.admin-dashboard-branch {
+  display: grid;
+  gap: .2rem;
+  min-width: 0;
+  color: #fff;
+  font-size: .68rem;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.admin-dashboard-branch select {
+  min-width: 160px;
+  padding: .45rem .6rem;
+  border: 0;
+  border-radius: 10px;
+  color: var(--amethyst-800);
+  font-weight: 700;
+  text-transform: none;
+}
+.ops-schedule,
+.ops-availability {
+  display: grid;
+  gap: .55rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ops-schedule__row,
+.ops-availability__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto;
+  gap: .55rem .85rem;
+  align-items: start;
+  padding: .7rem .8rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-solid);
+}
+.ops-schedule__row strong,
+.ops-availability__row strong {
+  display: block;
+  color: var(--text-strong);
+}
+.ops-schedule__row span,
+.ops-availability__row span,
+.ops-availability__row small {
+  color: var(--text-muted);
+  font-size: .75rem;
+}
+.ops-schedule__meta,
+.ops-schedule__links,
+.ops-availability__row em {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem .7rem;
+  font-size: .75rem;
+}
+.ops-schedule__links a {
+  color: var(--amethyst-700);
+  font-weight: 700;
+}
+.ops-availability__row em {
+  font-style: normal;
+  font-weight: 800;
+  color: var(--amethyst-800);
+}
+.ops-availability__row--unknown em { color: var(--text-muted); }
+.ops-availability__row--in_treatment em { color: var(--amethyst-700); }
+.ops-availability__row--unavailable em { color: var(--danger); }
+.ops-availability__row--available em { color: var(--emerald); }
+.dentist-stat-grid--ops,
+.admin-dashboard-page .admin-stat-grid--floor {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.65rem;
+  overflow-x: hidden;
+}
+.admin-dashboard-page .admin-stat-grid--floor .admin-stat-card {
+  gap: 0.18rem;
+  min-height: 0;
+  padding: 0.68rem 0.72rem 0.7rem;
+  border-radius: 14px;
+}
+.admin-dashboard-page .admin-stat-grid--floor .admin-stat-card span {
+  font-size: 0.6rem;
+  line-height: 1.2;
+}
+.admin-dashboard-page .admin-stat-grid--floor .admin-stat-card strong {
+  font-size: clamp(1.15rem, 1.8vw, 1.38rem);
+  line-height: 1.1;
+}
+.admin-dashboard-page .admin-stat-grid--floor .admin-stat-card small {
+  font-size: 0.6rem;
+  line-height: 1.28;
+}
+.admin-dashboard-page .admin-stat-grid--floor .ops-metric-timeframe {
+  margin: 0;
+  font-size: 0.54rem;
+  line-height: 1.25;
+}
+.admin-dashboard-page .admin-stat-grid--floor .admin-stat-card__top {
+  gap: 0.2rem;
+}
+.admin-dashboard-page .admin-stat-grid--floor .admin-stat-card__top svg {
+  width: 14px;
+  height: 14px;
+}
+.admin-dashboard-page .admin-stat-grid--floor .admin-stat-card__arrow {
+  right: 0.45rem;
+  bottom: 0.45rem;
+  width: 14px;
+  height: 14px;
+}
+.dentist-stat-grid--ops .dentist-stat-card {
+  align-items: flex-start;
+  gap: 0.5rem;
+  min-height: 0;
+  padding: 0.68rem 0.72rem;
+  border-radius: 14px;
+}
+.dentist-stat-grid--ops .dentist-stat-card span {
+  font-size: 0.6rem;
+  line-height: 1.2;
+}
+.dentist-stat-grid--ops .dentist-stat-card strong {
+  margin-top: 0.1rem;
+  font-size: 1.18rem;
+  line-height: 1.1;
+}
+.dentist-stat-grid--ops .ops-metric-timeframe {
+  margin-top: 0.06rem;
+  font-size: 0.54rem;
+  line-height: 1.25;
+}
+.dentist-stat-grid--ops .dentist-stat-card small {
+  display: block;
+  margin-top: 0.06rem;
+  color: var(--text-muted);
+  font-size: 0.6rem;
+  font-weight: 700;
+  line-height: 1.28;
+}
+.dentist-stat-grid--ops .dentist-stat-card__icon {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+}
+.dentist-stat-grid--ops .dentist-stat-card__icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+@media (max-width: 1100px) {
+  .admin-dashboard-page .admin-stat-grid--floor,
+  .dentist-stat-grid--ops {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 980px) {
+  .ops-dashboard-clearance {
+    padding-bottom: calc(7.5rem + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+@media (max-width: 390px) {
+  .admin-dashboard-page .admin-stat-grid,
+  .staff-page .staff-stat-grid,
+  .dentist-stat-grid--ops {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ops-schedule__row,
+  .ops-availability__row {
+    grid-template-columns: 1fr;
+  }
+  .admin-dashboard-page .admin-welcome-card__actions .admin-dashboard-branch {
+    flex: 1 1 100%;
+  }
+}
+
+@media (max-width: 320px) {
+  .admin-dashboard-page .admin-stat-grid {
+    grid-template-columns: 1fr;
+  }
+  .staff-page .staff-stat-grid,
+  .dentist-stat-grid--ops {
+    grid-template-columns: 1fr;
+  }
 }

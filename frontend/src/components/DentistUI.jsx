@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { X } from "lucide-react";
+import { Link } from "react-router-dom";
 import { statusLabel } from "../dentistUtils";
 
 export function DentistStatusBadge({ status }) {
@@ -7,21 +8,42 @@ export function DentistStatusBadge({ status }) {
   return <span className={`dentist-status dentist-status--${safe}`}>{statusLabel(safe)}</span>;
 }
 
-export function DentistSummaryCard({ label, value, detail, icon: Icon, tone = "purple" }) {
-  return (
-    <article className={`dentist-stat-card dentist-stat-card--${tone}`}>
+export function DentistSummaryCard({
+  label,
+  value,
+  detail,
+  timeframe,
+  icon: Icon,
+  tone = "purple",
+  to,
+  actionable = false,
+}) {
+  const className = `dentist-stat-card dentist-stat-card--${tone}${to ? " dentist-stat-card--link" : ""}${
+    actionable ? " is-actionable" : ""
+  }`;
+  const body = (
+    <>
       <div>
         <span>{label}</span>
         <strong>{value}</strong>
+        {timeframe ? <em className="ops-metric-timeframe">{timeframe}</em> : null}
         {detail ? <small>{detail}</small> : null}
       </div>
       {Icon ? (
         <span className="dentist-stat-card__icon" aria-hidden="true">
-          <Icon size={20} />
+          <Icon size={15} />
         </span>
       ) : null}
-    </article>
+    </>
   );
+  if (to) {
+    return (
+      <Link to={to} className={className}>
+        {body}
+      </Link>
+    );
+  }
+  return <article className={className}>{body}</article>;
 }
 
 export function DentistModal({

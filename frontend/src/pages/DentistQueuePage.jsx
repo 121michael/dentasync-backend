@@ -24,6 +24,14 @@ const tabs = [
   { id: "inline", label: "In Line" },
   { id: "completed", label: "Completed" },
 ];
+const QUEUE_TAB_IDS = new Set([
+  "ongoing",
+  "inline",
+  "completed",
+  "checked_in",
+  "waiting",
+  "no_show",
+]);
 
 function clinicTodayIso() {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
@@ -257,7 +265,7 @@ export function DentistQueuePage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [tab, setTab] = useState(() => {
     const urlTab = searchParams.get("tab");
-    return tabs.some((item) => item.id === urlTab) ? urlTab : "inline";
+    return QUEUE_TAB_IDS.has(urlTab) ? urlTab : "inline";
   });
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
@@ -290,7 +298,7 @@ export function DentistQueuePage() {
 
   useEffect(() => {
     const urlTab = searchParams.get("tab");
-    if (urlTab && tabs.some((item) => item.id === urlTab) && urlTab !== tab) {
+    if (urlTab && QUEUE_TAB_IDS.has(urlTab) && urlTab !== tab) {
       setTab(urlTab);
     }
     const focus = searchParams.get("focus");

@@ -30,6 +30,7 @@ function visibleNotificationSql(alias, branchId, paramIndex) {
 }
 const recordAccess = require("../services/recordAccess");
 const branchCheckIn = require("../services/branchCheckIn");
+const dashboardOps = require("../services/dashboardOps");
 
 const QUEUE_STATUS_MAP = {
   checked_in: "checked_in",
@@ -366,69 +367,33 @@ function createStaffPortalRouter({
     if (!branchId) {
       return res.json({
         ...branchAccess.publicContext(req.branchAccess),
-        date: new Date().toISOString().slice(0, 10),
+        date: require("../services/clinicSchedule").clinicTodayYmd(),
+        clinicDate: require("../services/clinicSchedule").clinicTodayYmd(),
+        timezone: dashboardOps.clinicTimezone(),
         serverTime: new Date().toISOString(),
         metrics: {
           todaysAppointments: 0,
+          bookedToday: 0,
           todayCheckIns: 0,
           checkedIn: 0,
+          waiting: 0,
           waitingQueue: 0,
+          inTreatment: 0,
           activeQueue: 0,
           completedToday: 0,
+          noShowToday: 0,
           pendingRequests: 0,
+          pendingHmoVerification: 0,
           unreadNotifications: 0,
         },
         todaysActivity: [],
+        schedulePreview: [],
       });
     }
     try {
-      const [
-        appointmentsToday,
-        checkedIn,
-        waitingQueue,
-        completedToday,
-        pendingRequests,
-        unreadResult,
-        activityResult,
-      ] = await Promise.all([
-        db.query(
-          `SELECT COUNT(*) AS count
-           FROM patient_portal_appointments
-           WHERE appointment_date = CURRENT_DATE
-             AND status NOT IN ('cancelled')
-             ${branchId ? "AND branch_id = $1" : ""}`,
-          branchId ? [branchId] : []
-        ),
-        db.query(
-          `SELECT COUNT(*) AS count
-           FROM patient_portal_queue_entries
-           WHERE DATE(checked_in_at) = CURRENT_DATE
-             ${branchId ? "AND branch_id = $1" : ""}`,
-          branchId ? [branchId] : []
-        ),
-        db.query(
-          `SELECT COUNT(*) AS count
-           FROM patient_portal_queue_entries
-           WHERE DATE(checked_in_at) = CURRENT_DATE
-             AND status IN ('checked_in', 'waiting', 'preparing')
-             ${branchId ? "AND branch_id = $1" : ""}`,
-          branchId ? [branchId] : []
-        ),
-        db.query(
-          `SELECT COUNT(*) AS count
-           FROM patient_portal_appointments
-           WHERE appointment_date = CURRENT_DATE
-             AND status = 'completed'
-             ${branchId ? "AND branch_id = $1" : ""}`,
-          branchId ? [branchId] : []
-        ),
-        db.query(
-          `SELECT COUNT(*) AS count
-           FROM patient_portal_appointments
-           WHERE status = 'pending'
-             ${branchId ? "AND branch_id = $1" : ""}`,
-          branchId ? [branchId] : []
-        ),
+      const [floor, schedulePreview, unreadResult, activityResult] = await Promise.all([
+        dashboardOps.loadFloorMetrics(db, { branchId }),
+        dashboardOps.loadSchedulePreview(db, { branchId }),
         db.query(
           `SELECT COUNT(*) AS count
            FROM staff_portal_notifications
@@ -454,29 +419,37 @@ function createStaffPortalRouter({
            JOIN users AS patient ON patient.id::text = appointment.user_id
            LEFT JOIN patient_portal_queue_entries AS queue
              ON queue.appointment_id = appointment.id
-            AND DATE(queue.checked_in_at) = CURRENT_DATE
-           WHERE appointment.appointment_date = CURRENT_DATE
-             ${branchId ? "AND appointment.branch_id = $1" : ""}
-           ORDER BY appointment.appointment_time ASC, appointment.id ASC
+            AND ${dashboardOps.clinicQueueTodaySql("queue")}
+           WHERE ${dashboardOps.appointmentTodaySql("appointment")}
+             AND appointment.branch_id = $1
+           ORDER BY appointment.appointment_time ASC NULLS LAST, appointment.id ASC
            LIMIT 80`,
-          branchId ? [branchId] : []
+          [branchId]
         ),
       ]);
 
       return res.json({
         ...branchAccess.publicContext(req.branchAccess),
-        date: new Date().toISOString().slice(0, 10),
+        date: floor.clinicDate,
+        clinicDate: floor.clinicDate,
+        timezone: floor.timezone,
         serverTime: new Date().toISOString(),
         metrics: {
-          todaysAppointments: count(appointmentsToday.rows[0], "count"),
-          todayCheckIns: count(checkedIn.rows[0], "count"),
-          checkedIn: count(checkedIn.rows[0], "count"),
-          waitingQueue: count(waitingQueue.rows[0], "count"),
-          activeQueue: count(waitingQueue.rows[0], "count"),
-          completedToday: count(completedToday.rows[0], "count"),
-          pendingRequests: count(pendingRequests.rows[0], "count"),
+          todaysAppointments: floor.bookedToday,
+          bookedToday: floor.bookedToday,
+          todayCheckIns: floor.checkedIn,
+          checkedIn: floor.checkedIn,
+          waiting: floor.waiting,
+          waitingQueue: floor.waiting,
+          inTreatment: floor.inTreatment,
+          activeQueue: floor.waiting,
+          completedToday: floor.completedToday,
+          noShowToday: floor.noShowToday,
+          pendingRequests: floor.pendingRequests,
+          pendingHmoVerification: floor.pendingHmoVerification,
           unreadNotifications: count(unreadResult.rows[0], "count"),
         },
+        schedulePreview,
         todaysActivity: activityResult.rows.map((row) => ({
           queueEntryId: row.queue_entry_id || null,
           queueNumber: row.token || (row.position != null ? `#${row.position}` : "—"),
@@ -484,6 +457,7 @@ function createStaffPortalRouter({
           patientName: row.patient_name || "Patient",
           appointmentId: row.appointment_id,
           appointmentTime: row.appointment_time,
+          timeLabel: row.appointment_time ? String(row.appointment_time).slice(0, 5) : "Date only",
           service: row.service_name || "Dental visit",
           dentist: row.dentist_name || "Unassigned",
           checkInStatus: row.queue_status ? displayQueueStatus(row.queue_status) : "not_checked_in",
@@ -649,8 +623,13 @@ function createStaffPortalRouter({
          FROM patient_portal_queue_entries AS queue
          JOIN users AS patient ON patient.id::text = queue.user_id
          LEFT JOIN patient_portal_appointments AS appointment ON appointment.id = queue.appointment_id
-         WHERE DATE(queue.checked_in_at) = CURRENT_DATE
+         WHERE ${dashboardOps.clinicQueueTodaySql("queue")}
            AND queue.branch_id = $1
+           ${
+             dashboardOps.queueStatusSql("queue", stringValue(req.query.status, 40)?.toLowerCase())
+               ? `AND ${dashboardOps.queueStatusSql("queue", stringValue(req.query.status, 40)?.toLowerCase())}`
+               : ""
+           }
          ORDER BY
            CASE WHEN queue.status IN ('completed', 'no_show') THEN 1 ELSE 0 END,
            ${branchCheckIn.QUEUE_ORDER_SQL}`,
@@ -930,8 +909,8 @@ function createStaffPortalRouter({
   });
 
   router.get("/appointments", async (req, res) => {
-    const tab = stringValue(req.query.tab, 40)?.toLowerCase() || "today";
-    const clinicTz = process.env.CLINIC_TIMEZONE || "Asia/Manila";
+      const tab = stringValue(req.query.tab, 40)?.toLowerCase() || "today";
+    const when = stringValue(req.query.when, 40)?.toLowerCase();
     const branchId = req.branchAccess?.activeBranch?.id;
     if (!branchId) {
       return res.json({
@@ -949,9 +928,18 @@ function createStaffPortalRouter({
       } else if (tab === "confirmed") {
         whereSql = `appointment.status = 'confirmed'`;
       } else if (tab === "today") {
-        whereSql = `appointment.appointment_date = (CURRENT_TIMESTAMP AT TIME ZONE '${clinicTz.replace(/'/g, "''")}')::date AND appointment.status NOT IN ('cancelled')`;
+        whereSql = `${dashboardOps.appointmentTodaySql("appointment")} AND appointment.status NOT IN ('cancelled', 'no_show')`;
       } else if (tab === "completed") {
         whereSql = `appointment.status = 'completed'`;
+        if (when === "today") {
+          whereSql += ` AND ${dashboardOps.appointmentTodaySql("appointment")}`;
+        }
+      } else if (tab === "no_show") {
+        whereSql = `appointment.status = 'no_show' AND ${dashboardOps.appointmentTodaySql("appointment")}`;
+      } else if (tab === "hmo") {
+        whereSql = `LOWER(COALESCE(appointment.coverage_type, '')) = 'hmo'
+          AND appointment.hmo_verification_status = 'pending_verification'
+          AND appointment.status NOT IN ('cancelled')`;
       } else if (tab === "cancelled") {
         whereSql = `appointment.status IN ('cancelled', 'no_show')`;
       } else if (tab === "all") {
@@ -981,11 +969,11 @@ function createStaffPortalRouter({
              patient.email AS patient_email
            FROM patient_portal_appointments AS appointment
            JOIN users AS patient ON patient.id::text = appointment.user_id
-           WHERE appointment.appointment_date = (CURRENT_TIMESTAMP AT TIME ZONE $1)::date
+           WHERE ${dashboardOps.appointmentTodaySql("appointment")}
              AND appointment.status IN ('confirmed', 'checked_in', 'completed', 'pending')
-             AND appointment.branch_id = $2
+             AND appointment.branch_id = $1
            ORDER BY appointment.appointment_time ASC`,
-          [clinicTz, branchId]
+          [branchId]
         ),
         db.query(
           `SELECT
@@ -2501,28 +2489,30 @@ function createStaffPortalRouter({
     try {
       const [waiting, inTreatment, completed, avgWait] = await Promise.all([
         db.query(
-          `SELECT COUNT(*) AS count FROM patient_portal_queue_entries
-           WHERE DATE(checked_in_at) = CURRENT_DATE
-             AND status IN ('checked_in', 'waiting', 'preparing')
+          `SELECT COUNT(*) AS count FROM patient_portal_queue_entries AS queue
+           WHERE ${dashboardOps.clinicQueueTodaySql("queue")}
+             AND queue.status IN ('checked_in', 'waiting', 'preparing')
              AND branch_id = $1`,
           [branchId]
         ),
         db.query(
-          `SELECT COUNT(*) AS count FROM patient_portal_queue_entries
-           WHERE DATE(checked_in_at) = CURRENT_DATE AND status IN ('dentist')
+          `SELECT COUNT(*) AS count FROM patient_portal_queue_entries AS queue
+           WHERE ${dashboardOps.clinicQueueTodaySql("queue")}
+             AND ${dashboardOps.queueStatusSql("queue", "in_treatment")}
              AND branch_id = $1`,
           [branchId]
         ),
         db.query(
-          `SELECT COUNT(*) AS count FROM patient_portal_queue_entries
-           WHERE DATE(checked_in_at) = CURRENT_DATE AND status = 'completed'
+          `SELECT COUNT(*) AS count FROM patient_portal_queue_entries AS queue
+           WHERE ${dashboardOps.clinicQueueTodaySql("queue")}
+             AND ${dashboardOps.queueStatusSql("queue", "completed")}
              AND branch_id = $1`,
           [branchId]
         ),
         db.query(
           `SELECT COALESCE(AVG(estimated_wait_minutes), 0) AS avg
-           FROM patient_portal_queue_entries
-           WHERE DATE(checked_in_at) = CURRENT_DATE
+           FROM patient_portal_queue_entries AS queue
+           WHERE ${dashboardOps.clinicQueueTodaySql("queue")}
              AND status IN ('checked_in', 'waiting', 'preparing')
              AND branch_id = $1`,
           [branchId]
