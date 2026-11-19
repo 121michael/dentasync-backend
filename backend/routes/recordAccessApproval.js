@@ -38,7 +38,10 @@ function createRecordAccessApprovalRouter({ db, authenticateToken }) {
 
   router.post("/challenges/:code/approve", async (req, res) => {
     try {
-      const result = await recordAccess.authorizeChallenge(db, req, { code: req.params.code });
+      const result = await recordAccess.authorizeChallenge(db, req, {
+        code: req.params.code,
+        authorizationPassword: req.body?.authorizationPassword,
+      });
       return res.json({
         message: "Restricted records are available for the approved scope.",
         grant: result.grant

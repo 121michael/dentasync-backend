@@ -1,6 +1,7 @@
 "use strict";
 
 const crypto = require("crypto");
+const bcrypt = require("bcrypt");
 const { writeAdminAudit } = require("./adminAudit");
 
 const GRANT_MINUTES = 30;
@@ -13,6 +14,9 @@ const SHARED_SESSION_MESSAGE =
   "Authorize this request from a signed-in Admin or delegated dentist account on this workstation.";
 const AUTH_WINDOW_MS = 15 * 60 * 1000;
 const AUTH_FAIL_LIMIT = 5;
+const AUTH_PASSWORD_MIN = 10;
+const AUTH_HASH_ROUNDS = 12;
+const SETUP_REQUIRED_MESSAGE = "Authorization credential setup is required.";
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const authFailures = new Map();
 
@@ -586,15 +590,40 @@ async function uniqueApprovalCode(db) {
   throw httpError("Unable to start record authorization.", 500);
 }
 
-function approverAccountEligible(row) {
-  if (row.is_archived) return false;
-  const status = String(row.status || "active").toLowerCase();
-  if (["inactive", "disabled", "suspended", "rejected", "pending", "unverified"].includes(status)) return false;
+function hasAuthorizationHash(row) {
+  return Boolean(row?.authorization_password_hash) || row?.has_authorization_credential === true;
+}
+
+function presentAuthorization(row = {}) {
+  const canApprove = row.can_approve_cross_branch_access === true;
+  const configured = canApprove && hasAuthorizationHash(row);
+  const stored = String(row.authorization_credential_status || "").toLowerCase();
+  let authorizationCredentialStatus = "none";
+  if (configured) authorizationCredentialStatus = "configured";
+  else if (canApprove) authorizationCredentialStatus = "setup_required";
+  else if (stored === "revoked") authorizationCredentialStatus = "revoked";
+  return {
+    canApproveCrossBranchAccess: canApprove,
+    authorizationCredentialStatus,
+    setupRequired: authorizationCredentialStatus === "setup_required",
+    credentialConfigured: configured,
+  };
+}
+
+function accountIsActive(row) {
+  if (row?.is_archived) return false;
+  const status = String(row?.status || "active").toLowerCase();
+  return !["inactive", "disabled", "suspended", "rejected", "pending", "unverified"].includes(status);
+}
+
+function approverAccountEligible(row, { requireCredential = true } = {}) {
+  if (!accountIsActive(row)) return false;
   const role = String(row.role || "").toLowerCase();
   if (role === "admin") return true;
   if (!row?.is_verified) return false;
-  if (role === "dentist" && row.can_approve_cross_branch_access === true) return true;
-  return false;
+  if (role !== "dentist" || row.can_approve_cross_branch_access !== true) return false;
+  if (!requireCredential) return true;
+  return hasAuthorizationHash(row);
 }
 
 function tokenAdminApprover(user) {
@@ -608,25 +637,47 @@ function tokenAdminApprover(user) {
   };
 }
 
-async function sessionApproverStatus(db, user) {
-  const role = String(user?.role || "").toLowerCase();
-  if (role === "admin") {
-    return { eligible: true, role, canApproveCrossBranchAccess: false };
-  }
-  const approver = await loadSessionApprover(db, user);
+function mapApproverRow(row) {
   return {
-    eligible: Boolean(approver),
-    role,
-    canApproveCrossBranchAccess: Boolean(approver?.can_approve_cross_branch_access),
+    id: row.id,
+    first_name: row.first_name,
+    last_name: row.last_name,
+    role: String(row.role || "").toLowerCase(),
+    can_approve_cross_branch_access: row.can_approve_cross_branch_access === true,
+    has_authorization_credential: hasAuthorizationHash(row),
+    authorization_credential_status: row.authorization_credential_status || null,
+    authorization_password_hash: row.authorization_password_hash || null,
   };
 }
 
-async function loadSessionApprover(db, user) {
+async function sessionApproverStatus(db, user) {
+  const role = String(user?.role || "").toLowerCase();
+  if (role === "admin") {
+    return {
+      eligible: true,
+      role,
+      canApproveCrossBranchAccess: false,
+      authorizationCredentialStatus: "none",
+      setupRequired: false,
+      credentialConfigured: false,
+    };
+  }
+  const approver = await loadSessionApprover(db, user, { requireCredential: false });
+  const presented = presentAuthorization(approver || {});
+  return {
+    eligible: Boolean(approver) && presented.credentialConfigured,
+    role,
+    ...presented,
+  };
+}
+
+async function loadSessionApprover(db, user, { requireCredential = true } = {}) {
   if (!user?.id) return null;
   try {
     const result = await db.query(
       `SELECT account.id, account.first_name, account.last_name, account.role, account.status,
-              account.is_verified, account.is_archived, profile.can_approve_cross_branch_access
+              account.is_verified, account.is_archived, profile.can_approve_cross_branch_access,
+              profile.authorization_password_hash, profile.authorization_credential_status
        FROM users AS account
        LEFT JOIN admin_portal_dentist_profiles AS profile
          ON profile.user_id::text = account.id::text
@@ -635,14 +686,8 @@ async function loadSessionApprover(db, user) {
       [String(user.id)]
     );
     const row = result.rows[0];
-    if (row && approverAccountEligible(row)) {
-      return {
-        id: row.id,
-        first_name: row.first_name,
-        last_name: row.last_name,
-        role: String(row.role || "").toLowerCase(),
-        can_approve_cross_branch_access: row.can_approve_cross_branch_access === true,
-      };
+    if (row && approverAccountEligible(row, { requireCredential })) {
+      return mapApproverRow(row);
     }
     if (String(row?.role || user.role || "").toLowerCase() === "admin" && approverAccountEligible({
       ...row,
@@ -655,9 +700,183 @@ async function loadSessionApprover(db, user) {
     return null;
   } catch (error) {
     if (error.code === "42703" || error.code === "42P01") {
-      return tokenAdminApprover(user);
+      if (String(user?.role || "").toLowerCase() === "admin") return tokenAdminApprover(user);
+      return null;
     }
     throw error;
+  }
+}
+
+async function loadDentistAuthorization(db, dentistId) {
+  try {
+    const result = await db.query(
+      `SELECT can_approve_cross_branch_access, authorization_password_hash, authorization_credential_status
+       FROM admin_portal_dentist_profiles
+       WHERE user_id = $1
+       LIMIT 1`,
+      [String(dentistId)]
+    );
+    const row = result.rows[0] || {};
+    return presentAuthorization({
+      ...row,
+      has_authorization_credential: Boolean(row.authorization_password_hash),
+    });
+  } catch (error) {
+    if (error.code === "42703" || error.code === "42P01") {
+      return presentAuthorization({});
+    }
+    throw error;
+  }
+}
+
+async function attachDentistAuthorization(db, accounts) {
+  if (!accounts?.length) return accounts;
+  for (const account of accounts) {
+    Object.assign(account, presentAuthorization({}));
+  }
+  try {
+    const flags = await db.query(
+      `SELECT user_id, can_approve_cross_branch_access, authorization_password_hash, authorization_credential_status
+       FROM admin_portal_dentist_profiles
+       WHERE user_id = ANY($1::text[])`,
+      [accounts.map((account) => String(account.id))]
+    );
+    const byUser = new Map(flags.rows.map((row) => [String(row.user_id), row]));
+    for (const account of accounts) {
+      Object.assign(account, presentAuthorization(byUser.get(String(account.id)) || {}));
+    }
+  } catch (error) {
+    if (error.code === "42703") {
+      try {
+        const flags = await db.query(
+          `SELECT user_id, can_approve_cross_branch_access
+           FROM admin_portal_dentist_profiles
+           WHERE user_id = ANY($1::text[])`,
+          [accounts.map((account) => String(account.id))]
+        );
+        const byUser = new Map(flags.rows.map((row) => [String(row.user_id), row]));
+        for (const account of accounts) {
+          Object.assign(account, presentAuthorization(byUser.get(String(account.id)) || {}));
+        }
+      } catch (fallbackError) {
+        if (fallbackError.code !== "42703" && fallbackError.code !== "42P01") throw fallbackError;
+      }
+    } else if (error.code !== "42P01") {
+      throw error;
+    }
+  }
+  return accounts;
+}
+
+async function assertActiveDentist(db, dentistId) {
+  const result = await db.query(
+    `SELECT id, first_name, last_name, role, status, is_verified, is_archived, password_hash
+     FROM users
+     WHERE id::text = $1
+       AND LOWER(role) = 'dentist'
+     LIMIT 1`,
+    [String(dentistId)]
+  );
+  const dentist = result.rows[0];
+  if (!dentist || dentist.is_archived) {
+    throw httpError("Dentist record not found.", 404);
+  }
+  return dentist;
+}
+
+async function setAuthorizationCredential(db, admin, dentistId, { password, confirmPassword }) {
+  const plain = String(password || "");
+  const confirm = String(confirmPassword == null ? password : confirmPassword);
+  if (plain.length < AUTH_PASSWORD_MIN) {
+    throw httpError("Authorization password must be at least 10 characters long.", 400);
+  }
+  if (plain !== confirm) {
+    throw httpError("Authorization password and confirmation do not match.", 400);
+  }
+  const dentist = await assertActiveDentist(db, dentistId);
+  if (dentist.password_hash && (await bcrypt.compare(plain, dentist.password_hash))) {
+    throw httpError("Choose an authorization password that is different from the sign-in password.", 400);
+  }
+  const previous = await loadDentistAuthorization(db, dentist.id);
+  const hash = await bcrypt.hash(plain, AUTH_HASH_ROUNDS);
+  await db.query(
+    `INSERT INTO admin_portal_dentist_profiles (
+       user_id, can_approve_cross_branch_access, authorization_password_hash, authorization_credential_status, updated_at
+     ) VALUES ($1, TRUE, $2, 'configured', CURRENT_TIMESTAMP)
+     ON CONFLICT (user_id) DO UPDATE SET
+       can_approve_cross_branch_access = TRUE,
+       authorization_password_hash = EXCLUDED.authorization_password_hash,
+       authorization_credential_status = 'configured',
+       updated_at = CURRENT_TIMESTAMP`,
+    [String(dentist.id), hash]
+  );
+  const action = previous.credentialConfigured ? "record_access_credential_reset" : "record_access_credential_set";
+  await writeAdminAudit(db, {
+    actorId: admin?.id,
+    actorName: `${admin?.first_name || admin?.firstName || ""} ${admin?.last_name || admin?.lastName || ""}`.trim() || null,
+    actorRole: admin?.role || "admin",
+    action,
+    targetType: "dentist",
+    targetId: String(dentist.id),
+    targetLabel: `${dentist.first_name || ""} ${dentist.last_name || ""}`.trim() || null,
+    detail: previous.credentialConfigured
+      ? "Authorization credential replaced. Permission preserved."
+      : "Authorization credential configured. Cross-branch approval permission enabled.",
+  });
+  return loadDentistAuthorization(db, dentist.id);
+}
+
+async function revokeAuthorizationCredential(db, admin, dentistId) {
+  const dentist = await assertActiveDentist(db, dentistId);
+  await db.query(
+    `INSERT INTO admin_portal_dentist_profiles (
+       user_id, can_approve_cross_branch_access, authorization_password_hash, authorization_credential_status, updated_at
+     ) VALUES ($1, FALSE, NULL, 'revoked', CURRENT_TIMESTAMP)
+     ON CONFLICT (user_id) DO UPDATE SET
+       can_approve_cross_branch_access = FALSE,
+       authorization_password_hash = NULL,
+       authorization_credential_status = 'revoked',
+       updated_at = CURRENT_TIMESTAMP`,
+    [String(dentist.id)]
+  );
+  await writeAdminAudit(db, {
+    actorId: admin?.id,
+    actorName: `${admin?.first_name || admin?.firstName || ""} ${admin?.last_name || admin?.lastName || ""}`.trim() || null,
+    actorRole: admin?.role || "admin",
+    action: "record_access_credential_revoked",
+    targetType: "dentist",
+    targetId: String(dentist.id),
+    targetLabel: `${dentist.first_name || ""} ${dentist.last_name || ""}`.trim() || null,
+    detail: "Authorization credential revoked. Cross-branch approval permission removed.",
+  });
+  return loadDentistAuthorization(db, dentist.id);
+}
+
+async function verifyApproverPassword(db, approver, password, req) {
+  const role = String(approver?.role || "").toLowerCase();
+  if (role === "admin") return;
+  const presented = presentAuthorization(approver);
+  if (presented.setupRequired || !presented.credentialConfigured) {
+    recordAuthFailure(String(req.user?.id || req.ip), req.ip);
+    throw httpError(SETUP_REQUIRED_MESSAGE, 403);
+  }
+  const plain = String(password || "");
+  if (!plain) {
+    recordAuthFailure(String(req.user?.id || req.ip), req.ip);
+    throw httpError("Enter the authorization password.", 400);
+  }
+  const matched = await bcrypt.compare(plain, approver.authorization_password_hash || "");
+  if (!matched) {
+    recordAuthFailure(String(req.user?.id || req.ip), req.ip);
+    await writeAdminAudit(db, {
+      actorId: approver.id,
+      actorRole: "dentist",
+      action: "record_access_authorize_failed",
+      targetType: "record_access_challenge",
+      result: "failure",
+      detail: "Authorization password was rejected.",
+    });
+    throw httpError(GENERIC_AUTH_MESSAGE, 401);
   }
 }
 
@@ -778,7 +997,7 @@ async function previewChallenge(db, req, code) {
   };
 }
 
-async function authorizeChallenge(db, req, { code }) {
+async function authorizeChallenge(db, req, { code, authorizationPassword }) {
   const approvalCode = normalizeApprovalCode(code);
   assertAuthRateLimit(String(req.user?.id || req.ip), req.ip);
   if (!approvalCode) {
@@ -786,7 +1005,7 @@ async function authorizeChallenge(db, req, { code }) {
     throw httpError(CHALLENGE_GONE_MESSAGE, 404);
   }
 
-  const approver = await loadSessionApprover(db, req.user);
+  const approver = await loadSessionApprover(db, req.user, { requireCredential: false });
   if (!approver) {
     recordAuthFailure(String(req.user?.id || req.ip), req.ip);
     await writeAdminAudit(db, {
@@ -798,6 +1017,10 @@ async function authorizeChallenge(db, req, { code }) {
       detail: "Approver session is not eligible.",
     });
     throw httpError("You cannot authorize this record access.", 403);
+  }
+  await verifyApproverPassword(db, approver, authorizationPassword, req);
+  if (String(approver.role || "").toLowerCase() !== "admin" && !presentAuthorization(approver).credentialConfigured) {
+    throw httpError(SETUP_REQUIRED_MESSAGE, 403);
   }
   clearAuthFailure(String(req.user?.id || req.ip), req.ip);
 
@@ -929,10 +1152,16 @@ async function authorizeChallenge(db, req, { code }) {
       detail: `Grant ${grant.rows[0]?.id || ""} request ${requestId} scope ${challenge.scope} branch ${challenge.originating_branch_id}.`,
     });
     return {
-      grant: grant.rows[0] || null,
+      grant: grant.rows[0]
+        ? {
+            id: grant.rows[0].id,
+            status: grant.rows[0].status,
+            expires_at: grant.rows[0].expires_at,
+            scope: grant.rows[0].scope,
+          }
+        : null,
       requestId,
       minutes,
-      approverRole: approver.role,
     };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
@@ -966,6 +1195,11 @@ module.exports = {
   rejectSharedSessionAuthorize,
   loadSessionApprover,
   sessionApproverStatus,
+  presentAuthorization,
+  attachDentistAuthorization,
+  loadDentistAuthorization,
+  setAuthorizationCredential,
+  revokeAuthorizationCredential,
   decideRequest,
   approverMayDecide,
   loadGrantMinutes,

@@ -19,6 +19,7 @@ function roleBlockedFromAuthorize(role) {
 export function RecordAccessAuthorizePage() {
   const { user } = useAuth();
   const [code, setCode] = useState("");
+  const [authorizationPassword, setAuthorizationPassword] = useState("");
   const [challenge, setChallenge] = useState(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -26,8 +27,9 @@ export function RecordAccessAuthorizePage() {
   const role = String(user?.role || eligibility?.role || "").toLowerCase();
   const blockedByRole = roleBlockedFromAuthorize(role);
   const isAdmin = role === "admin";
+  const setupRequired = !isAdmin && eligibility?.setupRequired === true;
   const eligible = isAdmin || (!blockedByRole && eligibility?.eligible === true);
-  const denied = blockedByRole || (!isAdmin && eligibility?.eligible === false);
+  const denied = blockedByRole || (!isAdmin && eligibility?.eligible === false && !setupRequired);
 
   useEffect(() => {
     if (blockedByRole || isAdmin) return undefined;
@@ -63,13 +65,21 @@ export function RecordAccessAuthorizePage() {
 
   async function approve() {
     if (!eligible || !challenge?.approvalCode) return;
+    if (!isAdmin && !authorizationPassword) {
+      setMessage("Enter the authorization password.");
+      return;
+    }
     setBusy(true);
     setMessage("");
     try {
-      const response = await api.approveRecordAccessChallenge(challenge.approvalCode);
+      const response = await api.approveRecordAccessChallenge(
+        challenge.approvalCode,
+        isAdmin ? {} : { authorizationPassword }
+      );
       setMessage(response.message || "Restricted records are available for the approved scope.");
       setChallenge(null);
       setCode("");
+      setAuthorizationPassword("");
     } catch (approveError) {
       setMessage(approveError.message);
     } finally {
@@ -78,14 +88,14 @@ export function RecordAccessAuthorizePage() {
   }
 
   return (
-    <main className="admin-page" style={{ maxWidth: "40rem", margin: "2rem auto", padding: "0 1rem" }}>
+    <main className="admin-page record-access-authorize" style={{ maxWidth: "40rem", margin: "2rem auto", padding: "0 1rem" }}>
       <p className="eyebrow">Cross-branch records</p>
       <h1>Authorize record access</h1>
       {denied ? (
         <>
           <h2>Access denied</h2>
           <p>
-            Only an Admin or a dentist who is delegated to approve cross-branch access can use this page. Approval
+            Only an Admin or a dentist with a configured authorization credential can use this page. Approval
             codes are entered here, not on the requesting dentist’s chart.
           </p>
           <p>Signed in as {user?.fullName || user?.email} ({role})</p>
@@ -94,15 +104,29 @@ export function RecordAccessAuthorizePage() {
           </p>
         </>
       ) : null}
-      {!denied && !eligible ? <p>Checking whether this account can authorize record access…</p> : null}
+      {setupRequired ? (
+        <>
+          <h2>Setup required</h2>
+          <p>
+            An administrator must set this dentist’s authorization credential before they can approve restricted
+            cross-branch records.
+          </p>
+          <p>Signed in as {user?.fullName || user?.email} ({role})</p>
+          <p>
+            <Link to={landingFor(role)}>Return to dashboard</Link>
+          </p>
+        </>
+      ) : null}
+      {!denied && !setupRequired && !eligible ? <p>Checking whether this account can authorize record access…</p> : null}
       {eligible ? (
         <>
           <p>
             Sign in on this workstation in a separate browser profile from the requesting dentist. Enter the approval
-            code shown on their screen. This page uses your account only.
+            code shown on their screen. This page uses your account only and returns the approval result to their
+            chart.
           </p>
           <p>Signed in as {user?.fullName || user?.email} ({role})</p>
-          <form onSubmit={loadChallenge}>
+          <form onSubmit={loadChallenge} className="admin-set-credential">
             <label>
               Approval code
               <input
@@ -118,13 +142,24 @@ export function RecordAccessAuthorizePage() {
             </button>
           </form>
           {challenge ? (
-            <section className="admin-card" style={{ marginTop: "1.5rem" }}>
+            <section className="admin-card admin-set-credential" style={{ marginTop: "1.5rem" }}>
               <p>Patient {challenge.patient?.fullName || "record"} · {challenge.patient?.patientId || challenge.patient?.id}</p>
               <p>Requesting dentist {challenge.requesterName || "clinic dentist"}</p>
               <p>
                 Branch {challenge.requestingBranchId} requesting {challenge.scope} from branch {challenge.originatingBranchId}
               </p>
               <p>Reason: {challenge.reason}</p>
+              {!isAdmin ? (
+                <label>
+                  Authorization password
+                  <input
+                    type="password"
+                    value={authorizationPassword}
+                    autoComplete="current-password"
+                    onChange={(event) => setAuthorizationPassword(event.target.value)}
+                  />
+                </label>
+              ) : null}
               <button className="button button--primary" disabled={busy} type="button" onClick={approve}>
                 {busy ? "Authorizing…" : "Authorize access"}
               </button>

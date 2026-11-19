@@ -400,10 +400,10 @@ export const api = {
   getRecordAccessApprover: () => request("/record-access/approver"),
   previewRecordAccessChallenge: (code) =>
     request(`/record-access/challenges/${encodeURIComponent(String(code || "").trim())}`),
-  approveRecordAccessChallenge: (code) =>
+  approveRecordAccessChallenge: (code, body = {}) =>
     request(`/record-access/challenges/${encodeURIComponent(String(code || "").trim())}/approve`, {
       method: "POST",
-      body: {},
+      body,
     }),
   getDentistRecordAccessRequests: () => request("/dentist/record-access-requests"),
   decideDentistRecordAccess: (requestId, decision) =>
@@ -512,6 +512,10 @@ export const api = {
   },
   createAdminDentist: (body) => request("/admin/dentists", { method: "POST", body }),
   updateAdminDentist: (id, body) => request(`/admin/dentists/${id}`, { method: "PATCH", body }),
+  setAdminDentistAuthorizationCredential: (id, body) =>
+    request(`/admin/dentists/${id}/authorization-credential`, { method: "PUT", body }),
+  revokeAdminDentistAuthorizationCredential: (id) =>
+    request(`/admin/dentists/${id}/authorization-credential`, { method: "DELETE" }),
   getAdminAccounts: (params = {}) => {
     const search = new URLSearchParams(Object.entries(params).filter(([, value]) => value || value === 0));
     return request(`/admin/accounts${search.size ? `?${search}` : ""}`);

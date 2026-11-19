@@ -39,6 +39,7 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
   const { createStaffPortalRouter } = require("../routes/staffPortal");
   const { createRecordAccessApprovalRouter } = require("../routes/recordAccessApproval");
   const { authenticateToken } = require("../middleware/authMiddleware");
+  const recordAccess = require("../services/recordAccess");
 
   let server;
   t.after(async () => {
@@ -126,6 +127,7 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
   await db.query(sqlFile("056_cross_branch_record_access.sql"));
   await db.query(sqlFile("057_record_access_workstation_auth.sql"));
   await db.query(sqlFile("058_record_access_isolated_approver.sql"));
+  await db.query(sqlFile("060_record_access_authorization_credential.sql"));
 
   const mandaluyong = await db.query(`SELECT id FROM clinic_branches WHERE is_main LIMIT 1`);
   const pasig = await db.query(
@@ -276,6 +278,7 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
 
   const adminPassword = "AdminPass1234";
   const delegatePassword = "DelegatePass1234";
+  const delegateAuthPassword = "DelegateAuth1234";
   const treatingPassword = "TreatPass1234";
   const staffPassword = "StaffPass1234";
   const coworkerPassword = "CoworkerPass1234";
@@ -493,8 +496,44 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
   assert.equal(ordinaryApprover.json.eligible, false);
   const selfApprover = await api("GET", "/api/record-access/approver", { role: "dentist", id: treatingId });
   assert.equal(selfApprover.json.eligible, false);
+  const setupApprover = await api("GET", "/api/record-access/approver", { role: "dentist", id: delegateId });
+  assert.equal(setupApprover.json.eligible, false);
+  assert.equal(setupApprover.json.setupRequired, true);
+  assert.equal(setupApprover.json.authorizationCredentialStatus, "setup_required");
+
+  const mismatch = await api("PUT", `/api/admin/dentists/${delegateId}/authorization-credential`, {
+    role: "admin",
+    id: adminId,
+    body: { password: delegateAuthPassword, confirmPassword: "DifferentPass1234" },
+  });
+  assert.equal(mismatch.status, 400);
+  const sameAsLogin = await api("PUT", `/api/admin/dentists/${delegateId}/authorization-credential`, {
+    role: "admin",
+    id: adminId,
+    body: { password: delegatePassword, confirmPassword: delegatePassword },
+  });
+  assert.equal(sameAsLogin.status, 400);
+  const setCredential = await api("PUT", `/api/admin/dentists/${delegateId}/authorization-credential`, {
+    role: "admin",
+    id: adminId,
+    body: { password: delegateAuthPassword, confirmPassword: delegateAuthPassword },
+  });
+  assert.equal(setCredential.status, 200, setCredential.json.message);
+  assert.equal(setCredential.json.dentist.credentialConfigured, true);
+  assert.equal(JSON.stringify(setCredential.json).includes(delegateAuthPassword), false);
+  const hashRow = await db.query(
+    `SELECT authorization_password_hash, can_approve_cross_branch_access, authorization_credential_status
+     FROM admin_portal_dentist_profiles WHERE user_id = $1`,
+    [delegateId]
+  );
+  assert.equal(hashRow.rows[0].can_approve_cross_branch_access, true);
+  assert.equal(hashRow.rows[0].authorization_credential_status, "configured");
+  assert.ok(hashRow.rows[0].authorization_password_hash);
+  assert.notEqual(hashRow.rows[0].authorization_password_hash, delegateAuthPassword);
+
   const delegateApprover = await api("GET", "/api/record-access/approver", { role: "dentist", id: delegateId });
   assert.equal(delegateApprover.json.eligible, true);
+  assert.equal(delegateApprover.json.credentialConfigured, true);
   const adminApprover = await api("GET", "/api/record-access/approver", { role: "admin", id: adminId });
   assert.equal(adminApprover.json.eligible, true);
   const unverifiedAdmin = await db.query(
@@ -563,9 +602,32 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
   });
   assert.equal(inactiveAuth.status, 403);
 
+  const setupBlocked = await api("POST", `/api/record-access/challenges/${approvalCode}/approve`, {
+    role: "dentist",
+    id: coworkerId,
+    body: { authorizationPassword: delegateAuthPassword },
+  });
+  assert.equal(setupBlocked.status, 403);
+
+  const missingPassword = await api("POST", `/api/record-access/challenges/${approvalCode}/approve`, {
+    role: "dentist",
+    id: delegateId,
+  });
+  assert.equal(missingPassword.status, 400);
+
+  const wrongPassword = await api("POST", `/api/record-access/challenges/${approvalCode}/approve`, {
+    role: "dentist",
+    id: delegateId,
+    body: { authorizationPassword: "WrongAuth1234" },
+  });
+  assert.equal(wrongPassword.status, 401);
+  assert.equal(JSON.stringify(wrongPassword.json).includes("WrongAuth1234"), false);
+  assert.equal(JSON.stringify(wrongPassword.json).includes(delegateAuthPassword), false);
+
   const outOfScope = await api("POST", `/api/record-access/challenges/${approvalCode}/approve`, {
     role: "dentist",
     id: delegateId,
+    body: { authorizationPassword: delegateAuthPassword },
   });
   assert.equal(outOfScope.status, 403);
 
@@ -745,6 +807,7 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
     api("POST", `/api/record-access/challenges/${delegateChallenge.json.challenge.approvalCode}/approve`, {
       role: "dentist",
       id: delegateId,
+      body: { authorizationPassword: delegateAuthPassword },
     }),
     api("POST", `/api/record-access/challenges/${delegateChallenge.json.challenge.approvalCode}/approve`, {
       role: "admin",
@@ -892,6 +955,76 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
   assert.equal(uncertain.status, 409);
   assert.ok(uncertain.json.needsSelection || uncertain.json.needsMergeDecision || uncertain.json.matches);
 
+  const resetCredential = await api("PUT", `/api/admin/dentists/${delegateId}/authorization-credential`, {
+    role: "admin",
+    id: adminId,
+    body: { password: "DelegateAuth5678", confirmPassword: "DelegateAuth5678" },
+  });
+  assert.equal(resetCredential.status, 200, resetCredential.json.message);
+  assert.equal(resetCredential.json.dentist.credentialConfigured, true);
+
+  const revokeCredential = await api("DELETE", `/api/admin/dentists/${delegateId}/authorization-credential`, {
+    role: "admin",
+    id: adminId,
+  });
+  assert.equal(revokeCredential.status, 200, revokeCredential.json.message);
+  assert.equal(revokeCredential.json.dentist.canApproveCrossBranchAccess, false);
+  assert.equal(revokeCredential.json.dentist.authorizationCredentialStatus, "revoked");
+  const afterRevokeApprover = await api("GET", "/api/record-access/approver", { role: "dentist", id: delegateId });
+  assert.equal(afterRevokeApprover.json.eligible, false);
+
+  const revokedChallenge = await api("POST", `/api/dentist/patients/${recordId}/access-challenges`, {
+    role: "dentist",
+    id: treatingId,
+    branchId: pasigId,
+    body: {
+      requestingBranchId: pasigId,
+      originatingBranchId: mandaluyongId,
+      reason: "Need notes after revoke",
+      scope: "diagnosis_notes",
+    },
+  });
+  const revokedApprove = await api(
+    "POST",
+    `/api/record-access/challenges/${revokedChallenge.json.challenge.approvalCode}/approve`,
+    {
+      role: "dentist",
+      id: delegateId,
+      body: { authorizationPassword: "DelegateAuth5678" },
+    }
+  );
+  assert.equal(revokedApprove.status, 403);
+
+  recordAccess.resetAuthFailures();
+  const restored = await api("PUT", `/api/admin/dentists/${delegateId}/authorization-credential`, {
+    role: "admin",
+    id: adminId,
+    body: { password: delegateAuthPassword, confirmPassword: delegateAuthPassword },
+  });
+  assert.equal(restored.status, 200, restored.json.message);
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const failed = await api(
+      "POST",
+      `/api/record-access/challenges/${revokedChallenge.json.challenge.approvalCode}/approve`,
+      {
+        role: "dentist",
+        id: delegateId,
+        body: { authorizationPassword: "BadAuthXXXX1" },
+      }
+    );
+    assert.equal(failed.status, 401, `attempt ${attempt} ${failed.status}`);
+  }
+  const limited = await api(
+    "POST",
+    `/api/record-access/challenges/${revokedChallenge.json.challenge.approvalCode}/approve`,
+    {
+      role: "dentist",
+      id: delegateId,
+      body: { authorizationPassword: delegateAuthPassword },
+    }
+  );
+  assert.equal(limited.status, 429);
+
   const permission = await api("PATCH", `/api/admin/dentists/${delegateId}`, {
     role: "admin",
     id: adminId,
@@ -936,13 +1069,16 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
   assert.equal(JSON.stringify(staffExport.json).includes("Deep caries"), false);
 
   const audit = await db.query(
-    `SELECT action FROM admin_portal_audit_logs WHERE action LIKE 'record_access_%' OR action = 'cross_branch_chart_read' OR action = 'Document Data Import'`
+    `SELECT action, detail FROM admin_portal_audit_logs WHERE action LIKE 'record_access_%' OR action = 'cross_branch_chart_read' OR action = 'Document Data Import'`
   );
   assert.ok(audit.rows.some((row) => row.action === "record_access_requested"));
   assert.ok(audit.rows.some((row) => row.action === "record_access_approved"));
+  assert.ok(audit.rows.some((row) => row.action === "record_access_credential_set"));
+  assert.ok(audit.rows.some((row) => row.action === "record_access_credential_reset"));
+  assert.ok(audit.rows.some((row) => row.action === "record_access_credential_revoked"));
   assert.ok(audit.rows.some((row) => row.action === "Document Data Import"));
   assert.equal(
-    audit.rows.filter((row) => /Deep caries|Hidden diagnosis|Pasig visit note/i.test(JSON.stringify(row))).length,
+    audit.rows.filter((row) => /Deep caries|Hidden diagnosis|Pasig visit note|DelegateAuth|DelegatePass/i.test(JSON.stringify(row))).length,
     0
   );
 });

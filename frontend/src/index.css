@@ -14897,6 +14897,104 @@ body.is-queue-display .fab-menu {
   align-items: flex-start;
 }
 
+.admin-set-credential {
+  display: grid;
+  gap: 0.7rem;
+  margin: 0;
+  padding: 0.9rem 1rem;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(152, 100, 215, 0.06);
+}
+.admin-set-credential legend {
+  padding: 0 0.35rem;
+  color: var(--amethyst-800, #5b2a86);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+.admin-set-credential p,
+.admin-set-credential__hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+.admin-set-credential label {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+.admin-set-credential input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.admin-set-credential__status {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 750;
+  color: var(--amethyst-800, #5b2a86);
+}
+.admin-set-credential__status--ok { color: var(--emerald); }
+.admin-set-credential__status--warn { color: var(--amber, #b45309); }
+.admin-set-credential__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+.admin-set-credential__actions .button {
+  flex: 1 1 10rem;
+}
+.admin-set-credential__toggle {
+  position: absolute;
+  right: 0.45rem;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border: 0;
+  background: transparent;
+  color: var(--amethyst-500);
+  cursor: pointer;
+}
+.admin-set-credential__badge {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 0.28rem;
+  margin-left: 0.4rem;
+  padding: 0.16rem 0.48rem;
+  border-radius: 999px;
+  color: var(--amethyst-800, #5b2a86);
+  background: var(--amethyst-100, #f3e8ff);
+  font-size: 0.62rem;
+  font-weight: 800;
+  line-height: 1;
+  vertical-align: middle;
+}
+.admin-set-credential__badge--ok {
+  color: var(--emerald);
+  background: var(--emerald-wash);
+}
+.record-access-authorize .admin-set-credential {
+  background: var(--surface);
+}
+
+@media (max-width: 720px) {
+  .admin-set-credential__actions .button {
+    flex: 1 1 100%;
+  }
+  .admin-set-credential__badge {
+    display: flex;
+    margin-left: 0;
+    width: max-content;
+  }
+}
+
 .admin-branch-heading { flex-wrap: wrap; }
 .admin-branch-heading > div:first-child { flex: 1 1 16rem; min-width: 0; }
 .admin-branch-heading .button--primary { flex: 0 0 auto; }

@@ -267,6 +267,11 @@ function mapAccount(row, extras = {}) {
   if (extras.canApproveCrossBranchAccess !== undefined) {
     payload.canApproveCrossBranchAccess = extras.canApproveCrossBranchAccess === true;
   }
+  if (extras.authorizationCredentialStatus !== undefined) {
+    payload.authorizationCredentialStatus = extras.authorizationCredentialStatus || "none";
+    payload.setupRequired = extras.setupRequired === true;
+    payload.credentialConfigured = extras.credentialConfigured === true;
+  }
   if (row.catalog_dentist_id !== undefined || extras.catalogDentistId !== undefined) {
     payload.catalogDentistId = extras.catalogDentistId ?? row.catalog_dentist_id ?? null;
   }
@@ -826,25 +831,7 @@ function createAdminPortalRouter({
         await clinicBranches.attachAssignments(db, accounts);
       }
       if (role === "dentist") {
-        for (const account of accounts) account.canApproveCrossBranchAccess = false;
-        if (accounts.length) {
-          try {
-            const flags = await db.query(
-              `SELECT user_id, can_approve_cross_branch_access
-               FROM admin_portal_dentist_profiles
-               WHERE user_id = ANY($1::text[])`,
-              [accounts.map((account) => String(account.id))]
-            );
-            const byUser = new Map(
-              flags.rows.map((row) => [String(row.user_id), row.can_approve_cross_branch_access === true])
-            );
-            for (const account of accounts) {
-              account.canApproveCrossBranchAccess = byUser.get(String(account.id)) === true;
-            }
-          } catch (error) {
-            if (error.code !== "42703" && error.code !== "42P01") throw error;
-          }
-        }
+        await recordAccess.attachDentistAuthorization(db, accounts);
       }
       return {
         page,
@@ -1831,27 +1818,14 @@ function createAdminPortalRouter({
       await client.query("COMMIT");
       transactionOpen = false;
 
-      let canApproveCrossBranchAccess = false;
-      if (Object.prototype.hasOwnProperty.call(req.body || {}, "canApproveCrossBranchAccess")) {
-        canApproveCrossBranchAccess = req.body.canApproveCrossBranchAccess === true;
-      } else {
-        try {
-          const flag = await db.query(
-            `SELECT can_approve_cross_branch_access FROM admin_portal_dentist_profiles WHERE user_id = $1`,
-            [String(dentist.id)]
-          );
-          canApproveCrossBranchAccess = flag.rows[0]?.can_approve_cross_branch_access === true;
-        } catch (error) {
-          if (error.code !== "42703" && error.code !== "42P01") throw error;
-        }
-      }
+      const authorization = await recordAccess.loadDentistAuthorization(db, dentist.id);
       const [withBranches] = await clinicBranches.attachAssignments(db, [
         mapAccount(dentist, {
           specialization: profileResult.rows[0]?.specialization || "",
           scheduleNotes: profileResult.rows[0]?.schedule_notes || "",
           licenseNumber: profileResult.rows[0]?.license_number || "",
           licenseVerified: profileResult.rows[0]?.license_verified === true,
-          canApproveCrossBranchAccess,
+          ...authorization,
         }),
       ]);
       return res.json({ dentist: withBranches });
@@ -1874,6 +1848,55 @@ function createAdminPortalRouter({
       return res.status(500).json({ message: "Unable to update the dentist account." });
     } finally {
       client.release();
+    }
+  });
+
+  router.put("/dentists/:id/authorization-credential", async (req, res) => {
+    const dentistId = stringValue(req.params.id, 120);
+    if (!dentistId) {
+      return res.status(400).json({ message: "A valid dentist ID is required." });
+    }
+    try {
+      const authorization = await recordAccess.setAuthorizationCredential(db, req.user, dentistId, {
+        password: req.body?.password,
+        confirmPassword: req.body?.confirmPassword,
+      });
+      return res.json({
+        message: authorization.credentialConfigured ? "Credential configured." : "Authorization credential saved.",
+        dentist: { id: dentistId, ...authorization },
+      });
+    } catch (error) {
+      if (error.status) {
+        return res.status(error.status).json({ message: error.message });
+      }
+      if (error.code === "42703" || isMissingRelation(error)) {
+        return migrationUnavailable(res);
+      }
+      console.error("Admin dentist authorization credential error:", error.message);
+      return res.status(500).json({ message: "Unable to save the authorization credential." });
+    }
+  });
+
+  router.delete("/dentists/:id/authorization-credential", async (req, res) => {
+    const dentistId = stringValue(req.params.id, 120);
+    if (!dentistId) {
+      return res.status(400).json({ message: "A valid dentist ID is required." });
+    }
+    try {
+      const authorization = await recordAccess.revokeAuthorizationCredential(db, req.user, dentistId);
+      return res.json({
+        message: "Authorization revoked.",
+        dentist: { id: dentistId, ...authorization },
+      });
+    } catch (error) {
+      if (error.status) {
+        return res.status(error.status).json({ message: error.message });
+      }
+      if (error.code === "42703" || isMissingRelation(error)) {
+        return migrationUnavailable(res);
+      }
+      console.error("Admin dentist authorization revoke error:", error.message);
+      return res.status(500).json({ message: "Unable to revoke the authorization credential." });
     }
   });
 

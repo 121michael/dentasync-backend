@@ -8,8 +8,10 @@ const files = [
   "056_cross_branch_record_access.sql",
   "057_record_access_workstation_auth.sql",
   "058_record_access_isolated_approver.sql",
+  "060_record_access_authorization_credential.sql",
 ];
 const rollbackFiles = [
+  "060_record_access_authorization_credential_rollback.sql",
   "058_record_access_isolated_approver_rollback.sql",
   "057_record_access_workstation_auth_rollback.sql",
   "056_cross_branch_record_access_rollback.sql",
@@ -25,7 +27,8 @@ async function main() {
   }
   if (!rollback) {
     console.log("Workstation challenges last 5 minutes and are single-use.");
-    console.log("Approvers sign in separately and enter the displayed approval code.");
+    console.log("Approvers sign in separately, enter the approval code, and confirm with their authorization password.");
+    console.log("Delegated dentists need a hashed Set Credential before they can authorize.");
     console.log("New grants last 30 minutes unless Admin sets 15 to 240 minutes.");
     console.log("Legacy pending requests stay visible until a fresh workstation authorization.");
     console.log("Audit log retention is not defined in the current schema and remains for clinic review.");

@@ -20,4 +20,12 @@ test("Admin sidebar and mobile menu omit Authorize Record Access while the route
   assert.match(page, /export function RecordAccessAuthorizePage/);
   assert.match(page, /getRecordAccessApprover/);
   assert.match(page, /approveRecordAccessChallenge/);
+  assert.match(page, /authorizationPassword/);
+  assert.match(page, /Setup required/);
+
+  const manage = fs.readFileSync(path.join(src, "pages", "AdminManageUsersPage.jsx"), "utf8");
+  assert.match(manage, /Set Credential/);
+  assert.match(manage, /Credential configured/);
+  assert.match(manage, /Revoke authorization/);
+  assert.doesNotMatch(manage, /Can Authorize Cross-Branch Record Access/);
 });

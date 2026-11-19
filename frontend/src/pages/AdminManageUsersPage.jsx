@@ -25,7 +25,7 @@ const emptyForm = {
   scheduleNotes: "",
   licenseNumber: "",
   licenseVerified: false,
-  canApproveCrossBranchAccess: false,
+  authorizationCredentialStatus: "none",
   branchId: "",
   branchIds: [],
 };
@@ -162,6 +162,11 @@ export function AdminManageUsersPage() {
   const [passwordResetError, setPasswordResetError] = useState("");
   const [passwordResetBusy, setPasswordResetBusy] = useState(false);
   const [focusKey, setFocusKey] = useState(() => searchParams.get("focus") || "");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authConfirm, setAuthConfirm] = useState("");
+  const [showAuthPassword, setShowAuthPassword] = useState(false);
+  const [credentialBusy, setCredentialBusy] = useState(false);
+  const [resettingCredential, setResettingCredential] = useState(false);
   const focusedRowRef = useRef(null);
   const saveLock = useRef(false);
 
@@ -267,6 +272,10 @@ export function AdminManageUsersPage() {
       ...emptyForm,
       position: tab === "staff" ? "Chief Clinic Coordinator" : emptyForm.position,
     });
+    setAuthPassword("");
+    setAuthConfirm("");
+    setShowAuthPassword(false);
+    setResettingCredential(false);
     setPhoneError("");
     setFieldErrors({});
     setFormOpen(true);
@@ -289,10 +298,14 @@ export function AdminManageUsersPage() {
       scheduleNotes: user.scheduleNotes || "",
       licenseNumber: user.licenseNumber || "",
       licenseVerified: Boolean(user.licenseVerified),
-      canApproveCrossBranchAccess: Boolean(user.canApproveCrossBranchAccess),
+      authorizationCredentialStatus: user.authorizationCredentialStatus || (user.setupRequired ? "setup_required" : "none"),
       branchId: user.branches?.[0] ? String(user.branches[0].id) : "",
       branchIds: (user.branches || []).map((branch) => String(branch.id)),
     });
+    setAuthPassword("");
+    setAuthConfirm("");
+    setShowAuthPassword(false);
+    setResettingCredential(false);
     setPhoneError("");
     setFieldErrors({});
     setFormOpen(true);
@@ -342,9 +355,12 @@ export function AdminManageUsersPage() {
     const payload = { ...form };
     if (tab === "staff") {
       delete payload.branchIds;
-      delete payload.canApproveCrossBranchAccess;
+      delete payload.authorizationCredentialStatus;
     }
-    if (tab === "dentist") delete payload.branchId;
+    if (tab === "dentist") {
+      delete payload.branchId;
+      delete payload.authorizationCredentialStatus;
+    }
     saveLock.current = true;
     setBusy(true);
     try {
@@ -369,6 +385,63 @@ export function AdminManageUsersPage() {
     } finally {
       saveLock.current = false;
       setBusy(false);
+    }
+  }
+
+  function applyAuthorizationToEditor(authorization) {
+    const status = authorization?.authorizationCredentialStatus || "none";
+    setForm((current) => ({ ...current, authorizationCredentialStatus: status }));
+    setEditing((current) => (current ? { ...current, ...authorization, authorizationCredentialStatus: status } : current));
+    setAuthPassword("");
+    setAuthConfirm("");
+    setResettingCredential(false);
+  }
+
+  async function saveAuthorizationCredential() {
+    if (!editing || tab !== "dentist" || credentialBusy) return;
+    if (authPassword.length < 10) {
+      pushToast("Authorization password must be at least 10 characters long.", "error");
+      return;
+    }
+    if (authPassword !== authConfirm) {
+      pushToast("Authorization password and confirmation do not match.", "error");
+      return;
+    }
+    setCredentialBusy(true);
+    try {
+      const response = await api.setAdminDentistAuthorizationCredential(editing.id, {
+        password: authPassword,
+        confirmPassword: authConfirm,
+      });
+      applyAuthorizationToEditor(response.dentist);
+      pushToast(response.message || "Credential configured.");
+      await load();
+    } catch (credentialError) {
+      pushToast(credentialError.message, "error");
+    } finally {
+      setCredentialBusy(false);
+    }
+  }
+
+  async function revokeAuthorizationCredential() {
+    if (!editing || tab !== "dentist" || credentialBusy) return;
+    const ok = await confirm({
+      title: "Revoke authorization",
+      message: `Revoke ${editing.fullName || "this dentist"}'s cross-branch authorization credential? They will not be able to approve restricted record access until a new credential is set.`,
+      confirmLabel: "Revoke authorization",
+      tone: "danger",
+    });
+    if (!ok) return;
+    setCredentialBusy(true);
+    try {
+      const response = await api.revokeAdminDentistAuthorizationCredential(editing.id);
+      applyAuthorizationToEditor(response.dentist);
+      pushToast(response.message || "Authorization revoked.");
+      await load();
+    } catch (credentialError) {
+      pushToast(credentialError.message, "error");
+    } finally {
+      setCredentialBusy(false);
     }
   }
 
@@ -688,7 +761,15 @@ export function AdminManageUsersPage() {
                       {tab === "patient" ? (
                         <td><code>{user.patientId || user.id}</code></td>
                       ) : null}
-                      <td><strong>{user.fullName}</strong></td>
+                      <td>
+                        <strong>{user.fullName}</strong>
+                        {tab === "dentist" && user.setupRequired ? (
+                          <span className="admin-set-credential__badge">Setup required</span>
+                        ) : null}
+                        {tab === "dentist" && user.credentialConfigured ? (
+                          <span className="admin-set-credential__badge admin-set-credential__badge--ok">Credential configured</span>
+                        ) : null}
+                      </td>
                       {tab !== "patient" ? <td><code>{user.id}</code></td> : null}
                       {tab === "staff" ? (
                         <td>{user.operationalRole || user.position || "Clinic Staff"}</td>
@@ -1173,16 +1254,103 @@ export function AdminManageUsersPage() {
                       I verified this license number against this dentist's professional record. Prescriptions stay blocked until this is checked. Do not enter another dentist's number.
                     </span>
                   </label>
-                  <label className="admin-form--manage-user__full admin-license-verify">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(form.canApproveCrossBranchAccess)}
-                      onChange={(e) => setForm({ ...form, canApproveCrossBranchAccess: e.target.checked })}
-                    />
-                    <span>
-                      Can Authorize Cross-Branch Record Access. This stays off unless an administrator turns it on. It does not open charts or other branches.
-                    </span>
-                  </label>
+                  {editing ? (
+                    <fieldset className="admin-form--manage-user__full admin-set-credential">
+                      <legend>Set Credential</legend>
+                      <p>
+                        Separate authorization password this dentist uses to approve another dentist’s access to
+                        restricted cross-branch records. It does not sign them in and does not open charts by itself.
+                      </p>
+                      {form.authorizationCredentialStatus === "setup_required" ? (
+                        <p className="admin-set-credential__status admin-set-credential__status--warn">Setup required</p>
+                      ) : null}
+                      {form.authorizationCredentialStatus === "configured" && !resettingCredential ? (
+                        <>
+                          <p className="admin-set-credential__status admin-set-credential__status--ok">Credential configured</p>
+                          <div className="admin-set-credential__actions">
+                            <button
+                              type="button"
+                              className="button button--secondary"
+                              disabled={credentialBusy}
+                              onClick={() => setResettingCredential(true)}
+                            >
+                              Reset credential
+                            </button>
+                            <button
+                              type="button"
+                              className="button button--danger"
+                              disabled={credentialBusy}
+                              onClick={revokeAuthorizationCredential}
+                            >
+                              {credentialBusy ? "Working…" : "Revoke authorization"}
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          {form.authorizationCredentialStatus === "revoked" ? (
+                            <p className="admin-set-credential__status">Authorization revoked. Set a new credential to restore approval permission.</p>
+                          ) : null}
+                          <label>
+                            Authorization password
+                            <span className="admin-password-reset__input">
+                              <input
+                                type={showAuthPassword ? "text" : "password"}
+                                value={authPassword}
+                                autoComplete="new-password"
+                                onChange={(event) => setAuthPassword(event.target.value)}
+                              />
+                              <button
+                                type="button"
+                                className="admin-set-credential__toggle"
+                                onClick={() => setShowAuthPassword((current) => !current)}
+                                aria-label={showAuthPassword ? "Hide authorization password" : "Show authorization password"}
+                              >
+                                {showAuthPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                              </button>
+                            </span>
+                          </label>
+                          <label>
+                            Confirm password
+                            <input
+                              type={showAuthPassword ? "text" : "password"}
+                              value={authConfirm}
+                              autoComplete="new-password"
+                              onChange={(event) => setAuthConfirm(event.target.value)}
+                            />
+                          </label>
+                          <div className="admin-set-credential__actions">
+                            <button
+                              type="button"
+                              className="button button--primary"
+                              disabled={credentialBusy}
+                              onClick={saveAuthorizationCredential}
+                            >
+                              {credentialBusy ? "Saving…" : resettingCredential ? "Save new credential" : "Save credential"}
+                            </button>
+                            {resettingCredential ? (
+                              <button
+                                type="button"
+                                className="button button--secondary"
+                                disabled={credentialBusy}
+                                onClick={() => {
+                                  setResettingCredential(false);
+                                  setAuthPassword("");
+                                  setAuthConfirm("");
+                                }}
+                              >
+                                Cancel reset
+                              </button>
+                            ) : null}
+                          </div>
+                        </>
+                      )}
+                    </fieldset>
+                  ) : (
+                    <p className="admin-form--manage-user__full admin-set-credential__hint">
+                      After this dentist is created, open Edit Dentist to set their authorization credential.
+                    </p>
+                  )}
                 </>
               ) : null}
             </div>
