@@ -18,6 +18,7 @@ import { ProfilePage } from "./pages/ProfilePage";
 import { QueueDisplayPage } from "./pages/QueueDisplayPage";
 import { QueuePage } from "./pages/QueuePage";
 import { StaffAppointmentsPage } from "./pages/StaffAppointmentsPage";
+import { StaffHmoVerificationPage } from "./pages/StaffHmoVerificationPage";
 import { StaffBillingPage } from "./pages/StaffBillingPage";
 import { StaffCheckInPage } from "./pages/StaffCheckInPage";
 import { StaffDashboardPage } from "./pages/StaffDashboardPage";
@@ -188,6 +189,7 @@ function PortalRoutes() {
           <Route path="/staff/check-in" element={<StaffCheckInPage />} />
           <Route path="/staff/check-ins" element={<Navigate to="/staff/check-in" replace />} />
           <Route path="/staff/appointments" element={<StaffAppointmentsPage />} />
+          <Route path="/staff/hmo-verification" element={<StaffHmoVerificationPage />} />
           <Route path="/staff/patient-records" element={<StaffPatientsPage />} />
           <Route path="/staff/patients" element={<Navigate to="/staff/patient-records" replace />} />
           <Route path="/staff/queue" element={<StaffQueuePage />} />

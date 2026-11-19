@@ -461,6 +461,14 @@ export function StaffPatientsPage() {
               <p>
                 <strong>Next Appointment:</strong> {nextAppointmentLabel(detail)}
               </p>
+              <p>
+                <strong>HMO coverage:</strong>{" "}
+                {detail.hmoStatus === "verified"
+                  ? `HMO Verified${detail.hmoProvider ? ` · ${detail.hmoProvider}` : ""}${
+                      detail.hmoVerifiedAt ? ` · ${formatDentistDate(detail.hmoVerifiedAt)}` : ""
+                    }`
+                  : (detail.hmoStatus || "not_enrolled").replaceAll("_", " ")}
+              </p>
             </div>
             {!isProfileLocked(detail) ? (
               <p className="muted-copy">

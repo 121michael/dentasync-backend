@@ -47,6 +47,7 @@ const prescriptions = require("../services/prescriptions");
 const { loadApprovedClinicCatalog, resolveCatalog } = require("../services/approvedClinicCatalog");
 const medicalDocuments = require("../services/medicalDocuments");
 const appointmentLifecycle = require("../services/appointmentLifecycle");
+const hmoVerification = require("../services/hmoVerification");
 
 const SERVICES = [
   {
@@ -836,7 +837,7 @@ function createPatientPortalRouter({
         ),
         db.query(
           `SELECT oral_health_score, last_cleaning, next_checkup,
-                  hmo_provider, hmo_status, membership_tier
+                  hmo_provider, hmo_status, hmo_verified_at, membership_tier
            FROM patient_portal_profiles
            WHERE user_id = $1`,
           [userId]
@@ -909,7 +910,7 @@ function createPatientPortalRouter({
           clinicalNotes: snapshot.hasAssessment ? snapshot.clinicalNotes || "" : "",
         };
       } catch (wellnessError) {
-        if (wellnessError?.code !== "42P01") {
+        if (wellnessError?.code !== "42P01" && wellnessError?.code !== "42703") {
           throw wellnessError;
         }
       }
@@ -931,6 +932,8 @@ function createPatientPortalRouter({
           completedVisits: resultCount(counts, "completed_visits"),
           queueToken: queue?.token || null,
           hmoStatus: profile.hmo_status || "not_enrolled",
+          hmoProvider: profile.hmo_provider || null,
+          hmoVerifiedAt: profile.hmo_verified_at || null,
         },
         wellness,
         queue: queue
@@ -1217,6 +1220,14 @@ function createPatientPortalRouter({
         branch_status: booked.branch?.status || null,
         is_main: booked.branch?.isMain ?? null,
       };
+      if (normalizedCoverage === "hmo") {
+        try {
+          const synced = await hmoVerification.syncAppointmentCoverage(db, savedAppointment);
+          savedAppointment.hmo_verification_status = synced.status;
+        } catch (coverageError) {
+          if (coverageError?.code !== "42P01" && coverageError?.code !== "42703") throw coverageError;
+        }
+      }
       const when = patientBranchBooking.schedulePhrase(appointmentDate, normalizedAppointmentTime);
 
       if (medicalDocumentId) {
@@ -2807,6 +2818,31 @@ function createPatientPortalRouter({
       }
 
       const dateOfBirth = isIsoDate(body.dateOfBirth) ? body.dateOfBirth : null;
+      const previousProfile = await db
+        .query(`SELECT * FROM patient_portal_profiles WHERE user_id = $1 LIMIT 1`, [userId])
+        .then((result) => result.rows[0] || {});
+      let coverageSync = {
+        hmoStatus: body.hmoProvider ? "pending_verification" : "not_enrolled",
+        hmoVerifiedAt: null,
+        hmoVerifiedBy: null,
+        hmoVerificationBranchId: null,
+      };
+      try {
+        coverageSync = await hmoVerification.syncProfileCoverage(db, {
+          userId,
+          previous: previousProfile,
+          hmoProvider: stringValue(body.hmoProvider, 120),
+          hmoMemberNumber: stringValue(body.hmoMemberNumber, 120),
+          verificationBranchId: body.hmoVerificationBranchId || body.verificationBranchId,
+        });
+      } catch (coverageError) {
+        if (coverageError?.status) {
+          return res.status(coverageError.status).json({ message: coverageError.message });
+        }
+        if (coverageError?.code !== "42P01" && coverageError?.code !== "42703") {
+          throw coverageError;
+        }
+      }
       const profileValues = [
         userId,
         dateOfBirth,
@@ -2821,7 +2857,7 @@ function createPatientPortalRouter({
         stringValue(body.dentalConcerns, 1200),
         stringValue(body.hmoProvider, 120),
         stringValue(body.hmoMemberNumber, 120),
-        body.hmoProvider ? "pending_verification" : "not_enrolled",
+        coverageSync.hmoStatus,
       ];
 
       let result;
@@ -2886,6 +2922,32 @@ function createPatientPortalRouter({
            RETURNING *`,
           profileValues
         );
+      }
+
+      try {
+        await db.query(
+          `UPDATE patient_portal_profiles
+           SET hmo_status = $1,
+               hmo_verified_at = $2,
+               hmo_verified_by = $3,
+               hmo_verification_branch_id = $4,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE user_id = $5`,
+          [
+            coverageSync.hmoStatus,
+            coverageSync.hmoVerifiedAt,
+            coverageSync.hmoVerifiedBy,
+            coverageSync.hmoVerificationBranchId,
+            userId,
+          ]
+        );
+        const refreshed = await db.query(
+          `SELECT * FROM patient_portal_profiles WHERE user_id = $1 LIMIT 1`,
+          [userId]
+        );
+        if (refreshed.rows[0]) result = { rows: refreshed.rows };
+      } catch (columnError) {
+        if (columnError?.code !== "42703" && columnError?.code !== "42P01") throw columnError;
       }
 
       return res.json({ message: "Your profile has been saved.", profile: result.rows[0] });

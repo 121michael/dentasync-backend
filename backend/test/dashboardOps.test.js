@@ -92,6 +92,8 @@ test("dashboard metrics, links, branch isolation, and dentist availability", asy
   await applyBranchOperationSchema(db);
   await patientBranchBooking.applyPatientBranchBookingSchema(db);
   await branchCheckIn.applyBranchCheckInSchema(db);
+  const hmoVerification = require("../services/hmoVerification");
+  await hmoVerification.applyHmoVerificationSchema(db);
 
   const main = await db.query(`SELECT id FROM clinic_branches WHERE is_main`);
   const taguig = await db.query(
@@ -146,16 +148,28 @@ test("dashboard metrics, links, branch isolation, and dentist availability", asy
     [String(mDentist), String(tDentist), String(unknownDentist)]
   );
 
-  const book = async ({ userId, branchId, dentistId, dentistName, time, status = "confirmed", coverage = "self_pay", hmo = "not_applicable" }) => {
+  const book = async ({
+    userId,
+    branchId,
+    dentistId,
+    dentistName,
+    time,
+    status = "confirmed",
+    coverage = "self_pay",
+    hmo = "not_applicable",
+    hmoProvider = null,
+    hmoMemberNumber = null,
+  }) => {
     const result = await db.query(
       `INSERT INTO patient_portal_appointments (
          user_id, service_id, service_name, dentist_id, dentist_name,
-         appointment_date, appointment_time, coverage_type, hmo_verification_status, estimated_cost, status, branch_id
+         appointment_date, appointment_time, coverage_type, hmo_provider, hmo_member_number,
+         hmo_verification_status, estimated_cost, status, branch_id
        ) VALUES (
          $1, 'cleaning', 'Cleaning', $2, $3,
-         (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date, $4, $5, $6, 500, $7, $8
+         (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date, $4, $5, $6, $7, $8, 500, $9, $10
        ) RETURNING id`,
-      [String(userId), dentistId, dentistName, time, coverage, hmo, status, branchId]
+      [String(userId), dentistId, dentistName, time, coverage, hmoProvider, hmoMemberNumber, hmo, status, branchId]
     );
     return result.rows[0].id;
   };
@@ -182,7 +196,10 @@ test("dashboard metrics, links, branch isolation, and dentist availability", asy
     time: "11:00",
     coverage: "hmo",
     hmo: "pending_verification",
+    hmoProvider: "Maxicare",
+    hmoMemberNumber: "MC-1001",
   });
+  await hmoVerification.applyHmoVerificationSchema(db);
   await book({
     userId: dateOnlyPatient,
     branchId: mainId,
@@ -255,8 +272,8 @@ test("dashboard metrics, links, branch isolation, and dentist availability", asy
   assert.equal(tDash.body.metrics.pendingHmoVerification, 0);
   assert.ok(mDash.body.schedulePreview.some((row) => row.timeLabel === "Date only"));
 
-  const hmoList = await request("GET", "/api/staff/appointments?tab=hmo", { token: mStaffToken });
-  assert.equal(hmoList.body.appointments.length, mDash.body.metrics.pendingHmoVerification);
+  const hmoList = await request("GET", "/api/staff/hmo-submissions", { token: mStaffToken });
+  assert.equal(hmoList.body.submissions.length, mDash.body.metrics.pendingHmoVerification);
   const todayList = await request("GET", "/api/staff/appointments?tab=today", { token: mStaffToken });
   assert.equal(todayList.body.appointments.length, mDash.body.metrics.bookedToday);
   const noShowList = await request("GET", "/api/staff/appointments?tab=no_show", { token: mStaffToken });

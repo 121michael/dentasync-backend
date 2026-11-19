@@ -108,6 +108,7 @@ function profileToForm(profile) {
     dentalConcerns: profile.dental_concerns || "",
     hmoProvider: profile.hmo_provider || "",
     hmoMemberNumber: profile.hmo_member_number || "",
+    hmoVerificationBranchId: profile.hmo_verification_branch_id || "",
     patientCategory: profile.patientCategory || profile.patient_category || "regular",
   };
 }
@@ -134,18 +135,24 @@ export function ProfilePage() {
   const [isSaving, setIsSaving] = useState(false);
   const [passwords, setPasswords] = useState({ currentPassword: "", newPassword: "" });
   const [activeSection, setActiveSection] = useState(null);
+  const [branches, setBranches] = useState([]);
+  const [hmoProviders, setHmoProviders] = useState([]);
 
   const load = useCallback(async () => {
     setError("");
     try {
-      const [profileResponse, securityResponse] = await Promise.all([
+      const [profileResponse, securityResponse, catalog, branchChoices] = await Promise.all([
         api.getProfile(),
         api.getSecurity(),
+        api.getCatalog().catch(() => ({ hmoProviders: [] })),
+        api.getBookingBranches().catch(() => ({ branches: [] })),
       ]);
       setProfile(profileResponse.profile);
       setForm(profileToForm(profileResponse.profile));
       setPreferences({ ...profileResponse.preferences, theme: themeRef.current || "light" });
       setSecurity(securityResponse);
+      setHmoProviders(catalog.hmoProviders || []);
+      setBranches(branchChoices.branches || branchChoices.activeBranches || []);
     } catch (loadError) {
       setError(loadError.message);
     }
@@ -478,12 +485,51 @@ export function ProfilePage() {
                   <div className="field-grid field-grid--two">
                     <label className="field">
                       <span>HMO provider</span>
-                      <input name="hmoProvider" value={form.hmoProvider} onChange={updateForm} />
+                      {hmoProviders.length ? (
+                        <select name="hmoProvider" value={form.hmoProvider} onChange={updateForm}>
+                          <option value="">Not enrolled</option>
+                          {hmoProviders.map((provider) => (
+                            <option key={provider.id || provider.name} value={provider.name}>
+                              {provider.name}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input name="hmoProvider" value={form.hmoProvider} onChange={updateForm} />
+                      )}
                     </label>
                     <label className="field">
                       <span>HMO member number</span>
                       <input name="hmoMemberNumber" value={form.hmoMemberNumber} onChange={updateForm} />
                     </label>
+                    <label className="field">
+                      <span>Review branch</span>
+                      <select
+                        name="hmoVerificationBranchId"
+                        value={form.hmoVerificationBranchId}
+                        onChange={updateForm}
+                      >
+                        <option value="">Select a branch for Staff review</option>
+                        {branches.map((branch) => (
+                          <option key={branch.id} value={branch.id}>
+                            {branch.name || branch.branchName}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <p className="field">
+                      <span>Verification status</span>
+                      <strong>
+                        {profile.hmo_status === "verified"
+                          ? "HMO Verified"
+                          : (profile.hmo_status || "not_enrolled").replaceAll("_", " ")}
+                      </strong>
+                      {profile.hmo_status === "verified" && profile.hmo_verified_at ? (
+                        <small>Verified {new Date(profile.hmo_verified_at).toLocaleDateString()}</small>
+                      ) : (
+                        <small>Staff must verify coverage. Saving HMO details does not create an appointment.</small>
+                      )}
+                    </p>
                   </div>
                   <div className="care-summary">
                     <span>

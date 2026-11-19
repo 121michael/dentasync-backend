@@ -263,11 +263,19 @@ export function DashboardPage() {
           icon={ShieldCheck}
           label="HMO coverage"
           value={
-            !dashboard.metrics.hmoStatus || dashboard.metrics.hmoStatus === "not_enrolled"
-              ? "Not enrolled"
-              : dashboard.metrics.hmoStatus.replaceAll("_", " ")
+            dashboard.metrics.hmoStatus === "verified"
+              ? "HMO Verified"
+              : !dashboard.metrics.hmoStatus || dashboard.metrics.hmoStatus === "not_enrolled"
+                ? "Not enrolled"
+                : dashboard.metrics.hmoStatus.replaceAll("_", " ")
           }
-          detail="Coverage verification status"
+          detail={
+            dashboard.metrics.hmoStatus === "verified"
+              ? [dashboard.metrics.hmoProvider, dashboard.metrics.hmoVerifiedAt ? prettyDate(dashboard.metrics.hmoVerifiedAt, "") : ""]
+                  .filter(Boolean)
+                  .join(" · ") || "Verified by clinic staff"
+              : "Coverage verification status"
+          }
           tone="violet"
         />
       </section>

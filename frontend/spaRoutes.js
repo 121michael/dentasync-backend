@@ -23,6 +23,7 @@ export const SPA_ROUTES = [
   "/staff/check-in",
   "/staff/check-ins",
   "/staff/appointments",
+  "/staff/hmo-verification",
   "/staff/patient-records",
   "/staff/patients",
   "/staff/queue",

@@ -70,6 +70,14 @@ export function getStaffNotificationTarget(notification) {
     };
   }
 
+  if (type === "hmo" || entityType === "hmo_submission" || entityType === "hmo") {
+    return {
+      targetPage: "hmo-verification",
+      path: "/staff/hmo-verification",
+      label: "View HMO verification",
+    };
+  }
+
   if (type === "document" || entityType === "document") {
     return {
       targetPage: "appointments",

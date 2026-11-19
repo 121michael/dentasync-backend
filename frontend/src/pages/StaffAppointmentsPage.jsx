@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Eye, MessageSquare, Nfc, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
-import { useSearchParams } from "react-router-dom";
+import { Navigate, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { StaffModal, StaffStatusBadge } from "../components/StaffUI";
@@ -12,16 +12,25 @@ const TABS = [
   { id: "pending", label: "Pending" },
   { id: "confirmed", label: "Confirmed" },
   { id: "today", label: "Today" },
-  { id: "hmo", label: "HMO Review" },
   { id: "completed", label: "Completed" },
   { id: "no_show", label: "No-show" },
   { id: "cancelled", label: "Cancelled" },
 ];
 
+function appointmentHmoLine(appointment) {
+  const appointmentLabel = `Appointment: ${String(appointment.status || "unknown").replaceAll("_", " ")}`;
+  if (appointment.coverageType !== "hmo") {
+    return appointmentLabel;
+  }
+  const hmoLabel = String(appointment.hmoVerificationStatus || "pending_verification").replaceAll("_", " ");
+  return `${appointmentLabel} · HMO: ${hmoLabel}`;
+}
+
 export function StaffAppointmentsPage() {
   const { pushToast, confirm } = useStaffUi();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [tab, setTab] = useState(searchParams.get("tab") || "today");
+  const requestedTab = searchParams.get("tab") || "today";
+  const [tab, setTab] = useState(requestedTab === "hmo" ? "today" : requestedTab);
   const when = searchParams.get("when") || "";
   const [data, setData] = useState(null);
   const [detail, setDetail] = useState(null);
@@ -222,7 +231,12 @@ export function StaffAppointmentsPage() {
         status,
         hmoVerificationStatus: status,
       });
-      pushToast(response.message || `HMO marked as ${status.replaceAll("_", " ")}.`);
+      const sms = response.sms;
+      if (sms?.status === "failed") {
+        pushToast(`HMO saved, but the SMS could not be sent. ${sms.reason || ""}`.trim(), "error");
+      } else {
+        pushToast(response.message || `HMO marked as ${status.replaceAll("_", " ")}.`);
+      }
       if (detail?.id === appointment.id) {
         const refreshed = await api.getStaffAppointment(appointment.id);
         setDetail(refreshed.appointment);
@@ -254,6 +268,10 @@ export function StaffAppointmentsPage() {
     });
     if (!ok) return;
     await runAction(rescheduleTarget, "reschedule", rescheduleForm);
+  }
+
+  if (searchParams.get("tab") === "hmo") {
+    return <Navigate to="/staff/hmo-verification" replace />;
   }
 
   if (error && !data) return <ErrorState message={error} onRetry={load} />;
@@ -358,6 +376,9 @@ export function StaffAppointmentsPage() {
                     </td>
                     <td>
                       <StaffStatusBadge status={appointment.status} />
+                      {appointment.coverageType === "hmo" ? (
+                        <small>{appointmentHmoLine(appointment)}</small>
+                      ) : null}
                     </td>
                     <td>
                       <div className="staff-row-actions">
@@ -424,7 +445,7 @@ export function StaffAppointmentsPage() {
             <p><small>Time</small><strong>{formatStaffTime(String(detail.time || "").slice(0, 5))}</strong></p>
             <p><small>Service</small><strong>{detail.service || detail.treatment}</strong></p>
             <p><small>Dentist</small><strong>{detail.dentist}</strong></p>
-            <p><small>HMO status</small><strong>{detail.coverageType || "—"}</strong></p>
+            <p><small>Statuses</small><strong>{appointmentHmoLine(detail)}</strong></p>
             <p><small>HMO provider</small><strong>{detail.hmoProvider || "—"}</strong></p>
             <p><small>HMO ID</small><strong>{detail.hmoMemberNumber || "—"}</strong></p>
             <p>

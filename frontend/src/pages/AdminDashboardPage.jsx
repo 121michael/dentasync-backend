@@ -201,7 +201,7 @@ export function AdminDashboardPage() {
         <AdminStatCard
           label="Pending HMO Verification"
           value={metrics.pendingHmoVerification ?? 0}
-          detail="HMO bookings waiting for authorized review"
+          detail="HMO submissions waiting for Staff review."
           tone="amber"
           icon={HeartPulse}
           to={dashboardHref("/admin/roster", { branchId, extra: { metric: "hmo" } })}

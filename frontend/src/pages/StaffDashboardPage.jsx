@@ -170,9 +170,9 @@ export function StaffDashboardPage() {
           label="Pending HMO Verification"
           value={metrics.pendingHmoVerification ?? 0}
           timeframe="Needs review"
-          detail="HMO bookings waiting for staff verification"
+          detail="HMO submissions waiting for Staff review."
           tone="amber"
-          to="/staff/appointments?tab=hmo"
+          to="/staff/hmo-verification"
           actionable={Number(metrics.pendingHmoVerification ?? 0) > 0}
         />
       </section>
