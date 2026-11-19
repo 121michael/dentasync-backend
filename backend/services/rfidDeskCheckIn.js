@@ -4,6 +4,8 @@ const crypto = require("crypto");
 const staffCheckIn = require("./staffCheckIn");
 const staffRfidEvents = require("./staffRfidEvents");
 const branchCheckIn = require("./branchCheckIn");
+const branchAccess = require("./branchAccess");
+const rfidScanErrors = require("./rfidScanErrors");
 
 function resolvedDeviceSecret(env = process.env) {
   return String(env.RFID_DEVICE_SECRET || "").trim();
@@ -82,10 +84,29 @@ function mapSuccess(appointment, checkIn, walkInCreated) {
   };
 }
 
+function failScan({ tag, branchId, status, message, errorCode, patient }) {
+  staffRfidEvents.recordRfidEvent({
+    rfidTag: tag,
+    method: "rfid",
+    branchId,
+    status: "failed",
+    message,
+    errorCode,
+    patient: patient || null,
+  });
+  return { ok: false, status, message, errorCode, patient: patient || undefined };
+}
+
+async function resolveReaderBranchId(client, reader) {
+  if (reader?.legacy) {
+    return branchAccess.mainBranchId(client);
+  }
+  return reader?.branch_id || null;
+}
+
 // The reader firmware does not send a branch. The authorized clinic_rfid_readers
 // row supplies the branch. A request body cannot choose a different branch.
-// Appointments at another branch are refused. A registered card with no eligible
-// appointment today is assigned the earliest remaining walk-in slot at the reader branch.
+// Reader and card assignment are evaluated before appointment or walk-in slots.
 async function checkInByRfidTag(db, { rfidTag, notifyClinicStaff, notifyClinicDentists }) {
   const tag = staffCheckIn.normalizeRfidTag(rfidTag);
   if (!tag) {
@@ -100,62 +121,81 @@ async function checkInByRfidTag(db, { rfidTag, notifyClinicStaff, notifyClinicDe
     transactionOpen = true;
     await client.query("SELECT pg_advisory_xact_lock(hashtext('patient_portal_queue'))");
 
-    const patient = await staffCheckIn.findPatient(client, { rfidTag: tag });
-    if (!patient) {
-      await client.query("ROLLBACK");
-      transactionOpen = false;
-      staffRfidEvents.recordRfidEvent({
-        rfidTag: tag,
-        method: "rfid",
-        status: "failed",
-        message: "RFID not recognized. Ask Admin to assign this card to the patient account.",
-      });
-      return {
-        ok: false,
-        status: 404,
-        message: "RFID not recognized. Ask Admin to assign this card to the patient account.",
-      };
-    }
-
-    if (!patient.is_verified) {
-      await client.query("ROLLBACK");
-      transactionOpen = false;
-      const fullName = `${patient.first_name || ""} ${patient.last_name || ""}`.trim();
-      staffRfidEvents.recordRfidEvent({
-        rfidTag: tag,
-        method: "rfid",
-        status: "failed",
-        message: "Patient account is not verified yet.",
-        patient: { id: patient.id, fullName },
-      });
-      return {
-        ok: false,
-        status: 403,
-        message: "Patient account is not verified yet.",
-        patient: { id: patient.id, fullName },
-      };
-    }
-
     const reader = await branchCheckIn.resolveAuthorizedReader(client);
-    readerBranchId = reader?.legacy ? "main" : reader?.branch_id || null;
+    readerBranchId = await resolveReaderBranchId(client, reader);
     if (!readerBranchId) {
       await client.query("ROLLBACK");
       transactionOpen = false;
-      return { ok: false, status: 409, message: "RFID reader is not configured for a clinic branch." };
+      return failScan({
+        tag,
+        branchId: null,
+        status: 409,
+        message: rfidScanErrors.RFID_READER_UNCONFIGURED_MESSAGE,
+        errorCode: rfidScanErrors.RFID_ERROR_CODES.READER_UNCONFIGURED,
+      });
     }
     if (!reader?.legacy && reader?.rfid_enabled === false) {
       await client.query("ROLLBACK");
       transactionOpen = false;
-      return { ok: false, status: 409, message: "RFID check-in is turned off for this clinic branch." };
+      return failScan({
+        tag,
+        branchId: readerBranchId,
+        status: 409,
+        message: rfidScanErrors.RFID_READER_DISABLED_MESSAGE,
+        errorCode: rfidScanErrors.RFID_ERROR_CODES.READER_DISABLED,
+      });
     }
-    const resolved = await staffCheckIn.resolveAppointmentForCheckIn(client, patient, {
+
+    const holder = await staffCheckIn.findRfidCardHolder(client, tag);
+    const eligiblePatient =
+      holder &&
+      String(holder.role || "").toLowerCase() === "patient" &&
+      !rfidScanErrors.isInactivePatientStatus(holder)
+        ? holder
+        : null;
+
+    if (!eligiblePatient) {
+      await client.query("ROLLBACK");
+      transactionOpen = false;
+      if (holder && String(holder.role || "").toLowerCase() === "patient") {
+        return failScan({
+          tag,
+          branchId: readerBranchId,
+          status: 403,
+          message: rfidScanErrors.RFID_INACTIVE_MESSAGE,
+          errorCode: rfidScanErrors.RFID_ERROR_CODES.INACTIVE,
+          patient: rfidScanErrors.patientSummary(holder),
+        });
+      }
+      return failScan({
+        tag,
+        branchId: readerBranchId,
+        status: 404,
+        message: rfidScanErrors.RFID_UNASSIGNED_MESSAGE,
+        errorCode: rfidScanErrors.RFID_ERROR_CODES.UNASSIGNED,
+      });
+    }
+
+    if (!eligiblePatient.is_verified) {
+      await client.query("ROLLBACK");
+      transactionOpen = false;
+      return failScan({
+        tag,
+        branchId: readerBranchId,
+        status: 403,
+        message: "Patient account is not verified yet.",
+        patient: rfidScanErrors.patientSummary(eligiblePatient),
+      });
+    }
+
+    const resolved = await staffCheckIn.resolveAppointmentForCheckIn(client, eligiblePatient, {
       allowWalkIn: true,
       branchId: readerBranchId,
     });
     if (!resolved.appointment) {
       let diagnosis = null;
       try {
-        diagnosis = await staffCheckIn.diagnoseMissingCheckInAppointment(client, patient);
+        diagnosis = await staffCheckIn.diagnoseMissingCheckInAppointment(client, eligiblePatient);
       } catch (diagnoseError) {
         console.warn("Check-in diagnosis failed:", diagnoseError.message);
       }
@@ -164,18 +204,16 @@ async function checkInByRfidTag(db, { rfidTag, notifyClinicStaff, notifyClinicDe
       const message = diagnosis?.hint
         ? `No eligible appointment found for this patient today. ${diagnosis.hint}`
         : "No eligible appointment found for this patient today.";
-      staffRfidEvents.recordRfidEvent({
-        rfidTag: tag,
-        method: "rfid",
-        branchId: reader?.branch_id || null,
-        status: "failed",
-        message,
-        patient: {
-          id: patient.id,
-          fullName: `${patient.first_name || ""} ${patient.last_name || ""}`.trim(),
-        },
-      });
-      return { ok: false, status: 404, message, diagnosis };
+      return {
+        ...failScan({
+          tag,
+          branchId: readerBranchId,
+          status: 404,
+          message,
+          patient: rfidScanErrors.patientSummary(eligiblePatient),
+        }),
+        diagnosis,
+      };
     }
 
     const checkIn = await staffCheckIn.performStaffCheckIn(client, {
@@ -193,7 +231,7 @@ async function checkInByRfidTag(db, { rfidTag, notifyClinicStaff, notifyClinicDe
     staffRfidEvents.recordRfidEvent({
       rfidTag: tag,
       method: "rfid",
-      branchId: reader?.branch_id || resolved.appointment?.branch_id || null,
+      branchId: readerBranchId,
       status: "success",
       message: payload.message,
       patient: payload.patient,
@@ -206,15 +244,17 @@ async function checkInByRfidTag(db, { rfidTag, notifyClinicStaff, notifyClinicDe
     if (transactionOpen) {
       await client.query("ROLLBACK");
     }
+    const errorCode = rfidScanErrors.classifyCheckInError(error);
     staffRfidEvents.recordRfidEvent({
       rfidTag: tag,
       method: "rfid",
-      branchId: readerBranchId && readerBranchId !== "main" ? readerBranchId : null,
+      branchId: readerBranchId,
       status: "failed",
       message: error.message || "Unable to complete patient check-in.",
+      errorCode,
     });
     if (error.status) {
-      return { ok: false, status: error.status, message: error.message };
+      return { ok: false, status: error.status, message: error.message, errorCode };
     }
     throw error;
   } finally {

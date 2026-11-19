@@ -18,6 +18,7 @@ function recordRfidEvent( partial ) {
     appointment: partial.appointment || null,
     queue: partial.queue || null,
     walkInCreated: Boolean(partial.walkInCreated),
+    errorCode: partial.errorCode || null,
     createdAt: new Date().toISOString(),
   };
   events.unshift(event);
@@ -40,8 +41,14 @@ function latestRfidEvent(branchId = null) {
   return events.find((event) => String(event.branchId) === String(branchId)) || null;
 }
 
+function resetRfidEvents() {
+  events.length = 0;
+  sequence = 0;
+}
+
 module.exports = {
   recordRfidEvent,
   listRfidEvents,
   latestRfidEvent,
+  resetRfidEvents,
 };

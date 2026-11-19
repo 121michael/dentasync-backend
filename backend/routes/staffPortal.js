@@ -10,6 +10,7 @@ const staffCheckIn = require("../services/staffCheckIn");
 const staffWalkInQr = require("../services/staffWalkInQr");
 const { insertPatientNotification } = require("../services/patientPortalNotifications");
 const staffRfidEvents = require("../services/staffRfidEvents");
+const rfidScanErrors = require("../services/rfidScanErrors");
 const {
   safeRecalculateQueueWaitEstimates,
   staffWaitEstimate,
@@ -871,7 +872,8 @@ function createStaffPortalRouter({
       const patient = await staffCheckIn.findPatient(client, { rfidTag });
       if (!patient) {
         return res.status(404).json({
-          message: "RFID not recognized. Ask Admin to assign this card to the patient account.",
+          message: rfidScanErrors.RFID_UNASSIGNED_MESSAGE,
+          errorCode: rfidScanErrors.RFID_ERROR_CODES.UNASSIGNED,
         });
       }
 
@@ -2223,9 +2225,7 @@ function createStaffPortalRouter({
       if (!appointment) {
         let patient = null;
         try {
-          if (method === "rfid") {
-            patient = await staffCheckIn.findPatient(client, { rfidTag });
-          } else {
+          if (method !== "rfid") {
             patient = await staffCheckIn.findPatient(client, {
               patientId,
               rfidTag,
@@ -2246,6 +2246,47 @@ function createStaffPortalRouter({
             patient = await staffCheckIn.findPatient(client, { patientId, code: payload?.code, phone, email });
           }
         }
+        if (method === "rfid") {
+          const holder = await staffCheckIn.findRfidCardHolder(client, rfidTag);
+          const eligible =
+            holder &&
+            String(holder.role || "").toLowerCase() === "patient" &&
+            !rfidScanErrors.isInactivePatientStatus(holder)
+              ? holder
+              : null;
+          if (!eligible) {
+            await client.query("ROLLBACK");
+            transactionOpen = false;
+            if (holder && String(holder.role || "").toLowerCase() === "patient") {
+              staffRfidEvents.recordRfidEvent({
+                rfidTag,
+                branchId: req.branchAccess?.activeBranch?.id || null,
+                status: "failed",
+                message: rfidScanErrors.RFID_INACTIVE_MESSAGE,
+                errorCode: rfidScanErrors.RFID_ERROR_CODES.INACTIVE,
+                patient: rfidScanErrors.patientSummary(holder),
+              });
+              return res.status(403).json({
+                message: rfidScanErrors.RFID_INACTIVE_MESSAGE,
+                errorCode: rfidScanErrors.RFID_ERROR_CODES.INACTIVE,
+                patient: rfidScanErrors.patientSummary(holder),
+              });
+            }
+            staffRfidEvents.recordRfidEvent({
+              rfidTag,
+              branchId: req.branchAccess?.activeBranch?.id || null,
+              status: "failed",
+              message: rfidScanErrors.RFID_UNASSIGNED_MESSAGE,
+              errorCode: rfidScanErrors.RFID_ERROR_CODES.UNASSIGNED,
+            });
+            return res.status(404).json({
+              message: rfidScanErrors.RFID_UNASSIGNED_MESSAGE,
+              errorCode: rfidScanErrors.RFID_ERROR_CODES.UNASSIGNED,
+            });
+          }
+          patient = eligible;
+        }
+
         if (!patient) {
           await client.query("ROLLBACK");
           transactionOpen = false;
@@ -2254,14 +2295,16 @@ function createStaffPortalRouter({
               rfidTag,
               branchId: req.branchAccess?.activeBranch?.id || null,
               status: "failed",
-              message: "RFID not recognized. Ask Admin to assign this card to the patient account.",
+              message: rfidScanErrors.RFID_UNASSIGNED_MESSAGE,
+              errorCode: rfidScanErrors.RFID_ERROR_CODES.UNASSIGNED,
             });
           }
           return res.status(404).json({
             message:
               method === "rfid"
-                ? "RFID not recognized. Ask Admin to assign this card to the patient account."
+                ? rfidScanErrors.RFID_UNASSIGNED_MESSAGE
                 : "Patient not found for this check-in code.",
+            errorCode: method === "rfid" ? rfidScanErrors.RFID_ERROR_CODES.UNASSIGNED : undefined,
           });
         }
         if (!patient.is_verified) {
@@ -2421,12 +2464,14 @@ function createStaffPortalRouter({
       if (!error.status || error.status >= 500) {
         console.error("Staff check-in error:", error.message, error.code || "", error.detail || "");
       }
+      const errorCode = method === "rfid" ? rfidScanErrors.classifyCheckInError(error) : null;
       if (method === "rfid") {
         staffRfidEvents.recordRfidEvent({
           rfidTag,
           branchId: req.branchAccess?.activeBranch?.id || null,
           status: "failed",
           message: error.message || "Unable to complete patient check-in.",
+          errorCode,
         });
       }
       return res.status(error.status || 500).json({
@@ -2435,6 +2480,7 @@ function createStaffPortalRouter({
           : error.message || "Unable to complete patient check-in.",
         detail: error.message,
         code: error.code || undefined,
+        errorCode: errorCode || undefined,
       });
     } finally {
       client.release();

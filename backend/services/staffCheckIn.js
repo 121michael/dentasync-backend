@@ -6,6 +6,7 @@ const queueNumbers = require("./queueNumbers");
 const branchAccess = require("./branchAccess");
 const branchCheckIn = require("./branchCheckIn");
 const patientBranchBooking = require("./patientBranchBooking");
+const rfidScanErrors = require("./rfidScanErrors");
 
 const NO_WALK_IN_SLOTS_MESSAGE = patientBranchBooking.NO_WALK_IN_SLOTS_MESSAGE;
 
@@ -357,7 +358,8 @@ async function findPatient(client, { patientId, rfidTag, code, phone, email }) {
   }
 
   const result = await client.query(
-    `SELECT id, first_name, last_name, email, phone, role, status, is_verified, rfid_tag
+    `SELECT id, first_name, last_name, email, phone, role, status, is_verified, rfid_tag,
+            COALESCE(is_archived, FALSE) AS is_archived
      FROM users
      WHERE LOWER(role) = 'patient'
        AND COALESCE(is_archived, FALSE) = FALSE
@@ -365,6 +367,21 @@ async function findPatient(client, { patientId, rfidTag, code, phone, email }) {
      ORDER BY id DESC
      LIMIT 1`,
     params
+  );
+  return result.rows[0] || null;
+}
+
+async function findRfidCardHolder(client, rfidTag) {
+  const tag = normalizeRfidTag(rfidTag);
+  if (!tag) return null;
+  const result = await client.query(
+    `SELECT id, first_name, last_name, email, phone, role, status, is_verified, rfid_tag,
+            COALESCE(is_archived, FALSE) AS is_archived
+     FROM users
+     WHERE LOWER(COALESCE(rfid_tag, '')) = LOWER($1)
+     ORDER BY id DESC
+     LIMIT 1`,
+    [tag]
   );
   return result.rows[0] || null;
 }
@@ -625,6 +642,7 @@ async function createWalkInAppointmentForPatient(client, patient, { branchId = n
     if (error?.code === "23505") {
       const conflict = new Error(NO_WALK_IN_SLOTS_MESSAGE);
       conflict.status = 409;
+      conflict.errorCode = rfidScanErrors.RFID_ERROR_CODES.NO_WALK_IN_SLOT;
       throw conflict;
     }
     throw error;
@@ -661,6 +679,7 @@ async function createWalkInAppointmentForPatient(client, patient, { branchId = n
     if (error?.code === "23505") {
       const conflict = new Error(NO_WALK_IN_SLOTS_MESSAGE);
       conflict.status = 409;
+      conflict.errorCode = rfidScanErrors.RFID_ERROR_CODES.NO_WALK_IN_SLOT;
       throw conflict;
     }
     throw error;
@@ -708,6 +727,7 @@ async function resolveAppointmentForCheckIn(client, patient, { allowWalkIn = fal
         `This appointment is at ${elsewhere.branch_name || "another clinic branch"}. Please check in at that branch's staffed desk.`
       );
       error.status = 409;
+      error.errorCode = rfidScanErrors.RFID_ERROR_CODES.WRONG_BRANCH;
       throw error;
     }
   }
@@ -1058,6 +1078,7 @@ module.exports = {
   parseQrPayload,
   normalizeRfidTag,
   findPatient,
+  findRfidCardHolder,
   findAppointmentForCheckIn,
   diagnoseMissingCheckInAppointment,
   resolveAppointmentForCheckIn,
