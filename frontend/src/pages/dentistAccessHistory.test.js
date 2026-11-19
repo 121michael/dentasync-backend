@@ -17,7 +17,11 @@ function accessRecordHistorySource() {
 test("Access Record History does not render a numbered treatment-summary list", () => {
   const source = accessRecordHistorySource();
   assert.match(source, /Access Record History/);
-  assert.match(source, /Cross-Branch Record Authorization/);
+  assert.match(source, /Request Record Access/);
+  assert.match(source, /Access Records/);
+  assert.match(source, /License Number/);
+  assert.doesNotMatch(source, /Cross-Branch Record Authorization/);
+  assert.doesNotMatch(source, /Create approval code/);
   assert.doesNotMatch(source, /<ol[\s>]/);
   assert.doesNotMatch(source, /No authorized history yet/);
   assert.doesNotMatch(source, /recorded \$\{formatDentistDate/);
@@ -27,5 +31,6 @@ test("Access Record History does not render a numbered treatment-summary list", 
 test("Dental Treatment History remains on the dentist patient record page", () => {
   const page = fs.readFileSync(path.join(here, "DentistRecordsPage.jsx"), "utf8");
   assert.match(page, /<h2>Dental Treatment History<\/h2>/);
-  assert.match(page, /Cross-Branch Record Authorization/);
+  assert.match(page, /Request Record Access/);
+  assert.match(page, /unlockDentistRecordAccess/);
 });

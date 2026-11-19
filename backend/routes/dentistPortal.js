@@ -3323,6 +3323,30 @@ function createDentistPortalRouter({
     }
   });
 
+  router.post("/patients/:id/record-access", async (req, res) => {
+    const recordId = numericId(req.params.id);
+    if (!recordId) return res.status(400).json({ message: "A valid patient record ID is required." });
+    try {
+      const detail = await clinicalPatients.getClinicalRecord(db, recordId);
+      if (!detail || detail.record.archived) {
+        return res.status(404).json({ message: "Patient record not found." });
+      }
+      const result = await recordAccess.unlockOwnRecordAccess(db, req, {
+        record: detail.record,
+        licenseNumber: req.body?.licenseNumber,
+        password: req.body?.password,
+      });
+      return res.json({
+        message: "Restricted records are available for the permitted history.",
+        expiresAt: result.expiresAt,
+        minutes: result.minutes,
+        grants: result.grants,
+      });
+    } catch (error) {
+      return sendAccessError(res, error, "Unable to open restricted records.");
+    }
+  });
+
   router.post("/patients/:id/access-challenges", async (req, res) => {
     const recordId = numericId(req.params.id);
     if (!recordId) return res.status(400).json({ message: "A valid patient record ID is required." });

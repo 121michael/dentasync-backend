@@ -1068,6 +1068,163 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
   assert.ok(staffExport.status === 200 || staffExport.status === 404, String(staffExport.status));
   assert.equal(JSON.stringify(staffExport.json).includes("Deep caries"), false);
 
+  const treatingAuthPassword = "TreatAuth1234";
+  const treatingLicense = "PRC-TR-1001";
+  const delegateLicense = "PRC-DEL-2002";
+  recordAccess.resetAuthFailures();
+  const licensePatch = await api("PATCH", `/api/admin/dentists/${treatingId}`, {
+    role: "admin",
+    id: adminId,
+    body: {
+      firstName: "Pat",
+      lastName: "Treating",
+      email: "pat.treating@example.test",
+      phone: "09170000002",
+      licenseNumber: treatingLicense,
+      licenseVerified: true,
+      branchIds: [mandaluyongId, pasigId],
+    },
+  });
+  assert.equal(licensePatch.status, 200, licensePatch.json.message);
+  const delegateLicensePatch = await api("PATCH", `/api/admin/dentists/${delegateId}`, {
+    role: "admin",
+    id: adminId,
+    body: {
+      firstName: "Del",
+      lastName: "Egated",
+      email: "del.egated@example.test",
+      phone: "09170000005",
+      licenseNumber: delegateLicense,
+      licenseVerified: true,
+      branchIds: [mandaluyongId, pasigId],
+    },
+  });
+  assert.equal(delegateLicensePatch.status, 200, delegateLicensePatch.json.message);
+  const treatingCredential = await api("PUT", `/api/admin/dentists/${treatingId}/authorization-credential`, {
+    role: "admin",
+    id: adminId,
+    body: { password: treatingAuthPassword, confirmPassword: treatingAuthPassword },
+  });
+  assert.equal(treatingCredential.status, 200, treatingCredential.json.message);
+
+  const missingAuth = await api("POST", `/api/dentist/patients/${recordId}/record-access`, {
+    role: "dentist",
+    id: coworkerId,
+    branchId: mandaluyongId,
+    body: { licenseNumber: treatingLicense, password: treatingAuthPassword },
+  });
+  assert.equal(missingAuth.status, 403);
+
+  const wrongUnlock = await api("POST", `/api/dentist/patients/${recordId}/record-access`, {
+    role: "dentist",
+    id: treatingId,
+    branchId: pasigId,
+    body: { licenseNumber: treatingLicense, password: "WrongAuth1234" },
+  });
+  assert.equal(wrongUnlock.status, 401);
+  assert.equal(JSON.stringify(wrongUnlock.json).includes("WrongAuth1234"), false);
+  assert.equal(JSON.stringify(wrongUnlock.json).includes(treatingAuthPassword), false);
+
+  const foreignLicense = await api("POST", `/api/dentist/patients/${recordId}/record-access`, {
+    role: "dentist",
+    id: treatingId,
+    branchId: pasigId,
+    body: { licenseNumber: delegateLicense, password: treatingAuthPassword },
+  });
+  assert.equal(foreignLicense.status, 403);
+
+  const unlocked = await api("POST", `/api/dentist/patients/${recordId}/record-access`, {
+    role: "dentist",
+    id: treatingId,
+    branchId: pasigId,
+    body: { licenseNumber: treatingLicense, password: treatingAuthPassword },
+  });
+  assert.equal(unlocked.status, 200, unlocked.json.message);
+  assert.equal(JSON.stringify(unlocked.json).includes(treatingAuthPassword), false);
+  assert.ok(unlocked.json.expiresAt);
+  const openedOwn = await api("GET", `/api/dentist/patients/${recordId}`, {
+    role: "dentist",
+    id: treatingId,
+    branchId: pasigId,
+  });
+  assert.equal(
+    openedOwn.json.treatments.find((row) => row.treatment === "Oral Prophylaxis").diagnosisNotes,
+    "Deep caries on 36"
+  );
+  assert.equal(openedOwn.json.treatments.find((row) => row.treatment === "Legacy Filling").diagnosisNotes, "");
+
+  const stillReadOnly = await api(
+    "PUT",
+    `/api/dentist/patients/${recordId}/treatments/${treatmentRow.rows[0].id}`,
+    {
+      role: "dentist",
+      id: treatingId,
+      branchId: pasigId,
+      body: { treatment: "Oral Prophylaxis", treatmentDate: "2026-01-10", diagnosisNotes: "changed" },
+    }
+  );
+  assert.equal(stillReadOnly.status, 403);
+
+  const otherAfterUnlock = await api("GET", `/api/dentist/patients/${otherRecordId}`, {
+    role: "dentist",
+    id: treatingId,
+    branchId: pasigId,
+  });
+  assert.equal(otherAfterUnlock.status, 200);
+  assert.equal((otherAfterUnlock.json.treatments || []).length, 0);
+  assert.equal(JSON.stringify(otherAfterUnlock.json).includes("Deep caries"), false);
+
+  await db.query(
+    `UPDATE record_access_grants SET expires_at = CURRENT_TIMESTAMP - INTERVAL '1 minute'
+     WHERE requesting_dentist_id = $1 AND clinical_record_id = $2 AND status = 'active'`,
+    [treatingId, recordId]
+  );
+  const expiredOwn = await api("GET", `/api/dentist/patients/${recordId}`, {
+    role: "dentist",
+    id: treatingId,
+    branchId: pasigId,
+  });
+  assert.equal(
+    expiredOwn.json.treatments.find((row) => row.treatment === "Oral Prophylaxis").diagnosisNotes,
+    ""
+  );
+
+  const ownChallenge = await api("POST", `/api/dentist/patients/${recordId}/access-challenges`, {
+    role: "dentist",
+    id: treatingId,
+    branchId: pasigId,
+    body: {
+      requestingBranchId: pasigId,
+      originatingBranchId: mandaluyongId,
+      reason: "Need notes via isolated approval",
+      scope: "diagnosis_notes",
+    },
+  });
+  assert.equal(ownChallenge.status, 201, ownChallenge.json.message);
+  const selfApproveWithCredential = await api(
+    "POST",
+    `/api/record-access/challenges/${ownChallenge.json.challenge.approvalCode}/approve`,
+    {
+      role: "dentist",
+      id: treatingId,
+      body: { authorizationPassword: treatingAuthPassword },
+    }
+  );
+  assert.equal(selfApproveWithCredential.status, 403);
+
+  const revokeTreating = await api("DELETE", `/api/admin/dentists/${treatingId}/authorization-credential`, {
+    role: "admin",
+    id: adminId,
+  });
+  assert.equal(revokeTreating.status, 200, revokeTreating.json.message);
+  const revokedUnlock = await api("POST", `/api/dentist/patients/${recordId}/record-access`, {
+    role: "dentist",
+    id: treatingId,
+    branchId: pasigId,
+    body: { licenseNumber: treatingLicense, password: treatingAuthPassword },
+  });
+  assert.equal(revokedUnlock.status, 403);
+
   const audit = await db.query(
     `SELECT action, detail FROM admin_portal_audit_logs WHERE action LIKE 'record_access_%' OR action = 'cross_branch_chart_read' OR action = 'Document Data Import'`
   );
@@ -1076,9 +1233,10 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
   assert.ok(audit.rows.some((row) => row.action === "record_access_credential_set"));
   assert.ok(audit.rows.some((row) => row.action === "record_access_credential_reset"));
   assert.ok(audit.rows.some((row) => row.action === "record_access_credential_revoked"));
+  assert.ok(audit.rows.some((row) => row.action === "record_access_self_unlocked"));
   assert.ok(audit.rows.some((row) => row.action === "Document Data Import"));
   assert.equal(
-    audit.rows.filter((row) => /Deep caries|Hidden diagnosis|Pasig visit note|DelegateAuth|DelegatePass/i.test(JSON.stringify(row))).length,
+    audit.rows.filter((row) => /Deep caries|Hidden diagnosis|Pasig visit note|DelegateAuth|DelegatePass|TreatAuth/i.test(JSON.stringify(row))).length,
     0
   );
 });

@@ -393,6 +393,8 @@ export const api = {
   getDentistRecordBranches: () => request("/dentist/record-branches"),
   requestDentistRecordAccess: (patientId, body) =>
     request(`/dentist/patients/${patientId}/access-requests`, { method: "POST", body }),
+  unlockDentistRecordAccess: (patientId, body) =>
+    request(`/dentist/patients/${patientId}/record-access`, { method: "POST", body }),
   createDentistRecordAccessChallenge: (patientId, body) =>
     request(`/dentist/patients/${patientId}/access-challenges`, { method: "POST", body }),
   getDentistRecordAccessChallenge: (patientId, challengeId) =>

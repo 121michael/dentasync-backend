@@ -880,6 +880,234 @@ async function verifyApproverPassword(db, approver, password, req) {
   }
 }
 
+function normalizeLicenseNumber(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+}
+
+async function loadDentistUnlockProfile(db, dentistId) {
+  const result = await db.query(
+    `SELECT account.id, account.first_name, account.last_name, account.role, account.status,
+            account.is_verified, account.is_archived, account.password_hash,
+            profile.can_approve_cross_branch_access, profile.authorization_password_hash,
+            profile.authorization_credential_status, profile.license_number, profile.license_verified
+     FROM users AS account
+     LEFT JOIN admin_portal_dentist_profiles AS profile
+       ON profile.user_id::text = account.id::text
+     WHERE account.id::text = $1
+     LIMIT 1`,
+    [String(dentistId)]
+  );
+  return result.rows[0] || null;
+}
+
+async function issuePermittedGrants(client, { dentistId, record, requestingBranchId, originatingBranchIds, minutes }) {
+  const grants = [];
+  const reason = "Verified authorization credential for permitted cross-branch history.";
+  for (const originatingBranchId of originatingBranchIds) {
+    for (const scope of RESTRICTED_SCOPES) {
+      await client.query(`SELECT pg_advisory_xact_lock(hashtext('record-grant'), hashtext($1))`, [
+        `${dentistId}:${record.id}:${originatingBranchId}:${scope}`,
+      ]);
+      const created = await client.query(
+        `INSERT INTO record_access_requests (
+           clinical_record_id, patient_user_id, requesting_dentist_id, requesting_branch_id,
+           originating_branch_id, reason, scope, status, decided_at, decided_by
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'approved', CURRENT_TIMESTAMP, $3)
+         RETURNING id`,
+        [
+          record.id,
+          record.linkedUserId || record.linked_user_id || null,
+          String(dentistId),
+          requestingBranchId,
+          originatingBranchId,
+          reason,
+          scope,
+        ]
+      );
+      const requestId = created.rows[0].id;
+      let grant;
+      try {
+        grant = await client.query(
+          `INSERT INTO record_access_grants (
+             request_id, requesting_dentist_id, clinical_record_id, originating_branch_id, scope, expires_at
+           ) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP + ($6 || ' minutes')::interval)
+           RETURNING id, status, expires_at, scope, originating_branch_id`,
+          [requestId, String(dentistId), record.id, originatingBranchId, scope, String(minutes)]
+        );
+      } catch (error) {
+        if (error.code !== "23505") throw error;
+        grant = await client.query(
+          `UPDATE record_access_grants
+           SET expires_at = CURRENT_TIMESTAMP + ($5 || ' minutes')::interval, status = 'active'
+           WHERE requesting_dentist_id = $1
+             AND clinical_record_id = $2
+             AND originating_branch_id = $3
+             AND scope = $4
+             AND status = 'active'
+           RETURNING id, status, expires_at, scope, originating_branch_id`,
+          [String(dentistId), record.id, originatingBranchId, scope, String(minutes)]
+        );
+      }
+      await client.query(
+        `INSERT INTO record_access_decisions (request_id, actor_id, actor_role, action)
+         VALUES ($1, $2, 'dentist', 'self_unlocked')`,
+        [requestId, String(dentistId)]
+      );
+      if (grant.rows[0]) grants.push(grant.rows[0]);
+    }
+  }
+  return grants;
+}
+
+async function unlockOwnRecordAccess(db, req, { record, licenseNumber, password }) {
+  const dentistId = String(req.dentist?.id || req.user?.id || "");
+  assertAuthRateLimit(dentistId, req.ip);
+  if (!record?.id) {
+    recordAuthFailure(dentistId, req.ip);
+    throw httpError("Patient record not found.", 404);
+  }
+
+  let profile;
+  try {
+    profile = await loadDentistUnlockProfile(db, dentistId);
+  } catch (error) {
+    if (error.code === "42703" || error.code === "42P01") {
+      throw httpError("Authorization credential setup is required.", 403);
+    }
+    throw error;
+  }
+  if (!profile || !accountIsActive(profile) || String(profile.role || "").toLowerCase() !== "dentist") {
+    recordAuthFailure(dentistId, req.ip);
+    throw httpError("This dashboard is available to active dentist accounts only.", 403);
+  }
+  const presented = presentAuthorization(profile);
+  if (!presented.credentialConfigured) {
+    recordAuthFailure(dentistId, req.ip);
+    throw httpError(
+      presented.setupRequired
+        ? SETUP_REQUIRED_MESSAGE
+        : "You are not authorized to open restricted records.",
+      403
+    );
+  }
+
+  const storedLicense = normalizeLicenseNumber(profile.license_number);
+  const enteredLicense = normalizeLicenseNumber(licenseNumber);
+  if (!profile.license_verified || !storedLicense) {
+    recordAuthFailure(dentistId, req.ip);
+    throw httpError("A verified license number is required before accessing restricted records.", 403);
+  }
+  if (!enteredLicense || enteredLicense !== storedLicense) {
+    recordAuthFailure(dentistId, req.ip);
+    await writeAdminAudit(db, {
+      actorId: dentistId,
+      actorRole: "dentist",
+      action: "record_access_unlock_failed",
+      targetType: "clinical_record",
+      targetId: String(record.id),
+      result: "failure",
+      detail: "License number did not match this dentist.",
+    });
+    throw httpError("That license number does not belong to this dentist.", 403);
+  }
+
+  const plain = String(password || "");
+  if (!plain) {
+    recordAuthFailure(dentistId, req.ip);
+    throw httpError("Enter the authorization password.", 400);
+  }
+  const matched = await bcrypt.compare(plain, profile.authorization_password_hash || "");
+  if (!matched) {
+    recordAuthFailure(dentistId, req.ip);
+    await writeAdminAudit(db, {
+      actorId: dentistId,
+      actorRole: "dentist",
+      action: "record_access_unlock_failed",
+      targetType: "clinical_record",
+      targetId: String(record.id),
+      result: "failure",
+      detail: "Authorization password was rejected.",
+    });
+    throw httpError(GENERIC_AUTH_MESSAGE, 401);
+  }
+
+  const relationship = await qualifyingRelationship(db, req.dentist, record);
+  if (!relationship.allowed) {
+    recordAuthFailure(dentistId, req.ip);
+    throw httpError(
+      "A confirmed appointment or an active encounter with this patient is required before requesting more of the chart.",
+      403,
+      { patient: identityOf(record), code: "NO_TREATMENT_RELATIONSHIP" }
+    );
+  }
+
+  const requestingBranchId = Number(req.branchAccess?.activeBranch?.id);
+  if (!Number.isSafeInteger(requestingBranchId)) {
+    throw httpError("Choose the branch you are working from.", 400);
+  }
+  if (!relationship.branchIds.map(String).includes(String(requestingBranchId))) {
+    throw httpError("Request the chart from a branch where you are seeing this patient.", 403);
+  }
+
+  const assigned = await authorizedBranchIds(db, dentistId);
+  const originatingBranchIds = assigned
+    .map((id) => Number(id))
+    .filter((id) => Number.isSafeInteger(id));
+  if (!originatingBranchIds.length) {
+    throw httpError("You cannot open restricted records for this branch.", 403);
+  }
+
+  const minutes = await loadGrantMinutes(db);
+  const client = await db.connect();
+  let grants;
+  try {
+    await client.query("BEGIN");
+    grants = await issuePermittedGrants(client, {
+      dentistId,
+      record,
+      requestingBranchId,
+      originatingBranchIds,
+      minutes,
+    });
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  clearAuthFailure(dentistId, req.ip);
+  const expiresAt = grants
+    .map((row) => row.expires_at)
+    .filter(Boolean)
+    .sort()[0] || null;
+  await writeAdminAudit(db, {
+    actorId: dentistId,
+    actorName: `${profile.first_name || ""} ${profile.last_name || ""}`.trim() || null,
+    actorRole: "dentist",
+    action: "record_access_self_unlocked",
+    targetType: "clinical_record",
+    targetId: String(record.id),
+    targetLabel: identityOf(record)?.patientId || null,
+    detail: `Read-only grant ${minutes} minutes for ${originatingBranchIds.length} permitted origin(s) and ${RESTRICTED_SCOPES.length} scopes.`,
+  });
+  return {
+    minutes,
+    expiresAt,
+    grants: grants.map((row) => ({
+      id: row.id,
+      status: row.status,
+      expiresAt: row.expires_at,
+      scope: row.scope,
+      originatingBranchId: row.originating_branch_id,
+    })),
+  };
+}
+
 function rejectSharedSessionAuthorize() {
   throw httpError(SHARED_SESSION_MESSAGE, 410);
 }
@@ -1200,6 +1428,7 @@ module.exports = {
   loadDentistAuthorization,
   setAuthorizationCredential,
   revokeAuthorizationCredential,
+  unlockOwnRecordAccess,
   decideRequest,
   approverMayDecide,
   loadGrantMinutes,

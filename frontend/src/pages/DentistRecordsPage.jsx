@@ -159,14 +159,6 @@ function listValue(value) {
   return text || "—";
 }
 
-const RECORD_SCOPES = [
-  ["diagnosis_notes", "Diagnosis notes"],
-  ["xrays", "X-rays"],
-  ["medical_documents", "Medical documents"],
-  ["wellness", "Wellness results"],
-  ["consent_forms", "Consent forms"],
-];
-
 function DelegatedRequestQueue() {
   const [requests, setRequests] = useState(null);
 
@@ -218,24 +210,17 @@ function DelegatedRequestQueue() {
   );
 }
 
-function AccessRecordHistory({ patientId, patient, onAuthorized, grantExpiresAt }) {
+function AccessRecordHistory({ patientId, onAuthorized, grantExpiresAt }) {
   const { user } = useAuth();
-  const [branches, setBranches] = useState([]);
   const [open, setOpen] = useState(false);
-  const [scope, setScope] = useState("diagnosis_notes");
-  const [reason, setReason] = useState("");
-  const [requestingBranchId, setRequestingBranchId] = useState("");
-  const [originatingBranchId, setOriginatingBranchId] = useState("");
-  const [challenge, setChallenge] = useState(null);
+  const [licenseNumber, setLicenseNumber] = useState("");
+  const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
   const onAuthorizedRef = useRef(onAuthorized);
   onAuthorizedRef.current = onAuthorized;
-
-  useEffect(() => {
-    api.getDentistRecordBranches().then((response) => setBranches(response.branches || [])).catch(() => setBranches([]));
-  }, []);
+  const dentistName = user?.fullName || `${user?.firstName || ""} ${user?.lastName || ""}`.trim() || "Signed-in dentist";
 
   useEffect(() => {
     if (!grantExpiresAt) return undefined;
@@ -245,47 +230,27 @@ function AccessRecordHistory({ patientId, patient, onAuthorized, grantExpiresAt 
     return () => window.clearTimeout(timer);
   }, [grantExpiresAt]);
 
-  useEffect(() => {
-    if (!challenge?.id || challenge.status === "approved") return undefined;
-    const timer = window.setInterval(async () => {
-      try {
-        const response = await api.getDentistRecordAccessChallenge(patientId, challenge.id);
-        const next = response.challenge;
-        if (next?.status === "approved") {
-          window.clearInterval(timer);
-          setOpen(false);
-          setChallenge(null);
-          onAuthorizedRef.current?.("Restricted records are available for the approved scope.");
-        } else if (next?.status === "expired") {
-          setChallenge(next);
-          setMessage("This authorization expired. Start a new request.");
-        }
-      } catch {
-        /* keep waiting; the dentist can retry by leaving the modal open */
-      }
-    }, 2000);
-    return () => window.clearInterval(timer);
-  }, [challenge, patientId]);
-
   function closeModal() {
     setOpen(false);
-    setChallenge(null);
+    setPassword("");
     setMessage("");
   }
 
-  async function startChallenge(event) {
+  async function unlockRecords(event) {
     event.preventDefault();
+    if (busy) return;
     setBusy(true);
     setMessage("");
     try {
-      const response = await api.createDentistRecordAccessChallenge(patientId, {
-        requestingBranchId: Number(requestingBranchId),
-        originatingBranchId: Number(originatingBranchId),
-        reason,
-        scope,
+      const response = await api.unlockDentistRecordAccess(patientId, {
+        licenseNumber,
+        password,
       });
-      setChallenge(response.challenge);
+      setPassword("");
+      setOpen(false);
+      onAuthorizedRef.current?.(response.message || "Restricted records are available for the permitted history.");
     } catch (requestError) {
+      setPassword("");
       setMessage(requestError.message);
     } finally {
       setBusy(false);
@@ -295,57 +260,44 @@ function AccessRecordHistory({ patientId, patient, onAuthorized, grantExpiresAt 
   return (
     <section className="dentist-card dentist-access-history">
       <h2>Access Record History</h2>
-      <p className="muted">Ordinary history you are authorized to read. Restricted notes stay hidden until an Admin or delegated dentist authorizes them at this workstation.</p>
-      <button className="button button--primary" type="button" onClick={() => setOpen(true)}>
-        Cross-Branch Record Authorization
+      <p className="muted">
+        Ordinary history you are authorized to read. Restricted notes from other permitted branches stay hidden until
+        you verify your Admin-configured authorization credential.
+      </p>
+      <button className="button button--primary" type="button" onClick={() => { setOpen(true); setPassword(""); setMessage(""); }}>
+        Request Record Access
       </button>
       {open ? (
-        <DentistModal title="Cross-Branch Record Authorization" onClose={closeModal}>
-          <p>Patient {patient?.fullName || patient?.patientName || "record"} · {patient?.patientId || patient?.recordCode || patientId}</p>
-          <p>Requesting dentist {user?.fullName || "this dentist"}</p>
-          {!challenge ? (
-            <form onSubmit={startChallenge}>
-              <label>
-                Your branch
-                <select value={requestingBranchId} onChange={(event) => setRequestingBranchId(event.target.value)} required>
-                  <option value="">Select</option>
-                  {branches.map((branch) => (
-                    <option key={branch.id} value={branch.id}>{branch.name}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Branch that holds the records
-                <select value={originatingBranchId} onChange={(event) => setOriginatingBranchId(event.target.value)} required>
-                  <option value="">Select</option>
-                  {branches.map((branch) => (
-                    <option key={`origin-${branch.id}`} value={branch.id}>{branch.name}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Record type
-                <select value={scope} onChange={(event) => setScope(event.target.value)}>
-                  {RECORD_SCOPES.map(([value, label]) => (
-                    <option key={value} value={value}>{label}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Reason for access
-                <input value={reason} onChange={(event) => setReason(event.target.value)} required minLength={3} />
-              </label>
-              <button className="button button--primary" disabled={busy} type="submit">{busy ? "Preparing…" : "Create approval code"}</button>
-            </form>
-          ) : (
-            <div>
-              <p>{challenge.scope} · {challenge.reason}</p>
-              <p>Ask an Admin or delegated dentist to sign in on this workstation in a separate browser profile, open Authorize record access, and enter this code:</p>
-              <p style={{ fontSize: "1.75rem", letterSpacing: "0.2rem", fontWeight: 700 }}>{challenge.approvalCode}</p>
-              <p className="muted">They sign in as themselves. Do not share your session or type their password here. This page refreshes the chart when they approve.</p>
-            </div>
-          )}
-          {message ? <p>{message}</p> : null}
+        <DentistModal title="Request Record Access" className="dentist-modal--request-access" onClose={closeModal}>
+          <form className="dentist-request-access" autoComplete="off" onSubmit={unlockRecords}>
+            <label>
+              Dentist Name
+              <input value={dentistName} readOnly tabIndex={-1} autoComplete="off" />
+            </label>
+            <label>
+              License Number
+              <input
+                value={licenseNumber}
+                autoComplete="off"
+                required
+                onChange={(event) => setLicenseNumber(event.target.value)}
+              />
+            </label>
+            <label>
+              Password
+              <input
+                type="password"
+                value={password}
+                autoComplete="new-password"
+                required
+                onChange={(event) => setPassword(event.target.value)}
+              />
+            </label>
+            <button className="button button--primary" disabled={busy} type="submit">
+              {busy ? "Checking…" : "Access Records"}
+            </button>
+            {message ? <p className="dentist-request-access__error">{message}</p> : null}
+          </form>
         </DentistModal>
       ) : null}
     </section>
