@@ -56,4 +56,13 @@ test("phone layout wraps welcome actions, uses two columns then one, and clears 
   assert.match(css, /@media \(max-width: 390px\) \{[\s\S]*\.admin-dashboard-page \.admin-stat-grid/);
   assert.match(css, /@media \(max-width: 320px\) \{[\s\S]*\.admin-dashboard-page \.admin-stat-grid \{[\s\S]*grid-template-columns: 1fr/);
   assert.match(css, /\.ops-dashboard-clearance/);
+  assert.match(page, /admin-stat-grid--floor/);
+  assert.match(
+    css,
+    /\.admin-dashboard-page \.admin-stat-grid--floor \{[\s\S]*grid-template-columns: repeat\(6, minmax\(0, 1fr\)\)/
+  );
+  assert.match(
+    css,
+    /\.admin-dashboard-page \.admin-stat-grid--floor \.admin-stat-card \{[\s\S]*padding: 0\.68rem 0\.72rem 0\.7rem/
+  );
 });

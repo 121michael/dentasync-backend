@@ -31,7 +31,7 @@ export function DentistSummaryCard({
       </div>
       {Icon ? (
         <span className="dentist-stat-card__icon" aria-hidden="true">
-          <Icon size={20} />
+          <Icon size={15} />
         </span>
       ) : null}
     </>

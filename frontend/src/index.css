@@ -15317,8 +15317,93 @@ body.is-queue-display .fab-menu {
 .ops-availability__row--in_treatment em { color: var(--amethyst-700); }
 .ops-availability__row--unavailable em { color: var(--danger); }
 .ops-availability__row--available em { color: var(--emerald); }
-.dentist-stat-grid--ops {
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+.dentist-stat-grid--ops,
+.admin-dashboard-page .admin-stat-grid--floor {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.65rem;
+  overflow-x: hidden;
+}
+.admin-dashboard-page .admin-stat-grid--floor .admin-stat-card {
+  gap: 0.18rem;
+  min-height: 0;
+  padding: 0.68rem 0.72rem 0.7rem;
+  border-radius: 14px;
+}
+.admin-dashboard-page .admin-stat-grid--floor .admin-stat-card span {
+  font-size: 0.6rem;
+  line-height: 1.2;
+}
+.admin-dashboard-page .admin-stat-grid--floor .admin-stat-card strong {
+  font-size: clamp(1.15rem, 1.8vw, 1.38rem);
+  line-height: 1.1;
+}
+.admin-dashboard-page .admin-stat-grid--floor .admin-stat-card small {
+  font-size: 0.6rem;
+  line-height: 1.28;
+}
+.admin-dashboard-page .admin-stat-grid--floor .ops-metric-timeframe {
+  margin: 0;
+  font-size: 0.54rem;
+  line-height: 1.25;
+}
+.admin-dashboard-page .admin-stat-grid--floor .admin-stat-card__top {
+  gap: 0.2rem;
+}
+.admin-dashboard-page .admin-stat-grid--floor .admin-stat-card__top svg {
+  width: 14px;
+  height: 14px;
+}
+.admin-dashboard-page .admin-stat-grid--floor .admin-stat-card__arrow {
+  right: 0.45rem;
+  bottom: 0.45rem;
+  width: 14px;
+  height: 14px;
+}
+.dentist-stat-grid--ops .dentist-stat-card {
+  align-items: flex-start;
+  gap: 0.5rem;
+  min-height: 0;
+  padding: 0.68rem 0.72rem;
+  border-radius: 14px;
+}
+.dentist-stat-grid--ops .dentist-stat-card span {
+  font-size: 0.6rem;
+  line-height: 1.2;
+}
+.dentist-stat-grid--ops .dentist-stat-card strong {
+  margin-top: 0.1rem;
+  font-size: 1.18rem;
+  line-height: 1.1;
+}
+.dentist-stat-grid--ops .ops-metric-timeframe {
+  margin-top: 0.06rem;
+  font-size: 0.54rem;
+  line-height: 1.25;
+}
+.dentist-stat-grid--ops .dentist-stat-card small {
+  display: block;
+  margin-top: 0.06rem;
+  color: var(--text-muted);
+  font-size: 0.6rem;
+  font-weight: 700;
+  line-height: 1.28;
+}
+.dentist-stat-grid--ops .dentist-stat-card__icon {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+}
+.dentist-stat-grid--ops .dentist-stat-card__icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+@media (max-width: 1100px) {
+  .admin-dashboard-page .admin-stat-grid--floor,
+  .dentist-stat-grid--ops {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 980px) {

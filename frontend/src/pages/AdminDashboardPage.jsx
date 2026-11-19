@@ -103,7 +103,7 @@ export function AdminDashboardPage() {
       <p className="ops-group-scope">
         Clinic floor · {branchName} · {clinicDate} ({timezone})
       </p>
-      <section className="admin-stat-grid" aria-label="Clinic floor today">
+      <section className="admin-stat-grid admin-stat-grid--floor" aria-label="Clinic floor today">
         <AdminStatCard
           label="Booked Today"
           value={metrics.bookedToday ?? metrics.appointmentsToday}
