@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, FolderOpen, Plus, Search } from "lucide-react";
+import {
+  ArrowLeft,
+  BadgeCheck,
+  CalendarDays,
+  FolderOpen,
+  HeartPulse,
+  KeyRound,
+  Plus,
+  Search,
+  ShieldCheck,
+  UserRound,
+} from "lucide-react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { DentalChart } from "../components/DentalChart";
@@ -210,7 +221,32 @@ function DelegatedRequestQueue() {
   );
 }
 
-function AccessRecordHistory({ patientId, onAuthorized, grantExpiresAt }) {
+function patientInitials(name) {
+  const parts = String(name || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  return `${parts[0]?.[0] || ""}${parts[1]?.[0] || ""}`.toUpperCase() || "PT";
+}
+
+function FieldValue({ label, children, warning = false }) {
+  const value = children == null || children === "" ? "—" : children;
+  return (
+    <div className={`field${warning ? " field--warning" : ""}`}>
+      <span>{label}</span>
+      <p className="field-readonly">{value}</p>
+    </div>
+  );
+}
+
+function StatusBadge({ status, children }) {
+  const tone = String(status || "pending")
+    .toLowerCase()
+    .replaceAll(" ", "_");
+  return <span className={`dentist-status dentist-status--${tone}`}>{children || procedureStatusLabel(status)}</span>;
+}
+
+function AccessRecordHistory({ patientId, onAuthorized, grantExpiresAt, requestOpenRef }) {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const [licenseNumber, setLicenseNumber] = useState("");
@@ -221,6 +257,18 @@ function AccessRecordHistory({ patientId, onAuthorized, grantExpiresAt }) {
   const onAuthorizedRef = useRef(onAuthorized);
   onAuthorizedRef.current = onAuthorized;
   const dentistName = user?.fullName || `${user?.firstName || ""} ${user?.lastName || ""}`.trim() || "Signed-in dentist";
+
+  useEffect(() => {
+    if (!requestOpenRef) return undefined;
+    requestOpenRef.current = () => {
+      setOpen(true);
+      setPassword("");
+      setMessage("");
+    };
+    return () => {
+      requestOpenRef.current = null;
+    };
+  }, [requestOpenRef]);
 
   useEffect(() => {
     if (!grantExpiresAt) return undefined;
@@ -258,13 +306,28 @@ function AccessRecordHistory({ patientId, onAuthorized, grantExpiresAt }) {
   }
 
   return (
-    <section className="dentist-card dentist-access-history">
-      <h2>Access Record History</h2>
-      <p className="muted">
+    <section className="glass-card profile-section dentist-access-history">
+      <div className="card-heading">
+        <div>
+          <span className="eyebrow">Authorized history</span>
+          <h2>Access Record History</h2>
+        </div>
+        <KeyRound className="card-heading__icon" size={21} />
+      </div>
+      <p className="muted-copy">
         Ordinary history you are authorized to read. Restricted notes from other permitted branches stay hidden until
         you verify your Admin-configured authorization credential.
       </p>
-      <button className="button button--primary" type="button" onClick={() => { setOpen(true); setPassword(""); setMessage(""); }}>
+      <button
+        className="button button--primary"
+        type="button"
+        data-request-record-access="true"
+        onClick={() => {
+          setOpen(true);
+          setPassword("");
+          setMessage("");
+        }}
+      >
         Request Record Access
       </button>
       {open ? (
@@ -372,6 +435,7 @@ export function DentistRecordsPage() {
   const [documentPreview, setDocumentPreview] = useState(null);
   const previewUrlRef = useRef("");
   const treatmentFormRef = useRef(null);
+  const requestAccessRef = useRef(null);
   const focusHandledRef = useRef("");
   const focusedRowRef = useRef(null);
   const [focusKey, setFocusKey] = useState(() => searchParams.get("focus") || "");
@@ -900,30 +964,8 @@ export function DentistRecordsPage() {
       {patientId && detail ? (
         <SectionHeading
           eyebrow="Shared patient record"
-          title={detail.patient.fullName || detail.patient.patientName || "Patient record"}
-          detail={`Patient ID ${detail.patient.patientId || detail.patient.recordCode || detail.patient.id}`}
-          action={
-            <div className="treatment-record__actions dentist-record-heading-actions">
-              <button
-                type="button"
-                className="button button--secondary"
-                onClick={() => navigate("/dentist/patient-records")}
-              >
-                <ArrowLeft size={16} /> Back
-              </button>
-              <button
-                type="button"
-                className={`button ${filesOpen ? "button--primary" : "button--secondary"}`}
-                aria-expanded={filesOpen}
-                onClick={toggleUploadedFiles}
-              >
-                <FolderOpen size={16} /> Dental Documents
-                {medicalDocuments.length ? (
-                  <span className="uploaded-files-count">{medicalDocuments.length}</span>
-                ) : null}
-              </button>
-            </div>
-          }
+          title="Patient Details"
+          detail="Review authorized demographic, coverage, and clinical information."
         />
       ) : (
       <SectionHeading
@@ -939,17 +981,6 @@ export function DentistRecordsPage() {
       )}
 
       {!patientId ? <DelegatedRequestQueue /> : null}
-      {patientId && detail ? (
-        <AccessRecordHistory
-          patientId={patientId}
-          patient={detail.patient}
-          grantExpiresAt={detail.access?.grantExpiresAt}
-          onAuthorized={(notice) => {
-            if (notice) setSuccess(notice);
-            refreshPatientDetail(patientId);
-          }}
-        />
-      ) : null}
       {error ? <p className="inline-alert inline-alert--error">{error}</p> : null}
       {success ? <p className="inline-alert inline-alert--success">{success}</p> : null}
 
@@ -1130,141 +1161,211 @@ export function DentistRecordsPage() {
 
       {detail ? (
         <div className="dentist-patient-record">
-          <section className="dentist-patient-info">
-            <div className="dentist-panel__heading">
+          <section className="membership-card">
+            <div className="membership-card__shine" />
+            <div className="membership-card__top">
+              <span className="membership-card__logo">
+                <img src="/logo.png" alt="" className="membership-card__logo-image" />
+                Amethyst Dental
+              </span>
+              <span>{isProfileLocked(detail.patient) ? "LINKED PATIENT" : "WALK-IN RECORD"}</span>
+            </div>
+            <div className="membership-card__identity">
+              <span className="membership-card__avatar">
+                {patientInitials(detail.patient.fullName || detail.patient.patientName)}
+              </span>
               <div>
-                <span className="eyebrow">Shared patient record</span>
-                <h2>Patient Information</h2>
-              </div>
-              <div className="treatment-record__actions">
-                {!isProfileLocked(detail.patient) ? (
-                  <button
-                    type="button"
-                    className="button button--secondary button--compact"
-                    onClick={openAgeSexEditor}
-                  >
-                    Edit Age and Sex
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  className={`button ${treatmentFormOpen && !editingTreatmentId ? "button--secondary" : "button--primary"}`}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    if (treatmentFormOpen && !editingTreatmentId) {
-                      closeTreatmentForm();
-                    } else {
-                      openAddTreatment();
-                    }
-                  }}
-                >
-                  {treatmentFormOpen && !editingTreatmentId ? (
-                    "− Close Treatment Form"
-                  ) : (
-                    <>
-                      <Plus size={16} /> Add Treatment
-                    </>
-                  )}
-                </button>
+                <strong>{detail.patient.fullName || detail.patient.patientName || "Patient record"}</strong>
+                <small>
+                  Patient ID · {detail.patient.patientId || detail.patient.recordCode || detail.patient.id}
+                </small>
               </div>
             </div>
-            <div className="dentist-detail-grid">
-              <p>
-                <strong>Patient ID:</strong>{" "}
-                <span>
-                  {detail.patient.patientId || detail.patient.recordCode || detail.patient.id}
-                </span>
-              </p>
-              <p>
-                <strong>Name:</strong>{" "}
-                <span>{detail.patient.fullName || detail.patient.patientName}</span>
-              </p>
-              <p>
-                <strong>Age:</strong>{" "}
-                <span>
-                  {detail.patient.age != null && detail.patient.age !== "" ? detail.patient.age : "—"}
-                </span>
-              </p>
-              <p>
-                <strong>Sex:</strong> <span>{detail.patient.gender || "—"}</span>
-              </p>
-              <p>
-                <strong>Birthdate:</strong>{" "}
-                <span>
-                  {detail.patient.dateOfBirth ? formatDentistDate(detail.patient.dateOfBirth) : "—"}
-                </span>
-              </p>
-              <p>
-                <strong>Phone Number:</strong> <span>{detail.patient.phone || "—"}</span>
-              </p>
-              <p>
-                <strong>Email:</strong> <span>{detail.patient.email || "—"}</span>
-              </p>
-              <p>
-                <strong>Category:</strong> <span>{detail.patient.patientCategory || "—"}</span>
-              </p>
-              <p>
-                <strong>Emergency Contact Name:</strong>{" "}
-                <span>{detail.patient.emergencyContactName?.trim() || "—"}</span>
-              </p>
-              <p>
-                <strong>Relationship:</strong>{" "}
-                <span>{detail.patient.emergencyContactRelationship?.trim() || "—"}</span>
-              </p>
-              <p>
-                <strong>Emergency Mobile Number:</strong>{" "}
-                <span>{detail.patient.emergencyContactPhone?.trim() || "—"}</span>
-              </p>
-              <p>
-                <strong>Allergies:</strong> <span>{detail.patient.allergies?.trim() || "—"}</span>
-              </p>
-              <p>
-                <strong>Existing Conditions:</strong>{" "}
-                <span>{detail.patient.existingConditions?.trim() || "—"}</span>
-              </p>
-              <p>
-                <strong>Current Medications:</strong>{" "}
-                <span>{detail.patient.currentMedications?.trim() || "—"}</span>
-              </p>
-              <p>
-                <strong>Dental Concerns:</strong>{" "}
-                <span>{detail.patient.dentalConcerns?.trim() || "—"}</span>
-              </p>
-              <p>
-                <strong>HMO coverage:</strong>{" "}
-                <span>
-                  {detail.patient.hmoStatus === "verified"
-                    ? `HMO Verified${detail.patient.hmoProvider ? ` · ${detail.patient.hmoProvider}` : ""}${
-                        detail.patient.hmoVerifiedAt ? ` · ${formatDentistDate(detail.patient.hmoVerifiedAt)}` : ""
-                      }`
-                    : (detail.patient.hmoStatus || "not_enrolled").replaceAll("_", " ")}
-                </span>
-              </p>
-              <p>
-                <strong>Record type:</strong>{" "}
-                <span>
-                  {isProfileLocked(detail.patient)
-                    ? "Linked account (profile synced)"
-                    : "Walk-in clinical record"}
-                </span>
-              </p>
-              <p>
-                <strong>Next Appointment:</strong>{" "}
-                <span>{nextAppointmentLabel(null, detail.nextAppointment, detail.patient)}</span>
-              </p>
+            <div className="membership-card__bottom">
+              <div>
+                <span>Category</span>
+                <strong>{detail.patient.patientCategory || "Regular"}</strong>
+              </div>
+              <div>
+                <span>Next appointment</span>
+                <strong>{nextAppointmentLabel(null, detail.nextAppointment, detail.patient)}</strong>
+              </div>
+              <div className="membership-card__verified">
+                <BadgeCheck size={17} />
+                {detail.patient.hmoStatus === "verified"
+                  ? `HMO verified${detail.patient.hmoProvider ? ` · ${detail.patient.hmoProvider}` : ""}`
+                  : (detail.patient.hmoStatus || "not enrolled").replaceAll("_", " ")}
+              </div>
             </div>
           </section>
+
+          <div className="dentist-record-toolbar" role="toolbar" aria-label="Patient record actions">
+            <button
+              type="button"
+              className="button button--secondary"
+              onClick={() => navigate("/dentist/patient-records")}
+            >
+              <ArrowLeft size={16} /> Back
+            </button>
+            <button
+              type="button"
+              className="button button--primary"
+              onClick={() => requestAccessRef.current?.()}
+            >
+              <KeyRound size={16} /> Request Record Access
+            </button>
+            <button
+              type="button"
+              className={`button ${treatmentFormOpen && !editingTreatmentId ? "button--secondary" : "button--primary"}`}
+              onClick={(event) => {
+                event.preventDefault();
+                if (treatmentFormOpen && !editingTreatmentId) closeTreatmentForm();
+                else openAddTreatment();
+              }}
+            >
+              {treatmentFormOpen && !editingTreatmentId ? (
+                "Close Treatment Form"
+              ) : (
+                <>
+                  <Plus size={16} /> Add Treatment
+                </>
+              )}
+            </button>
+            <button
+              type="button"
+              className={`button ${filesOpen ? "button--primary" : "button--secondary"}`}
+              aria-expanded={filesOpen}
+              onClick={toggleUploadedFiles}
+            >
+              <FolderOpen size={16} /> Dental Documents
+              {medicalDocuments.length ? (
+                <span className="uploaded-files-count">{medicalDocuments.length}</span>
+              ) : null}
+            </button>
+            {!isProfileLocked(detail.patient) ? (
+              <button type="button" className="button button--secondary" onClick={openAgeSexEditor}>
+                Edit Age and Sex
+              </button>
+            ) : null}
+          </div>
+
+          <section className="glass-card profile-section">
+            <div className="card-heading">
+              <div>
+                <span className="eyebrow">About the patient</span>
+                <h2>Personal Information</h2>
+              </div>
+              <UserRound className="card-heading__icon" size={21} />
+            </div>
+            <div className="field-grid field-grid--two">
+              <FieldValue label="Full name">{detail.patient.fullName || detail.patient.patientName}</FieldValue>
+              <FieldValue label="Patient ID">
+                {detail.patient.patientId || detail.patient.recordCode || detail.patient.id}
+              </FieldValue>
+              <FieldValue label="Age">
+                {detail.patient.age != null && detail.patient.age !== "" ? detail.patient.age : "—"}
+              </FieldValue>
+              <FieldValue label="Sex">{detail.patient.gender}</FieldValue>
+              <FieldValue label="Date of birth">
+                {detail.patient.dateOfBirth ? formatDentistDate(detail.patient.dateOfBirth) : "—"}
+              </FieldValue>
+              <FieldValue label="Patient category">{detail.patient.patientCategory}</FieldValue>
+              <FieldValue label="Email address">{detail.patient.email}</FieldValue>
+              <FieldValue label="Mobile number">{detail.patient.phone}</FieldValue>
+              <FieldValue label="Record type">
+                {isProfileLocked(detail.patient) ? "Linked account (profile synced)" : "Walk-in clinical record"}
+              </FieldValue>
+              <FieldValue label="Next appointment">
+                {nextAppointmentLabel(null, detail.nextAppointment, detail.patient)}
+              </FieldValue>
+            </div>
+          </section>
+
+          <section className="glass-card profile-section">
+            <div className="card-heading">
+              <div>
+                <span className="eyebrow">For peace of mind</span>
+                <h2>Emergency Contact</h2>
+              </div>
+              <ShieldCheck className="card-heading__icon" size={21} />
+            </div>
+            <div className="field-grid field-grid--three">
+              <FieldValue label="Contact name">{detail.patient.emergencyContactName?.trim()}</FieldValue>
+              <FieldValue label="Relationship">{detail.patient.emergencyContactRelationship?.trim()}</FieldValue>
+              <FieldValue label="Mobile number">{detail.patient.emergencyContactPhone?.trim()}</FieldValue>
+            </div>
+          </section>
+
+          <section className="glass-card profile-section">
+            <div className="card-heading">
+              <div>
+                <span className="eyebrow">Shared securely with the care team</span>
+                <h2>Clinical Information</h2>
+              </div>
+              <HeartPulse className="card-heading__icon" size={21} />
+            </div>
+            <div className="field-grid field-grid--two">
+              <FieldValue label="Allergies" warning>
+                {detail.patient.allergies?.trim()}
+              </FieldValue>
+              <FieldValue label="Existing conditions">{detail.patient.existingConditions?.trim()}</FieldValue>
+              <FieldValue label="Current medications">{detail.patient.currentMedications?.trim()}</FieldValue>
+              <FieldValue label="Dental concerns">{detail.patient.dentalConcerns?.trim()}</FieldValue>
+            </div>
+          </section>
+
+          <section className="glass-card profile-section">
+            <div className="card-heading">
+              <div>
+                <span className="eyebrow">Coverage and Wellness</span>
+                <h2>HMO verification</h2>
+              </div>
+              <CalendarDays className="card-heading__icon" size={21} />
+            </div>
+            <div className={`verification-status${detail.patient.hmoStatus === "verified" ? "" : " is-pending"}`}>
+              <BadgeCheck size={18} />
+              <div>
+                <strong>
+                  {detail.patient.hmoStatus === "verified"
+                    ? `HMO Verified${detail.patient.hmoProvider ? ` · ${detail.patient.hmoProvider}` : ""}`
+                    : (detail.patient.hmoStatus || "not_enrolled").replaceAll("_", " ")}
+                </strong>
+                <small>
+                  {detail.patient.hmoVerifiedAt
+                    ? `Verified ${formatDentistDate(detail.patient.hmoVerifiedAt)}`
+                    : "Status is limited to branches this dentist is authorized to view."}
+                </small>
+              </div>
+            </div>
+            <div className="field-grid field-grid--two" style={{ marginTop: "1rem" }}>
+              <FieldValue label="HMO provider">{detail.patient.hmoProvider}</FieldValue>
+              <FieldValue label="Coverage status">
+                {(detail.patient.hmoStatus || "not_enrolled").replaceAll("_", " ")}
+              </FieldValue>
+            </div>
+          </section>
+
+          <AccessRecordHistory
+            patientId={patientId}
+            patient={detail.patient}
+            grantExpiresAt={detail.access?.grantExpiresAt}
+            requestOpenRef={requestAccessRef}
+            onAuthorized={(notice) => {
+              if (notice) setSuccess(notice);
+              refreshPatientDetail(patientId);
+            }}
+          />
 
           <PrescriptionsPanel
             role="dentist"
             patientId={detail.patient.id}
+            className="glass-card profile-section"
             onCreate={() => navigate(`/dentist/prescriptions?patientId=${detail.patient.id}`)}
           />
 
           {ageSexOpen && !isProfileLocked(detail.patient) ? (
-            <form className="dentist-form" onSubmit={saveAgeSex} style={{ marginBottom: "1rem" }}>
-              <div className="dentist-panel__heading">
+            <form className="glass-card profile-section dentist-form" onSubmit={saveAgeSex}>
+              <div className="card-heading">
                 <div>
                   <span className="eyebrow">Demographics</span>
                   <h2>Edit Age and Sex</h2>
@@ -1324,7 +1425,7 @@ export function DentistRecordsPage() {
             </form>
           ) : null}
 
-          <section className="treatment-record dentist-wellness-assessment" style={{ marginTop: "1.25rem" }}>
+          <section className="glass-card profile-section treatment-record dentist-wellness-assessment">
             <div className="treatment-record__header">
               <div>
                 <span className="eyebrow">Preventive care</span>
@@ -1416,7 +1517,7 @@ export function DentistRecordsPage() {
           <div
             ref={treatmentFormRef}
             className={`dentist-treatment-form dentist-treatment-form--inline ${
-              treatmentFormOpen ? "is-open" : ""
+              treatmentFormOpen ? "is-open glass-card profile-section" : ""
             }`}
           >
             <div
@@ -1554,7 +1655,7 @@ export function DentistRecordsPage() {
           />
 
           {detail.currentVisit?.procedures?.length || detail.currentVisit?.queueEntryId ? (
-            <section className="treatment-record" style={{ marginTop: "1.25rem" }}>
+            <section className="glass-card profile-section treatment-record">
               <div className="treatment-record__header">
                 <div>
                   <span className="eyebrow">Current visit</span>
@@ -1590,7 +1691,7 @@ export function DentistRecordsPage() {
                       <span>
                         Tooth: {procedure.toothNumber ? `#${procedure.toothNumber}` : "—"}
                       </span>
-                      <span>Status: {procedureStatusLabel(procedure.status)}</span>
+                      <span>Status: <StatusBadge status={procedure.status} /></span>
                     </li>
                   ))}
                 </ol>
@@ -1600,7 +1701,7 @@ export function DentistRecordsPage() {
             </section>
           ) : null}
 
-          <section className="treatment-record" style={{ marginTop: "1.25rem" }}>
+          <section className="glass-card profile-section treatment-record">
             <div className="treatment-record__header">
               <div>
                 <span className="eyebrow">Shared patient dental record</span>
@@ -1668,7 +1769,7 @@ export function DentistRecordsPage() {
                             : "—"}
                         </td>
                         <td>{treatment.name || treatment.treatment || "—"}</td>
-                        <td>{procedureStatusLabel(treatment.status)}</td>
+                        <td><StatusBadge status={treatment.status} /></td>
                         <td>{treatment.diagnosis || treatment.diagnosisNotes || "—"}</td>
                         <td>{treatment.dentist || "—"}</td>
                         <td>{formatMoney(treatment.amountCharged)}</td>

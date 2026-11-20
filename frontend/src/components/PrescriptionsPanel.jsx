@@ -6,7 +6,7 @@ function statusLabel(status) {
   return String(status || "draft").replace(/_/g, " ");
 }
 
-export function PrescriptionsPanel({ role, patientId, onCreate }) {
+export function PrescriptionsPanel({ role, patientId, onCreate, className = "" }) {
   const [rows, setRows] = useState([]);
   const [error, setError] = useState("");
 
@@ -37,7 +37,7 @@ export function PrescriptionsPanel({ role, patientId, onCreate }) {
       : `/dentist/prescriptions?patientId=${encodeURIComponent(patientId)}`;
 
   return (
-    <section className="treatment-record prescription-record-section">
+    <section className={`treatment-record prescription-record-section ${className}`.trim()}>
       <div className="treatment-record__header">
         <div>
           <span className="eyebrow">Clinical documents</span>
@@ -60,7 +60,9 @@ export function PrescriptionsPanel({ role, patientId, onCreate }) {
           {rows.map((row) => (
             <article key={row.id}>
               <strong>{row.prescriptionNumber}</strong>
-              <span>{statusLabel(row.workflowStatus)}</span>
+              <span className={`dentist-status dentist-status--${String(row.workflowStatus || "draft").toLowerCase()}`}>
+                {statusLabel(row.workflowStatus)}
+              </span>
               <span>v{row.currentVersion}</span>
               <span>Email: {row.emailStatus}</span>
             </article>

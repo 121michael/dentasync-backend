@@ -2828,11 +2828,70 @@ html[data-theme="dark"] .portal-shell[data-theme="dark"] ~ .tooth-loader .tooth-
 }
 
 .dentist-patient-record-page {
+  display: grid;
+  gap: 1.15rem;
   padding-bottom: max(1.5rem, env(safe-area-inset-bottom, 0px));
   width: 100%;
   min-width: 0;
   max-width: 100%;
   overflow-x: hidden;
+}
+
+.dentist-record-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  position: sticky;
+  top: 0.35rem;
+  z-index: 8;
+  padding: 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--surface-solid) 94%, transparent);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(14px);
+}
+
+.dentist-record-toolbar .button {
+  min-height: 40px;
+}
+
+.field-readonly {
+  margin: 0;
+  min-height: 43px;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface-solid);
+  color: var(--text-strong);
+  font-size: 0.84rem;
+  font-weight: 650;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.dentist-patient-record .profile-section {
+  padding: 1.3rem;
+}
+
+.dentist-patient-record .membership-card {
+  margin: 0;
+}
+
+.dentist-access-history .button {
+  justify-self: start;
+  margin-top: 0.35rem;
+}
+
+.verification-status.is-pending {
+  color: var(--amber);
+  background: var(--amber-wash);
+}
+
+.dentist-status--authorized,
+.dentist-status--sent {
+  color: var(--emerald);
+  background: var(--emerald-wash);
 }
 
 .dentist-patient-record-page .dentist-detail-grid p {
@@ -2940,7 +2999,18 @@ html[data-theme="dark"] .portal-shell[data-theme="dark"] ~ .tooth-loader .tooth-
 
   .dentist-patient-record-page {
     gap: 0.75rem;
-    padding-bottom: calc(6.5rem + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(7.75rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .dentist-record-toolbar {
+    position: static;
+  }
+
+  .dentist-record-toolbar .button {
+    flex: 1 1 calc(50% - 0.3rem);
+    justify-content: center;
+    min-height: 40px;
+    white-space: nowrap;
   }
 
   .dentist-patient-record-page .section-heading {
@@ -3160,7 +3230,7 @@ html[data-theme="dark"] .portal-shell[data-theme="dark"] ~ .tooth-loader .tooth-
 
 @media (max-width: 720px) {
   .dentist-patient-record-page {
-    padding-bottom: calc(6.25rem + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(7.75rem + env(safe-area-inset-bottom, 0px));
   }
 
   .uploaded-files-folder.is-open {
@@ -4504,6 +4574,11 @@ body.booking-summary-open .patient-assistant__panel {
   .membership-card { min-height: 300px; gap: 1.7rem; }
   .membership-card__bottom { display: grid; grid-template-columns: 1fr 1fr; }
   .membership-card__verified { grid-column: 1 / 2; }
+  .dentist-patient-record .membership-card {
+    min-height: 0;
+    gap: 0.95rem;
+    padding: 1.1rem 1.15rem 1.2rem;
+  }
   .profile-menu {
     grid-template-columns: 1fr;
   }
@@ -11773,6 +11848,13 @@ body.is-queue-display .fab-menu {
     display: flex;
     justify-content: center;
     pointer-events: none;
+  }
+
+  /* Keep the Menu FAB off Patient Details fields and action buttons.
+     Header hamburger still opens the dentist sidebar. */
+  body:has(.dentist-patient-record-page) .role-bottom-dock--wide,
+  body:has(.dentist-patient-record-page) .role-bottom-dock--compact {
+    display: none;
   }
 
   .role-bottom-dock--wide .fab-menu,
