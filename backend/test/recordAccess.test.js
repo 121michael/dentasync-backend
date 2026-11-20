@@ -128,6 +128,7 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
   await db.query(sqlFile("057_record_access_workstation_auth.sql"));
   await db.query(sqlFile("058_record_access_isolated_approver.sql"));
   await db.query(sqlFile("060_record_access_authorization_credential.sql"));
+  await db.query(sqlFile("061_authorization_credential_secret.sql"));
 
   const mandaluyong = await db.query(`SELECT id FROM clinic_branches WHERE is_main LIMIT 1`);
   const pasig = await db.query(

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Archive, Check, Circle, Eye, EyeOff, KeyRound, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { Navigate, useSearchParams } from "react-router-dom";
 import { api } from "../api";
+import { useAuth } from "../useAuth";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { AdminModal, AdminStatusBadge } from "../components/AdminUI";
 import { useAdminUi } from "../components/AdminLayout";
@@ -26,10 +27,13 @@ const emptyForm = {
   licenseNumber: "",
   licenseVerified: false,
   authorizationCredentialStatus: "none",
+  credentialViewable: false,
   branchId: "",
   branchIds: [],
 };
 
+const CREDENTIAL_MASK = "••••••••";
+const REVEAL_MS = 15000;
 const PH_MOBILE_PATTERN = /^09[0-9]{9}$/;
 const PH_MOBILE_MESSAGE = "Enter a valid 11-digit mobile number starting with 09.";
 const INCOMPLETE_EMAIL_MESSAGE = "Enter a complete email address, including the full domain.";
@@ -169,6 +173,15 @@ export function AdminManageUsersPage() {
   const [resettingCredential, setResettingCredential] = useState(false);
   const focusedRowRef = useRef(null);
   const saveLock = useRef(false);
+  const revealTimer = useRef(null);
+  const { user: signedInAdmin } = useAuth();
+  const [verifyOpen, setVerifyOpen] = useState(false);
+  const [adminVerifyPassword, setAdminVerifyPassword] = useState("");
+  const [showAdminVerifyPassword, setShowAdminVerifyPassword] = useState(false);
+  const [verifyError, setVerifyError] = useState("");
+  const [verifyBusy, setVerifyBusy] = useState(false);
+  const [revealedPassword, setRevealedPassword] = useState("");
+  const [legacyRevealMessage, setLegacyRevealMessage] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -193,6 +206,20 @@ export function AdminManageUsersPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (formOpen && signedInAdmin) return undefined;
+    hideRevealedCredential();
+    closeVerifyDialog();
+    return undefined;
+  }, [formOpen, signedInAdmin]);
+
+  useEffect(
+    () => () => {
+      if (revealTimer.current) window.clearTimeout(revealTimer.current);
+    },
+    []
+  );
 
   const users = useMemo(() => {
     if (!data) return [];
@@ -284,6 +311,8 @@ export function AdminManageUsersPage() {
     setAuthConfirm("");
     setShowAuthPassword(false);
     setResettingCredential(false);
+    hideRevealedCredential();
+    closeVerifyDialog();
     setPhoneError("");
     setFieldErrors({});
     setFormOpen(true);
@@ -307,6 +336,7 @@ export function AdminManageUsersPage() {
       licenseNumber: user.licenseNumber || "",
       licenseVerified: Boolean(user.licenseVerified),
       authorizationCredentialStatus: user.authorizationCredentialStatus || (user.setupRequired ? "setup_required" : "none"),
+      credentialViewable: Boolean(user.credentialViewable),
       branchId: user.branches?.[0] ? String(user.branches[0].id) : "",
       branchIds: (user.branches || []).map((branch) => String(branch.id)),
     });
@@ -314,6 +344,8 @@ export function AdminManageUsersPage() {
     setAuthConfirm("");
     setShowAuthPassword(false);
     setResettingCredential(false);
+    hideRevealedCredential();
+    closeVerifyDialog();
     setPhoneError("");
     setFieldErrors({});
     setFormOpen(true);
@@ -368,6 +400,7 @@ export function AdminManageUsersPage() {
     if (tab === "dentist") {
       delete payload.branchId;
       delete payload.authorizationCredentialStatus;
+      delete payload.credentialViewable;
     }
     saveLock.current = true;
     setBusy(true);
@@ -396,13 +429,38 @@ export function AdminManageUsersPage() {
     }
   }
 
+  function closeVerifyDialog() {
+    setVerifyOpen(false);
+    setAdminVerifyPassword("");
+    setShowAdminVerifyPassword(false);
+    setVerifyError("");
+    setVerifyBusy(false);
+  }
+
+  function hideRevealedCredential() {
+    if (revealTimer.current) {
+      window.clearTimeout(revealTimer.current);
+      revealTimer.current = null;
+    }
+    setRevealedPassword("");
+    setLegacyRevealMessage("");
+  }
+
   function applyAuthorizationToEditor(authorization) {
     const status = authorization?.authorizationCredentialStatus || "none";
-    setForm((current) => ({ ...current, authorizationCredentialStatus: status }));
-    setEditing((current) => (current ? { ...current, ...authorization, authorizationCredentialStatus: status } : current));
+    setForm((current) => ({
+      ...current,
+      authorizationCredentialStatus: status,
+      credentialViewable: Boolean(authorization?.credentialViewable),
+    }));
+    setEditing((current) =>
+      current ? { ...current, ...authorization, authorizationCredentialStatus: status } : current
+    );
     setAuthPassword("");
     setAuthConfirm("");
     setResettingCredential(false);
+    hideRevealedCredential();
+    closeVerifyDialog();
   }
 
   async function saveAuthorizationCredential() {
@@ -428,6 +486,46 @@ export function AdminManageUsersPage() {
       pushToast(credentialError.message, "error");
     } finally {
       setCredentialBusy(false);
+    }
+  }
+
+  async function submitAdminVerification(event) {
+    event.preventDefault();
+    if (!editing || verifyBusy) return;
+    setVerifyBusy(true);
+    setVerifyError("");
+    try {
+      const verified = await api.verifyAdminDentistAuthorizationCredential(editing.id, {
+        adminPassword: adminVerifyPassword,
+      });
+      setAdminVerifyPassword("");
+      if (!verified.credentialViewable) {
+        closeVerifyDialog();
+        setRevealedPassword("");
+        setLegacyRevealMessage(verified.message || "Reset this credential to enable viewing.");
+        return;
+      }
+      const revealed = await api.revealAdminDentistAuthorizationCredential(editing.id, {
+        verificationToken: verified.verificationToken,
+      });
+      closeVerifyDialog();
+      if (!revealed.credentialViewable) {
+        setRevealedPassword("");
+        setLegacyRevealMessage(revealed.message || "Reset this credential to enable viewing.");
+        return;
+      }
+      setLegacyRevealMessage("");
+      setRevealedPassword(revealed.password || "");
+      if (revealTimer.current) window.clearTimeout(revealTimer.current);
+      revealTimer.current = window.setTimeout(() => {
+        setRevealedPassword("");
+        revealTimer.current = null;
+      }, REVEAL_MS);
+    } catch (verifyErr) {
+      setVerifyError(verifyErr.message || "Unable to verify administrator access.");
+      setRevealedPassword("");
+    } finally {
+      setVerifyBusy(false);
     }
   }
 
@@ -779,7 +877,7 @@ export function AdminManageUsersPage() {
                           <span className="admin-set-credential__badge">Setup required</span>
                         ) : null}
                         {tab === "dentist" && user.credentialConfigured ? (
-                          <span className="admin-set-credential__badge admin-set-credential__badge--ok">Credential configured</span>
+                          <span className="admin-set-credential__badge admin-set-credential__badge--ok">Credential set</span>
                         ) : null}
                       </td>
                       {tab !== "patient" ? <td><code>{user.id}</code></td> : null}
@@ -1081,7 +1179,15 @@ export function AdminManageUsersPage() {
       ) : null}
 
       {formOpen ? (
-        <AdminModal title={editing ? "Edit account" : "Provision Profile"} onClose={() => setFormOpen(false)} wide>
+        <AdminModal
+          title={editing ? "Edit account" : "Provision Profile"}
+          onClose={() => {
+            hideRevealedCredential();
+            closeVerifyDialog();
+            setFormOpen(false);
+          }}
+          wide
+        >
           <form className="admin-form admin-form--manage-user" onSubmit={saveUser} noValidate>
             <div className="admin-form--manage-user__grid">
               <label>
@@ -1278,13 +1384,45 @@ export function AdminManageUsersPage() {
                       ) : null}
                       {form.authorizationCredentialStatus === "configured" && !resettingCredential ? (
                         <>
-                          <p className="admin-set-credential__status admin-set-credential__status--ok">Credential configured</p>
+                          <label>
+                            Authorization password
+                            <span className="admin-password-reset__input">
+                              <input
+                                type={revealedPassword ? "text" : "password"}
+                                value={revealedPassword || CREDENTIAL_MASK}
+                                readOnly
+                                disabled
+                                autoComplete="off"
+                                name="authorization-credential-mask"
+                                data-credential-mask="true"
+                              />
+                              <button
+                                type="button"
+                                className="admin-set-credential__toggle"
+                                onClick={() => {
+                                  setVerifyError("");
+                                  setAdminVerifyPassword("");
+                                  setVerifyOpen(true);
+                                }}
+                                aria-label="View authorization password"
+                              >
+                                <Eye size={16} />
+                              </button>
+                            </span>
+                          </label>
+                          <p className="admin-set-credential__status admin-set-credential__status--ok">Credential set.</p>
+                          {legacyRevealMessage ? (
+                            <p className="admin-set-credential__status admin-set-credential__status--warn">{legacyRevealMessage}</p>
+                          ) : null}
                           <div className="admin-set-credential__actions">
                             <button
                               type="button"
                               className="button button--secondary"
                               disabled={credentialBusy}
-                              onClick={() => setResettingCredential(true)}
+                              onClick={() => {
+                                hideRevealedCredential();
+                                setResettingCredential(true);
+                              }}
                             >
                               Reset credential
                             </button>
@@ -1294,7 +1432,7 @@ export function AdminManageUsersPage() {
                               disabled={credentialBusy}
                               onClick={revokeAuthorizationCredential}
                             >
-                              {credentialBusy ? "Working…" : "Revoke authorization"}
+                              {credentialBusy ? "Working…" : "Revoke credential"}
                             </button>
                           </div>
                         </>
@@ -1367,8 +1505,63 @@ export function AdminManageUsersPage() {
               ) : null}
             </div>
             <div className="admin-modal__actions">
-              <button type="button" className="button button--secondary" onClick={() => setFormOpen(false)}>Cancel</button>
+              <button
+                type="button"
+                className="button button--secondary"
+                onClick={() => {
+                  hideRevealedCredential();
+                  closeVerifyDialog();
+                  setFormOpen(false);
+                }}
+              >
+                Cancel
+              </button>
               <button className="button button--primary" disabled={busy}>{busy ? "Saving…" : "Save"}</button>
+            </div>
+          </form>
+        </AdminModal>
+      ) : null}
+
+      {verifyOpen ? (
+        <AdminModal title="Verify administrator" onClose={closeVerifyDialog}>
+          <form className="admin-form admin-form--manage-user admin-set-credential-verify" onSubmit={submitAdminVerification}>
+            <p>
+              Enter your own Admin login password to view this dentist’s authorization credential. This does not
+              unlock other dentists and is required again the next time you view.
+            </p>
+            <label htmlFor="admin-credential-verify-password">
+              Administrator password
+              <span className="admin-password-reset__input">
+                <input
+                  id="admin-credential-verify-password"
+                  type={showAdminVerifyPassword ? "text" : "password"}
+                  autoComplete="current-password"
+                  value={adminVerifyPassword}
+                  disabled={verifyBusy}
+                  onChange={(event) => setAdminVerifyPassword(event.target.value)}
+                />
+                <button
+                  type="button"
+                  className="field__visibility"
+                  onClick={() => setShowAdminVerifyPassword((current) => !current)}
+                  aria-label={showAdminVerifyPassword ? "Hide administrator password" : "Show administrator password"}
+                >
+                  {showAdminVerifyPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+                </button>
+              </span>
+            </label>
+            {verifyError ? (
+              <p className="admin-form--manage-user__error" role="alert">
+                {verifyError}
+              </p>
+            ) : null}
+            <div className="admin-modal__actions">
+              <button type="button" className="button button--secondary" onClick={closeVerifyDialog} disabled={verifyBusy}>
+                Cancel
+              </button>
+              <button type="submit" className="button button--primary" disabled={verifyBusy}>
+                {verifyBusy ? "Verifying…" : "View credential"}
+              </button>
             </div>
           </form>
         </AdminModal>

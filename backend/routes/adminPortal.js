@@ -1883,6 +1883,66 @@ function createAdminPortalRouter({
     }
   });
 
+  function noStoreCredential(res) {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+  }
+
+  router.post("/dentists/:id/authorization-credential/verify-view", async (req, res) => {
+    const dentistId = stringValue(req.params.id, 120);
+    if (!dentistId) {
+      return res.status(400).json({ message: "A valid dentist ID is required." });
+    }
+    noStoreCredential(res);
+    try {
+      const verification = await recordAccess.verifyAdminForCredentialReveal(
+        db,
+        req.admin,
+        dentistId,
+        req.body?.adminPassword,
+        req
+      );
+      return res.json(verification);
+    } catch (error) {
+      if (error.status) {
+        return res.status(error.status).json({ message: error.message });
+      }
+      if (error.code === "42703" || isMissingRelation(error)) {
+        return migrationUnavailable(res);
+      }
+      console.error("Admin dentist credential verify error:", error.message);
+      return res.status(500).json({ message: "Unable to verify administrator access." });
+    }
+  });
+
+  router.post("/dentists/:id/authorization-credential/reveal", async (req, res) => {
+    const dentistId = stringValue(req.params.id, 120);
+    if (!dentistId) {
+      return res.status(400).json({ message: "A valid dentist ID is required." });
+    }
+    noStoreCredential(res);
+    try {
+      const revealed = await recordAccess.revealAuthorizationCredential(
+        db,
+        req.admin,
+        dentistId,
+        req.body?.verificationToken,
+        req
+      );
+      return res.json(revealed);
+    } catch (error) {
+      if (error.status) {
+        return res.status(error.status).json({ message: error.message });
+      }
+      if (error.code === "42703" || isMissingRelation(error)) {
+        return migrationUnavailable(res);
+      }
+      console.error("Admin dentist credential reveal error:", error.message);
+      return res.status(500).json({ message: "Unable to reveal the authorization credential." });
+    }
+  });
+
   router.delete("/dentists/:id/authorization-credential", async (req, res) => {
     const dentistId = stringValue(req.params.id, 120);
     if (!dentistId) {
