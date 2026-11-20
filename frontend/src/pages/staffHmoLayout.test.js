@@ -10,15 +10,25 @@ const page = fs.readFileSync(path.join(root, "pages", "StaffHmoVerificationPage.
 const layout = fs.readFileSync(path.join(root, "components", "StaffLayout.jsx"), "utf8");
 const appointments = fs.readFileSync(path.join(root, "pages", "StaffAppointmentsPage.jsx"), "utf8");
 const dashboard = fs.readFileSync(path.join(root, "pages", "StaffDashboardPage.jsx"), "utf8");
+const patientBooking = fs.readFileSync(path.join(root, "pages", "AppointmentsPage.jsx"), "utf8");
 
-test("HMO Verification is a separate Staff destination from Appointments", () => {
-  assert.match(layout, /to: "\/staff\/hmo-verification"/);
+test("HMO Verification is removed from Staff sidebar and mobile Menu", () => {
+  assert.doesNotMatch(layout, /to: "\/staff\/hmo-verification"/);
+  assert.doesNotMatch(layout, /label: "HMO Verification"/);
   assert.match(layout, /to: "\/staff\/appointments"/);
+  assert.match(layout, /to: "\/staff\/patient-records"/);
   assert.match(dashboard, /to="\/staff\/hmo-verification"/);
   assert.match(dashboard, /HMO submissions waiting for Staff review\./);
   assert.doesNotMatch(appointments, /id: "hmo"/);
   assert.match(appointments, /Appointment:/);
   assert.match(appointments, /· HMO:/);
+});
+
+test("Patient Book Appointment still offers HMO coverage", () => {
+  assert.match(patientBooking, /Will you be using an HMO\?/);
+  assert.match(patientBooking, /value="hmo"/);
+  assert.match(patientBooking, /Yes, I have HMO coverage/);
+  assert.match(patientBooking, /coverageType === "hmo"/);
 });
 
 test("HMO verification layout wraps at 390px and 320px while remaining a full-page review", () => {
