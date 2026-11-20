@@ -17,6 +17,11 @@ import { BrandMark } from "../components/BrandMark";
 import { LegalDocument } from "../components/LegalDocument";
 import { PORTAL_FEATURES } from "./landing/LandingSections";
 import { legalDocumentById } from "../legal/dentasyncLegal";
+import {
+  PATIENT_SEX_OPTIONS,
+  registrationDemographicsError,
+  todayCalendarDate,
+} from "../patientDemographics";
 import { useAuth } from "../useAuth";
 
 const PENDING_OTP_KEY = "amethyst_pending_otp";
@@ -47,6 +52,8 @@ export function AuthPage() {
     phone: "",
     password: "",
     otp: "",
+    sex: "",
+    dateOfBirth: "",
     patientCategory: "regular",
     acceptedTerms: false,
     acceptedPrivacy: false,
@@ -148,6 +155,11 @@ export function AuthPage() {
       );
       return;
     }
+    const demographicsError = registrationDemographicsError(form);
+    if (demographicsError) {
+      setMessage(demographicsError);
+      return;
+    }
     setIsBusy(true);
     try {
       const response = await api.register({
@@ -157,6 +169,9 @@ export function AuthPage() {
         phone: form.phone,
         password: form.password,
         role: "patient",
+        sex: form.sex,
+        gender: form.sex,
+        dateOfBirth: form.dateOfBirth,
         patientCategory: form.patientCategory || "regular",
         acceptedTerms: true,
         acceptedPrivacy: true,
@@ -331,6 +346,33 @@ export function AuthPage() {
                 />
               </span>
             </label>
+          )}
+          {isRegistration && (
+            <div className="field-row auth-demographics-row">
+              <label className="field">
+                <span>Sex</span>
+                <select name="sex" value={form.sex} onChange={updateForm} required>
+                  <option value="">Select sex</option>
+                  {PATIENT_SEX_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Date of birth</span>
+                <input
+                  name="dateOfBirth"
+                  type="date"
+                  value={form.dateOfBirth}
+                  onChange={updateForm}
+                  min="1900-01-01"
+                  max={todayCalendarDate()}
+                  required
+                />
+              </label>
+            </div>
           )}
           {isRegistration && (
             <label className="field">

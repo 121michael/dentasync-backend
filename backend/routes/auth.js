@@ -7,9 +7,10 @@ const {
   isOtpRequestId,
   normalizeOtp,
 } = require("../services/otpService");
-const { linkClinicalRecordsToUser } = require("../services/clinicalPatients");
+const { findOrCreateClinicalRecordForUser, linkClinicalRecordsToUser } = require("../services/clinicalPatients");
 const { accessTokenPayload } = require("../services/sessionRevocation");
 const patientIds = require("../services/patientIds");
+const patientData = require("../services/patientData");
 
 const RESETTABLE_ROLES = ["admin", "dentist", "staff", "patient"];
 const INACTIVE_ACCOUNT_STATUSES = ["inactive", "disabled", "suspended"];
@@ -131,6 +132,69 @@ function createAuthRouter({
     },
   });
 
+  async function seedPatientDemographics(userId, { gender, dateOfBirth, patientCategory }) {
+    const uid = String(userId);
+    const attempts = [
+      {
+        sql: `INSERT INTO patient_portal_profiles (user_id, date_of_birth, birth_date, gender, patient_category)
+              VALUES ($1, $2::date, $2::date, $3, $4)
+              ON CONFLICT (user_id) DO UPDATE SET
+                date_of_birth = EXCLUDED.date_of_birth,
+                birth_date = EXCLUDED.birth_date,
+                gender = EXCLUDED.gender,
+                patient_category = COALESCE(patient_portal_profiles.patient_category, EXCLUDED.patient_category),
+                updated_at = CURRENT_TIMESTAMP`,
+        params: [uid, dateOfBirth, gender, patientCategory],
+      },
+      {
+        sql: `INSERT INTO patient_portal_profiles (user_id, date_of_birth, gender, patient_category)
+              VALUES ($1, $2::date, $3, $4)
+              ON CONFLICT (user_id) DO UPDATE SET
+                date_of_birth = EXCLUDED.date_of_birth,
+                gender = EXCLUDED.gender,
+                patient_category = COALESCE(patient_portal_profiles.patient_category, EXCLUDED.patient_category),
+                updated_at = CURRENT_TIMESTAMP`,
+        params: [uid, dateOfBirth, gender, patientCategory],
+      },
+      {
+        sql: `INSERT INTO patient_portal_profiles (user_id, date_of_birth, gender)
+              VALUES ($1, $2::date, $3)
+              ON CONFLICT (user_id) DO UPDATE SET
+                date_of_birth = EXCLUDED.date_of_birth,
+                gender = EXCLUDED.gender,
+                updated_at = CURRENT_TIMESTAMP`,
+        params: [uid, dateOfBirth, gender],
+      },
+    ];
+
+    for (const attempt of attempts) {
+      try {
+        await db.query(attempt.sql, attempt.params);
+        break;
+      } catch (profileError) {
+        if (profileError?.code === "42P01") return;
+        if (profileError?.code !== "42703") {
+          console.warn("Patient demographic profile seed skipped:", profileError.message);
+          return;
+        }
+      }
+    }
+
+    try {
+      await db.query(
+        `UPDATE clinic_patient_records
+         SET date_of_birth = COALESCE($1::date, date_of_birth),
+             gender = COALESCE($2, gender)
+         WHERE linked_user_id::text = $3`,
+        [dateOfBirth, gender, uid]
+      );
+    } catch (clinicalError) {
+      if (clinicalError?.code !== "42P01" && clinicalError?.code !== "42703") {
+        console.warn("Clinical demographic seed skipped:", clinicalError.message);
+      }
+    }
+  }
+
   async function recordLoginActivity(user, req, eventType) {
     if (typeof db.query !== "function") {
       return;
@@ -164,6 +228,10 @@ function createAuthRouter({
     const normalizedPhone = normalizePhone(phone);
     const requestedRole = (role || "patient").toLowerCase();
     const categoryValue = patientIds.normalizeCategory(patientCategory || category || "regular");
+    const gender = patientData.canonicalSex(req.body?.sex || req.body?.gender);
+    const dateOfBirth = patientData.allowedDateOfBirth(
+      req.body?.dateOfBirth || req.body?.birthDate || req.body?.date_of_birth
+    );
 
     if (!normalizedEmail || !normalizedPhone || !password) {
       return res.status(400).json({
@@ -190,6 +258,23 @@ function createAuthRouter({
         message:
           "You must agree to the Terms and Conditions and acknowledge the Privacy Notice before creating an account.",
       });
+    }
+
+    if (!gender) {
+      return res.status(400).json({ message: "Please select sex." });
+    }
+    if (!dateOfBirth) {
+      const rawDob = String(
+        req.body?.dateOfBirth || req.body?.birthDate || req.body?.date_of_birth || ""
+      ).trim();
+      if (!rawDob) {
+        return res.status(400).json({ message: "Date of birth is required." });
+      }
+      const parsedDob = patientData.calendarDate(rawDob) || (patientData.isIsoDate(rawDob) ? rawDob : "");
+      if (parsedDob && parsedDob > patientData.todayCalendarDate()) {
+        return res.status(400).json({ message: "Date of birth cannot be in the future." });
+      }
+      return res.status(400).json({ message: "Enter a valid date of birth." });
     }
 
     const computedFirstName = firstName || (fullName ? fullName.split(" ")[0] : "");
@@ -328,21 +413,11 @@ function createAuthRouter({
         }
       }
 
-      try {
-        // Seed portal profile category when table supports it (Patient ID stays on users).
-        await db.query(
-          `INSERT INTO patient_portal_profiles (user_id, patient_category)
-           VALUES ($1, $2)
-           ON CONFLICT (user_id) DO UPDATE
-             SET patient_category = COALESCE(patient_portal_profiles.patient_category, EXCLUDED.patient_category),
-                 updated_at = CURRENT_TIMESTAMP`,
-          [String(userRow.id), categoryValue]
-        );
-      } catch (profileError) {
-        if (profileError?.code !== "42P01" && profileError?.code !== "42703") {
-          console.warn("Patient category profile seed skipped:", profileError.message);
-        }
-      }
+      await seedPatientDemographics(userRow.id, {
+        gender,
+        dateOfBirth,
+        patientCategory: categoryValue,
+      });
 
       try {
         const request = await otpService.issueOtp(userRow);
@@ -507,6 +582,21 @@ function createAuthRouter({
       }
 
       await recordLoginActivity(result.user, req, "otp_verified_pending_approval");
+
+      try {
+        await findOrCreateClinicalRecordForUser(db, result.user.id, {
+          id: result.user.id,
+          role: "patient",
+        });
+      } catch (clinicalError) {
+        if (
+          clinicalError?.status !== 404 &&
+          clinicalError?.code !== "42P01" &&
+          clinicalError?.code !== "42703"
+        ) {
+          console.warn("Clinical record create after OTP skipped:", clinicalError.message);
+        }
+      }
 
       return res.status(200).json({
         message:

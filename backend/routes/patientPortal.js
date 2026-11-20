@@ -2752,6 +2752,8 @@ function createPatientPortalRouter({
 
       const user = userResult.rows[0];
       const profileRow = profileResult.rows[0] || {};
+      const dateOfBirth = patientData.calendarDate(profileRow.date_of_birth) || null;
+      const birthDate = patientData.calendarDate(profileRow.birth_date) || dateOfBirth;
       return res.json({
         profile: {
           id: user.id,
@@ -2765,6 +2767,10 @@ function createPatientPortalRouter({
           memberSince: user.created_at || null,
           verified: user.is_verified,
           ...profileRow,
+          date_of_birth: dateOfBirth,
+          birth_date: birthDate || null,
+          gender: patientData.normalizeSex(profileRow.gender) || profileRow.gender || "",
+          age: patientData.ageFromDateOfBirth(dateOfBirth),
           patient_category: user.patient_category || profileRow.patient_category || "regular",
         },
         preferences: {

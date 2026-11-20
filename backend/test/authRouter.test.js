@@ -234,6 +234,8 @@ test("register reclaims an archived patient email/phone instead of blocking sign
       email: "returning@example.test",
       phone: "09171234567",
       password: "SecurePass123",
+      sex: "Female",
+      dateOfBirth: "1994-04-21",
       acceptedTerms: true,
       acceptedPrivacy: true,
     }),
@@ -246,6 +248,14 @@ test("register reclaims an archived patient email/phone instead of blocking sign
   assert.equal(issuedFor.id, 99);
   assert.ok(queries.some((entry) => /UPDATE users/i.test(entry.sql)));
   assert.ok(!queries.some((entry) => /INSERT INTO users/i.test(entry.sql)));
+  assert.ok(
+    queries.some(
+      (entry) =>
+        /INSERT INTO patient_portal_profiles/i.test(entry.sql) &&
+        entry.params.includes("Female") &&
+        entry.params.includes("1994-04-21")
+    )
+  );
 });
 
 test("register requires Terms and Privacy Notice consent", async (t) => {
@@ -290,6 +300,64 @@ test("register requires Terms and Privacy Notice consent", async (t) => {
   assert.equal(response.status, 400);
   assert.match(body.message, /Terms and Conditions/i);
   assert.equal(queried, false);
+});
+
+test("register requires sex and a valid past date of birth", async (t) => {
+  const app = express();
+  app.use(express.json());
+  app.use(
+    "/api/auth",
+    createAuthRouter({
+      db: {
+        async query() {
+          return { rows: [] };
+        },
+      },
+      otpService: {
+        async issueOtp() {
+          throw new Error("OTP should not be issued for invalid demographics");
+        },
+      },
+      authenticateToken: (_req, _res, next) => next(),
+      jwtSecret: "test-jwt-secret",
+    })
+  );
+  const server = await startServer(app);
+  t.after(server.close);
+
+  async function register(extra) {
+    const response = await fetch(`${server.baseUrl}/api/auth/register`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        firstName: "New",
+        lastName: "Patient",
+        email: "new@example.test",
+        phone: "09171234567",
+        password: "SecurePass123",
+        acceptedTerms: true,
+        acceptedPrivacy: true,
+        ...extra,
+      }),
+    });
+    return { status: response.status, body: await response.json() };
+  }
+
+  const missingSex = await register({ dateOfBirth: "2001-06-15" });
+  assert.equal(missingSex.status, 400);
+  assert.match(missingSex.body.message, /sex/i);
+
+  const missingDob = await register({ sex: "Female" });
+  assert.equal(missingDob.status, 400);
+  assert.match(missingDob.body.message, /date of birth/i);
+
+  const invalidDob = await register({ sex: "Female", dateOfBirth: "2026-02-31" });
+  assert.equal(invalidDob.status, 400);
+  assert.match(invalidDob.body.message, /valid date of birth/i);
+
+  const futureDob = await register({ sex: "Female", dateOfBirth: "2099-01-01" });
+  assert.equal(futureDob.status, 400);
+  assert.match(futureDob.body.message, /future/i);
 });
 
 test("forgot-password accepts active verified accounts across all supported roles", async (t) => {

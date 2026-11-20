@@ -126,7 +126,7 @@ function isMissingRelation(error) {
 function mapClinicalRecord(row, extras = {}) {
   const firstName = row.first_name || "";
   const lastName = row.last_name || "";
-  const dateOfBirth = row.date_of_birth || null;
+  const dateOfBirth = patientData.calendarDate(row.date_of_birth) || null;
   const gender = row.gender || "";
   const age =
     extras.age ??
@@ -331,7 +331,10 @@ async function enrichRecordsFromLinkedProfiles(db, records) {
 
     const firstName = stringValue(account.first_name, 80) || record.firstName;
     const lastName = stringValue(account.last_name, 80) || record.lastName;
-    const dateOfBirth = account.date_of_birth || record.dateOfBirth;
+    const dateOfBirth =
+      patientData.calendarDate(account.date_of_birth) ||
+      patientData.calendarDate(record.dateOfBirth) ||
+      record.dateOfBirth;
     const gender = stringValue(account.gender, 40) || record.gender;
     const age = ageFromDateOfBirth(dateOfBirth);
 
@@ -1956,12 +1959,7 @@ async function findOrCreateClinicalRecordForUser(db, userId, actor = {}) {
 
   const firstName = stringValue(user.first_name, 80) || "Patient";
   const lastName = stringValue(user.last_name, 80) || linkedUserId;
-  let dateOfBirth = null;
-  if (user.date_of_birth instanceof Date && !Number.isNaN(user.date_of_birth.getTime())) {
-    dateOfBirth = user.date_of_birth.toISOString().slice(0, 10);
-  } else if (typeof user.date_of_birth === "string") {
-    dateOfBirth = user.date_of_birth.slice(0, 10);
-  }
+  const dateOfBirth = patientData.calendarDate(user.date_of_birth) || null;
 
   // Insert directly with linked_user_id to avoid createClinicalRecord's users.is_archived probe.
   const result = await db.query(

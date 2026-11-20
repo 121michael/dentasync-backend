@@ -12349,10 +12349,23 @@ body.is-queue-display .fab-menu {
   margin: -0.35rem 0 0.2rem;
 }
 
+.landing .auth-card .field,
+.landing .auth-card .field-row {
+  min-width: 0;
+}
+
 .landing .auth-card .field input,
 .landing .auth-card .field select {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
   min-height: 46px;
   border-radius: 12px;
+}
+
+.landing .auth-card .field input[type="date"] {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .landing .auth-card .field input:focus,
@@ -13671,8 +13684,27 @@ body.is-queue-display .fab-menu {
     padding: 1.35rem 1.1rem;
     border-radius: 20px;
   }
-  .landing .auth-screen__panel .field-row {
+  .landing .auth-screen__panel .field-row,
+  .landing .auth-card .auth-demographics-row {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 390px) {
+  .landing .auth-screen__panel {
+    padding: 1.2rem 0.9rem;
+  }
+  .landing .auth-card .auth-demographics-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 320px) {
+  .landing .auth-screen__panel {
+    padding: 1.05rem 0.75rem;
+  }
+  .landing .auth-card .field input[type="date"] {
+    font-size: 1rem;
   }
 }
 
