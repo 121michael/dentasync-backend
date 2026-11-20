@@ -36,10 +36,20 @@ test("normalizeIsoDate handles common document date formats", () => {
 });
 
 test("age is derived from birthdate rather than stored", () => {
-  const today = new Date("2026-09-19T00:00:00.000Z");
+  const today = new Date(2026, 8, 19);
   assert.equal(patientData.ageFromDateOfBirth("2005-01-10", today), 21);
   assert.equal(patientData.ageFromDateOfBirth("2005-09-20", today), 20);
   assert.equal(patientData.ageFromDateOfBirth(null, today), null);
+});
+
+test("calendar dates stay YYYY-MM-DD without timezone shifts", () => {
+  assert.equal(patientData.calendarDate("2001-06-15"), "2001-06-15");
+  assert.equal(patientData.calendarDate("2001-06-15T00:00:00.000Z"), "2001-06-15");
+  assert.equal(patientData.calendarDate(new Date("2001-06-15T00:00:00.000Z")), "2001-06-15");
+  assert.equal(patientData.allowedDateOfBirth("2099-01-01", new Date(2026, 10, 20)), "");
+  assert.equal(patientData.allowedDateOfBirth("2026-02-31"), "");
+  assert.equal(patientData.canonicalSex("female"), "Female");
+  assert.equal(patientData.canonicalSex("unknown"), "");
 });
 
 test("canonicalTreatmentName collapses spellings into the treatment taxonomy", () => {

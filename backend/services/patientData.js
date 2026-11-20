@@ -209,13 +209,53 @@ function normalizeIsoDate(value) {
   return "";
 }
 
+function todayCalendarDate(now = new Date()) {
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Calendar date only (YYYY-MM-DD). Avoids timezone shifts from Date/ISO timestamps.
+ */
+function calendarDate(value) {
+  if (value == null || value === "") return "";
+  if (typeof value === "string") {
+    const match = value.trim().match(/^(\d{4}-\d{2}-\d{2})/);
+    if (match && isIsoDate(match[1])) return match[1];
+    return normalizeIsoDate(value) || "";
+  }
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    if (value.getUTCHours() === 0 && value.getUTCMinutes() === 0 && value.getUTCSeconds() === 0) {
+      return value.toISOString().slice(0, 10);
+    }
+    return todayCalendarDate(value);
+  }
+  return "";
+}
+
+const CANONICAL_SEX = new Set(["Male", "Female", "Non-binary", "Prefer to self-describe"]);
+
+function canonicalSex(value) {
+  const normalized = normalizeSex(value);
+  return CANONICAL_SEX.has(normalized) ? normalized : "";
+}
+
+function allowedDateOfBirth(value, now = new Date()) {
+  const iso = calendarDate(value);
+  if (!iso || !isIsoDate(iso)) return "";
+  if (iso > todayCalendarDate(now)) return "";
+  return iso;
+}
+
 function ageFromDateOfBirth(value, today = new Date()) {
-  const iso = normalizeIsoDate(value);
+  const iso = calendarDate(value) || normalizeIsoDate(value);
   if (!iso) return null;
-  const dob = new Date(`${iso}T00:00:00.000Z`);
-  let age = today.getUTCFullYear() - dob.getUTCFullYear();
-  const monthDiff = today.getUTCMonth() - dob.getUTCMonth();
-  if (monthDiff < 0 || (monthDiff === 0 && today.getUTCDate() < dob.getUTCDate())) {
+  const dob = new Date(`${iso}T00:00:00`);
+  let age = today.getFullYear() - dob.getFullYear();
+  const monthDiff = today.getMonth() - dob.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) {
     age -= 1;
   }
   return age >= 0 && age <= 130 ? age : null;
@@ -366,6 +406,11 @@ module.exports = {
   formatPhoneForDisplay,
   isIsoDate,
   normalizeIsoDate,
+  todayCalendarDate,
+  calendarDate,
+  canonicalSex,
+  allowedDateOfBirth,
+  CANONICAL_SEX,
   ageFromDateOfBirth,
   formatAgeSex,
   parseMoney,

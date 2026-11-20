@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { api } from "../api";
 import { ErrorState, LoadingState, SectionHeading } from "../components/UI";
+import { calendarDateInputValue, PATIENT_SEX_OPTIONS } from "../patientDemographics";
 import { useAuth } from "../useAuth";
 
 const PROFILE_MENU = [
@@ -96,7 +97,7 @@ function profileToForm(profile) {
     lastName: profile.lastName || "",
     email: profile.email || "",
     phone: profile.phone || "",
-    dateOfBirth: profile.date_of_birth || "",
+    dateOfBirth: calendarDateInputValue(profile.date_of_birth),
     gender: profile.gender || "",
     address: profile.address || "",
     emergencyContactName: profile.emergency_contact_name || "",
@@ -361,10 +362,11 @@ export function ProfilePage() {
                       <span>Gender</span>
                       <select name="gender" value={form.gender} onChange={updateForm}>
                         <option value="">Prefer not to say</option>
-                        <option>Female</option>
-                        <option>Male</option>
-                        <option>Non-binary</option>
-                        <option>Prefer to self-describe</option>
+                        {PATIENT_SEX_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
                       </select>
                     </label>
                     <label className="field">
