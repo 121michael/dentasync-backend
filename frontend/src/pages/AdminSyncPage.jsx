@@ -473,7 +473,12 @@ export function AdminSyncPage() {
               .map(([field]) => field)
       );
       if (response.ocrError || response.allowManualEntry) {
-        setError(response.ocrError || response.message || "");
+        const missing = Array.isArray(response.missingSettings) ? response.missingSettings.filter(Boolean) : [];
+        setError(
+          missing.length
+            ? `${response.ocrError || response.message || ""} Missing: ${missing.join(", ")}.`
+            : response.ocrError || response.message || ""
+        );
       }
       setPreviewZoom(1);
       setPreviewPage(1);

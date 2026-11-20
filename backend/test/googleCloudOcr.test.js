@@ -10,7 +10,11 @@ const {
   extractTextWithGoogleCloud,
   extractHandwrittenFormWithDocumentAi,
   documentAiProcessorName,
+  documentAiApiEndpoint,
+  documentAiMissingSettingNames,
   documentAiIsConfigured,
+  DOCUMENT_AI_AUTH_MESSAGE,
+  DOCUMENT_AI_PROCESSOR_MESSAGE,
   applyLowConfidenceFields,
   googleCloudOcrIsConfigured,
   setGoogleCloudOcrFetch,
@@ -173,7 +177,18 @@ test("Document AI processor name is built from project, location, and processor 
     }),
     "projects/clinic-sync/locations/us/processors/proc-handwriting"
   );
+  assert.equal(
+    documentAiApiEndpoint({ GOOGLE_DOCUMENT_AI_LOCATION: "us" }),
+    "https://us-documentai.googleapis.com"
+  );
+  assert.equal(
+    documentAiApiEndpoint({ GOOGLE_DOCUMENT_AI_LOCATION: "eu" }),
+    "https://eu-documentai.googleapis.com"
+  );
   assert.equal(documentAiIsConfigured({ GOOGLE_CLOUD_PROJECT: "clinic-sync" }), false);
+  assert.ok(documentAiMissingSettingNames({}).includes("GOOGLE_CLOUD_PROJECT"));
+  assert.ok(documentAiMissingSettingNames({}).includes("GOOGLE_DOCUMENT_AI_PROCESSOR_ID"));
+  assert.ok(documentAiMissingSettingNames({}).includes("GOOGLE_CLOUD_API_KEY"));
 });
 
 test("Enterprise Document OCR reads a synthetic handwritten form and blanks low-confidence values", async () => {
@@ -203,7 +218,7 @@ test("Enterprise Document OCR reads a synthetic handwritten form and blanks low-
     assert.equal(ocr.ok, true);
     assert.equal(ocr.method, "gcp-document-ai-ocr");
     assert.match(ocr.text, /Maria Santos/);
-    assert.ok(calls.some((call) => call.url.includes("documentai.googleapis.com")));
+    assert.ok(calls.some((call) => call.url.includes("https://us-documentai.googleapis.com/v1/")));
     assert.match(String(calls.find((call) => call.url.includes("documentai.googleapis.com")).body), /ocrConfig/);
 
     const extracted = await extractDocumentData(filePath, "image/png", "handwriting-chart.png", {

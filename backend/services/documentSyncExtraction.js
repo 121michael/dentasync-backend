@@ -12,6 +12,7 @@ const {
   extractHandwrittenFormWithDocumentAi,
   applyLowConfidenceFields,
   documentAiIsConfigured,
+  DOCUMENT_AI_MISSING_MESSAGE,
 } = require("./googleCloudOcr");
 const { parseAffectedTeeth, isValidFdiTooth } = require("./dentalChartSync");
 
@@ -3496,6 +3497,8 @@ async function extractDocumentDataUntracked(filePath, mimeType, originalName, op
   const handwritten = String(options.sourceType || "").trim() === "hard_copy_scan";
   let allowManualEntry = false;
   let ocrError = "";
+  let ocrErrorCode = "";
+  let missingSettings = [];
   let documentAiTokens = [];
   let handwrittenExtracted = null;
 
@@ -3511,18 +3514,22 @@ async function extractDocumentDataUntracked(filePath, mimeType, originalName, op
         method: handwrittenOcr.method,
         confidence: handwrittenOcr.confidence,
         tokens: handwrittenOcr.tokens || [],
+        fields: {},
       };
       documentAiTokens = handwrittenExtracted.tokens;
     } else {
       ocrError = handwrittenOcr.message;
+      ocrErrorCode = handwrittenOcr.code || "ocr_failed";
+      missingSettings = handwrittenOcr.missingSettings || [];
       allowManualEntry = true;
     }
   }
 
   // Fast vision path for complex handwritten forms when configured.
+  // Hard-copy scans stay on Document AI so mapping uses that transcription.
   let vision = null;
   let visionProviderNote = "";
-  if (isImage || mimeType === "application/pdf" || extension === ".pdf") {
+  if (!handwritten && (isImage || mimeType === "application/pdf" || extension === ".pdf")) {
     try {
       vision = await extractFieldsWithGemini(filePath, mimeType || (isImage ? "image/png" : "application/pdf"));
     } catch (error) {
@@ -3541,10 +3548,14 @@ async function extractDocumentDataUntracked(filePath, mimeType, originalName, op
     throw new DocumentValidationError(INVALID_DOCUMENT_MESSAGE);
   }
 
-  const extracted = handwrittenExtracted || (await extractTextFromFile(filePath, mimeType, originalName));
+  const extracted =
+    handwrittenExtracted ||
+    (handwritten
+      ? { text: "", method: "document-ai", confidence: 0, fields: {}, warning: ocrError }
+      : await extractTextFromFile(filePath, mimeType, originalName));
 
   // If Gemini returned fields, also try Gemini on the upright corrected image for better accuracy.
-  if (isImage && extracted.uprightPath && process.env.GEMINI_API_KEY) {
+  if (!handwritten && isImage && extracted.uprightPath && process.env.GEMINI_API_KEY) {
     try {
       const uprightVision = await extractFieldsWithGemini(extracted.uprightPath, "image/png");
       if (uprightVision && uprightVision.isDocument !== false) {
@@ -3620,6 +3631,7 @@ async function extractDocumentDataUntracked(filePath, mimeType, originalName, op
   // Second pass: when patient header is readable but Procedure/Date/Age are still blank,
   // re-OCR the treatment table band and escalate to OCR.space if needed.
   if (
+    !handwritten &&
     isImage &&
     String(structured.payload.patient?.fullName || "").trim() &&
     dentalChartMissingCriticalFields(structured.payload)
@@ -3747,7 +3759,10 @@ async function extractDocumentDataUntracked(filePath, mimeType, originalName, op
     handwritten
       ? documentAiIsConfigured()
         ? ocrError || "Handwritten scan read with Google Document AI Enterprise Document OCR."
-        : ocrError
+        : ocrError ||
+          (missingSettings.length
+            ? `${DOCUMENT_AI_MISSING_MESSAGE} Missing: ${missingSettings.join(", ")}.`
+            : DOCUMENT_AI_MISSING_MESSAGE)
       : "",
     visionProviderNote,
     vision
@@ -3779,6 +3794,8 @@ async function extractDocumentDataUntracked(filePath, mimeType, originalName, op
     autoFilledCount: filledCount,
     allowManualEntry,
     ocrError,
+    ocrErrorCode,
+    missingSettings,
   };
 }
 

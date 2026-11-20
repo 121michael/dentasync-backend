@@ -13,7 +13,7 @@ const { Pool } = require("pg");
 const {
   setGoogleCloudOcrFetch,
   clearGoogleCloudOcrCache,
-  DOCUMENT_AI_FAILED_MESSAGE,
+  DOCUMENT_AI_PROCESSOR_MESSAGE,
 } = require("../services/googleCloudOcr");
 
 dotenv.config({ path: path.join(__dirname, "..", ".env") });
@@ -301,7 +301,8 @@ test("handwritten Document AI extract, save, duplicate skip, and OCR failure", a
   const failed = await uploadScan(filePath, "fail");
   assert.equal(failed.status, 201, JSON.stringify(failed.body));
   assert.equal(failed.body.allowManualEntry, true);
-  assert.equal(failed.body.ocrError, DOCUMENT_AI_FAILED_MESSAGE);
+  assert.equal(failed.body.ocrError, DOCUMENT_AI_PROCESSOR_MESSAGE);
+  assert.equal(failed.body.ocrErrorCode, "processor_error");
   assert.equal(failed.body.job.status, "extracted");
   const failPayload = failed.body.job.editedPayload || {};
   failPayload.patient = {

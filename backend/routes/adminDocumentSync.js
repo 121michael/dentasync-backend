@@ -538,6 +538,8 @@ function attachAdminDocumentSyncRoutes(router, { db, uploadDirectory }) {
           needsReview: Boolean(extraction.needsReview) || allowManualEntry,
           allowManualEntry,
           ocrError: ocrError || null,
+          ocrErrorCode: extraction.ocrErrorCode || null,
+          missingSettings: extraction.missingSettings || [],
         });
       } catch (error) {
         const isValidation =

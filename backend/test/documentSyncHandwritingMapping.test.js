@@ -134,6 +134,26 @@ Sensitive to cold on 14
   assert.equal(extractExplicitClinicalNotes("REMARKS\nWatch occlusion"), "Watch occlusion");
 });
 
+test("procedure, date, tooth, dentist, and amount stay on the same treatment row", () => {
+  const { payload } = extractStructuredPayload(`
+NAME
+Pearl Amethyst
+TREATMENT RECORD
+Date | Tooth | Procedure | Dentist | Amount Charged
+SEPT 7, 2024 | 14 | Oral Prophylaxis | Dr. Tala Reyes | 800
+OCT 12, 2024 | 36 | Restoration | Dr. Tala Reyes | 1500
+`);
+  assert.equal(payload.procedure.visits.length, 2);
+  assert.equal(payload.procedure.visits[0].treatmentDate.includes("SEPT") || payload.procedure.visits[0].treatmentDate.includes("Sept"), true);
+  assert.equal(payload.procedure.visits[0].toothNos, "14");
+  assert.equal(payload.procedure.visits[0].treatment, "Oral Prophylaxis");
+  assert.match(payload.procedure.visits[0].dentistName, /Tala Reyes/i);
+  assert.equal(payload.procedure.visits[0].amountCharged, "800");
+  assert.equal(payload.procedure.visits[1].toothNos, "36");
+  assert.equal(payload.procedure.visits[1].amountCharged, "1500");
+  assert.equal(payload.procedure.notes || "", "");
+});
+
 test("ambiguous teeth across two procedures stay blank", () => {
   const { payload, fieldStatuses } = extractStructuredPayload(`
 TREATMENT RECORD

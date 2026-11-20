@@ -17,6 +17,10 @@
 const LOW_CONFIDENCE_THRESHOLD = 0.55;
 const DOCUMENT_AI_MISSING_MESSAGE =
   "Google Document AI is not configured for handwritten forms. Set GOOGLE_CLOUD_PROJECT, GOOGLE_DOCUMENT_AI_LOCATION, GOOGLE_DOCUMENT_AI_PROCESSOR_ID, and a service account or API key on the server. You can still type the fields from the original document.";
+const DOCUMENT_AI_AUTH_MESSAGE =
+  "Document AI authentication failed. Check GOOGLE_APPLICATION_CREDENTIALS, GOOGLE_SERVICE_ACCOUNT_JSON, or GOOGLE_CLOUD_API_KEY on the server. You can still type the fields from the original document, then Confirm & Save.";
+const DOCUMENT_AI_PROCESSOR_MESSAGE =
+  "The Document AI processor rejected this handwritten form. Confirm the processor ID, location, and IAM permissions. You can still type the fields from the original document, then Confirm & Save.";
 const DOCUMENT_AI_FAILED_MESSAGE =
   "Document AI could not read this handwritten form. Leave unreadable values blank and enter them from the original document, then Confirm & Save.";
 
@@ -139,6 +143,43 @@ async function getAccessToken(env, scopes) {
     expiresAt: Date.now() + Number(data.expires_in || 3600) * 1000,
   };
   return token;
+}
+
+function documentAiLocation(env = process.env) {
+  const full = stringEnv(env, ["GOOGLE_DOCUMENT_AI_PROCESSOR", "DOCUMENT_AI_PROCESSOR_NAME"]);
+  const fromName = String(full).match(/\/locations\/([^/]+)\//i);
+  if (fromName?.[1]) return fromName[1];
+  return stringEnv(env, ["GOOGLE_DOCUMENT_AI_LOCATION", "DOCUMENT_AI_LOCATION"]) || "us";
+}
+
+function documentAiApiEndpoint(env = process.env) {
+  const location = String(documentAiLocation(env) || "us")
+    .trim()
+    .toLowerCase();
+  return `https://${location}-documentai.googleapis.com`;
+}
+
+function documentAiMissingSettingNames(env = process.env) {
+  const missing = [];
+  const project = stringEnv(env, [
+    "GOOGLE_CLOUD_PROJECT",
+    "GOOGLE_CLOUD_PROJECT_ID",
+    "GCLOUD_PROJECT",
+    "DOCUMENT_AI_PROJECT",
+  ]);
+  const processorId = stringEnv(env, ["GOOGLE_DOCUMENT_AI_PROCESSOR_ID", "DOCUMENT_AI_PROCESSOR_ID"]);
+  const full = stringEnv(env, ["GOOGLE_DOCUMENT_AI_PROCESSOR", "DOCUMENT_AI_PROCESSOR_NAME"]);
+  if (!full.includes("/processors/") && !project) missing.push("GOOGLE_CLOUD_PROJECT");
+  if (!stringEnv(env, ["GOOGLE_DOCUMENT_AI_LOCATION", "DOCUMENT_AI_LOCATION"]) && !full.includes("/locations/")) {
+    missing.push("GOOGLE_DOCUMENT_AI_LOCATION");
+  }
+  if (!full.includes("/processors/") && !processorId) missing.push("GOOGLE_DOCUMENT_AI_PROCESSOR_ID");
+  if (!googleCloudOcrIsConfigured(env)) {
+    missing.push("GOOGLE_APPLICATION_CREDENTIALS");
+    missing.push("GOOGLE_SERVICE_ACCOUNT_JSON");
+    missing.push("GOOGLE_CLOUD_API_KEY");
+  }
+  return [...new Set(missing)];
 }
 
 function documentAiProcessorName(env = process.env) {
@@ -329,10 +370,16 @@ function applyLowConfidenceFields(payload, fieldStatuses, tokens, threshold = LO
   if (Array.isArray(procedure.visits)) {
     for (const row of procedure.visits) {
       if (!row || typeof row !== "object") continue;
-      if (tokenConfidenceForValue(tokens, row.amountCharged) < threshold) row.amountCharged = "";
-      if (tokenConfidenceForValue(tokens, row.treatmentDate) < threshold) row.treatmentDate = "";
-      if (tokenConfidenceForValue(tokens, row.treatment) < threshold) row.treatment = "";
-      if (tokenConfidenceForValue(tokens, row.toothNos) < threshold) row.toothNos = "";
+      const amountConfidence = tokenConfidenceForValue(tokens, row.amountCharged);
+      const dateConfidence = tokenConfidenceForValue(tokens, row.treatmentDate);
+      const treatmentConfidence = tokenConfidenceForValue(tokens, row.treatment);
+      const toothConfidence = tokenConfidenceForValue(tokens, row.toothNos);
+      const dentistConfidence = tokenConfidenceForValue(tokens, row.dentistName);
+      if (amountConfidence != null && amountConfidence < threshold) row.amountCharged = "";
+      if (dateConfidence != null && dateConfidence < threshold) row.treatmentDate = "";
+      if (treatmentConfidence != null && treatmentConfidence < threshold) row.treatment = "";
+      if (toothConfidence != null && toothConfidence < threshold) row.toothNos = "";
+      if (dentistConfidence != null && dentistConfidence < threshold) row.dentistName = "";
     }
   }
   return next;
@@ -434,7 +481,7 @@ async function extractWithDocumentAi({ filePath, mimeType, env }) {
   if (!processor) return null;
   const buffer = fs.readFileSync(filePath);
   const data = await requestGoogleJson(
-    `https://documentai.googleapis.com/v1/${processor}:process`,
+    `${documentAiApiEndpoint(env)}/v1/${processor}:process`,
     {
       env,
       scopes: [DOCUMENT_AI_SCOPE],
@@ -466,12 +513,36 @@ async function extractWithDocumentAi({ filePath, mimeType, env }) {
   };
 }
 
+function classifyDocumentAiError(error) {
+  const status = Number(error?.status);
+  const message = String(error?.message || "");
+  if (
+    status === 401 ||
+    status === 403 ||
+    /auth failed|unauthenticated|permission denied|invalid_grant/i.test(message)
+  ) {
+    return { code: "auth_failed", message: DOCUMENT_AI_AUTH_MESSAGE };
+  }
+  if (status >= 400) {
+    return { code: "processor_error", message: DOCUMENT_AI_PROCESSOR_MESSAGE };
+  }
+  return { code: "ocr_failed", message: DOCUMENT_AI_FAILED_MESSAGE };
+}
+
 async function extractHandwrittenFormWithDocumentAi({ filePath, mimeType, env = process.env } = {}) {
   if (!filePath || !fs.existsSync(filePath)) {
     return { ok: false, code: "ocr_failed", message: DOCUMENT_AI_FAILED_MESSAGE };
   }
   if (!documentAiIsConfigured(env)) {
-    return { ok: false, code: "not_configured", message: DOCUMENT_AI_MISSING_MESSAGE };
+    const missingSettings = documentAiMissingSettingNames(env);
+    return {
+      ok: false,
+      code: "not_configured",
+      message: missingSettings.length
+        ? `${DOCUMENT_AI_MISSING_MESSAGE} Missing: ${missingSettings.join(", ")}.`
+        : DOCUMENT_AI_MISSING_MESSAGE,
+      missingSettings,
+    };
   }
   const extension = path.extname(filePath).toLowerCase();
   const isPdf = mimeType === "application/pdf" || extension === ".pdf";
@@ -482,11 +553,11 @@ async function extractHandwrittenFormWithDocumentAi({ filePath, mimeType, env = 
       env,
     });
     if (!result?.text) {
-      return { ok: false, code: "ocr_failed", message: DOCUMENT_AI_FAILED_MESSAGE };
+      return { ok: false, code: "unreadable", message: DOCUMENT_AI_FAILED_MESSAGE };
     }
     return { ok: true, ...result };
-  } catch {
-    return { ok: false, code: "ocr_failed", message: DOCUMENT_AI_FAILED_MESSAGE };
+  } catch (error) {
+    return { ok: false, ...classifyDocumentAiError(error) };
   }
 }
 
@@ -591,10 +662,15 @@ async function extractTextWithGoogleCloud({
 module.exports = {
   LOW_CONFIDENCE_THRESHOLD,
   DOCUMENT_AI_MISSING_MESSAGE,
+  DOCUMENT_AI_AUTH_MESSAGE,
+  DOCUMENT_AI_PROCESSOR_MESSAGE,
   DOCUMENT_AI_FAILED_MESSAGE,
   extractTextWithGoogleCloud,
   extractHandwrittenFormWithDocumentAi,
   documentAiProcessorName,
+  documentAiApiEndpoint,
+  documentAiLocation,
+  documentAiMissingSettingNames,
   documentAiIsConfigured,
   applyLowConfidenceFields,
   googleCloudOcrIsConfigured,
