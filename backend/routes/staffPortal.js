@@ -231,6 +231,7 @@ function mapInvoice(row) {
     patientName: row.patient_name,
     patientPhone: row.patient_phone || null,
     appointmentId: row.appointment_id || null,
+    branchId: row.branch_id != null ? Number(row.branch_id) : null,
     serviceName: row.service_name,
     amount: Number(row.amount || 0),
     amountPaid: Number(row.amount_paid || 0),
@@ -246,6 +247,73 @@ function mapInvoice(row) {
 
 function isMissingRelation(error) {
   return error?.code === "42P01" || error?.code === "42703";
+}
+
+async function ensureInvoiceBranchColumn(db) {
+  try {
+    await db.query(`ALTER TABLE staff_portal_invoices ADD COLUMN IF NOT EXISTS branch_id BIGINT`);
+  } catch (error) {
+    if (error?.code === "42P01") return;
+    throw error;
+  }
+}
+
+function invoiceAtBranchSql(alias, paramIndex) {
+  return `(
+    ${alias}.branch_id = $${paramIndex}
+    OR (
+      ${alias}.branch_id IS NULL
+      AND ${alias}.appointment_id IS NOT NULL
+      AND EXISTS (
+        SELECT 1
+        FROM patient_portal_appointments AS appointment
+        WHERE appointment.id = ${alias}.appointment_id
+          AND appointment.branch_id = $${paramIndex}
+      )
+    )
+  )`;
+}
+
+async function assertOperationalAtStaffBranch(db, { appointmentId, queueEntryId, branchId }) {
+  if (appointmentId) {
+    const result = await db.query(
+      `SELECT id FROM patient_portal_appointments WHERE id = $1 AND branch_id = $2 LIMIT 1`,
+      [appointmentId, branchId]
+    );
+    if (!result.rows.length) {
+      const error = new Error("That record is not available at this branch.");
+      error.status = 403;
+      throw error;
+    }
+  }
+  if (!queueEntryId) return;
+  try {
+    const result = await db.query(
+      `SELECT id FROM patient_portal_queue_entries WHERE id = $1 AND branch_id = $2 LIMIT 1`,
+      [queueEntryId, branchId]
+    );
+    if (!result.rows.length) {
+      const error = new Error("That record is not available at this branch.");
+      error.status = 403;
+      throw error;
+    }
+  } catch (error) {
+    if (error.status) throw error;
+    const result = await db.query(
+      `SELECT queue.id
+       FROM patient_portal_queue_entries AS queue
+       LEFT JOIN patient_portal_appointments AS appointment ON appointment.id = queue.appointment_id
+       WHERE queue.id = $1
+         AND appointment.branch_id = $2
+       LIMIT 1`,
+      [queueEntryId, branchId]
+    );
+    if (!result.rows.length) {
+      const error = new Error("That record is not available at this branch.");
+      error.status = 403;
+      throw error;
+    }
+  }
 }
 
 function invoiceCode() {
@@ -1060,8 +1128,9 @@ function createStaffPortalRouter({
              FROM patient_portal_appointments AS appointment
              JOIN users AS patient ON patient.id::text = appointment.user_id
              WHERE appointment.id = $1
+               AND appointment.branch_id = $2
              LIMIT 1`,
-            [appointmentId]
+            [appointmentId, req.branchAccess.activeBranch.id]
           );
           if (!fallback.rows.length) {
             return res.status(404).json({ message: "Appointment not found." });
@@ -1352,8 +1421,9 @@ function createStaffPortalRouter({
          FROM patient_portal_appointments AS appointment
          JOIN users AS patient ON patient.id::text = appointment.user_id
          WHERE appointment.id = $1
+           AND appointment.branch_id = $2
          LIMIT 1`,
-        [appointmentId]
+        [appointmentId, branchId]
       );
       return res.json({
         appointment: mapAppointment(appointmentResult.rows[0]),
@@ -1373,14 +1443,33 @@ function createStaffPortalRouter({
     }
   });
 
-  router.get("/dentist-availability", async (_req, res) => {
+  router.get("/dentist-availability", async (req, res) => {
+    const branchId = req.branchAccess?.activeBranch?.id;
+    if (!branchId) {
+      return res.status(403).json({ message: "No branch is assigned to this account." });
+    }
     try {
       const result = await db.query(
-        `SELECT id, dentist_id, dentist_name, availability_date, start_time, end_time, status
-         FROM staff_portal_dentist_availability
-         WHERE availability_date >= CURRENT_DATE
-         ORDER BY availability_date ASC, start_time ASC, dentist_name ASC
-         LIMIT 200`
+        `SELECT availability.id, availability.dentist_id, availability.dentist_name,
+                availability.availability_date, availability.start_time, availability.end_time, availability.status
+         FROM staff_portal_dentist_availability AS availability
+         WHERE availability.availability_date >= CURRENT_DATE
+           AND EXISTS (
+             SELECT 1
+             FROM clinic_branch_assignments AS assignment
+             JOIN users AS dentist ON dentist.id::text = assignment.user_id::text
+             LEFT JOIN admin_portal_dentist_profiles AS profile
+               ON profile.user_id = dentist.id::text
+             WHERE assignment.branch_id = $1
+               AND LOWER(dentist.role) = 'dentist'
+               AND (
+                 dentist.id::text = availability.dentist_id
+                 OR profile.catalog_dentist_id = availability.dentist_id
+               )
+           )
+         ORDER BY availability.availability_date ASC, availability.start_time ASC, availability.dentist_name ASC
+         LIMIT 200`,
+        [branchId]
       );
       return res.json({
         availability: result.rows.map((entry) => ({
@@ -1608,13 +1697,38 @@ function createStaffPortalRouter({
     }
 
     try {
-      const before = await db
-        .query(`SELECT amount_paid FROM clinic_patient_treatments WHERE id = $1 AND clinical_record_id = $2`, [
-          treatmentId,
-          recordId,
-        ])
-        .then((result) => (result.rows[0] ? Number(result.rows[0].amount_paid || 0) : null))
-        .catch(() => null);
+      const staffBranchId = req.branchAccess?.activeBranch?.id;
+      if (!staffBranchId) {
+        return res.status(403).json({ message: "No branch is assigned to this account." });
+      }
+      let currentTreatment;
+      try {
+        const existing = await db.query(
+          `SELECT amount_paid, originating_branch_id
+           FROM clinic_patient_treatments
+           WHERE id = $1 AND clinical_record_id = $2
+           LIMIT 1`,
+          [treatmentId, recordId]
+        );
+        currentTreatment = existing.rows[0];
+        if (currentTreatment && !recordAccess.staffCanViewTreatment(currentTreatment, staffBranchId)) {
+          return res.status(403).json({ message: "That treatment is not available at this branch." });
+        }
+      } catch (lookupError) {
+        if (lookupError?.code !== "42703") throw lookupError;
+        const existing = await db.query(
+          `SELECT amount_paid
+           FROM clinic_patient_treatments
+           WHERE id = $1 AND clinical_record_id = $2
+           LIMIT 1`,
+          [treatmentId, recordId]
+        );
+        currentTreatment = existing.rows[0];
+      }
+      if (!currentTreatment) {
+        return res.status(404).json({ message: "Treatment not found." });
+      }
+      const before = currentTreatment.amount_paid != null ? Number(currentTreatment.amount_paid || 0) : null;
       const treatment = await clinicalPatients.updateTreatmentAmountPaid(
         db,
         recordId,
@@ -1729,7 +1843,11 @@ function createStaffPortalRouter({
             dental_concerns: detail.record.dentalConcerns,
           },
           appointments,
-          treatments: detail.treatments.map((record) => {
+          treatments: detail.treatments
+            .filter((record) =>
+              recordAccess.staffCanViewTreatment(record, req.branchAccess?.activeBranch?.id)
+            )
+            .map((record) => {
             const payment = patientData.paymentSummary(record.amountCharged, record.amountPaid);
             const staffBranchId = req.branchAccess?.activeBranch?.id || null;
             const visible = recordAccess.presentTreatment(record, {
@@ -1757,7 +1875,9 @@ function createStaffPortalRouter({
               ...payment,
             };
           }),
-          currentVisit: await clinicalPatients.listCurrentVisitForRecord(db, detail.record),
+          currentVisit: await clinicalPatients.listCurrentVisitForRecord(db, detail.record, {
+            branchId: req.branchAccess?.activeBranch?.id || null,
+          }),
         },
       });
     } catch (error) {
@@ -2690,18 +2810,23 @@ function createStaffPortalRouter({
 
   router.get("/billing", async (req, res) => {
     const search = stringValue(req.query.search, 100);
+    const branchId = req.branchAccess?.activeBranch?.id;
+    if (!branchId) {
+      return res.status(403).json({ message: "No branch is assigned to this account." });
+    }
     try {
-      const params = [];
-      let whereSql = "TRUE";
+      await ensureInvoiceBranchColumn(db);
+      const params = [branchId];
+      let whereSql = invoiceAtBranchSql("invoice", 1);
       if (search) {
         params.push(`%${search}%`);
-        whereSql = `(invoice_code ILIKE $1 OR patient_name ILIKE $1 OR service_name ILIKE $1 OR COALESCE(patient_phone, '') ILIKE $1)`;
+        whereSql += ` AND (invoice.invoice_code ILIKE $2 OR invoice.patient_name ILIKE $2 OR invoice.service_name ILIKE $2 OR COALESCE(invoice.patient_phone, '') ILIKE $2)`;
       }
       const result = await db.query(
-        `SELECT *
-         FROM staff_portal_invoices
+        `SELECT invoice.*
+         FROM staff_portal_invoices AS invoice
          WHERE ${whereSql}
-         ORDER BY invoice_date DESC, id DESC
+         ORDER BY invoice.invoice_date DESC, invoice.id DESC
          LIMIT 200`,
         params
       );
@@ -2740,13 +2865,22 @@ function createStaffPortalRouter({
       paymentStatus = patientData.paymentStatus(amount, amountPaid);
     }
 
+    const branchId = req.branchAccess?.activeBranch?.id;
+    if (!branchId) {
+      return res.status(403).json({ message: "No branch is assigned to this account." });
+    }
+
     try {
+      if (appointmentId) {
+        await assertOperationalAtStaffBranch(db, { appointmentId, branchId });
+      }
+      await ensureInvoiceBranchColumn(db);
       const staffName = `${req.staff.first_name || ""} ${req.staff.last_name || ""}`.trim() || "Clinic Staff";
       const result = await db.query(
         `INSERT INTO staff_portal_invoices (
            invoice_code, patient_user_id, patient_name, patient_phone, appointment_id,
-           service_name, amount, amount_paid, payment_status, notes, created_by, created_by_name
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+           service_name, amount, amount_paid, payment_status, notes, created_by, created_by_name, branch_id
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
          RETURNING *`,
         [
           invoiceCode(),
@@ -2761,6 +2895,7 @@ function createStaffPortalRouter({
           notes,
           String(req.staff.id),
           staffName,
+          branchId,
         ]
       );
       return res.status(201).json({
@@ -2768,6 +2903,9 @@ function createStaffPortalRouter({
         invoice: mapInvoice(result.rows[0]),
       });
     } catch (error) {
+      if (error.status) {
+        return res.status(error.status).json({ message: error.message });
+      }
       if (isMissingRelation(error)) {
         return res.status(503).json({
           message: "Billing tables are missing. Run npm run migrate:staff-operations.",
@@ -2797,8 +2935,21 @@ function createStaffPortalRouter({
       return res.status(400).json({ message: "Invalid payment status." });
     }
 
+    const branchId = req.branchAccess?.activeBranch?.id;
+    if (!branchId) {
+      return res.status(403).json({ message: "No branch is assigned to this account." });
+    }
+
     try {
-      const current = await db.query(`SELECT * FROM staff_portal_invoices WHERE id = $1 LIMIT 1`, [invoiceId]);
+      await ensureInvoiceBranchColumn(db);
+      const current = await db.query(
+        `SELECT invoice.*
+         FROM staff_portal_invoices AS invoice
+         WHERE invoice.id = $1
+           AND ${invoiceAtBranchSql("invoice", 2)}
+         LIMIT 1`,
+        [invoiceId, branchId]
+      );
       if (!current.rows.length) {
         return res.status(404).json({ message: "Invoice not found." });
       }
@@ -2838,8 +2989,20 @@ function createStaffPortalRouter({
     if (!invoiceId) {
       return res.status(400).json({ message: "A valid invoice ID is required." });
     }
+    const branchId = req.branchAccess?.activeBranch?.id;
+    if (!branchId) {
+      return res.status(403).json({ message: "No branch is assigned to this account." });
+    }
     try {
-      const result = await db.query(`SELECT * FROM staff_portal_invoices WHERE id = $1 LIMIT 1`, [invoiceId]);
+      await ensureInvoiceBranchColumn(db);
+      const result = await db.query(
+        `SELECT invoice.*
+         FROM staff_portal_invoices AS invoice
+         WHERE invoice.id = $1
+           AND ${invoiceAtBranchSql("invoice", 2)}
+         LIMIT 1`,
+        [invoiceId, branchId]
+      );
       if (!result.rows.length) {
         return res.status(404).json({ message: "Invoice not found." });
       }
@@ -2864,6 +3027,7 @@ function createStaffPortalRouter({
         limit: Number(req.query.limit) || 50,
         appointmentId: numericId(req.query.appointmentId),
         patientUserId: stringValue(req.query.patientUserId, 120),
+        branchId: req.branchAccess?.activeBranch?.id || null,
       });
       return res.json({ logs });
     } catch (error) {
@@ -2886,18 +3050,30 @@ function createStaffPortalRouter({
       return res.status(400).json({ message: "Enter a valid Philippine mobile number." });
     }
 
+    const branchId = req.branchAccess?.activeBranch?.id;
+    if (!branchId) {
+      return res.status(403).json({ message: "No branch is assigned to this account." });
+    }
+    try {
+      await assertOperationalAtStaffBranch(db, { appointmentId, queueEntryId, branchId });
+    } catch (error) {
+      return res.status(error.status || 403).json({ message: error.message });
+    }
+
     let appointment = null;
     let queueEntry = null;
     if (appointmentId) {
-      const result = await db.query(`SELECT * FROM patient_portal_appointments WHERE id = $1 LIMIT 1`, [
-        appointmentId,
-      ]);
+      const result = await db.query(
+        `SELECT * FROM patient_portal_appointments WHERE id = $1 AND branch_id = $2 LIMIT 1`,
+        [appointmentId, branchId]
+      );
       appointment = result.rows[0] || null;
     }
     if (queueEntryId) {
-      const result = await db.query(`SELECT * FROM patient_portal_queue_entries WHERE id = $1 LIMIT 1`, [
-        queueEntryId,
-      ]);
+      const result = await db.query(
+        `SELECT * FROM patient_portal_queue_entries WHERE id = $1 AND branch_id = $2 LIMIT 1`,
+        [queueEntryId, branchId]
+      );
       queueEntry = result.rows[0] || null;
     }
     const settings = smsHelper.getSmsSettings ? await smsHelper.getSmsSettings() : {};
@@ -2941,6 +3117,16 @@ function createStaffPortalRouter({
     const smsHelper = clinicSms || req.app?.locals?.clinicSms || null;
     if (!smsHelper?.isValidPhMobile?.(patientPhone)) {
       return res.status(400).json({ message: "Enter a valid Philippine mobile number." });
+    }
+
+    const branchId = req.branchAccess?.activeBranch?.id;
+    if (!branchId) {
+      return res.status(403).json({ message: "No branch is assigned to this account." });
+    }
+    try {
+      await assertOperationalAtStaffBranch(db, { appointmentId, queueEntryId, branchId });
+    } catch (error) {
+      return res.status(error.status || 403).json({ message: error.message });
     }
 
     let deliveryStatus = "failed";
@@ -3049,8 +3235,12 @@ function createStaffPortalRouter({
     }
   });
 
-  router.get("/export/:report", async (_req, res) => {
-    const report = stringValue(_req.params.report, 30)?.toLowerCase();
+  router.get("/export/:report", async (req, res) => {
+    const report = stringValue(req.params.report, 30)?.toLowerCase();
+    const branchId = req.branchAccess?.activeBranch?.id;
+    if (!branchId) {
+      return res.status(403).json({ message: "No branch is assigned to this account." });
+    }
     let headers;
     let rows;
     let fileName;
@@ -3070,7 +3260,12 @@ function createStaffPortalRouter({
            JOIN users AS patient ON patient.id::text = queue.user_id
            LEFT JOIN patient_portal_appointments AS appointment ON appointment.id = queue.appointment_id
            WHERE DATE(queue.checked_in_at) = CURRENT_DATE
-           ORDER BY queue.position ASC`
+             AND (
+               queue.branch_id = $1
+               OR (queue.branch_id IS NULL AND appointment.branch_id = $1)
+             )
+           ORDER BY queue.position ASC`,
+          [branchId]
         );
         headers = ["Queue #", "Patient", "Dentist", "Status", "Wait Minutes", "Checked In"];
         rows = result.rows.map((row) => [
@@ -3093,8 +3288,10 @@ function createStaffPortalRouter({
              appointment.status
            FROM patient_portal_appointments AS appointment
            JOIN users AS patient ON patient.id::text = appointment.user_id
+           WHERE appointment.branch_id = $1
            ORDER BY appointment.appointment_date DESC, appointment.appointment_time DESC
-           LIMIT 1000`
+           LIMIT 1000`,
+          [branchId]
         );
         headers = ["Date", "Time", "Patient", "Treatment", "Dentist", "Status"];
         rows = result.rows.map((row) => [

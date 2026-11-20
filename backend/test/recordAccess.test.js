@@ -877,8 +877,13 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
     branchId: pasigId,
   });
   assert.equal(staffView.status, 200, staffView.json.message);
-  const staffMandaluyong = staffView.json.patient.treatments.find((row) => row.treatment === "Oral Prophylaxis");
-  assert.equal(staffMandaluyong.diagnosisNotes, "");
+  assert.equal(
+    (staffView.json.patient.treatments || []).some((row) => row.treatment === "Oral Prophylaxis"),
+    false
+  );
+  const staffPasig = staffView.json.patient.treatments.find((row) => row.treatment === "Consultation");
+  assert.ok(staffPasig);
+  assert.equal(staffPasig.diagnosisNotes, "Pasig visit note");
 
   const job = await db.query(
     `INSERT INTO admin_portal_document_sync_jobs (

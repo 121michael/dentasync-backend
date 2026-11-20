@@ -87,17 +87,17 @@ async function resolveForAccount(db, { userId, role, requestedBranchId }) {
   const requested = requestedBranchId
     ? assignments.find((branch) => String(branch.id) === String(requestedBranchId))
     : null;
-  if (requestedBranchId && !requested) {
-    return {
-      assignments,
-      activeBranch: null,
-      forbidden: true,
-      message: "You are not assigned to that branch.",
-    };
-  }
 
   if (role === "staff") {
     const branch = assignments[0] || null;
+    if (requestedBranchId && (!branch || String(branch.id) !== String(requestedBranchId))) {
+      return {
+        assignments,
+        activeBranch: null,
+        forbidden: true,
+        message: "You are not assigned to that branch.",
+      };
+    }
     if (!branch) {
       return {
         assignments,
@@ -115,6 +115,15 @@ async function resolveForAccount(db, { userId, role, requestedBranchId }) {
       };
     }
     return { assignments, activeBranch: branch, branch, message: null };
+  }
+
+  if (requestedBranchId && !requested) {
+    return {
+      assignments,
+      activeBranch: null,
+      forbidden: true,
+      message: "You are not assigned to that branch.",
+    };
   }
 
   const active = assignments.filter((branch) => branch.active);
@@ -183,11 +192,22 @@ function attachBranchAccess(db, role) {
       const path = req.path || "";
       const reading = req.method === "GET" || req.method === "HEAD";
       const profileOrNotice = path.startsWith("/profile") || path.startsWith("/notifications") || path.startsWith("/branch-context");
+      const staffAccountOnly = path.startsWith("/profile") || path.startsWith("/branch-context");
       const clinicalRead = reading && path.startsWith("/patients");
       const finishUnderway =
         req.branchAccess.paused &&
         req.method === "PATCH" &&
         /^\/queue\/[^/]+$/.test(path);
+      if (
+        role === "staff" &&
+        !req.branchAccess.activeBranch &&
+        !staffAccountOnly
+      ) {
+        return res.status(403).json({
+          message: req.branchAccess.message || "No branch is assigned to this account.",
+          branch: publicContext(req.branchAccess),
+        });
+      }
       if (req.branchAccess.paused && !reading && !profileOrNotice && !finishUnderway) {
         return res.status(409).json({
           message: req.branchAccess.message,

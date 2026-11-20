@@ -658,7 +658,7 @@ function createClinicSmsService({
     });
   }
 
-  async function listSmsLogs({ limit = 50, appointmentId = null, patientUserId = null } = {}) {
+  async function listSmsLogs({ limit = 50, appointmentId = null, patientUserId = null, branchId = null } = {}) {
     const clauses = [];
     const params = [];
     if (appointmentId) {
@@ -668,6 +668,17 @@ function createClinicSmsService({
     if (patientUserId) {
       params.push(String(patientUserId));
       clauses.push(`patient_user_id = $${params.length}`);
+    }
+    if (branchId != null && branchId !== "") {
+      params.push(branchId);
+      clauses.push(`(
+        appointment_id IS NOT NULL
+        AND EXISTS (
+          SELECT 1 FROM patient_portal_appointments AS appointment
+          WHERE appointment.id = clinic_sms_logs.appointment_id
+            AND appointment.branch_id = $${params.length}
+        )
+      )`);
     }
     params.push(Math.max(1, Math.min(200, Number(limit) || 50)));
     const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";

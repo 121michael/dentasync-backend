@@ -190,6 +190,13 @@ function restrictedAllowed({ originatingBranchId, encounterBranchIds, grants, sc
   return (grants || []).some((grant) => grant.scope === scope && grant.branchId === branchId);
 }
 
+function staffCanViewTreatment(treatment, staffBranchId) {
+  if (staffBranchId == null || staffBranchId === "") return false;
+  const origin = treatment?.originatingBranchId || treatment?.originating_branch_id;
+  if (origin == null || origin === "") return false;
+  return String(origin) === String(staffBranchId);
+}
+
 function presentTreatment(treatment, access) {
   const ordinary = {
     id: treatment.id,
@@ -1414,6 +1421,7 @@ module.exports = {
   qualifyingRelationship,
   activeGrants,
   restrictedAllowed,
+  staffCanViewTreatment,
   presentTreatment,
   createRequest,
   createChallenge,
