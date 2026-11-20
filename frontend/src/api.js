@@ -38,7 +38,7 @@ async function request(path, { method = "GET", body, headers = {}, authenticated
   if (authenticated && token) {
     requestHeaders.Authorization = `Bearer ${token}`;
   }
-  if (path.startsWith("/staff") || path.startsWith("/dentist")) {
+  if (path.startsWith("/dentist")) {
     const branchId = sessionStorage.getItem("dentasync.activeBranchId");
     if (branchId) requestHeaders["X-DentaSync-Branch"] = branchId;
   }

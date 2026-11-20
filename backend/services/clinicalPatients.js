@@ -1631,33 +1631,37 @@ async function nextVisitSequence(db, queueEntryId) {
   }
 }
 
-async function findActiveQueueForUser(db, userId) {
+async function findActiveQueueForUser(db, userId, { branchId = null } = {}) {
   if (!userId) return null;
   const tz = process.env.CLINIC_TIMEZONE || "Asia/Manila";
+  const scoped = branchId != null && branchId !== "";
   try {
     const result = await db.query(
-      `SELECT id, token, appointment_id, status, position, user_id
+      `SELECT id, token, appointment_id, status, position, user_id, branch_id
        FROM patient_portal_queue_entries
        WHERE user_id = $1
          AND (checked_in_at AT TIME ZONE $2)::date = (CURRENT_TIMESTAMP AT TIME ZONE $2)::date
          AND status NOT IN ('completed', 'no_show')
+         ${scoped ? "AND branch_id = $3" : ""}
        ORDER BY id DESC
        LIMIT 1`,
-      [String(userId), tz]
+      scoped ? [String(userId), tz, branchId] : [String(userId), tz]
     );
     return result.rows[0] || null;
   } catch (error) {
     if (error?.code !== "42P01") {
       try {
         const result = await db.query(
-          `SELECT id, token, appointment_id, status, position, user_id
-           FROM patient_portal_queue_entries
-           WHERE user_id = $1
-             AND DATE(checked_in_at) = CURRENT_DATE
-             AND status NOT IN ('completed', 'no_show')
-           ORDER BY id DESC
+          `SELECT queue.id, queue.token, queue.appointment_id, queue.status, queue.position, queue.user_id
+           FROM patient_portal_queue_entries AS queue
+           LEFT JOIN patient_portal_appointments AS appointment ON appointment.id = queue.appointment_id
+           WHERE queue.user_id = $1
+             AND DATE(queue.checked_in_at) = CURRENT_DATE
+             AND queue.status NOT IN ('completed', 'no_show')
+             ${scoped ? "AND (queue.branch_id = $2 OR appointment.branch_id = $2)" : ""}
+           ORDER BY queue.id DESC
            LIMIT 1`,
-          [String(userId)]
+          scoped ? [String(userId), branchId] : [String(userId)]
         );
         return result.rows[0] || null;
       } catch {
@@ -1722,9 +1726,9 @@ async function listTreatmentsForQueueEntries(db, queueEntryIds) {
   }
 }
 
-async function listCurrentVisitForRecord(db, record) {
+async function listCurrentVisitForRecord(db, record, { branchId = null } = {}) {
   if (!record) return null;
-  const queue = await findActiveQueueForUser(db, record.linkedUserId);
+  const queue = await findActiveQueueForUser(db, record.linkedUserId, { branchId });
   const queueEntryId = queue?.id ? Number(queue.id) : null;
   const appointmentId = queue?.appointment_id ? Number(queue.appointment_id) : null;
   const procedures = await listTreatmentsForVisit(db, { queueEntryId, appointmentId });
