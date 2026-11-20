@@ -7,6 +7,7 @@ import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { StaffModal, StaffStatusBadge } from "../components/StaffUI";
 import { useStaffUi } from "../components/StaffLayout";
 import { formatDentistDate } from "../dentistUtils";
+import { displayDateOfBirth, displaySex } from "../patientDemographics";
 import { PrescriptionsPanel } from "../components/PrescriptionsPanel";
 
 const emptyForm = {
@@ -306,7 +307,7 @@ export function StaffPatientsPage() {
                     <td>
                       <strong>{listValue(patient.fullName || patient.patientName)}</strong>
                     </td>
-                    <td>{listValue(patient.gender || patient.profile?.gender)}</td>
+                    <td>{displaySex(patient.gender || patient.profile?.gender)}</td>
                     <td>
                       <div className="staff-row-actions">
                         <button
@@ -435,13 +436,11 @@ export function StaffPatientsPage() {
                 {detail.age != null && detail.age !== "" ? detail.age : "—"}
               </p>
               <p>
-                <strong>Sex:</strong> {detail.gender || detail.profile?.gender || "—"}
+                <strong>Sex:</strong> {displaySex(detail.gender || detail.profile?.gender)}
               </p>
               <p>
-                <strong>Birthdate:</strong>{" "}
-                {detail.dateOfBirth || detail.profile?.date_of_birth
-                  ? formatDentistDate(detail.dateOfBirth || detail.profile?.date_of_birth)
-                  : "—"}
+                <strong>Date of birth:</strong>{" "}
+                {displayDateOfBirth(detail.dateOfBirth || detail.profile?.date_of_birth)}
               </p>
               <p>
                 <strong>Phone Number:</strong> {detail.phone || "—"}

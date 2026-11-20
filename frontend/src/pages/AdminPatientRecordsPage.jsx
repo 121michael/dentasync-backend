@@ -7,6 +7,7 @@ import { AdminModal } from "../components/AdminUI";
 import { useAdminUi } from "../components/AdminLayout";
 import { formatAdminDate } from "../adminUtils";
 import { matchesNotificationFocus } from "../notificationFocus";
+import { displayDateOfBirth, displaySex } from "../patientDemographics";
 function listValue(value) {
   const text = value == null ? "" : String(value).trim();
   return text || "—";
@@ -271,7 +272,7 @@ export function AdminPatientRecordsPage() {
                   >
                     <td><code>{listValue(item.patientId || item.recordCode || item.id)}</code></td>
                     <td><strong>{listValue(item.fullName || item.patientName)}</strong></td>
-                    <td>{listValue(item.gender)}</td>
+                    <td>{displaySex(item.gender)}</td>
                     <td>
                       <button className="button button--secondary button--compact" onClick={() => viewRecord(item)}>
                         <Eye size={14} /> View
@@ -321,7 +322,7 @@ export function AdminPatientRecordsPage() {
                       <tr key={item.id}>
                         <td><code>{listValue(item.patientId)}</code></td>
                         <td><strong>{listValue(item.fullName)}</strong></td>
-                        <td>{listValue(item.gender)}</td>
+                        <td>{displaySex(item.gender)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -353,8 +354,8 @@ export function AdminPatientRecordsPage() {
           <div className="admin-detail-grid admin-patient-record-details">
             <p><small>Patient</small><strong>{record.fullName}</strong></p>
             <p><small>Patient ID</small><strong>{record.patientId || record.recordCode || record.id}</strong></p>
-            <p><small>Date of Birth</small><strong>{formatHistoryDate(record.dateOfBirth)}</strong></p>
-            <p><small>Sex</small><strong>{record.gender || "—"}</strong></p>
+            <p><small>Date of birth</small><strong>{displayDateOfBirth(record.dateOfBirth)}</strong></p>
+            <p><small>Sex</small><strong>{displaySex(record.gender)}</strong></p>
             <p><small>Contact</small><strong>{record.phone || "—"}</strong></p>
             <p><small>Email</small><strong>{record.email || "—"}</strong></p>
             <p><small>Address</small><strong>{record.address || "—"}</strong></p>
@@ -403,8 +404,8 @@ export function AdminPatientRecordsPage() {
                 <strong>{record.age != null && record.age !== "" ? record.age : "—"}</strong>
               </p>
               <p>
-                <small>Gender</small>
-                <strong>{record.gender || "—"}</strong>
+                <small>Sex</small>
+                <strong>{displaySex(record.gender)}</strong>
               </p>
             </div>
 

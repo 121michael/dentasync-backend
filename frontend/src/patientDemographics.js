@@ -39,3 +39,21 @@ export function calendarDateInputValue(value) {
   if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
   return "";
 }
+
+export const NOT_RECORDED = "Not recorded";
+
+export function displaySex(value) {
+  const text = value == null ? "" : String(value).trim();
+  return text || NOT_RECORDED;
+}
+
+export function displayDateOfBirth(value) {
+  const iso = calendarDateInputValue(value);
+  if (!iso || !isIsoCalendarDate(iso)) return NOT_RECORDED;
+  const [year, month, day] = iso.split("-").map(Number);
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  }).format(new Date(year, month - 1, day));
+}
