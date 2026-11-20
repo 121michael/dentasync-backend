@@ -4,9 +4,11 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
   applyOverrides,
+  mergeServiceOverrides,
   resolveCatalog,
   invalidateClinicCatalogCache,
   loadApprovedClinicCatalog,
+  saveApprovedClinicCatalog,
 } = require("../services/approvedClinicCatalog");
 const { answerFromCatalog, APPROVED_CLINIC_SERVICES } = require("../services/clinicAssistant");
 const { SERVICES, DENTISTS } = require("../routes/patientPortal");
@@ -53,6 +55,100 @@ test("unknown service ids and html are ignored when applying admin edits", () =>
   assert.equal(cleaning.priceLabel, "₱1,200–₱1,400 mild");
   assert.equal(cleaning.chatbotEn, "Mild cleaning is ₱1,200–₱1,400.");
   assert.equal(catalog.services.some((item) => item.id === "not-a-real-service"), false);
+});
+
+test("saving only price label and chatbot answer keeps official details and units", () => {
+  const original = resolveCatalog(null).catalog.services.find((item) => item.id === "cleaning");
+  const catalog = applyOverrides([
+    {
+      id: "cleaning",
+      priceLabel: "₱1,111 mild",
+      chatbotEn: "Cleaning is ₱1,111 for mild cases.",
+    },
+  ]);
+  const cleaning = catalog.services.find((item) => item.id === "cleaning");
+  const filling = catalog.services.find((item) => item.id === "filling");
+  assert.equal(cleaning.priceLabel, "₱1,111 mild");
+  assert.equal(cleaning.chatbotEn, "Cleaning is ₱1,111 for mild cases.");
+  assert.equal(cleaning.details, original.details);
+  assert.deepEqual(cleaning.lines, original.lines);
+  assert.equal(filling.priceLabel, "₱1,000 per surface");
+});
+
+test("mergeServiceOverrides keeps other services and hidden fields", () => {
+  const merged = mergeServiceOverrides(
+    [
+      {
+        id: "filling",
+        priceLabel: "₱2,000 custom filling",
+        chatbotEn: "Filling stays custom.",
+        details: "Do not replace filling details.",
+      },
+      {
+        id: "cleaning",
+        priceLabel: "old cleaning",
+        details: "Keep official cleaning details.",
+        lines: [{ label: "Mild", value: "₱1,000" }],
+      },
+    ],
+    [{ id: "cleaning", priceLabel: "₱1,111 mild", chatbotEn: "Cleaning is ₱1,111." }]
+  );
+  const cleaning = merged.find((item) => item.id === "cleaning");
+  const filling = merged.find((item) => item.id === "filling");
+  assert.equal(cleaning.priceLabel, "₱1,111 mild");
+  assert.equal(cleaning.chatbotEn, "Cleaning is ₱1,111.");
+  assert.equal(cleaning.details, "Keep official cleaning details.");
+  assert.deepEqual(cleaning.lines, [{ label: "Mild", value: "₱1,000" }]);
+  assert.equal(filling.priceLabel, "₱2,000 custom filling");
+  assert.equal(filling.chatbotEn, "Filling stays custom.");
+});
+
+test("saveApprovedClinicCatalog patches one service without resetting others", async () => {
+  let stored = {
+    services: [
+      {
+        id: "filling",
+        priceLabel: "₱2,000 custom filling",
+        chatbotEn: "Filling stays custom.",
+        details: "Do not replace filling details.",
+      },
+      {
+        id: "cleaning",
+        priceLabel: "old cleaning",
+        details: "Keep official cleaning details.",
+        lines: [{ label: "Mild", value: "₱1,000" }],
+      },
+    ],
+  };
+  const db = {
+    async query(sql, params = []) {
+      if (String(sql).includes("SELECT setting_value")) {
+        return { rows: [{ setting_value: stored }] };
+      }
+      if (String(sql).includes("INSERT INTO admin_portal_settings")) {
+        stored = JSON.parse(params[1]);
+        return {
+          rows: [{ setting_value: stored, updated_at: "2026-11-20T00:00:00.000Z", updated_by: "admin-1" }],
+        };
+      }
+      throw new Error(`unexpected sql ${sql}`);
+    },
+  };
+  invalidateClinicCatalogCache();
+  await saveApprovedClinicCatalog(
+    db,
+    [{ id: "cleaning", priceLabel: "₱1,111 mild", chatbotEn: "Cleaning is ₱1,111." }],
+    "admin-1"
+  );
+  const cleaning = stored.services.find((item) => item.id === "cleaning");
+  const filling = stored.services.find((item) => item.id === "filling");
+  assert.equal(cleaning.priceLabel, "₱1,111 mild");
+  assert.equal(cleaning.chatbotEn, "Cleaning is ₱1,111.");
+  assert.equal(cleaning.details, "Keep official cleaning details.");
+  assert.deepEqual(cleaning.lines, [{ label: "Mild", value: "₱1,000" }]);
+  assert.equal(filling.priceLabel, "₱2,000 custom filling");
+  assert.equal(filling.chatbotEn, "Filling stays custom.");
+  invalidateClinicCatalogCache();
 });
 
 test("admin catalog edits flow into chatbot answers", () => {
