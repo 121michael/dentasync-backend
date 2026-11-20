@@ -214,12 +214,46 @@ test("Dentist Patient Details matches profile styling at 320, 390, and desktop",
   await openRecord();
   const desktopText = await page.evaluate(() => document.body.innerText);
   assert.match(desktopText, /P-2026-1104/);
+  assert.match(desktopText, /Back to Patient Records/);
   assert.match(desktopText, /Personal Information/);
-  assert.match(desktopText, /HMO verification/);
-  assert.match(desktopText, /RX-10021/);
+  assert.match(desktopText, /Emergency Contact/);
+  assert.match(desktopText, /Clinical Information/);
+  assert.match(desktopText, /Coverage and Wellness/);
   assert.match(desktopText, /Request Record Access/);
-  assert.match(desktopText, /Add Treatment/);
-  assert.doesNotMatch(desktopText, /HMO Verification\n/);
+  assert.doesNotMatch(desktopText, /RX-10021/);
+  const desktopCols = await page.evaluate(() => {
+    const menu = document.querySelector(".profile-menu");
+    return menu ? getComputedStyle(menu).gridTemplateColumns.split(" ").length : 0;
+  });
+  assert.equal(desktopCols, 2);
+
+  await page.evaluate(() =>
+    [...document.querySelectorAll(".profile-menu__item")].find((button) =>
+      /Personal Information/i.test(button.textContent || "")
+    )?.click()
+  );
+  await page.waitForFunction(() => document.body.innerText.includes("pearl.amethyst@example.test"));
+  await page.evaluate(() =>
+    [...document.querySelectorAll("button")].find((button) => /Back to patient cards/i.test(button.textContent || ""))?.click()
+  );
+  await page.waitForSelector(".profile-menu");
+
+  await page.evaluate(() =>
+    [...document.querySelectorAll(".profile-menu__item")].find((button) =>
+      /Emergency Contact/i.test(button.textContent || "")
+    )?.click()
+  );
+  await page.waitForFunction(() => document.body.innerText.includes("Rio Amethyst"));
+  await page.evaluate(() =>
+    [...document.querySelectorAll("button")].find((button) => /Back to patient cards/i.test(button.textContent || ""))?.click()
+  );
+
+  await page.evaluate(() =>
+    [...document.querySelectorAll(".profile-menu__item")].find((button) =>
+      /Clinical Information/i.test(button.textContent || "")
+    )?.click()
+  );
+  await page.waitForFunction(() => document.body.innerText.includes("Add Treatment"));
 
   await page.evaluate(() =>
     [...document.querySelectorAll("button")].find((button) => /Add Treatment/i.test(button.textContent || ""))?.click()
@@ -251,14 +285,27 @@ test("Dentist Patient Details matches profile styling at 320, 390, and desktop",
     [...document.querySelectorAll("button")].find((button) => /Dental Documents|Open folder/i.test(button.textContent || ""))?.click()
   );
   await page.waitForFunction(() => document.body.innerText.includes("endorsement.pdf"));
+  assert.match(await page.evaluate(() => document.body.innerText), /RX-10021/);
+
+  await page.evaluate(() =>
+    [...document.querySelectorAll("button")].find((button) => /Back to patient cards/i.test(button.textContent || ""))?.click()
+  );
+  await page.evaluate(() =>
+    [...document.querySelectorAll(".profile-menu__item")].find((button) =>
+      /Coverage and Wellness/i.test(button.textContent || "")
+    )?.click()
+  );
+  await page.waitForFunction(() => document.body.innerText.includes("Maxicare"));
 
   await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
   await openRecord();
   const overlap = await page.evaluate(() => {
     const fab = document.querySelector(".fab-menu__button") || document.querySelector('[aria-label="Open menu"]');
-    const toolbar = document.querySelector(".dentist-record-toolbar");
-    const heading = [...document.querySelectorAll("h2")].find((node) => node.textContent === "Personal Information");
-    const fields = [...document.querySelectorAll(".dentist-patient-record .field")];
+    const toolbar = document.querySelector(".dentist-record-identity__actions");
+    const heading = [...document.querySelectorAll(".profile-menu__copy strong")].find(
+      (node) => node.textContent === "Personal Information"
+    );
+    const fields = [...document.querySelectorAll(".dentist-patient-record .profile-menu__item")];
     const buttons = [...document.querySelectorAll(".dentist-record-toolbar .button")];
     if (!fab) return { hidden: true, hitsToolbar: false, hitsHeading: false, hitsFields: [], hitsButtons: false };
     const a = fab.getBoundingClientRect();
@@ -288,8 +335,8 @@ test("Dentist Patient Details matches profile styling at 320, 390, and desktop",
   await page.setViewport({ width: 320, height: 720, isMobile: true, hasTouch: true });
   await openRecord();
   const stacked = await page.evaluate(() => {
-    const grid = document.querySelector(".field-grid--two");
-    const style = grid ? getComputedStyle(grid) : null;
+    const menu = document.querySelector(".profile-menu");
+    const style = menu ? getComputedStyle(menu) : null;
     return style ? style.gridTemplateColumns.split(" ").length : 0;
   });
   assert.equal(stacked, 1);
