@@ -30,7 +30,7 @@ function shouldTrackLoading(path, { method = "GET", silent = false, fullscreen }
   return true;
 }
 
-async function request(path, { method = "GET", body, headers = {}, authenticated = true, silent = false, fullscreen } = {}) {
+async function request(path, { method = "GET", body, headers = {}, authenticated = true, silent = false, fullscreen, cache } = {}) {
   const requestHeaders = { ...headers };
   const token = accessToken();
   const track = shouldTrackLoading(path, { method, silent, fullscreen });
@@ -53,6 +53,7 @@ async function request(path, { method = "GET", body, headers = {}, authenticated
       const response = await fetch(`${API_BASE}${path}`, {
         method,
         headers: requestHeaders,
+        ...(cache ? { cache } : {}),
         body: body instanceof FormData ? body : body ? JSON.stringify(body) : undefined,
       });
 
@@ -534,6 +535,8 @@ export const api = {
   },
   createAdminDentist: (body) => request("/admin/dentists", { method: "POST", body }),
   updateAdminDentist: (id, body) => request(`/admin/dentists/${id}`, { method: "PATCH", body }),
+  getAdminDentistAuthorizationCredential: (id) =>
+    request(`/admin/dentists/${id}/authorization-credential`, { cache: "no-store" }),
   setAdminDentistAuthorizationCredential: (id, body) =>
     request(`/admin/dentists/${id}/authorization-credential`, { method: "PUT", body }),
   verifyAdminDentistAuthorizationCredential: (id, body) =>

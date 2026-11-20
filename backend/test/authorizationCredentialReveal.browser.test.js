@@ -71,6 +71,17 @@ test("Set Credential stays masked and opens Admin verification", { timeout: 1800
   app.get("/api/admin/dashboard", (_req, res) => res.json({ metrics: {} }));
   app.get("/api/admin/notifications", (_req, res) => res.json({ notifications: [], unreadCount: 0 }));
   app.get("/api/admin/branches", (_req, res) => res.json({ branches: [{ id: 1, name: "Main", status: "active" }] }));
+  app.get("/api/admin/dentists/:id/authorization-credential", (_req, res) => {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+    return res.json({
+      dentist: {
+        id: dentist.id,
+        authorizationCredentialStatus: "configured",
+        credentialConfigured: true,
+        credentialViewable: true,
+      },
+    });
+  });
   app.get("/api/admin/dentists", (_req, res) => res.json({ dentists: [dentist] }));
   app.get("/api/admin/staff", (_req, res) => res.json({ staff: [] }));
   app.get("/api/admin/registrations/pending", (_req, res) => res.json({ requests: [] }));
