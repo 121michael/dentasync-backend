@@ -356,6 +356,14 @@ strong {
   font-weight: 550;
 }
 
+.field-empty-hint {
+  display: block;
+  margin-top: 0.28rem;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
 .field input,
 .field select,
 .field textarea {

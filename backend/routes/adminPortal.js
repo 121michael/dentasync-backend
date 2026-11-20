@@ -16,6 +16,7 @@ const { attachClinicScheduleRoutes } = require("./clinicSchedule");
 const { attachAdminDependentRoutes } = require("./adminDependents");
 const { writeAdminAudit } = require("../services/adminAudit");
 const clinicalPatients = require("../services/clinicalPatients");
+const patientData = require("../services/patientData");
 const { insertPatientNotification } = require("../services/patientPortalNotifications");
 const { loadAdminAnalytics, isMissingRelation: analyticsMissingRelation } = require("../services/adminAnalytics");
 const { renderAdminAnalyticsExport } = require("../services/adminAnalyticsExport");
@@ -281,7 +282,8 @@ function mapAccount(row, extras = {}) {
     payload.operationalRole = extras.operationalRole || row.operational_role || payload.position || "";
   }
   if (extras.dateOfBirth !== undefined || row.date_of_birth !== undefined) {
-    payload.dateOfBirth = extras.dateOfBirth ?? row.date_of_birth ?? null;
+    payload.dateOfBirth =
+      patientData.calendarDate(extras.dateOfBirth ?? row.date_of_birth) || null;
   }
   if (extras.gender !== undefined || row.gender !== undefined) {
     payload.gender = extras.gender ?? row.gender ?? "";
@@ -1209,8 +1211,8 @@ function createAdminPortalRouter({
           ...patient,
           profile: profile
             ? {
-                dateOfBirth: profile.date_of_birth,
-                gender: profile.gender,
+                dateOfBirth: patientData.calendarDate(profile.date_of_birth) || null,
+                gender: patientData.normalizeSex(profile.gender) || profile.gender || "",
                 address: profile.address,
                 emergencyContactName: profile.emergency_contact_name,
                 emergencyContactRelationship: profile.emergency_contact_relationship,

@@ -359,6 +359,18 @@ function isIsoDate(value) {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
+function serializePortalProfile(row = {}) {
+  const dateOfBirth = patientData.calendarDate(row.date_of_birth) || null;
+  const birthDate = patientData.calendarDate(row.birth_date) || dateOfBirth;
+  return {
+    ...row,
+    date_of_birth: dateOfBirth,
+    birth_date: birthDate || null,
+    gender: patientData.normalizeSex(row.gender) || row.gender || "",
+    age: patientData.ageFromDateOfBirth(dateOfBirth),
+  };
+}
+
 function isTime(value) {
   if (typeof value !== "string") {
     return false;
@@ -2751,9 +2763,7 @@ function createPatientPortalRouter({
       }
 
       const user = userResult.rows[0];
-      const profileRow = profileResult.rows[0] || {};
-      const dateOfBirth = patientData.calendarDate(profileRow.date_of_birth) || null;
-      const birthDate = patientData.calendarDate(profileRow.birth_date) || dateOfBirth;
+      const profileRow = serializePortalProfile(profileResult.rows[0] || {});
       return res.json({
         profile: {
           id: user.id,
@@ -2767,10 +2777,6 @@ function createPatientPortalRouter({
           memberSince: user.created_at || null,
           verified: user.is_verified,
           ...profileRow,
-          date_of_birth: dateOfBirth,
-          birth_date: birthDate || null,
-          gender: patientData.normalizeSex(profileRow.gender) || profileRow.gender || "",
-          age: patientData.ageFromDateOfBirth(dateOfBirth),
           patient_category: user.patient_category || profileRow.patient_category || "regular",
         },
         preferences: {
@@ -2956,7 +2962,10 @@ function createPatientPortalRouter({
         if (columnError?.code !== "42703" && columnError?.code !== "42P01") throw columnError;
       }
 
-      return res.json({ message: "Your profile has been saved.", profile: result.rows[0] });
+      return res.json({
+        message: "Your profile has been saved.",
+        profile: serializePortalProfile(result.rows[0] || {}),
+      });
     } catch (error) {
       if (error.code === "23505") {
         return res.status(409).json({ message: "That email address or mobile number is already in use." });

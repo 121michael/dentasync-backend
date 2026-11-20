@@ -26,6 +26,7 @@ import { DentistModal } from "../components/DentistUI";
 import { DentalDocumentPreview } from "../components/DentalDocumentPreview";
 import { PrescriptionsPanel } from "../components/PrescriptionsPanel";
 import { formatDentistDate } from "../dentistUtils";
+import { displayDateOfBirth, displaySex } from "../patientDemographics";
 import { matchesNotificationFocus } from "../notificationFocus";
 import { useAuth } from "../useAuth";
 
@@ -1081,7 +1082,7 @@ export function DentistRecordsPage() {
                     <td>
                       <strong>{listValue(patient.fullName || patient.patientName)}</strong>
                     </td>
-                    <td>{listValue(patient.gender)}</td>
+                    <td>{displaySex(patient.gender)}</td>
                     <td>
                       <button
                         className="button button--secondary button--compact"
@@ -1308,10 +1309,8 @@ export function DentistRecordsPage() {
               <FieldValue label="Age">
                 {detail.patient.age != null && detail.patient.age !== "" ? detail.patient.age : "—"}
               </FieldValue>
-              <FieldValue label="Sex">{detail.patient.gender}</FieldValue>
-              <FieldValue label="Date of birth">
-                {detail.patient.dateOfBirth ? formatDentistDate(detail.patient.dateOfBirth) : "—"}
-              </FieldValue>
+              <FieldValue label="Sex">{displaySex(detail.patient.gender)}</FieldValue>
+              <FieldValue label="Date of birth">{displayDateOfBirth(detail.patient.dateOfBirth)}</FieldValue>
               <FieldValue label="Patient category">{detail.patient.patientCategory}</FieldValue>
               <FieldValue label="Email address">{detail.patient.email}</FieldValue>
               <FieldValue label="Mobile number">{detail.patient.phone}</FieldValue>

@@ -17,7 +17,12 @@ import {
 } from "lucide-react";
 import { api } from "../api";
 import { ErrorState, LoadingState, SectionHeading } from "../components/UI";
-import { calendarDateInputValue, PATIENT_SEX_OPTIONS } from "../patientDemographics";
+import {
+  calendarDateInputValue,
+  displayDateOfBirth,
+  NOT_RECORDED,
+  PATIENT_SEX_OPTIONS,
+} from "../patientDemographics";
 import { useAuth } from "../useAuth";
 
 const PROFILE_MENU = [
@@ -364,11 +369,16 @@ export function ProfilePage() {
                     <label className="field">
                       <span>Date of birth</span>
                       <input name="dateOfBirth" type="date" value={form.dateOfBirth} onChange={updateForm} />
+                      {!form.dateOfBirth ? (
+                        <small className="field-empty-hint">{displayDateOfBirth("")}</small>
+                      ) : (
+                        <small className="field-empty-hint">{displayDateOfBirth(form.dateOfBirth)}</small>
+                      )}
                     </label>
                     <label className="field">
-                      <span>Gender</span>
+                      <span>Sex</span>
                       <select name="gender" value={form.gender} onChange={updateForm}>
-                        <option value="">Prefer not to say</option>
+                        <option value="">{NOT_RECORDED}</option>
                         {PATIENT_SEX_OPTIONS.map((option) => (
                           <option key={option.value} value={option.value}>
                             {option.label}
