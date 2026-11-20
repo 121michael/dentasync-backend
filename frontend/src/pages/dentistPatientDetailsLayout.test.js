@@ -17,6 +17,10 @@ test("Dentist Patient Details uses four My Profile style cards in order", () => 
   assert.match(page, /Back to Patient Records/);
   assert.match(page, /Back to patient cards/);
   assert.match(page, /Patient ID ·/);
+  assert.match(page, /View and update your personal details/);
+  assert.match(page, /Manage your emergency contact details/);
+  assert.match(page, /Review your dental and clinical information/);
+  assert.match(page, /View your coverage and wellness information/);
   const personal = page.indexOf('title: "Personal Information"');
   const emergency = page.indexOf('title: "Emergency Contact"');
   const clinical = page.indexOf('title: "Clinical Information"');

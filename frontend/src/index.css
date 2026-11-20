@@ -2875,15 +2875,41 @@ html[data-theme="dark"] .portal-shell[data-theme="dark"] ~ .tooth-loader .tooth-
   font-weight: 650;
 }
 
-.dentist-patient-record .profile-menu {
-  margin-top: 0.15rem;
+.dentist-record-identity__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin: 0.35rem 0 0.55rem;
 }
 
+.dentist-patient-record .profile-menu {
+  margin-top: 0.2rem;
+  gap: 0.75rem;
+}
+
+.dentist-patient-record .profile-menu__item {
+  min-height: 78px;
+  padding: 1rem 1.1rem;
+  border-radius: 18px;
+  box-shadow: 0 8px 18px rgba(62, 24, 98, 0.05);
+}
+
+.dentist-patient-record .profile-menu__item:first-child,
 .dentist-patient-record .profile-menu__item.is-selected,
 .dentist-patient-record .profile-menu__item:hover,
 .dentist-patient-record .profile-menu__item:focus-visible {
-  border-color: color-mix(in srgb, var(--amethyst-500) 45%, var(--border));
-  background: color-mix(in srgb, var(--amethyst-100) 55%, #fff);
+  border-color: #c9a6ea;
+  background: #efe4fc;
+  box-shadow: none;
+  transform: none;
+}
+
+.dentist-patient-record .profile-menu__item:focus-visible {
+  outline: none;
+}
+
+.dentist-patient-record .profile-menu__item:active {
+  transform: none;
 }
 
 .field-readonly {

@@ -301,7 +301,7 @@ test("Dentist Patient Details matches profile styling at 320, 390, and desktop",
   await openRecord();
   const overlap = await page.evaluate(() => {
     const fab = document.querySelector(".fab-menu__button") || document.querySelector('[aria-label="Open menu"]');
-    const toolbar = document.querySelector(".dentist-record-toolbar");
+    const toolbar = document.querySelector(".dentist-record-identity__actions");
     const heading = [...document.querySelectorAll(".profile-menu__copy strong")].find(
       (node) => node.textContent === "Personal Information"
     );

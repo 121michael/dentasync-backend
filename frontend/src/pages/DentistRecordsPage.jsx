@@ -227,25 +227,25 @@ const RECORD_MENU = [
   {
     id: "personal",
     title: "Personal Information",
-    description: "View demographic and contact details",
+    description: "View and update your personal details",
     icon: UserRound,
   },
   {
     id: "emergency",
     title: "Emergency Contact",
-    description: "View the saved emergency contact",
+    description: "Manage your emergency contact details",
     icon: ShieldCheck,
   },
   {
     id: "clinical",
     title: "Clinical Information",
-    description: "Review medical details, chart, treatments, and documents",
+    description: "Review your dental and clinical information",
     icon: HeartPulse,
   },
   {
     id: "coverage",
     title: "Coverage and Wellness",
-    description: "View HMO coverage and wellness information",
+    description: "View your coverage and wellness information",
     icon: CalendarDays,
   },
 ];
@@ -1198,7 +1198,7 @@ export function DentistRecordsPage() {
             <p className="dentist-record-identity__id">
               Patient ID · {detail.patient.patientId || detail.patient.recordCode || detail.patient.id}
             </p>
-            <div className="dentist-record-toolbar" role="toolbar" aria-label="Patient record actions">
+            <div className="dentist-record-identity__actions">
               <button
                 type="button"
                 className="button button--primary"
