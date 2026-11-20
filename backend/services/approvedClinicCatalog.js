@@ -68,6 +68,42 @@ function defaultById() {
   return map;
 }
 
+function overridesList(rawOverrides) {
+  if (Array.isArray(rawOverrides)) return rawOverrides;
+  if (Array.isArray(rawOverrides?.services)) return rawOverrides.services;
+  return [];
+}
+
+function mergeServiceOverrides(currentOverrides, incoming) {
+  const defaults = defaultById();
+  const byId = new Map();
+  for (const row of overridesList(currentOverrides)) {
+    const id = typeof row?.id === "string" ? row.id.trim() : "";
+    if (!id || !defaults.has(id)) continue;
+    byId.set(id, { ...row, id });
+  }
+  for (const patch of overridesList(incoming)) {
+    const id = typeof patch?.id === "string" ? patch.id.trim() : "";
+    if (!id || !defaults.has(id)) continue;
+    const existing = { ...(byId.get(id) || { id }) };
+    for (const field of EDITABLE_FIELDS) {
+      if (!Object.prototype.hasOwnProperty.call(patch, field)) continue;
+      const next = sanitizeText(patch[field]);
+      if (next != null) existing[field] = next;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "lines")) {
+      const lines = sanitizeLines(patch.lines);
+      if (lines) existing.lines = lines;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, "notes")) {
+      const notes = sanitizeNotes(patch.notes);
+      if (notes) existing.notes = notes;
+    }
+    byId.set(id, existing);
+  }
+  return [...byId.values()];
+}
+
 function applyOverrides(rawOverrides) {
   const catalog = cloneCatalog();
   const defaults = defaultById();
@@ -211,8 +247,26 @@ async function loadApprovedClinicCatalog(db) {
   }
 }
 
+async function readStoredOverrides(db) {
+  if (!db || typeof db.query !== "function") return [];
+  try {
+    const result = await db.query(
+      `SELECT setting_value
+       FROM admin_portal_settings
+       WHERE setting_key = $1
+       LIMIT 1`,
+      [SETTING_KEY]
+    );
+    return overridesList(result.rows[0]?.setting_value || null);
+  } catch (error) {
+    if (error?.code === "42P01" || error?.code === "42703") return [];
+    throw error;
+  }
+}
+
 async function saveApprovedClinicCatalog(db, incoming, actorId) {
-  const resolved = resolveCatalog(incoming);
+  const merged = mergeServiceOverrides(await readStoredOverrides(db), incoming);
+  const resolved = resolveCatalog(merged);
   const stored = {
     services: resolved.catalog.services.map((service) => {
       const payload = { id: service.id };
@@ -249,6 +303,7 @@ module.exports = {
   DEFAULT_CATALOG,
   cloneCatalog,
   applyOverrides,
+  mergeServiceOverrides,
   resolveCatalog,
   chatbotServicesFrom,
   buildFacts,

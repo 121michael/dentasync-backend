@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { ErrorState, LoadingState } from "../components/UI";
 import { useAdminUi } from "../components/AdminLayout";
@@ -36,25 +36,15 @@ const TOGGLES = [
   },
 ];
 
-function linesToText(lines) {
-  return (lines || [])
-    .map((line) => `${line.label || ""}: ${line.value || ""}`.replace(/^: /, "").trim())
-    .join("\n");
+function visibleServices(list) {
+  return (list || []).filter((service) => service.adminVisible !== false);
 }
 
-function textToLines(text) {
-  return String(text || "")
-    .split("\n")
-    .map((row) => row.trim())
-    .filter(Boolean)
-    .map((row) => {
-      const index = row.indexOf(":");
-      if (index < 0) return { label: row, value: "" };
-      return {
-        label: row.slice(0, index).trim(),
-        value: row.slice(index + 1).trim(),
-      };
-    });
+function draftFromService(service) {
+  return {
+    priceLabel: service?.priceLabel || "",
+    chatbotEn: service?.chatbotEn || "",
+  };
 }
 
 export function AdminAiSettingsPage() {
@@ -62,23 +52,53 @@ export function AdminAiSettingsPage() {
   const [settings, setSettings] = useState(null);
   const [groups, setGroups] = useState([]);
   const [services, setServices] = useState([]);
+  const [selectedServiceId, setSelectedServiceId] = useState("");
+  const [draft, setDraft] = useState({ priceLabel: "", chatbotEn: "" });
+  const [baseline, setBaseline] = useState({ priceLabel: "", chatbotEn: "" });
   const [error, setError] = useState("");
+  const [catalogError, setCatalogError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [catalogLoading, setCatalogLoading] = useState(true);
+  const [serviceStatus, setServiceStatus] = useState("");
+  const loadGen = useRef(0);
+  const selectedServiceIdRef = useRef("");
+  selectedServiceIdRef.current = selectedServiceId;
+
+  const applyCatalog = useCallback((catalogResponse, keepId) => {
+    const nextServices = catalogResponse.services || [];
+    const nextGroups = catalogResponse.groups || [];
+    setGroups(nextGroups);
+    setServices(nextServices);
+    const nextId =
+      keepId && visibleServices(nextServices).some((service) => service.id === keepId) ? keepId : "";
+    const selected = nextServices.find((service) => service.id === nextId) || null;
+    const nextDraft = draftFromService(selected);
+    setSelectedServiceId(nextId);
+    setDraft(nextDraft);
+    setBaseline(nextDraft);
+  }, []);
 
   const load = useCallback(async () => {
+    const seq = ++loadGen.current;
+    setCatalogLoading(true);
     try {
       const [settingsResponse, catalogResponse] = await Promise.all([
         api.getAdminAiSettings(),
         api.getAdminClinicServices(),
       ]);
+      if (seq !== loadGen.current) return;
       setSettings(settingsResponse.settings);
-      setGroups(catalogResponse.groups || []);
-      setServices(catalogResponse.services || []);
+      applyCatalog(catalogResponse, selectedServiceIdRef.current);
       setError("");
+      setCatalogError("");
     } catch (loadError) {
+      if (seq !== loadGen.current) return;
       setError(loadError.message);
+      setCatalogError(loadError.message);
+    } finally {
+      if (seq === loadGen.current) setCatalogLoading(false);
     }
-  }, []);
+  }, [applyCatalog]);
 
   useEffect(() => {
     load();
@@ -86,17 +106,40 @@ export function AdminAiSettingsPage() {
 
   const groupedServices = useMemo(
     () =>
-      groups.map((group) => ({
-        ...group,
-        services: services.filter((service) => service.group === group.id && service.adminVisible !== false),
-      })).filter((group) => group.services.length),
+      groups
+        .map((group) => ({
+          ...group,
+          services: visibleServices(services).filter((service) => service.group === group.id),
+        }))
+        .filter((group) => group.services.length),
     [groups, services]
   );
+  const selectedService = useMemo(
+    () => visibleServices(services).find((service) => service.id === selectedServiceId) || null,
+    [services, selectedServiceId]
+  );
+  const dirty =
+    Boolean(selectedServiceId) &&
+    (draft.priceLabel !== baseline.priceLabel || draft.chatbotEn !== baseline.chatbotEn);
 
-  function updateService(id, patch) {
-    setServices((current) =>
-      current.map((service) => (service.id === id ? { ...service, ...patch } : service))
-    );
+  async function chooseService(nextId) {
+    if (nextId === selectedServiceId) return;
+    if (dirty) {
+      const ok = await confirm({
+        title: "Discard unsaved edits?",
+        message: "You have unsaved price label or chatbot answer changes. Switch services and lose those edits?",
+        confirmLabel: "Discard edits",
+        tone: "danger",
+      });
+      if (!ok) return;
+    }
+    const selected = services.find((service) => service.id === nextId) || null;
+    const nextDraft = draftFromService(selected);
+    setSelectedServiceId(selected ? selected.id : "");
+    setDraft(nextDraft);
+    setBaseline(nextDraft);
+    setServiceStatus("");
+    setCatalogError("");
   }
 
   async function toggleSetting(key) {
@@ -146,20 +189,49 @@ export function AdminAiSettingsPage() {
 
   async function saveClinicServices(event) {
     event.preventDefault();
+    if (!selectedService) {
+      pushToast("Select a service before saving.", "error");
+      return;
+    }
     const ok = await confirm({
-      title: "Save clinic services",
-      message: "This updates Patient Portal prices and the AI chatbot from the same approved catalog.",
-      confirmLabel: "Save catalog",
+      title: "Save clinic service",
+      message: `This updates the Patient Portal price label and chatbot answer for ${selectedService.title}. Other catalog fields stay as stored.`,
+      confirmLabel: "Save service",
       tone: "primary",
     });
     if (!ok) return;
+    const savingId = selectedService.id;
+    const savingDraft = { priceLabel: draft.priceLabel, chatbotEn: draft.chatbotEn };
     setBusy(true);
+    setServiceStatus("Saving…");
+    setCatalogError("");
     try {
-      const response = await api.updateAdminClinicServices({ services });
-      setGroups(response.groups || groups);
-      setServices(response.services || services);
-      pushToast(response.message || "Clinic services updated successfully.");
+      const response = await api.updateAdminClinicServices({
+        services: [
+          {
+            id: savingId,
+            priceLabel: savingDraft.priceLabel,
+            chatbotEn: savingDraft.chatbotEn,
+          },
+        ],
+      });
+      const nextServices = response.services || [];
+      const nextGroups = response.groups || [];
+      setGroups(nextGroups);
+      setServices(nextServices);
+      if (selectedServiceIdRef.current === savingId) {
+        const selected = nextServices.find((service) => service.id === savingId) || null;
+        const nextDraft = draftFromService(selected);
+        setDraft(nextDraft);
+        setBaseline(nextDraft);
+        setServiceStatus("Saved.");
+      }
+      pushToast(response.message || "Clinic service updated successfully.");
     } catch (saveError) {
+      if (selectedServiceIdRef.current === savingId) {
+        setServiceStatus("");
+        setCatalogError(saveError.message);
+      }
       pushToast(saveError.message, "error");
     } finally {
       setBusy(false);
@@ -246,69 +318,74 @@ export function AdminAiSettingsPage() {
             <span className="eyebrow">AI Knowledge</span>
             <h2>Clinic Services</h2>
             <p>
-              Official service names, prices, and chatbot answers. Changes here update the Patient Portal
-              and chatbot from the same catalog.
+              Choose a clinic service, then update its price label and chatbot answer. Patient Portal and
+              chatbot still read this same catalog. Official price details stay stored and are not shown here.
             </p>
           </div>
         </div>
         <form className="admin-form admin-clinic-services__form" onSubmit={saveClinicServices}>
-          {groupedServices.map((group) => (
-            <div key={group.id} className="admin-clinic-services__group">
-              <h3>{group.title}</h3>
-              {group.services.map((service) => (
-                <article key={service.id} className="admin-clinic-services__card">
-                  <label>
-                    Service name
-                    <input
-                      value={service.title || ""}
-                      disabled={busy}
-                      onChange={(event) => updateService(service.id, { title: event.target.value })}
-                    />
-                  </label>
-                  <label>
-                    Price label
-                    <input
-                      value={service.priceLabel || ""}
-                      disabled={busy}
-                      onChange={(event) => updateService(service.id, { priceLabel: event.target.value })}
-                    />
-                  </label>
-                  <label className="admin-clinic-services__wide">
-                    Official price / details
-                    <textarea
-                      rows={3}
-                      value={service.details || ""}
-                      disabled={busy}
-                      onChange={(event) => updateService(service.id, { details: event.target.value })}
-                    />
-                  </label>
-                  <label className="admin-clinic-services__wide">
-                    Price units and terms
-                    <textarea
-                      rows={3}
-                      value={linesToText(service.lines)}
-                      disabled={busy}
-                      onChange={(event) =>
-                        updateService(service.id, { lines: textToLines(event.target.value) })
-                      }
-                    />
-                  </label>
-                  <label className="admin-clinic-services__wide">
-                    Chatbot answer
-                    <textarea
-                      rows={4}
-                      value={service.chatbotEn || ""}
-                      disabled={busy}
-                      onChange={(event) => updateService(service.id, { chatbotEn: event.target.value })}
-                    />
-                  </label>
-                </article>
+          <label className="admin-clinic-services__picker" htmlFor="admin-clinic-service-select">
+            Select a service
+            <select
+              id="admin-clinic-service-select"
+              value={selectedServiceId}
+              disabled={busy || catalogLoading}
+              aria-busy={catalogLoading ? "true" : "false"}
+              onChange={(event) => chooseService(event.target.value)}
+            >
+              <option value="">Select a service</option>
+              {groupedServices.map((group) => (
+                <optgroup key={group.id} label={group.title}>
+                  {group.services.map((service) => (
+                    <option key={service.id} value={service.id}>
+                      {service.title}
+                    </option>
+                  ))}
+                </optgroup>
               ))}
-            </div>
-          ))}
+            </select>
+          </label>
+          {catalogLoading ? <p className="muted">Loading clinic services…</p> : null}
+          {selectedService ? (
+            <article className="admin-clinic-services__card">
+              <label className="admin-clinic-services__wide" htmlFor="admin-clinic-service-price">
+                Price label
+                <input
+                  id="admin-clinic-service-price"
+                  value={draft.priceLabel}
+                  disabled={busy}
+                  onChange={(event) => {
+                    setServiceStatus("");
+                    setDraft((current) => ({ ...current, priceLabel: event.target.value }));
+                  }}
+                />
+              </label>
+              <label className="admin-clinic-services__wide" htmlFor="admin-clinic-service-chatbot">
+                Chatbot answer
+                <textarea
+                  id="admin-clinic-service-chatbot"
+                  rows={5}
+                  value={draft.chatbotEn}
+                  disabled={busy}
+                  onChange={(event) => {
+                    setServiceStatus("");
+                    setDraft((current) => ({ ...current, chatbotEn: event.target.value }));
+                  }}
+                />
+              </label>
+            </article>
+          ) : (
+            <p className="muted">Select a service to edit its price label and chatbot answer.</p>
+          )}
+          {catalogError ? (
+            <p className="admin-form--manage-user__error" role="alert">
+              {catalogError}
+            </p>
+          ) : null}
+          {serviceStatus ? <p className="admin-clinic-services__status">{serviceStatus}</p> : null}
           <div className="admin-modal__actions">
-            <button className="button button--primary" disabled={busy}>
-              {busy ? "Saving…" : "Save clinic services"}
+            <button className="button button--primary" disabled={busy || catalogLoading || !selectedService}>
+              {busy ? "Saving…" : "Save clinic service"}
             </button>
           </div>
         </form>
