@@ -1857,6 +1857,30 @@ function createAdminPortalRouter({
     }
   });
 
+  router.get("/dentists/:id/authorization-credential", async (req, res) => {
+    const dentistId = stringValue(req.params.id, 120);
+    if (!dentistId) {
+      return res.status(400).json({ message: "A valid dentist ID is required." });
+    }
+    noStoreCredential(res);
+    try {
+      await recordAccess.assertActiveDentist(db, dentistId);
+      const authorization = await recordAccess.loadDentistAuthorization(db, dentistId);
+      return res.json({
+        dentist: { id: dentistId, ...authorization },
+      });
+    } catch (error) {
+      if (error.status) {
+        return res.status(error.status).json({ message: error.message });
+      }
+      if (error.code === "42703" || isMissingRelation(error)) {
+        return migrationUnavailable(res);
+      }
+      console.error("Admin dentist authorization credential status error:", error.message);
+      return res.status(500).json({ message: "Unable to load the authorization credential status." });
+    }
+  });
+
   router.put("/dentists/:id/authorization-credential", async (req, res) => {
     const dentistId = stringValue(req.params.id, 120);
     if (!dentistId) {

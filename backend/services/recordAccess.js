@@ -682,10 +682,11 @@ function hasAuthorizationHash(row) {
 
 function presentAuthorization(row = {}) {
   const canApprove = row.can_approve_cross_branch_access === true;
-  const configured = canApprove && hasAuthorizationHash(row);
+  const hasHash = hasAuthorizationHash(row);
+  const configured = canApprove && hasHash;
   const stored = String(row.authorization_credential_status || "").toLowerCase();
   let authorizationCredentialStatus = "none";
-  if (configured) authorizationCredentialStatus = "configured";
+  if (hasHash || stored === "configured") authorizationCredentialStatus = "configured";
   else if (canApprove) authorizationCredentialStatus = "setup_required";
   else if (stored === "revoked") authorizationCredentialStatus = "revoked";
   return {
@@ -694,7 +695,7 @@ function presentAuthorization(row = {}) {
     setupRequired: authorizationCredentialStatus === "setup_required",
     credentialConfigured: configured,
     credentialViewable:
-      configured &&
+      hasHash &&
       (row.has_recoverable_secret === true || Boolean(row.authorization_password_ciphertext)),
   };
 }
@@ -1735,6 +1736,7 @@ module.exports = {
   loadSessionApprover,
   sessionApproverStatus,
   presentAuthorization,
+  assertActiveDentist,
   attachDentistAuthorization,
   loadDentistAuthorization,
   setAuthorizationCredential,

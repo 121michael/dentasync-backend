@@ -318,7 +318,7 @@ export function AdminManageUsersPage() {
     setFormOpen(true);
   }
 
-  function openEdit(user) {
+  async function openEdit(user) {
     if (tab === "patient") {
       pushToast("Patient portal accounts are self-registered. Use Approve or Reject instead.", "warning");
       return;
@@ -349,6 +349,14 @@ export function AdminManageUsersPage() {
     setPhoneError("");
     setFieldErrors({});
     setFormOpen(true);
+    if (tab === "dentist") {
+      try {
+        const response = await api.getAdminDentistAuthorizationCredential(user.id);
+        if (response?.dentist) applyAuthorizationToEditor(response.dentist);
+      } catch {
+        // Keep list flags when the status endpoint is unavailable.
+      }
+    }
   }
 
   function clearFieldError(name) {
@@ -401,13 +409,41 @@ export function AdminManageUsersPage() {
       delete payload.branchId;
       delete payload.authorizationCredentialStatus;
       delete payload.credentialViewable;
+      delete payload.canApproveCrossBranchAccess;
+    }
+    const typedCredential = String(authPassword || "");
+    const typedConfirm = String(authConfirm || "");
+    const wantsCredentialSave =
+      tab === "dentist" &&
+      editing &&
+      Boolean(typedCredential || typedConfirm) &&
+      typedCredential !== CREDENTIAL_MASK;
+    if (wantsCredentialSave) {
+      if (typedCredential.length < 10) {
+        pushToast("Authorization password must be at least 10 characters long.", "error");
+        return;
+      }
+      if (typedCredential !== typedConfirm) {
+        pushToast("Authorization password and confirmation do not match.", "error");
+        return;
+      }
     }
     saveLock.current = true;
     setBusy(true);
     try {
       if (editing) {
+        if (wantsCredentialSave) {
+          const credentialResponse = await api.setAdminDentistAuthorizationCredential(editing.id, {
+            password: typedCredential,
+            confirmPassword: typedConfirm,
+          });
+          applyAuthorizationToEditor(credentialResponse.dentist);
+        }
         const updater = tab === "staff" ? api.updateAdminStaff : api.updateAdminDentist;
-        await updater(editing.id, payload);
+        const updated = await updater(editing.id, payload);
+        if (tab === "dentist" && updated?.dentist?.authorizationCredentialStatus) {
+          applyAuthorizationToEditor(updated.dentist);
+        }
         pushToast("Account updated successfully.");
       } else {
         const creator = tab === "staff" ? api.createAdminStaff : api.createAdminDentist;
@@ -1438,9 +1474,13 @@ export function AdminManageUsersPage() {
                         </>
                       ) : (
                         <>
-                          {form.authorizationCredentialStatus === "revoked" ? (
+                          {form.authorizationCredentialStatus === "revoked" && !resettingCredential ? (
                             <p className="admin-set-credential__status">Authorization revoked. Set a new credential to restore approval permission.</p>
-                          ) : null}
+                          ) : resettingCredential ? (
+                            <p className="admin-set-credential__status">Enter a new authorization password. The previous stored copy is replaced on save.</p>
+                          ) : (
+                            <p className="admin-set-credential__status">No authorization credential is stored yet.</p>
+                          )}
                           <label>
                             Authorization password
                             <span className="admin-password-reset__input">

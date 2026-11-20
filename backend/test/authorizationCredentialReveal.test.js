@@ -174,6 +174,17 @@ test("Admin credential reveal stays masked until verified and never leaks hashes
   assert.equal(stored.rows[0].authorization_password_ciphertext.includes(dentistAuth), false);
   assert.equal(stored.rows[0].authorization_secret_key_id, "v1");
 
+  const status = await api("GET", `/api/admin/dentists/${dentistId}/authorization-credential`, {
+    role: "admin",
+    id: adminId,
+  });
+  assert.equal(status.status, 200, status.json.message);
+  assert.equal(status.json.dentist.authorizationCredentialStatus, "configured");
+  assert.equal(status.json.dentist.credentialConfigured, true);
+  assert.equal(status.json.dentist.password, undefined);
+  assert.equal(containsSecret(status.json, dentistAuth), false);
+  assert.match(String(status.headers.get("cache-control") || ""), /no-store/);
+
   const listed = await api("GET", "/api/admin/dentists?limit=50", { role: "admin", id: adminId });
   assert.equal(listed.status, 200);
   const listedDentist = (listed.json.dentists || []).find((row) => String(row.id) === dentistId);
@@ -219,6 +230,12 @@ test("Admin credential reveal stays masked until verified and never leaks hashes
     body: { adminPassword: adminPassword },
   });
   assert.equal(staffBlocked.status, 403);
+
+  const dentistStatusBlocked = await api("GET", `/api/admin/dentists/${dentistId}/authorization-credential`, {
+    role: "dentist",
+    id: dentistId,
+  });
+  assert.equal(dentistStatusBlocked.status, 403);
 
   const dentistBlocked = await api("POST", `/api/admin/dentists/${dentistId}/authorization-credential/reveal`, {
     role: "dentist",
