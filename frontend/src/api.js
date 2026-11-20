@@ -536,6 +536,10 @@ export const api = {
   updateAdminDentist: (id, body) => request(`/admin/dentists/${id}`, { method: "PATCH", body }),
   setAdminDentistAuthorizationCredential: (id, body) =>
     request(`/admin/dentists/${id}/authorization-credential`, { method: "PUT", body }),
+  verifyAdminDentistAuthorizationCredential: (id, body) =>
+    request(`/admin/dentists/${id}/authorization-credential/verify-view`, { method: "POST", body }),
+  revealAdminDentistAuthorizationCredential: (id, body) =>
+    request(`/admin/dentists/${id}/authorization-credential/reveal`, { method: "POST", body }),
   revokeAdminDentistAuthorizationCredential: (id) =>
     request(`/admin/dentists/${id}/authorization-credential`, { method: "DELETE" }),
   getAdminAccounts: (params = {}) => {

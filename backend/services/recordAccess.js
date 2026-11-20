@@ -3,6 +3,10 @@
 const crypto = require("crypto");
 const bcrypt = require("bcrypt");
 const { writeAdminAudit } = require("./adminAudit");
+const {
+  encryptAuthorizationPassword,
+  decryptAuthorizationPassword,
+} = require("./dentistCredentialSecret");
 
 const GRANT_MINUTES = 30;
 const GRANT_RANGE_MINUTES = { min: 15, max: 240 };
@@ -16,9 +20,15 @@ const AUTH_WINDOW_MS = 15 * 60 * 1000;
 const AUTH_FAIL_LIMIT = 5;
 const AUTH_PASSWORD_MIN = 10;
 const AUTH_HASH_ROUNDS = 12;
+const REVEAL_TICKET_MS = 30 * 1000;
+const REVEAL_LEGACY_MESSAGE = "Reset this credential to enable viewing.";
+const REVEAL_BIND_MESSAGE = "This verification is not valid for this dentist.";
+const ADMIN_PASSWORD_WRONG = "Administrator password is incorrect.";
 const SETUP_REQUIRED_MESSAGE = "Authorization credential setup is required.";
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const authFailures = new Map();
+const revealTickets = new Map();
+const revealFailures = new Map();
 
 const RESTRICTED_SCOPES = [
   "diagnosis_notes",
@@ -444,6 +454,75 @@ async function saveGrantMinutes(db, minutes, adminId) {
 
 function resetAuthFailures() {
   authFailures.clear();
+  revealFailures.clear();
+  revealTickets.clear();
+}
+
+function revealAttemptKey(adminId, dentistId) {
+  return `reveal:${String(adminId || "")}:${String(dentistId || "")}`;
+}
+
+function assertRevealRateLimit(adminId, dentistId) {
+  const key = revealAttemptKey(adminId, dentistId);
+  const now = Date.now();
+  const current = revealFailures.get(key);
+  if (current && now - current.startedAt > AUTH_WINDOW_MS) {
+    revealFailures.delete(key);
+    return;
+  }
+  if (current && current.count >= AUTH_FAIL_LIMIT) {
+    throw httpError("Too many verification attempts. Please wait 15 minutes and try again.", 429);
+  }
+}
+
+function recordRevealFailure(adminId, dentistId) {
+  const key = revealAttemptKey(adminId, dentistId);
+  const now = Date.now();
+  const current = revealFailures.get(key);
+  if (!current || now - current.startedAt > AUTH_WINDOW_MS) {
+    revealFailures.set(key, { startedAt: now, count: 1 });
+    return;
+  }
+  current.count += 1;
+}
+
+function clearRevealFailure(adminId, dentistId) {
+  revealFailures.delete(revealAttemptKey(adminId, dentistId));
+}
+
+function purgeRevealTickets(now = Date.now()) {
+  for (const [token, row] of revealTickets.entries()) {
+    if (!row || row.expiresAt <= now) revealTickets.delete(token);
+  }
+}
+
+function issueRevealTicket({ adminId, dentistId, sessionId }) {
+  purgeRevealTickets();
+  const token = crypto.randomBytes(32).toString("hex");
+  revealTickets.set(token, {
+    adminId: String(adminId),
+    dentistId: String(dentistId),
+    sessionId: String(sessionId || adminId),
+    expiresAt: Date.now() + REVEAL_TICKET_MS,
+  });
+  return token;
+}
+
+function consumeRevealTicket(token, { adminId, dentistId, sessionId }) {
+  purgeRevealTickets();
+  const key = String(token || "");
+  const row = revealTickets.get(key);
+  if (row) revealTickets.delete(key);
+  if (!row || row.expiresAt <= Date.now()) {
+    throw httpError("Administrator verification expired. Verify again to view this credential.", 403);
+  }
+  if (row.adminId !== String(adminId) || row.sessionId !== String(sessionId || adminId) || row.dentistId !== String(dentistId)) {
+    throw httpError(REVEAL_BIND_MESSAGE, 403);
+  }
+}
+
+function adminActorName(admin) {
+  return `${admin?.first_name || admin?.firstName || ""} ${admin?.last_name || admin?.lastName || ""}`.trim() || null;
 }
 
 function authAttemptKey(identifier, ip) {
@@ -614,6 +693,9 @@ function presentAuthorization(row = {}) {
     authorizationCredentialStatus,
     setupRequired: authorizationCredentialStatus === "setup_required",
     credentialConfigured: configured,
+    credentialViewable:
+      configured &&
+      (row.has_recoverable_secret === true || Boolean(row.authorization_password_ciphertext)),
   };
 }
 
@@ -684,7 +766,8 @@ async function loadSessionApprover(db, user, { requireCredential = true } = {}) 
     const result = await db.query(
       `SELECT account.id, account.first_name, account.last_name, account.role, account.status,
               account.is_verified, account.is_archived, profile.can_approve_cross_branch_access,
-              profile.authorization_password_hash, profile.authorization_credential_status
+              profile.authorization_password_hash, profile.authorization_credential_status,
+              profile.authorization_password_ciphertext
        FROM users AS account
        LEFT JOIN admin_portal_dentist_profiles AS profile
          ON profile.user_id::text = account.id::text
@@ -706,6 +789,27 @@ async function loadSessionApprover(db, user, { requireCredential = true } = {}) 
     }
     return null;
   } catch (error) {
+    if (error.code === "42703" && String(error.message || "").includes("authorization_password_ciphertext")) {
+      try {
+        const result = await db.query(
+          `SELECT account.id, account.first_name, account.last_name, account.role, account.status,
+                  account.is_verified, account.is_archived, profile.can_approve_cross_branch_access,
+                  profile.authorization_password_hash, profile.authorization_credential_status
+           FROM users AS account
+           LEFT JOIN admin_portal_dentist_profiles AS profile
+             ON profile.user_id::text = account.id::text
+           WHERE account.id::text = $1
+           LIMIT 1`,
+          [String(user.id)]
+        );
+        const row = result.rows[0];
+        if (row && approverAccountEligible(row, { requireCredential })) {
+          return mapApproverRow(row);
+        }
+      } catch (fallbackError) {
+        if (fallbackError.code !== "42703" && fallbackError.code !== "42P01") throw fallbackError;
+      }
+    }
     if (error.code === "42703" || error.code === "42P01") {
       if (String(user?.role || "").toLowerCase() === "admin") return tokenAdminApprover(user);
       return null;
@@ -714,22 +818,44 @@ async function loadSessionApprover(db, user, { requireCredential = true } = {}) 
   }
 }
 
+function presentStoredAuthorization(row = {}) {
+  return presentAuthorization({
+    ...row,
+    has_authorization_credential: Boolean(row.authorization_password_hash),
+    has_recoverable_secret: Boolean(row.authorization_password_ciphertext),
+  });
+}
+
 async function loadDentistAuthorization(db, dentistId) {
   try {
     const result = await db.query(
-      `SELECT can_approve_cross_branch_access, authorization_password_hash, authorization_credential_status
+      `SELECT can_approve_cross_branch_access, authorization_password_hash, authorization_credential_status,
+              authorization_password_ciphertext
        FROM admin_portal_dentist_profiles
        WHERE user_id = $1
        LIMIT 1`,
       [String(dentistId)]
     );
-    const row = result.rows[0] || {};
-    return presentAuthorization({
-      ...row,
-      has_authorization_credential: Boolean(row.authorization_password_hash),
-    });
+    return presentStoredAuthorization(result.rows[0] || {});
   } catch (error) {
-    if (error.code === "42703" || error.code === "42P01") {
+    if (error.code === "42703") {
+      try {
+        const result = await db.query(
+          `SELECT can_approve_cross_branch_access, authorization_password_hash, authorization_credential_status
+           FROM admin_portal_dentist_profiles
+           WHERE user_id = $1
+           LIMIT 1`,
+          [String(dentistId)]
+        );
+        return presentStoredAuthorization(result.rows[0] || {});
+      } catch (fallbackError) {
+        if (fallbackError.code === "42703" || fallbackError.code === "42P01") {
+          return presentAuthorization({});
+        }
+        throw fallbackError;
+      }
+    }
+    if (error.code === "42P01") {
       return presentAuthorization({});
     }
     throw error;
@@ -743,7 +869,8 @@ async function attachDentistAuthorization(db, accounts) {
   }
   try {
     const flags = await db.query(
-      `SELECT user_id, can_approve_cross_branch_access, authorization_password_hash, authorization_credential_status
+      `SELECT user_id, can_approve_cross_branch_access, authorization_password_hash, authorization_credential_status,
+              authorization_password_ciphertext
        FROM admin_portal_dentist_profiles
        WHERE user_id = ANY($1::text[])`,
       [accounts.map((account) => String(account.id))]
@@ -754,6 +881,24 @@ async function attachDentistAuthorization(db, accounts) {
     }
   } catch (error) {
     if (error.code === "42703") {
+      try {
+        const flags = await db.query(
+          `SELECT user_id, can_approve_cross_branch_access, authorization_password_hash, authorization_credential_status
+           FROM admin_portal_dentist_profiles
+           WHERE user_id = ANY($1::text[])`,
+          [accounts.map((account) => String(account.id))]
+        );
+        const byUser = new Map(flags.rows.map((row) => [String(row.user_id), row]));
+        for (const account of accounts) {
+          Object.assign(account, presentAuthorization(byUser.get(String(account.id)) || {}));
+        }
+        return accounts;
+      } catch (hashFallbackError) {
+        if (hashFallbackError.code !== "42703") {
+          if (hashFallbackError.code === "42P01") return accounts;
+          throw hashFallbackError;
+        }
+      }
       try {
         const flags = await db.query(
           `SELECT user_id, can_approve_cross_branch_access
@@ -800,23 +945,37 @@ async function setAuthorizationCredential(db, admin, dentistId, { password, conf
   if (plain !== confirm) {
     throw httpError("Authorization password and confirmation do not match.", 400);
   }
+  if (/^•+$/.test(plain)) {
+    throw httpError("Enter a new authorization password. The masked indicator is not a password.", 400);
+  }
   const dentist = await assertActiveDentist(db, dentistId);
   if (dentist.password_hash && (await bcrypt.compare(plain, dentist.password_hash))) {
     throw httpError("Choose an authorization password that is different from the sign-in password.", 400);
   }
+  const secret = encryptAuthorizationPassword(plain);
   const previous = await loadDentistAuthorization(db, dentist.id);
   const hash = await bcrypt.hash(plain, AUTH_HASH_ROUNDS);
-  await db.query(
-    `INSERT INTO admin_portal_dentist_profiles (
-       user_id, can_approve_cross_branch_access, authorization_password_hash, authorization_credential_status, updated_at
-     ) VALUES ($1, TRUE, $2, 'configured', CURRENT_TIMESTAMP)
-     ON CONFLICT (user_id) DO UPDATE SET
-       can_approve_cross_branch_access = TRUE,
-       authorization_password_hash = EXCLUDED.authorization_password_hash,
-       authorization_credential_status = 'configured',
-       updated_at = CURRENT_TIMESTAMP`,
-    [String(dentist.id), hash]
-  );
+  try {
+    await db.query(
+      `INSERT INTO admin_portal_dentist_profiles (
+         user_id, can_approve_cross_branch_access, authorization_password_hash, authorization_credential_status,
+         authorization_password_ciphertext, authorization_secret_key_id, updated_at
+       ) VALUES ($1, TRUE, $2, 'configured', $3, $4, CURRENT_TIMESTAMP)
+       ON CONFLICT (user_id) DO UPDATE SET
+         can_approve_cross_branch_access = TRUE,
+         authorization_password_hash = EXCLUDED.authorization_password_hash,
+         authorization_credential_status = 'configured',
+         authorization_password_ciphertext = EXCLUDED.authorization_password_ciphertext,
+         authorization_secret_key_id = EXCLUDED.authorization_secret_key_id,
+         updated_at = CURRENT_TIMESTAMP`,
+      [String(dentist.id), hash, secret.ciphertext, secret.keyId]
+    );
+  } catch (error) {
+    if (error.code === "42703") {
+      throw httpError("Apply the authorization credential secret migration before saving a viewable credential.", 503);
+    }
+    throw error;
+  }
   const action = previous.credentialConfigured ? "record_access_credential_reset" : "record_access_credential_set";
   await writeAdminAudit(db, {
     actorId: admin?.id,
@@ -835,17 +994,35 @@ async function setAuthorizationCredential(db, admin, dentistId, { password, conf
 
 async function revokeAuthorizationCredential(db, admin, dentistId) {
   const dentist = await assertActiveDentist(db, dentistId);
-  await db.query(
-    `INSERT INTO admin_portal_dentist_profiles (
-       user_id, can_approve_cross_branch_access, authorization_password_hash, authorization_credential_status, updated_at
-     ) VALUES ($1, FALSE, NULL, 'revoked', CURRENT_TIMESTAMP)
-     ON CONFLICT (user_id) DO UPDATE SET
-       can_approve_cross_branch_access = FALSE,
-       authorization_password_hash = NULL,
-       authorization_credential_status = 'revoked',
-       updated_at = CURRENT_TIMESTAMP`,
-    [String(dentist.id)]
-  );
+  try {
+    await db.query(
+      `INSERT INTO admin_portal_dentist_profiles (
+         user_id, can_approve_cross_branch_access, authorization_password_hash, authorization_credential_status,
+         authorization_password_ciphertext, authorization_secret_key_id, updated_at
+       ) VALUES ($1, FALSE, NULL, 'revoked', NULL, NULL, CURRENT_TIMESTAMP)
+       ON CONFLICT (user_id) DO UPDATE SET
+         can_approve_cross_branch_access = FALSE,
+         authorization_password_hash = NULL,
+         authorization_credential_status = 'revoked',
+         authorization_password_ciphertext = NULL,
+         authorization_secret_key_id = NULL,
+         updated_at = CURRENT_TIMESTAMP`,
+      [String(dentist.id)]
+    );
+  } catch (error) {
+    if (error.code !== "42703") throw error;
+    await db.query(
+      `INSERT INTO admin_portal_dentist_profiles (
+         user_id, can_approve_cross_branch_access, authorization_password_hash, authorization_credential_status, updated_at
+       ) VALUES ($1, FALSE, NULL, 'revoked', CURRENT_TIMESTAMP)
+       ON CONFLICT (user_id) DO UPDATE SET
+         can_approve_cross_branch_access = FALSE,
+         authorization_password_hash = NULL,
+         authorization_credential_status = 'revoked',
+         updated_at = CURRENT_TIMESTAMP`,
+      [String(dentist.id)]
+    );
+  }
   await writeAdminAudit(db, {
     actorId: admin?.id,
     actorName: `${admin?.first_name || admin?.firstName || ""} ${admin?.last_name || admin?.lastName || ""}`.trim() || null,
@@ -857,6 +1034,132 @@ async function revokeAuthorizationCredential(db, admin, dentistId) {
     detail: "Authorization credential revoked. Cross-branch approval permission removed.",
   });
   return loadDentistAuthorization(db, dentist.id);
+}
+
+async function loadRecoverableCredential(db, dentistId) {
+  const result = await db.query(
+    `SELECT authorization_password_hash, authorization_password_ciphertext, authorization_credential_status,
+            can_approve_cross_branch_access
+     FROM admin_portal_dentist_profiles
+     WHERE user_id = $1
+     LIMIT 1`,
+    [String(dentistId)]
+  );
+  return result.rows[0] || {};
+}
+
+async function verifyAdminForCredentialReveal(db, admin, dentistId, adminPassword, req) {
+  if (String(admin?.role || "").toLowerCase() !== "admin") {
+    throw httpError("Only an administrator can view this credential.", 403);
+  }
+  const dentist = await assertActiveDentist(db, dentistId);
+  assertRevealRateLimit(admin.id, dentist.id);
+  const plain = String(adminPassword || "");
+  if (!plain) {
+    throw httpError("Enter your administrator login password.", 400);
+  }
+  const matched = await bcrypt.compare(plain, admin.password_hash || "");
+  if (!matched) {
+    recordRevealFailure(admin.id, dentist.id);
+    await writeAdminAudit(db, {
+      actorId: admin.id,
+      actorName: adminActorName(admin),
+      actorRole: "admin",
+      action: "record_access_credential_reveal_failed",
+      targetType: "dentist",
+      targetId: String(dentist.id),
+      targetLabel: `${dentist.first_name || ""} ${dentist.last_name || ""}`.trim() || null,
+      result: "blocked",
+      detail: "Administrator password was rejected. No credential was returned.",
+      ipAddress: req?.ip || null,
+      sessionId: String(admin.id),
+    });
+    throw httpError(ADMIN_PASSWORD_WRONG, 401);
+  }
+  clearRevealFailure(admin.id, dentist.id);
+  const stored = await loadRecoverableCredential(db, dentist.id);
+  const presented = presentStoredAuthorization(stored);
+  const verificationToken = issueRevealTicket({
+    adminId: admin.id,
+    dentistId: dentist.id,
+    sessionId: admin.id,
+  });
+  return {
+    verificationToken,
+    expiresInSeconds: Math.round(REVEAL_TICKET_MS / 1000),
+    credentialConfigured: presented.credentialConfigured,
+    credentialViewable: presented.credentialViewable,
+    authorizationCredentialStatus: presented.authorizationCredentialStatus,
+    message: presented.credentialConfigured && !presented.credentialViewable ? REVEAL_LEGACY_MESSAGE : undefined,
+  };
+}
+
+async function revealAuthorizationCredential(db, admin, dentistId, verificationToken, req) {
+  if (String(admin?.role || "").toLowerCase() !== "admin") {
+    throw httpError("Only an administrator can view this credential.", 403);
+  }
+  const dentist = await assertActiveDentist(db, dentistId);
+  consumeRevealTicket(verificationToken, {
+    adminId: admin.id,
+    dentistId: dentist.id,
+    sessionId: admin.id,
+  });
+  const stored = await loadRecoverableCredential(db, dentist.id);
+  const presented = presentStoredAuthorization(stored);
+  if (!presented.credentialConfigured) {
+    await writeAdminAudit(db, {
+      actorId: admin.id,
+      actorName: adminActorName(admin),
+      actorRole: "admin",
+      action: "record_access_credential_reveal_denied",
+      targetType: "dentist",
+      targetId: String(dentist.id),
+      targetLabel: `${dentist.first_name || ""} ${dentist.last_name || ""}`.trim() || null,
+      result: "blocked",
+      detail: "Reveal requested but no authorization credential is configured.",
+      ipAddress: req?.ip || null,
+      sessionId: String(admin.id),
+    });
+    throw httpError("No authorization credential is set for this dentist.", 404);
+  }
+  if (!presented.credentialViewable) {
+    await writeAdminAudit(db, {
+      actorId: admin.id,
+      actorName: adminActorName(admin),
+      actorRole: "admin",
+      action: "record_access_credential_reveal_denied",
+      targetType: "dentist",
+      targetId: String(dentist.id),
+      targetLabel: `${dentist.first_name || ""} ${dentist.last_name || ""}`.trim() || null,
+      result: "blocked",
+      detail: "Legacy hash-only credential cannot be viewed. Reset is required.",
+      ipAddress: req?.ip || null,
+      sessionId: String(admin.id),
+    });
+    return {
+      credentialViewable: false,
+      credentialConfigured: true,
+      message: REVEAL_LEGACY_MESSAGE,
+    };
+  }
+  const password = decryptAuthorizationPassword(stored.authorization_password_ciphertext);
+  await writeAdminAudit(db, {
+    actorId: admin.id,
+    actorName: adminActorName(admin),
+    actorRole: "admin",
+    action: "record_access_credential_revealed",
+    targetType: "dentist",
+    targetId: String(dentist.id),
+    targetLabel: `${dentist.first_name || ""} ${dentist.last_name || ""}`.trim() || null,
+    detail: "Administrator viewed the authorization credential after login-password verification.",
+    ipAddress: req?.ip || null,
+    sessionId: String(admin.id),
+  });
+  return {
+    credentialViewable: true,
+    credentialConfigured: true,
+    password,
+  };
 }
 
 async function verifyApproverPassword(db, approver, password, req) {
@@ -1436,6 +1739,8 @@ module.exports = {
   loadDentistAuthorization,
   setAuthorizationCredential,
   revokeAuthorizationCredential,
+  verifyAdminForCredentialReveal,
+  revealAuthorizationCredential,
   unlockOwnRecordAccess,
   decideRequest,
   approverMayDecide,
