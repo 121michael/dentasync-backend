@@ -2856,6 +2856,36 @@ html[data-theme="dark"] .portal-shell[data-theme="dark"] ~ .tooth-loader .tooth-
   min-height: 40px;
 }
 
+.dentist-record-identity {
+  display: grid;
+  gap: 0.28rem;
+}
+
+.dentist-record-identity h1 {
+  margin: 0.12rem 0 0;
+  font-size: clamp(1.45rem, 2.4vw, 2.05rem);
+  letter-spacing: -0.045em;
+  line-height: 1.15;
+}
+
+.dentist-record-identity__id {
+  margin: 0 0 0.45rem;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  font-weight: 650;
+}
+
+.dentist-patient-record .profile-menu {
+  margin-top: 0.15rem;
+}
+
+.dentist-patient-record .profile-menu__item.is-selected,
+.dentist-patient-record .profile-menu__item:hover,
+.dentist-patient-record .profile-menu__item:focus-visible {
+  border-color: color-mix(in srgb, var(--amethyst-500) 45%, var(--border));
+  background: color-mix(in srgb, var(--amethyst-100) 55%, #fff);
+}
+
 .field-readonly {
   margin: 0;
   min-height: 43px;

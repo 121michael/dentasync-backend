@@ -3,6 +3,8 @@ import {
   ArrowLeft,
   BadgeCheck,
   CalendarDays,
+  ChevronLeft,
+  ChevronRight,
   FolderOpen,
   HeartPulse,
   KeyRound,
@@ -221,13 +223,32 @@ function DelegatedRequestQueue() {
   );
 }
 
-function patientInitials(name) {
-  const parts = String(name || "")
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
-  return `${parts[0]?.[0] || ""}${parts[1]?.[0] || ""}`.toUpperCase() || "PT";
-}
+const RECORD_MENU = [
+  {
+    id: "personal",
+    title: "Personal Information",
+    description: "View demographic and contact details",
+    icon: UserRound,
+  },
+  {
+    id: "emergency",
+    title: "Emergency Contact",
+    description: "View the saved emergency contact",
+    icon: ShieldCheck,
+  },
+  {
+    id: "clinical",
+    title: "Clinical Information",
+    description: "Review medical details, chart, treatments, and documents",
+    icon: HeartPulse,
+  },
+  {
+    id: "coverage",
+    title: "Coverage and Wellness",
+    description: "View HMO coverage and wellness information",
+    icon: CalendarDays,
+  },
+];
 
 function FieldValue({ label, children, warning = false }) {
   const value = children == null || children === "" ? "—" : children;
@@ -246,7 +267,7 @@ function StatusBadge({ status, children }) {
   return <span className={`dentist-status dentist-status--${tone}`}>{children || procedureStatusLabel(status)}</span>;
 }
 
-function AccessRecordHistory({ patientId, onAuthorized, grantExpiresAt, requestOpenRef }) {
+function AccessRecordHistory({ patientId, onAuthorized, grantExpiresAt, requestOpenRef, compact = false }) {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const [licenseNumber, setLicenseNumber] = useState("");
@@ -306,30 +327,34 @@ function AccessRecordHistory({ patientId, onAuthorized, grantExpiresAt, requestO
   }
 
   return (
-    <section className="glass-card profile-section dentist-access-history">
-      <div className="card-heading">
-        <div>
-          <span className="eyebrow">Authorized history</span>
-          <h2>Access Record History</h2>
-        </div>
-        <KeyRound className="card-heading__icon" size={21} />
-      </div>
-      <p className="muted-copy">
-        Ordinary history you are authorized to read. Restricted notes from other permitted branches stay hidden until
-        you verify your Admin-configured authorization credential.
-      </p>
-      <button
-        className="button button--primary"
-        type="button"
-        data-request-record-access="true"
-        onClick={() => {
-          setOpen(true);
-          setPassword("");
-          setMessage("");
-        }}
-      >
-        Request Record Access
-      </button>
+    <>
+      {compact ? null : (
+        <section className="glass-card profile-section dentist-access-history">
+          <div className="card-heading">
+            <div>
+              <span className="eyebrow">Authorized history</span>
+              <h2>Access Record History</h2>
+            </div>
+            <KeyRound className="card-heading__icon" size={21} />
+          </div>
+          <p className="muted-copy">
+            Ordinary history you are authorized to read. Restricted notes from other permitted branches stay hidden until
+            you verify your Admin-configured authorization credential.
+          </p>
+          <button
+            className="button button--primary"
+            type="button"
+            data-request-record-access="true"
+            onClick={() => {
+              setOpen(true);
+              setPassword("");
+              setMessage("");
+            }}
+          >
+            Request Record Access
+          </button>
+        </section>
+      )}
       {open ? (
         <DentistModal title="Request Record Access" className="dentist-modal--request-access" onClose={closeModal}>
           <form className="dentist-request-access" autoComplete="off" onSubmit={unlockRecords}>
@@ -363,7 +388,7 @@ function AccessRecordHistory({ patientId, onAuthorized, grantExpiresAt, requestO
           </form>
         </DentistModal>
       ) : null}
-    </section>
+    </>
   );
 }
 
@@ -439,6 +464,7 @@ export function DentistRecordsPage() {
   const focusHandledRef = useRef("");
   const focusedRowRef = useRef(null);
   const [focusKey, setFocusKey] = useState(() => searchParams.get("focus") || "");
+  const [recordSection, setRecordSection] = useState(null);
 
   const load = useCallback(async (options = {}) => {
     try {
@@ -586,6 +612,7 @@ export function DentistRecordsPage() {
     setAgeSexOpen(false);
     setSavingWellness(false);
     setFilesOpen(openFilesFromQuery);
+    setRecordSection(openFilesFromQuery ? "clinical" : null);
     refreshPatientDetail(patientId)
       .then(() => {
         if (!cancelled) setError("");
@@ -607,6 +634,7 @@ export function DentistRecordsPage() {
 
   function openAgeSexEditor() {
     if (!detail?.patient) return;
+    setRecordSection("personal");
     if (isProfileLocked(detail.patient)) {
       setError(
         "Basic patient information comes from the patient account profile and cannot be edited here."
@@ -701,6 +729,7 @@ export function DentistRecordsPage() {
 
   function openAddTreatment() {
     if (!requestCloseEdit()) return;
+    setRecordSection("clinical");
     setError("");
     setSuccess("");
     setTreatmentForm(emptyTreatment);
@@ -917,6 +946,7 @@ export function DentistRecordsPage() {
   const toothRequired = procedureRequiresTooth(treatmentForm.name);
 
   function toggleUploadedFiles() {
+    setRecordSection("clinical");
     setFilesOpen((open) => {
       const next = !open;
       if (next) {
@@ -961,13 +991,7 @@ export function DentistRecordsPage() {
 
   return (
     <div className={`dentist-page${patientId ? " dentist-patient-record-page" : ""}`}>
-      {patientId && detail ? (
-        <SectionHeading
-          eyebrow="Shared patient record"
-          title="Patient Details"
-          detail="Review authorized demographic, coverage, and clinical information."
-        />
-      ) : (
+      {patientId && detail ? null : (
       <SectionHeading
         eyebrow="Clinical archive"
         title="Dental Records Vault"
@@ -1161,94 +1185,113 @@ export function DentistRecordsPage() {
 
       {detail ? (
         <div className="dentist-patient-record">
-          <section className="membership-card">
-            <div className="membership-card__shine" />
-            <div className="membership-card__top">
-              <span className="membership-card__logo">
-                <img src="/logo.png" alt="" className="membership-card__logo-image" />
-                Amethyst Dental
-              </span>
-              <span>{isProfileLocked(detail.patient) ? "LINKED PATIENT" : "WALK-IN RECORD"}</span>
-            </div>
-            <div className="membership-card__identity">
-              <span className="membership-card__avatar">
-                {patientInitials(detail.patient.fullName || detail.patient.patientName)}
-              </span>
-              <div>
-                <strong>{detail.patient.fullName || detail.patient.patientName || "Patient record"}</strong>
-                <small>
-                  Patient ID · {detail.patient.patientId || detail.patient.recordCode || detail.patient.id}
-                </small>
-              </div>
-            </div>
-            <div className="membership-card__bottom">
-              <div>
-                <span>Category</span>
-                <strong>{detail.patient.patientCategory || "Regular"}</strong>
-              </div>
-              <div>
-                <span>Next appointment</span>
-                <strong>{nextAppointmentLabel(null, detail.nextAppointment, detail.patient)}</strong>
-              </div>
-              <div className="membership-card__verified">
-                <BadgeCheck size={17} />
-                {detail.patient.hmoStatus === "verified"
-                  ? `HMO verified${detail.patient.hmoProvider ? ` · ${detail.patient.hmoProvider}` : ""}`
-                  : (detail.patient.hmoStatus || "not enrolled").replaceAll("_", " ")}
-              </div>
-            </div>
-          </section>
-
-          <div className="dentist-record-toolbar" role="toolbar" aria-label="Patient record actions">
+          <div className="dentist-record-identity">
             <button
               type="button"
-              className="button button--secondary"
+              className="button button--secondary profile-back"
               onClick={() => navigate("/dentist/patient-records")}
             >
-              <ArrowLeft size={16} /> Back
+              <ArrowLeft size={16} /> Back to Patient Records
             </button>
-            <button
-              type="button"
-              className="button button--primary"
-              onClick={() => requestAccessRef.current?.()}
-            >
-              <KeyRound size={16} /> Request Record Access
-            </button>
-            <button
-              type="button"
-              className={`button ${treatmentFormOpen && !editingTreatmentId ? "button--secondary" : "button--primary"}`}
-              onClick={(event) => {
-                event.preventDefault();
-                if (treatmentFormOpen && !editingTreatmentId) closeTreatmentForm();
-                else openAddTreatment();
-              }}
-            >
-              {treatmentFormOpen && !editingTreatmentId ? (
-                "Close Treatment Form"
-              ) : (
-                <>
-                  <Plus size={16} /> Add Treatment
-                </>
-              )}
-            </button>
-            <button
-              type="button"
-              className={`button ${filesOpen ? "button--primary" : "button--secondary"}`}
-              aria-expanded={filesOpen}
-              onClick={toggleUploadedFiles}
-            >
-              <FolderOpen size={16} /> Dental Documents
-              {medicalDocuments.length ? (
-                <span className="uploaded-files-count">{medicalDocuments.length}</span>
-              ) : null}
-            </button>
-            {!isProfileLocked(detail.patient) ? (
-              <button type="button" className="button button--secondary" onClick={openAgeSexEditor}>
-                Edit Age and Sex
+            <span className="eyebrow">Shared patient record</span>
+            <h1>{detail.patient.fullName || detail.patient.patientName || "Patient record"}</h1>
+            <p className="dentist-record-identity__id">
+              Patient ID · {detail.patient.patientId || detail.patient.recordCode || detail.patient.id}
+            </p>
+            <div className="dentist-record-toolbar" role="toolbar" aria-label="Patient record actions">
+              <button
+                type="button"
+                className="button button--primary"
+                onClick={() => requestAccessRef.current?.()}
+              >
+                <KeyRound size={16} /> Request Record Access
               </button>
-            ) : null}
+              {recordSection === "clinical" ? (
+                <>
+                  <button
+                    type="button"
+                    className={`button ${treatmentFormOpen && !editingTreatmentId ? "button--secondary" : "button--primary"}`}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      if (treatmentFormOpen && !editingTreatmentId) closeTreatmentForm();
+                      else openAddTreatment();
+                    }}
+                  >
+                    {treatmentFormOpen && !editingTreatmentId ? (
+                      "Close Treatment Form"
+                    ) : (
+                      <>
+                        <Plus size={16} /> Add Treatment
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    className={`button ${filesOpen ? "button--primary" : "button--secondary"}`}
+                    aria-expanded={filesOpen}
+                    onClick={toggleUploadedFiles}
+                  >
+                    <FolderOpen size={16} /> Dental Documents
+                    {medicalDocuments.length ? (
+                      <span className="uploaded-files-count">{medicalDocuments.length}</span>
+                    ) : null}
+                  </button>
+                </>
+              ) : null}
+              {recordSection === "personal" && !isProfileLocked(detail.patient) ? (
+                <button type="button" className="button button--secondary" onClick={openAgeSexEditor}>
+                  Edit Age and Sex
+                </button>
+              ) : null}
+            </div>
           </div>
 
+          <AccessRecordHistory
+            compact
+            patientId={patientId}
+            patient={detail.patient}
+            grantExpiresAt={detail.access?.grantExpiresAt}
+            requestOpenRef={requestAccessRef}
+            onAuthorized={(notice) => {
+              if (notice) setSuccess(notice);
+              refreshPatientDetail(patientId);
+            }}
+          />
+
+          {!recordSection ? (
+            <nav className="profile-menu" aria-label="Patient record sections">
+              {RECORD_MENU.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className="profile-menu__item"
+                    onClick={() => setRecordSection(item.id)}
+                  >
+                    <span className="profile-menu__icon" aria-hidden="true">
+                      <Icon size={18} />
+                    </span>
+                    <span className="profile-menu__copy">
+                      <strong>{item.title}</strong>
+                      <small>{item.description}</small>
+                    </span>
+                    <ChevronRight size={18} aria-hidden="true" />
+                  </button>
+                );
+              })}
+            </nav>
+          ) : (
+            <button
+              type="button"
+              className="button button--secondary profile-back"
+              onClick={() => setRecordSection(null)}
+            >
+              <ChevronLeft size={16} /> Back to patient cards
+            </button>
+          )}
+
+          {recordSection === "personal" ? (
           <section className="glass-card profile-section">
             <div className="card-heading">
               <div>
@@ -1280,7 +1323,9 @@ export function DentistRecordsPage() {
               </FieldValue>
             </div>
           </section>
+          ) : null}
 
+          {recordSection === "emergency" ? (
           <section className="glass-card profile-section">
             <div className="card-heading">
               <div>
@@ -1295,7 +1340,9 @@ export function DentistRecordsPage() {
               <FieldValue label="Mobile number">{detail.patient.emergencyContactPhone?.trim()}</FieldValue>
             </div>
           </section>
+          ) : null}
 
+          {recordSection === "clinical" ? (
           <section className="glass-card profile-section">
             <div className="card-heading">
               <div>
@@ -1313,7 +1360,9 @@ export function DentistRecordsPage() {
               <FieldValue label="Dental concerns">{detail.patient.dentalConcerns?.trim()}</FieldValue>
             </div>
           </section>
+          ) : null}
 
+          {recordSection === "coverage" ? (
           <section className="glass-card profile-section">
             <div className="card-heading">
               <div>
@@ -1344,26 +1393,9 @@ export function DentistRecordsPage() {
               </FieldValue>
             </div>
           </section>
+          ) : null}
 
-          <AccessRecordHistory
-            patientId={patientId}
-            patient={detail.patient}
-            grantExpiresAt={detail.access?.grantExpiresAt}
-            requestOpenRef={requestAccessRef}
-            onAuthorized={(notice) => {
-              if (notice) setSuccess(notice);
-              refreshPatientDetail(patientId);
-            }}
-          />
-
-          <PrescriptionsPanel
-            role="dentist"
-            patientId={detail.patient.id}
-            className="glass-card profile-section"
-            onCreate={() => navigate(`/dentist/prescriptions?patientId=${detail.patient.id}`)}
-          />
-
-          {ageSexOpen && !isProfileLocked(detail.patient) ? (
+          {recordSection === "personal" && ageSexOpen && !isProfileLocked(detail.patient) ? (
             <form className="glass-card profile-section dentist-form" onSubmit={saveAgeSex}>
               <div className="card-heading">
                 <div>
@@ -1425,6 +1457,7 @@ export function DentistRecordsPage() {
             </form>
           ) : null}
 
+          {recordSection === "coverage" ? (
           <section className="glass-card profile-section treatment-record dentist-wellness-assessment">
             <div className="treatment-record__header">
               <div>
@@ -1513,7 +1546,10 @@ export function DentistRecordsPage() {
               </div>
             </form>
           </section>
+          ) : null}
 
+          {recordSection === "clinical" ? (
+          <>
           <div
             ref={treatmentFormRef}
             className={`dentist-treatment-form dentist-treatment-form--inline ${
@@ -1941,6 +1977,14 @@ export function DentistRecordsPage() {
               </p>
             )}
           </section>
+          <PrescriptionsPanel
+            role="dentist"
+            patientId={detail.patient.id}
+            className="glass-card profile-section"
+            onCreate={() => navigate(`/dentist/prescriptions?patientId=${detail.patient.id}`)}
+          />
+          </>
+          ) : null}
         </div>
       ) : null}
 
