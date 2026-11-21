@@ -51,7 +51,7 @@ test("purgeUserAccount deletes the users row after related cleanup", async () =>
   const client = {
     async query(sql, params = []) {
       statements.push({ sql, params });
-      if (/DELETE FROM users/i.test(sql)) {
+      if (/DELETE FROM users WHERE id::text/i.test(sql)) {
         return { rows: [{ id: "9", email: "gone@example.test", role: "patient" }] };
       }
       return { rows: [] };
@@ -60,7 +60,10 @@ test("purgeUserAccount deletes the users row after related cleanup", async () =>
 
   const removed = await purgeUserAccount(client, 9);
   assert.equal(removed.email, "gone@example.test");
+  assert.ok(statements.some((entry) => /SAVEPOINT/i.test(entry.sql)));
   assert.ok(statements.some((entry) => /otp_verification_requests/i.test(entry.sql)));
+  assert.ok(statements.some((entry) => /patient_hmo_submissions/i.test(entry.sql)));
+  assert.ok(statements.some((entry) => /clinic_patient_treatments/i.test(entry.sql)));
   assert.ok(statements.some((entry) => /DELETE FROM ai_conversations/i.test(entry.sql)));
   assert.ok(statements.some((entry) => /DELETE FROM users/i.test(entry.sql)));
   assert.deepEqual(statements.at(-1).params, ["9"]);

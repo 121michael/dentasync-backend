@@ -10,6 +10,7 @@ const { linkClinicalRecordsToUser } = require("../services/clinicalPatients");
 const {
   canPermanentlyDeleteAccount,
   purgeUserAccount,
+  RELATED_RECORD_BLOCK_MESSAGE,
 } = require("../services/purgeUserAccount");
 
 const {
@@ -1155,6 +1156,20 @@ function attachAdminCommandCenterRoutes(router, { db, passwordResetService = nul
         transactionOpen = false;
         return res.status(404).json({ message: "Account not found." });
       }
+      const role = String(target.role || "").toLowerCase();
+      if (role === "admin") {
+        await client.query("ROLLBACK");
+        transactionOpen = false;
+        return res.status(403).json({ message: "Administrator accounts cannot be permanently deleted." });
+      }
+      if (!target.is_archived && !canPermanentlyDeleteAccount(target)) {
+        await client.query("ROLLBACK");
+        transactionOpen = false;
+        return res.status(409).json({
+          message:
+            "This account is not archived, so it was not deleted. It remains in the active list.",
+        });
+      }
       if (!canPermanentlyDeleteAccount(target)) {
         await client.query("ROLLBACK");
         transactionOpen = false;
@@ -1186,6 +1201,9 @@ function attachAdminCommandCenterRoutes(router, { db, passwordResetService = nul
     } catch (error) {
       if (transactionOpen) {
         await client.query("ROLLBACK");
+      }
+      if (error?.code === "23503") {
+        return res.status(409).json({ message: RELATED_RECORD_BLOCK_MESSAGE });
       }
       console.error("Admin account purge error:", error.message);
       return res.status(500).json({ message: "Unable to permanently delete the account." });

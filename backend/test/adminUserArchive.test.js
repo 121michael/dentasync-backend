@@ -178,10 +178,7 @@ async function startPortal(seedUsers, { missingPatientColumns = false } = {}) {
 
     if (
       /^\s*DELETE FROM /i.test(sql) ||
-      /UPDATE clinic_patient_records SET linked_user_id/i.test(sql) ||
-      /UPDATE dental_procedure_authorizations SET linked_user_id/i.test(sql) ||
-      /UPDATE staff_portal_invoices SET patient_user_id/i.test(sql) ||
-      /UPDATE users SET managed_by_user_id/i.test(sql)
+      (/^\s*UPDATE /i.test(sql) && !sql.includes("SET is_archived"))
     ) {
       return { rows: [] };
     }
@@ -370,7 +367,9 @@ test("archived accounts can be restored by an administrator without duplicating 
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ confirm: "delete" }),
     });
-    assert.equal(removed.status, 403);
+    assert.equal(removed.status, 409);
+    const deniedBody = await removed.json();
+    assert.match(String(deniedBody.message || ""), /not archived/i);
     assert.ok(portal.users.has("patient-1"));
   } finally {
     await portal.close();
