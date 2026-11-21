@@ -66,6 +66,7 @@ export function AdminArchivedPage() {
   }
 
   async function restoreUser(user) {
+    if (actionBusyId) return;
     const name = user.fullName || user.email;
     const isPatient = archiveRole === "patient";
     const isDentist = archiveRole === "dentist";
@@ -102,10 +103,12 @@ export function AdminArchivedPage() {
   }
 
   async function deleteUserPermanently(user) {
+    if (actionBusyId) return;
     const name = user.fullName || user.email;
+    const patientId = user.patientId ? ` Patient ID ${user.patientId}.` : "";
     const ok = await confirm({
       title: "Permanently delete account",
-      message: `Delete ${name} completely? This cannot be undone. The email can be used to register again.`,
+      message: `Permanently delete ${name} (${user.email || "no email"})?${patientId} This cannot be undone. The login is removed so the email can be used to register again. Clinical treatment history stays in clinic records.`,
       confirmLabel: "Delete permanently",
       tone: "danger",
     });
@@ -218,14 +221,14 @@ export function AdminArchivedPage() {
                         </button>
                         <button
                           className="button button--primary button--compact"
-                          disabled={actionBusyId === `${user.id}:restore`}
+                          disabled={Boolean(actionBusyId)}
                           onClick={() => restoreUser(user)}
                         >
                           <RotateCcw size={14} /> Restore
                         </button>
                         <button
                           className="button button--danger button--compact"
-                          disabled={actionBusyId === `${user.id}:purge`}
+                          disabled={Boolean(actionBusyId)}
                           onClick={() => deleteUserPermanently(user)}
                         >
                           <Trash2 size={14} /> Delete
