@@ -1818,7 +1818,55 @@ html[data-theme="dark"] .portal-shell[data-theme="dark"] ~ .tooth-loader .tooth-
 
 .patient-queue-board {
   display: grid;
-  gap: 0.75rem;
+  gap: 1rem;
+  min-width: 0;
+  padding: 1.5rem;
+}
+
+.patient-queue-board__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+}
+
+.patient-queue-board__title {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  min-width: 0;
+}
+
+.patient-queue-board__icon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: 12px;
+  color: var(--amethyst-800);
+  background: var(--amethyst-100);
+}
+
+.patient-queue-board__title h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  letter-spacing: -0.03em;
+}
+
+.patient-queue-board__title p {
+  margin: 0.22rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.patient-queue-board__updated {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 650;
 }
 
 .patient-queue-board__list {
@@ -1826,74 +1874,112 @@ html[data-theme="dark"] .portal-shell[data-theme="dark"] ~ .tooth-loader .tooth-
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 0.45rem;
+  gap: 0.5rem;
 }
 
 .patient-queue-board__row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.7fr) minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
-  gap: 0.65rem;
+  gap: 0.45rem 0.75rem;
   min-width: 0;
-  padding: 0.55rem 0.7rem;
+  padding: 0.72rem 0.85rem;
   border: 1px solid var(--border);
   border-radius: 14px;
   background: var(--surface);
 }
 
-.patient-queue-board__row > div {
+.patient-queue-board__identity {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.4rem;
   min-width: 0;
 }
 
 .patient-queue-board__row strong {
-  font-size: 0.92rem;
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
 }
 
-.patient-queue-board__row small {
+.patient-queue-board__status {
   color: var(--text-muted);
-  font-size: 0.72rem;
+  font-size: 0.76rem;
+  font-weight: 650;
+}
+
+.patient-queue-board__wait {
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 750;
   text-align: right;
   line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .patient-queue-board__row.is-you {
-  border-color: color-mix(in srgb, var(--amethyst-700, #6b4bb8) 45%, var(--border));
-  background: color-mix(in srgb, var(--amethyst-700, #6b4bb8) 8%, var(--surface));
+  border-color: color-mix(in srgb, var(--amethyst-700, #6b4bb8) 38%, var(--border));
+  background: color-mix(in srgb, var(--amethyst-700, #6b4bb8) 9%, var(--surface));
 }
 
 .patient-queue-board__you {
   flex-shrink: 0;
-  padding: 0.08rem 0.4rem;
+  padding: 0.12rem 0.45rem;
   border-radius: 999px;
   background: var(--amethyst-700, #6b4bb8);
   color: #fff;
   font-size: 0.62rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font-weight: 750;
+  letter-spacing: 0.03em;
 }
 
-.patient-queue-board__meta {
+.patient-queue-board__empty {
   display: grid;
-  gap: 0.2rem;
+  justify-items: center;
+  gap: 0.28rem;
+  padding: 0.35rem 0.25rem 0.15rem;
+  text-align: center;
+}
+
+.patient-queue-board__empty strong {
+  color: var(--text-strong);
+  font-size: 0.95rem;
+}
+
+.patient-queue-board__empty p {
+  margin: 0;
+  max-width: 22rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.patient-queue-board__footer {
   margin: 0;
   color: var(--text-muted);
   font-size: 0.72rem;
-  line-height: 1.45;
+  line-height: 1.4;
+}
+
+@media (max-width: 760px) {
+  .patient-queue-board {
+    padding: 1rem;
+  }
 }
 
 @media (max-width: 390px) {
   .patient-queue-ticket {
     padding: 1rem 0.95rem;
   }
-  .patient-queue-board__row {
+  .patient-queue-board__header {
     flex-direction: column;
+  }
+  .patient-queue-board__row {
+    grid-template-columns: minmax(0, 1fr);
     align-items: flex-start;
   }
-
-  .patient-queue-board__row small {
+  .patient-queue-board__wait,
+  .patient-queue-board__status {
     text-align: left;
   }
 }
