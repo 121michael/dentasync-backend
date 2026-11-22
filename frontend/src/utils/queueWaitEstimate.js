@@ -84,6 +84,31 @@ export function compactQueueWaitCaption(entry) {
   return label === "Estimate unavailable" ? "Estimated wait: Estimate unavailable" : `Estimated wait: ${label}`;
 }
 
+export function featuredWaitValue(entry) {
+  if (!entry) return null;
+  const status = String(entry.status || "").toLowerCase();
+  if (status === "dentist" || status === "in_chair" || status === "in_treatment") return "In treatment";
+  if (status === "completed") return "Completed";
+  return compactAbout(waitRangeFromEntry(entry));
+}
+
+export function queueRowStatusLabel(entry) {
+  const status = String(entry?.status || "").toLowerCase();
+  if (status === "dentist" || status === "in_chair" || status === "in_treatment") return "In treatment";
+  if (status === "completed") return "Completed";
+  if (status === "no_show") return "No-show";
+  if (status === "cancelled") return "Cancelled";
+  if (entry?.isCurrentPatient) return "Waiting";
+  return compactAbout(waitRangeFromEntry(entry));
+}
+
+export function hasEstimatedCallTime(entry) {
+  const estimate = entry?.waitEstimate?.estimatedCallTime;
+  if (estimate?.start || estimate?.end) return true;
+  if (entry?.estimatedCallStart || entry?.estimatedCallEnd) return true;
+  return false;
+}
+
 export function formatWaitUpdatedAt(value) {
   if (!value) return null;
   const date = new Date(value);
