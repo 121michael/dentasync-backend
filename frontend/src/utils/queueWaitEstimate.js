@@ -39,6 +39,7 @@ export function formatCallTimeRange(start, end, { unavailableLabel = "Currently 
 
 export function waitRangeFromEntry(entry) {
   if (entry?.waitEstimate?.unavailable) return "Estimate unavailable";
+  if (entry?.waitEstimate?.treatmentOverrun) return "Treatment running long";
   const estimate = entry?.waitEstimate?.estimatedWaitMinutes;
   if (estimate && (estimate.min != null || estimate.max != null)) {
     return formatWaitRange(estimate.min, estimate.max, { unavailableLabel: "Estimate unavailable" });
@@ -56,6 +57,7 @@ function compactAbout(range) {
   if (!range || range === "Estimate unavailable" || range === "Currently unavailable") {
     return "Estimate unavailable";
   }
+  if (range === "Treatment running long") return "Treatment running long";
   if (range === "Now") return "Now";
   return `About ${range}`;
 }

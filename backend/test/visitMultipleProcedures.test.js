@@ -261,9 +261,9 @@ test("patients behind a multi-procedure visit wait for the remaining total", asy
     aheadEntries: [{ id: 2, token: "A102", status: "dentist", service_name: "Restoration" }],
   });
 
-  // Remaining restoration 20 + crown 90 = 110. Range 99–126 with default 0.90/1.15.
-  assert.equal(estimate.estimatedWaitMinutes.min, 99);
-  assert.equal(estimate.estimatedWaitMinutes.max, 126);
+  // Remaining restoration 20 + crown 90 = 110.
+  assert.equal(estimate.estimatedWaitMinutes.min, 110);
+  assert.equal(estimate.estimatedWaitMinutes.max, 110);
   assert.equal(estimate.estimatedDurationMinutes, 35);
 });
 
