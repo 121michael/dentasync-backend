@@ -1758,48 +1758,85 @@ html[data-theme="dark"] .portal-shell[data-theme="dark"] ~ .tooth-loader .tooth-
 
 .patient-queue-ticket {
   display: grid;
-  gap: 0.55rem;
+  gap: 1rem;
   min-width: 0;
+  padding: 1.5rem;
 }
-.patient-queue-ticket__top {
+.patient-queue-ticket__header {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 0.65rem;
+  gap: 0.5rem 1rem;
+}
+.patient-queue-ticket__title {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+}
+.patient-queue-ticket__title h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  letter-spacing: -0.03em;
+}
+.patient-queue-ticket__icon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: 12px;
+  color: var(--amethyst-800);
+  background: var(--amethyst-100);
+}
+.patient-queue-ticket__updated {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+.patient-queue-ticket__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(11.5rem, 0.8fr);
+  align-items: stretch;
+  gap: 0.85rem;
 }
 .patient-queue-ticket__number {
-  margin: 0.2rem 0 0.45rem;
+  margin: 0 0 0.45rem;
   color: var(--text-strong);
-  font-size: clamp(1.55rem, 4vw, 2.1rem);
+  font-size: clamp(1.7rem, 4vw, 2.15rem);
   font-weight: 800;
   letter-spacing: -0.05em;
   overflow-wrap: anywhere;
 }
-.patient-queue-ticket__icon {
+.patient-queue-ticket__panel {
   display: grid;
-  width: 44px;
-  height: 44px;
-  flex-shrink: 0;
-  place-items: center;
+  align-content: center;
+  gap: 0.18rem;
+  min-width: 0;
+  padding: 0.85rem 1rem;
+  border: 1px solid color-mix(in srgb, var(--amethyst-700, #6b4bb8) 22%, var(--border));
   border-radius: 14px;
-  color: var(--amethyst-800);
-  background: var(--amethyst-100);
+  background: color-mix(in srgb, var(--amethyst-700, #6b4bb8) 8%, var(--surface));
 }
-.patient-queue-ticket__wait {
-  margin: 0;
+.patient-queue-ticket__panel span {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+.patient-queue-ticket__panel strong {
   color: var(--amethyst-800);
-  font-size: 0.98rem;
-  font-weight: 750;
+  font-size: 1.05rem;
+  font-weight: 800;
+  line-height: 1.3;
   overflow-wrap: anywhere;
 }
-.patient-queue-ticket__meta {
-  display: grid;
-  gap: 0.15rem;
+.patient-queue-ticket__footer {
   margin: 0;
   color: var(--text-muted);
   font-size: 0.72rem;
-  line-height: 1.45;
+  line-height: 1.4;
 }
 .queue-hero__wait {
   margin: 0.1rem 0 0;
@@ -1962,15 +1999,17 @@ html[data-theme="dark"] .portal-shell[data-theme="dark"] ~ .tooth-loader .tooth-
 }
 
 @media (max-width: 760px) {
+  .patient-queue-ticket,
   .patient-queue-board {
     padding: 1rem;
+  }
+  .patient-queue-ticket__body {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
 @media (max-width: 390px) {
-  .patient-queue-ticket {
-    padding: 1rem 0.95rem;
-  }
+  .patient-queue-ticket__header,
   .patient-queue-board__header {
     flex-direction: column;
   }
@@ -1985,15 +2024,12 @@ html[data-theme="dark"] .portal-shell[data-theme="dark"] ~ .tooth-loader .tooth-
 }
 
 @media (max-width: 320px) {
-  .patient-queue-ticket {
-    padding: 0.9rem 0.85rem;
-  }
   .patient-queue-ticket__number {
     font-size: 1.4rem;
   }
-  .queue-hero__wait,
-  .patient-queue-ticket__wait {
-    font-size: 0.9rem;
+  .patient-queue-ticket__panel strong,
+  .queue-hero__wait {
+    font-size: 0.95rem;
   }
 }
 

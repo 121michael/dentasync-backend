@@ -176,8 +176,9 @@ test("Patient Dashboard Queue shows compact waits at 320, 390, and desktop", { t
   assert.match(desktop, /Your queue position and estimated waiting time/);
   assert.match(desktop, /Your ticket/);
   assert.match(desktop, /About 20 min/);
-  assert.match(desktop, /Estimated wait: About 20 min/);
-  assert.match(desktop, /QUEUE TICKET/i);
+  assert.match(desktop, /Your Queue Ticket/);
+  assert.match(desktop, /Estimated wait/);
+  assert.match(desktop, /About 20 min/);
   assert.match(desktop, /Estimates may change as treatments progress/);
   assert.match(desktop, /In treatment/);
   assert.match(desktop, /Estimate unavailable/);

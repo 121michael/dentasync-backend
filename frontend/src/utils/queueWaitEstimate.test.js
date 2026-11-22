@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { compactQueueWaitCaption, ticketWaitLine, waitRangeFromEntry } from "./queueWaitEstimate.js";
+import { compactQueueWaitCaption, ticketWaitLine, ticketWaitPanel, waitRangeFromEntry } from "./queueWaitEstimate.js";
 
 test("compact captions highlight the signed-in patient without inventing waits", () => {
   assert.equal(
@@ -61,4 +61,34 @@ test("ticket wait line uses the same backend labels without inventing Now", () =
   assert.equal(ticketWaitLine({ status: "dentist" }), "In treatment");
   assert.equal(ticketWaitLine({ status: "completed" }), "Completed");
   assert.equal(ticketWaitLine({ status: "waiting" }), "Estimated wait: Estimate unavailable");
+});
+
+test("ticket wait panel shows wait once and does not invent Now", () => {
+  assert.deepEqual(
+    ticketWaitPanel({
+      status: "waiting",
+      waitEstimate: { estimatedWaitMinutes: { min: 8, max: 8 } },
+    }),
+    { kind: "waiting", title: "Estimated wait", value: "About 8 min" }
+  );
+  assert.deepEqual(
+    ticketWaitPanel({ status: "dentist" }),
+    { kind: "in_treatment", title: null, value: "Your treatment is underway" }
+  );
+  assert.deepEqual(
+    ticketWaitPanel({ status: "completed" }),
+    { kind: "completed", title: null, value: "Completed" }
+  );
+  assert.deepEqual(
+    ticketWaitPanel({ status: "waiting", waitEstimate: { unavailable: true } }),
+    { kind: "waiting", title: "Estimated wait", value: "Estimate unavailable" }
+  );
+  assert.deepEqual(
+    ticketWaitPanel({ status: "waiting", waitEstimate: { treatmentOverrun: true } }),
+    { kind: "waiting", title: "Estimated wait", value: "Treatment running long" }
+  );
+  assert.deepEqual(
+    ticketWaitPanel({ status: "waiting" }),
+    { kind: "waiting", title: "Estimated wait", value: "Estimate unavailable" }
+  );
 });
