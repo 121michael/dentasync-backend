@@ -13,18 +13,22 @@ const estimate = fs.readFileSync(path.join(root, "utils", "queueWaitEstimate.js"
 
 test("dashboard queue ticket reuses the queue wait helper", () => {
   assert.match(dashboard, /PatientQueueTicket/);
-  assert.match(ticket, /ticketWaitLine/);
+  assert.match(ticket, /ticketWaitPanel/);
+  assert.match(ticket, /Your Queue Ticket/);
   assert.match(ticket, /TICKET_WAIT_NOTE/);
   assert.match(ticket, /Last updated/);
+  assert.doesNotMatch(ticket, /Last updated —/);
+  assert.doesNotMatch(ticket, /ticketWaitLine/);
   assert.match(queue, /ticketWaitLine\(current\)/);
   assert.match(queue, /queueStatusWaitLabel\(current\)/);
-  assert.match(estimate, /export function ticketWaitLine/);
+  assert.match(estimate, /export function ticketWaitPanel/);
   assert.doesNotMatch(queue, /Now — you are being seen/);
 });
 
-test("queue ticket wraps at 320px and 390px", () => {
-  assert.match(css, /\.patient-queue-ticket \{[\s\S]*min-width: 0;/);
-  assert.match(css, /@media \(max-width: 390px\) \{[\s\S]*\.patient-queue-ticket \{[\s\S]*padding: 1rem 0\.95rem;/);
+test("queue ticket matches Live Queue padding and stacks on small screens", () => {
+  assert.match(css, /\.patient-queue-ticket \{[\s\S]*padding: 1\.5rem;/);
+  assert.match(css, /@media \(max-width: 760px\) \{[\s\S]*\.patient-queue-ticket,[\s\S]*padding: 1rem;/);
+  assert.match(css, /@media \(max-width: 390px\) \{[\s\S]*\.patient-queue-ticket__header,[\s\S]*flex-direction: column;/);
   assert.match(css, /@media \(max-width: 320px\) \{[\s\S]*\.patient-queue-ticket__number \{[\s\S]*font-size: 1\.4rem;/);
   assert.match(css, /\.queue-hero__wait \{[\s\S]*overflow-wrap: anywhere;/);
 });

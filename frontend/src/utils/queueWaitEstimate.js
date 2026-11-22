@@ -86,6 +86,27 @@ export function ticketWaitLine(entry) {
   return `Estimated wait: ${label}`;
 }
 
+export function ticketWaitPanel(entry) {
+  const status = String(entry?.status || "").toLowerCase();
+  if (status === "dentist" || status === "in_chair" || status === "in_treatment") {
+    return { kind: "in_treatment", title: null, value: "Your treatment is underway" };
+  }
+  if (status === "completed") {
+    return { kind: "completed", title: null, value: "Completed" };
+  }
+  if (status === "no_show") {
+    return { kind: "no_show", title: null, value: "No-show" };
+  }
+  if (status === "cancelled") {
+    return { kind: "cancelled", title: null, value: "Cancelled" };
+  }
+  return {
+    kind: "waiting",
+    title: "Estimated wait",
+    value: compactAbout(waitRangeFromEntry(entry)),
+  };
+}
+
 export function compactQueueWaitCaption(entry) {
   const status = String(entry?.status || "").toLowerCase();
   const yours = Boolean(entry?.isCurrentPatient);
