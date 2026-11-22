@@ -259,6 +259,14 @@ test("remaining chair time plus added procedures publish to the patient queue AP
     return row?.waitEstimate || json?.queue?.waitEstimate || null;
   }
 
+  {
+    const staffToken = jwt.sign({ id: "9", role: "staff" }, jwtSecret, { expiresIn: "1h" });
+    const denied = await fetch(`${base}/api/patient/queue`, {
+      headers: { authorization: `Bearer ${staffToken}` },
+    });
+    assert.ok([401, 403].includes(denied.status), `staff denied ${denied.status}`);
+  }
+
   const firstLoad = await asUser(nextPatient, "/api/patient/queue");
   assert.equal(firstLoad.status, 200, firstLoad.json.message);
   const firstNext = minutesFor(firstLoad.json, "A-102").estimatedWaitMinutes.min;
@@ -273,7 +281,13 @@ test("remaining chair time plus added procedures publish to the patient queue AP
 
   const dashboard = await asUser(nextPatient, "/api/patient/dashboard");
   assert.equal(minutesFor(dashboard.json, "A-102").estimatedWaitMinutes.min, firstNext);
+  assert.equal(firstLoad.json.current.waitEstimate.estimatedWaitMinutes.min, firstNext);
+  assert.equal(dashboard.json.queue.waitEstimate.estimatedWaitMinutes.min, firstNext);
+  assert.equal(dashboard.json.queue.token, "A-102");
   assert.equal(dashboard.json.queueBoard.entries.some((row) => row.token === "B-001"), false);
+  const stranger = await asUser(otherBranchPatient, "/api/patient/queue");
+  assert.equal(stranger.json.current?.token, "B-001");
+  assert.equal((stranger.json.queue || []).some((row) => row.token === "A-102"), false);
 
   await db.query(
     `INSERT INTO clinic_patient_treatments

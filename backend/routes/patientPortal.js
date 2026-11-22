@@ -965,7 +965,10 @@ function createPatientPortalRouter({
               position: queue.position,
               status: queue.status,
               estimatedWaitMinutes: waitEnabled ? queue.estimated_wait_minutes : null,
-              waitEstimate: queueBoard.current?.waitEstimate || null,
+              waitEstimate:
+                queueBoard.current?.waitEstimate ||
+                (queueBoard.entries || []).find((row) => row.isCurrentPatient)?.waitEstimate ||
+                null,
               isCurrentPatient: true,
             }
           : null,
@@ -1621,7 +1624,7 @@ function createPatientPortalRouter({
       const waitEnabled = aiSettings
         ? isAiFeatureEnabled(aiSettings, "waitingTimePrediction")
         : true;
-      const waitEstimate = waitEnabled ? publicWaitEstimate(waitEstimateFromRow(current)) : null;
+      let waitEstimate = waitEnabled ? publicWaitEstimate(waitEstimateFromRow(current)) : null;
       const visitProcedures = current
         ? await listTreatmentsForVisit(db, {
             queueEntryId: current.id,
@@ -1640,6 +1643,11 @@ function createPatientPortalRouter({
         entries: [],
         lastUpdatedAt: null,
       }));
+      const boardSelf =
+        (queueBoard.entries || []).find((row) => row.isCurrentPatient) || queueBoard.current || null;
+      if (boardSelf?.waitEstimate) {
+        waitEstimate = boardSelf.waitEstimate;
+      }
 
       return res.json({
         nowServing: nowServing?.token || null,

@@ -45,9 +45,11 @@ export function waitRangeFromEntry(entry) {
     return formatWaitRange(estimate.min, estimate.max, { unavailableLabel: "Estimate unavailable" });
   }
   if (entry?.estimatedWaitMinMinutes != null || entry?.estimatedWaitMaxMinutes != null) {
-    return formatWaitRange(entry.estimatedWaitMinMinutes, entry.estimatedWaitMaxMinutes);
+    return formatWaitRange(entry.estimatedWaitMinMinutes, entry.estimatedWaitMaxMinutes, {
+      unavailableLabel: "Estimate unavailable",
+    });
   }
-  if (entry?.waitMinutes != null) {
+  if (entry?.waitMinutes != null && Number(entry.waitMinutes) > 0) {
     return formatWaitRange(entry.waitMinutes, entry.waitMinutes, { unavailableLabel: "Estimate unavailable" });
   }
   return "Estimate unavailable";
@@ -69,6 +71,19 @@ export function queueStatusWaitLabel(entry) {
   if (status === "no_show") return "No-show";
   if (status === "cancelled") return "Cancelled";
   return compactAbout(waitRangeFromEntry(entry));
+}
+
+export function ticketWaitLine(entry) {
+  const status = String(entry?.status || "").toLowerCase();
+  if (status === "dentist" || status === "in_chair" || status === "in_treatment") return "In treatment";
+  if (status === "completed") return "Completed";
+  if (status === "no_show") return "No-show";
+  if (status === "cancelled") return "Cancelled";
+  const label = queueStatusWaitLabel(entry);
+  if (label === "Now") return "Estimated wait: Now";
+  if (label === "Treatment running long") return "Estimated wait: Treatment running long";
+  if (label === "Estimate unavailable") return "Estimated wait: Estimate unavailable";
+  return `Estimated wait: ${label}`;
 }
 
 export function compactQueueWaitCaption(entry) {
@@ -128,3 +143,5 @@ export function publicQueueNumber(entry) {
 
 export const QUEUE_WAIT_DISCLAIMER =
   "Estimates are approximate and may change depending on actual treatment duration and queue conditions.";
+
+export const TICKET_WAIT_NOTE = "Waiting times may change.";

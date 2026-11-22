@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { compactQueueWaitCaption, waitRangeFromEntry } from "./queueWaitEstimate.js";
+import { compactQueueWaitCaption, ticketWaitLine, waitRangeFromEntry } from "./queueWaitEstimate.js";
 
 test("compact captions highlight the signed-in patient without inventing waits", () => {
   assert.equal(
@@ -32,4 +32,33 @@ test("compact captions highlight the signed-in patient without inventing waits",
     waitRangeFromEntry({ waitEstimate: { treatmentOverrun: true, estimatedWaitMinutes: { min: 0, max: 0 } } }),
     "Treatment running long"
   );
+  assert.equal(waitRangeFromEntry({ waitMinutes: 0 }), "Estimate unavailable");
+});
+
+test("ticket wait line uses the same backend labels without inventing Now", () => {
+  assert.equal(
+    ticketWaitLine({
+      status: "waiting",
+      waitEstimate: { estimatedWaitMinutes: { min: 8, max: 8 } },
+    }),
+    "Estimated wait: About 8 min"
+  );
+  assert.equal(
+    ticketWaitLine({
+      status: "waiting",
+      waitEstimate: { estimatedWaitMinutes: { min: 0, max: 0 } },
+    }),
+    "Estimated wait: Now"
+  );
+  assert.equal(
+    ticketWaitLine({ status: "waiting", waitEstimate: { unavailable: true } }),
+    "Estimated wait: Estimate unavailable"
+  );
+  assert.equal(
+    ticketWaitLine({ status: "waiting", waitEstimate: { treatmentOverrun: true } }),
+    "Estimated wait: Treatment running long"
+  );
+  assert.equal(ticketWaitLine({ status: "dentist" }), "In treatment");
+  assert.equal(ticketWaitLine({ status: "completed" }), "Completed");
+  assert.equal(ticketWaitLine({ status: "waiting" }), "Estimated wait: Estimate unavailable");
 });

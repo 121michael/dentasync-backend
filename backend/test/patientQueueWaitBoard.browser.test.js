@@ -172,6 +172,9 @@ test("Patient Dashboard Queue shows compact waits at 320, 390, and desktop", { t
   const desktop = await page.evaluate(() => document.body.innerText);
   assert.match(desktop, /Live wait times/);
   assert.match(desktop, /Your estimated wait: About 20 min/);
+  assert.match(desktop, /Estimated wait: About 20 min/);
+  assert.match(desktop, /QUEUE TICKET/i);
+  assert.match(desktop, /Waiting times may change/);
   assert.match(desktop, /In treatment/);
   assert.match(desktop, /Estimate unavailable/);
   assert.match(desktop, /Last updated/);
@@ -179,7 +182,9 @@ test("Patient Dashboard Queue shows compact waits at 320, 390, and desktop", { t
   await shot("patient-dashboard-queue-desktop.png");
 
   await open("/queue", 1280, 900, false);
-  assert.match(await page.evaluate(() => document.body.innerText), /Your estimated wait: About 20 min/);
+  const queueText = await page.evaluate(() => document.body.innerText);
+  assert.match(queueText, /Your estimated wait: About 20 min/);
+  assert.match(queueText, /Estimated wait: About 20 min/);
   await shot("patient-queue-page-desktop.png");
 
   await open("/dashboard", 390, 844, true);

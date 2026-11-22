@@ -16,8 +16,11 @@ import { displayQueueStatus } from "../utils/walkInQr";
 import { PatientQueueBoard } from "../components/PatientQueueBoard";
 import {
   callRangeFromEntry,
+  formatWaitUpdatedAt,
   QUEUE_WAIT_DISCLAIMER,
-  waitRangeFromEntry,
+  queueStatusWaitLabel,
+  ticketWaitLine,
+  TICKET_WAIT_NOTE,
 } from "../utils/queueWaitEstimate";
 
 export function QueuePage() {
@@ -124,6 +127,14 @@ export function QueuePage() {
                   <strong>{displayQueueStatus(current.status)}</strong>
                 </div>
               </div>
+              <p className="queue-hero__wait">{ticketWaitLine(current)}</p>
+              <p className="queue-hero__note">
+                {formatWaitUpdatedAt(queueData.lastUpdatedAt || current?.waitEstimate?.calculatedAt)
+                  ? `Last updated ${formatWaitUpdatedAt(queueData.lastUpdatedAt || current?.waitEstimate?.calculatedAt)}`
+                  : "Last updated —"}
+                {" · "}
+                {TICKET_WAIT_NOTE}
+              </p>
             </div>
             <div className="queue-glow-ring" aria-label={`Your ticket ${current.token}`}>
               <Ticket size={31} />
@@ -169,11 +180,7 @@ export function QueuePage() {
               ) : null}
               <div className="queue-estimate">
                 <strong>Estimated waiting time</strong>
-                <span>
-                  {current.status === "dentist"
-                    ? "Now — you are being seen"
-                    : waitRangeFromEntry(current)}
-                </span>
+                <span>{queueStatusWaitLabel(current)}</span>
               </div>
               <div className="queue-estimate">
                 <strong>Estimated call time</strong>
