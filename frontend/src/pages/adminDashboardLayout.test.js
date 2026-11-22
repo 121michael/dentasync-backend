@@ -30,7 +30,10 @@ test("dashboard cards keep existing metrics and desktop sidebar navigation", () 
   assert.match(page, /Dentist Availability/);
   assert.match(page, /View Full Schedule/);
   assert.match(page, /floorMetricHref\("booked"/);
-  assert.match(page, /\/admin\/users\?tab=patient/);
+  assert.match(page, /\/admin\/users\?tab=patient&filter=pending/);
+  assert.match(page, /\/admin\/users\?tab=patient&filter=approved/);
+  assert.match(page, /Pending Patient Approvals/);
+  assert.match(page, /Patients waiting for Admin approval/);
   assert.match(page, /\/admin\/archived-records/);
   assert.match(page, /\/admin\/sync-data/);
   assert.match(page, /metrics\.archivedRecords/);

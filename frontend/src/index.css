@@ -6349,6 +6349,106 @@ body.is-queue-display .staff-mobile-nav {
   background: linear-gradient(135deg, var(--amethyst-700), #7440aa);
   box-shadow: 0 10px 22px rgba(91, 42, 134, .22);
 }
+.admin-page--users .admin-tabs {
+  align-items: center;
+}
+.admin-tabs--patient-status {
+  width: fit-content;
+  max-width: 100%;
+}
+.admin-tab__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.35rem;
+  margin-left: .4rem;
+  padding: .08rem .42rem;
+  border-radius: 999px;
+  background: rgba(91, 42, 134, .12);
+  color: var(--amethyst-800);
+  font-size: .68rem;
+  font-weight: 800;
+}
+.admin-tab.is-active .admin-tab__count {
+  background: rgba(255, 255, 255, .22);
+  color: #fff;
+}
+.admin-account-cards { display: none; }
+@media (min-width: 761px) {
+  .admin-page--patient-accounts .admin-table {
+    min-width: 0;
+  }
+  .admin-page--patient-accounts .admin-table .admin-row-actions {
+    max-width: 22rem;
+  }
+}
+.admin-account-card {
+  display: grid;
+  gap: .45rem;
+  padding: .9rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: linear-gradient(180deg, #fff, #faf7fd);
+  overflow-wrap: anywhere;
+}
+.admin-account-card__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: .45rem;
+}
+.admin-account-card p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: .74rem;
+}
+.admin-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .55rem;
+  margin-top: .85rem;
+  color: var(--text-muted);
+  font-size: .74rem;
+  font-weight: 700;
+}
+@media (max-width: 760px) {
+  .admin-table-wrap--desktop { display: none; }
+  .admin-page--patient-accounts .admin-account-cards {
+    display: grid;
+    gap: .7rem;
+  }
+}
+@media (max-width: 390px) {
+  .admin-page--patient-accounts .admin-tabs .admin-tab {
+    padding: .55rem .72rem;
+    font-size: .72rem;
+  }
+  .admin-page--patient-accounts .admin-toolbar {
+    align-items: stretch;
+  }
+  .admin-page--patient-accounts .admin-search,
+  .admin-page--patient-accounts .admin-toolbar .button {
+    flex: 1 1 100%;
+  }
+  .admin-page--patient-accounts .admin-row-actions .button {
+    flex: 1 1 calc(50% - .35rem);
+    min-width: 7.2rem;
+    white-space: nowrap;
+  }
+}
+@media (max-width: 320px) {
+  .admin-page--patient-accounts .admin-account-card {
+    padding: .78rem .8rem;
+  }
+  .admin-page--patient-accounts .admin-row-actions .button {
+    flex: 1 1 100%;
+  }
+  .admin-page--patient-accounts.ops-dashboard-clearance {
+    padding-bottom: calc(9.25rem + env(safe-area-inset-bottom, 0px));
+  }
+}
 .admin-ai-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
