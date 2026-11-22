@@ -10,7 +10,11 @@ const jwt = require("jsonwebtoken");
 const multer = require("multer");
 const { accessTokenPayload, updatePasswordHash } = require("../services/sessionRevocation");
 const { linkClinicalRecordsToUser, listTreatmentsForVisit } = require("../services/clinicalPatients");
-const { publicWaitEstimate, waitEstimateFromRow } = require("../services/queueWaitPrediction");
+const {
+  publicWaitEstimate,
+  waitEstimateFromRow,
+  loadPatientQueueBoard,
+} = require("../services/queueWaitPrediction");
 const {
   answerWithOptionalGemini,
   loadClinicKnowledge,
@@ -901,6 +905,13 @@ function createPatientPortalRouter({
       const user = userResult.rows[0];
       const profile = profileResult.rows[0] || {};
       const queue = queueResult.rows[0] || null;
+      const aiSettings = await loadAiSettings(db).catch(() => null);
+      const waitEnabled = aiSettings ? isAiFeatureEnabled(aiSettings, "waitingTimePrediction") : true;
+      const queueBoard = await loadPatientQueueBoard(db, { userId, waitEnabled }).catch(() => ({
+        current: null,
+        entries: [],
+        lastUpdatedAt: null,
+      }));
       const counts = appointmentCountResult.rows[0];
       const smsPrefs = preferenceResult.rows[0] || {};
       let wellness = {
@@ -953,9 +964,15 @@ function createPatientPortalRouter({
               token: queue.token,
               position: queue.position,
               status: queue.status,
-              estimatedWaitMinutes: queue.estimated_wait_minutes,
+              estimatedWaitMinutes: waitEnabled ? queue.estimated_wait_minutes : null,
+              waitEstimate: queueBoard.current?.waitEstimate || null,
+              isCurrentPatient: true,
             }
           : null,
+        queueBoard: {
+          entries: queueBoard.entries || [],
+          lastUpdatedAt: queueBoard.lastUpdatedAt || null,
+        },
         unreadNotifications: resultCount(notificationResult.rows[0], "unread_count"),
         recentNotifications: recentNotificationResult.rows.map((row) => mapPatientNotification(row)),
         smsPreferences: {
@@ -1619,6 +1636,10 @@ function createPatientPortalRouter({
         remainingProcedures[0] ||
         null;
       const additionalProcedureCount = Math.max(0, remainingProcedures.length - (currentProcedure ? 1 : 0));
+      const queueBoard = await loadPatientQueueBoard(db, { userId, waitEnabled }).catch(() => ({
+        entries: [],
+        lastUpdatedAt: null,
+      }));
 
       return res.json({
         nowServing: nowServing?.token || null,
@@ -1657,19 +1678,22 @@ function createPatientPortalRouter({
               steps: queueSteps(current.status),
             }
           : null,
-        // Patients only see their own ticket details (not other patients' queue rows).
-        queue: current
-          ? [
-              {
-                token: current.token,
-                queueNumber: current.token,
-                status: current.status,
-                estimatedWaitMinutes: waitEnabled ? current.estimated_wait_minutes : null,
-                waitEstimate,
-                isCurrentPatient: true,
-              },
-            ]
-          : [],
+        // Token-only board: no names, treatments, or other personal details.
+        queue: queueBoard.entries?.length
+          ? queueBoard.entries
+          : current
+            ? [
+                {
+                  token: current.token,
+                  queueNumber: current.token,
+                  status: current.status,
+                  estimatedWaitMinutes: waitEnabled ? current.estimated_wait_minutes : null,
+                  waitEstimate,
+                  isCurrentPatient: true,
+                },
+              ]
+            : [],
+        lastUpdatedAt: queueBoard.lastUpdatedAt || waitEstimate?.calculatedAt || null,
         notifyWhenNear: preferenceResult.rows[0]?.notify_queue || false,
       });
     } catch (error) {

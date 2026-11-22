@@ -13,6 +13,7 @@ import { RescheduleAppointmentModal } from "../components/RescheduleAppointmentM
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
 import { displayAppointmentStatus } from "../utils/appointmentStatus";
 import { displayQueueStatus } from "../utils/walkInQr";
+import { PatientQueueBoard } from "../components/PatientQueueBoard";
 import {
   callRangeFromEntry,
   QUEUE_WAIT_DISCLAIMER,
@@ -128,6 +129,11 @@ export function QueuePage() {
               <Ticket size={31} />
             </div>
           </section>
+
+          <PatientQueueBoard
+            entries={queueData.queue || []}
+            lastUpdatedAt={queueData.lastUpdatedAt || current?.waitEstimate?.calculatedAt}
+          />
 
           <section className="glass-card queue-progress-card">
             <div className="card-heading">

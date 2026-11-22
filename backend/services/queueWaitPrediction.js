@@ -279,28 +279,31 @@ async function estimateProcedureDuration(db, entry, settings = getPredictionSett
 
 function remainingServingMinutes(entry, fullMinutes, now = new Date()) {
   const status = String(entry.status || "").toLowerCase();
+  const stored = Number(
+    entry.procedureDurationMinutes ??
+      entry.procedure_duration_minutes ??
+      entry.durationMinutes ??
+      entry.duration_minutes ??
+      fullMinutes
+  );
+  const full = Math.max(0, roundMinutes(stored || fullMinutes));
   if (!SERVING_STATUSES.has(status)) {
-    return Math.max(0, roundMinutes(fullMinutes));
+    return full;
   }
-  const startedRaw = entry.serving_started_at || entry.servingStartedAt || entry.started_at || entry.startedAt;
-  if (!startedRaw) {
-    const stored = Number(
-      entry.procedureDurationMinutes ??
-        entry.procedure_duration_minutes ??
-        entry.durationMinutes ??
-        entry.duration_minutes ??
-        entry.estimated_wait_minutes ??
-        entry.estimatedWaitMinutes ??
-        fullMinutes
-    );
-    return Math.max(1, roundMinutes(stored || fullMinutes));
+  const recordedStart =
+    entry.treatment_started_at ||
+    entry.treatmentStartedAt ||
+    entry.recorded_started_at ||
+    null;
+  if (!recordedStart) {
+    return full;
   }
-  const started = new Date(startedRaw);
+  const started = new Date(recordedStart);
   if (Number.isNaN(started.getTime())) {
-    return Math.max(1, roundMinutes(fullMinutes));
+    return full;
   }
   const elapsed = Math.max(0, (now.getTime() - started.getTime()) / 60000);
-  return Math.max(1, roundMinutes((fullMinutes || 0) - elapsed));
+  return Math.max(1, roundMinutes(full - elapsed));
 }
 
 async function loadVisitProcedures(db, entry) {
@@ -356,7 +359,7 @@ async function expectedMinutesForEntry(db, entry, settings, now) {
         remaining += remainingServingMinutes(
           {
             status: "dentist",
-            serving_started_at: procedure.started_at || entry.serving_started_at,
+            treatment_started_at: procedure.started_at || null,
             duration_minutes: full,
           },
           full,
@@ -395,29 +398,31 @@ function serializeEstimate({
   predictor,
   stats,
   patientsAhead,
+  unavailable = false,
 }) {
   const status = String(entry.status || "").toLowerCase();
   const serving = SERVING_STATUSES.has(status);
   const waiting = WAITING_STATUSES.has(status);
-  const min = serving ? 0 : range.min;
-  const max = serving ? 0 : range.max;
+  const min = serving || unavailable ? 0 : range.min;
+  const max = serving || unavailable ? 0 : range.max;
   return {
     queueNumber: entry.token || null,
     queuePosition: Number(entry.position) || null,
     patientsAhead: serving ? 0 : patientsAhead,
     estimatedDurationMinutes: durationMinutes,
-    estimatedWaitMinutes: waiting || serving ? { min, max } : null,
+    estimatedWaitMinutes:
+      unavailable || !(waiting || serving) ? null : { min, max },
     estimatedCallTime:
-      waiting || serving
-        ? {
+      unavailable || !(waiting || serving)
+        ? null
+        : {
             start: addMinutes(now, min).toISOString(),
             end: addMinutes(now, max).toISOString(),
-          }
-        : null,
-    estimationMethod: settings.methodVersion,
-    confidenceLevel: predictor.confidenceFrom(stats),
+          },
+    estimationMethod: unavailable ? "unavailable" : settings.methodVersion,
+    confidenceLevel: unavailable ? "low" : predictor.confidenceFrom(stats),
     calculatedAt: now.toISOString(),
-    unavailable: false,
+    unavailable,
   };
 }
 
@@ -439,25 +444,28 @@ function waitEstimateFromRow(row) {
     row.wait_estimate_duration_minutes != null ? Number(row.wait_estimate_duration_minutes) : null;
   if (min == null && max == null && !row.wait_estimate_at && durationMinutes == null) return null;
   const remaining = remainingTreatmentRange(row, durationMinutes);
+  const unavailable =
+    String(row.wait_estimate_method || "").toLowerCase() === "unavailable" ||
+    Boolean(row.wait_estimate_unavailable);
   return {
     queueNumber: row.token || null,
     queuePosition: Number(row.position) || null,
     estimatedDurationMinutes: durationMinutes,
     remainingTreatmentMinutes: remaining,
     estimatedWaitMinutes:
-      min == null && max == null
+      unavailable || (min == null && max == null)
         ? null
         : { min: Number(min || 0), max: Number(max || 0) },
     estimatedCallTime:
-      row.wait_estimate_call_start || row.wait_estimate_call_end
-        ? {
+      unavailable || !(row.wait_estimate_call_start || row.wait_estimate_call_end)
+        ? null
+        : {
             start: row.wait_estimate_call_start ? new Date(row.wait_estimate_call_start).toISOString() : null,
             end: row.wait_estimate_call_end ? new Date(row.wait_estimate_call_end).toISOString() : null,
-          }
-        : null,
+          },
     estimationMethod: row.wait_estimate_method || null,
     calculatedAt: row.wait_estimate_at ? new Date(row.wait_estimate_at).toISOString() : null,
-    unavailable: false,
+    unavailable,
   };
 }
 
@@ -511,7 +519,10 @@ async function loadTodayQueue(db, branchId = null) {
          queue.serving_started_at,
          appointment.service_id,
          appointment.service_name,
-         appointment.dentist_id
+         appointment.dentist_id,
+         appointment.appointment_date,
+         appointment.appointment_time,
+         appointment.created_at AS appointment_created_at
        FROM patient_portal_queue_entries AS queue
        LEFT JOIN patient_portal_appointments AS appointment
          ON appointment.id = queue.appointment_id
@@ -536,7 +547,10 @@ async function loadTodayQueue(db, branchId = null) {
            queue.appointment_id,
            appointment.service_id,
            appointment.service_name,
-           appointment.dentist_id
+           appointment.dentist_id,
+           appointment.appointment_date,
+           appointment.appointment_time,
+           appointment.created_at AS appointment_created_at
          FROM patient_portal_queue_entries AS queue
          LEFT JOIN patient_portal_appointments AS appointment
            ON appointment.id = queue.appointment_id
@@ -547,6 +561,43 @@ async function loadTodayQueue(db, branchId = null) {
     }
     throw error;
   }
+}
+
+function dentistLane(entry) {
+  return String(entry?.dentist_id || entry?.dentistId || "").trim() || "__unassigned__";
+}
+
+function queueOrderKey(row) {
+  const status = String(row?.status || "").toLowerCase();
+  const servingRank =
+    status === "dentist" || status === "preparing" ? 0 : WAITING_STATUSES.has(status) ? 1 : 2;
+  const servingPosition = servingRank === 0 ? Number(row.position) || 0 : 0;
+  const date = row?.appointment_date ? String(row.appointment_date).slice(0, 10) : "9999-99-99";
+  const time = String(row?.appointment_time || "99:99:99");
+  const created = String(row?.appointment_created_at || row?.checked_in_at || "");
+  const appointmentId = Number(row?.appointment_id) || 0;
+  const id = Number(row?.id) || 0;
+  return [servingRank, servingPosition, date, time, created, appointmentId, id];
+}
+
+function compareQueueOrder(a, b) {
+  const left = queueOrderKey(a);
+  const right = queueOrderKey(b);
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] < right[index]) return -1;
+    if (left[index] > right[index]) return 1;
+  }
+  return 0;
+}
+
+function aheadEntriesFor(entry, orderedActive) {
+  const lane = dentistLane(entry);
+  const selfIndex = orderedActive.findIndex((row) => String(row.id) === String(entry.id));
+  return orderedActive.filter((row, index) => {
+    if (dentistLane(row) !== lane) return false;
+    if (selfIndex >= 0) return index < selfIndex;
+    return compareQueueOrder(row, entry) < 0;
+  });
 }
 
 async function estimateWaitForQueueContext(db, { entry, aheadEntries = [], now = new Date(), settings } = {}) {
@@ -563,6 +614,7 @@ async function estimateWaitForQueueContext(db, { entry, aheadEntries = [], now =
       predictor: service.predictor,
       stats: emptyStats("unknown", service.settings.fallbackMinutes),
       patientsAhead: 0,
+      unavailable: true,
     });
   }
 
@@ -583,12 +635,14 @@ async function estimateWaitForQueueContext(db, { entry, aheadEntries = [], now =
 
   let waitPoint = 0;
   const aheadStats = [];
+  let unreliableAhead = false;
   for (const ahead of aheadEntries) {
     const aheadStatus = String(ahead.status || "").toLowerCase();
     if (!ACTIVE_STATUSES.has(aheadStatus)) continue;
     const estimated = await expectedMinutesForEntry(db, ahead, service.settings, now);
     waitPoint += estimated.remainingMinutes;
     aheadStats.push(estimated.stats);
+    if (estimated.source === "fallback") unreliableAhead = true;
   }
 
   const combined = aheadStats.length
@@ -608,7 +662,8 @@ async function estimateWaitForQueueContext(db, { entry, aheadEntries = [], now =
     combined.stdDevMinutes = combined.stdDevMinutes / aheadStats.length;
   }
 
-  const range = service.predictor.rangeFrom(waitPoint, combined);
+  const unavailable = aheadEntries.length > 0 && unreliableAhead;
+  const range = unavailable ? { min: 0, max: 0 } : service.predictor.rangeFrom(waitPoint, combined);
   return serializeEstimate({
     entry,
     waitPoint,
@@ -619,11 +674,19 @@ async function estimateWaitForQueueContext(db, { entry, aheadEntries = [], now =
     predictor: service.predictor,
     stats: combined,
     patientsAhead: aheadEntries.filter((item) => ACTIVE_STATUSES.has(String(item.status || "").toLowerCase())).length,
+    unavailable,
   });
 }
 
 async function isolateQuery(db, sql, params) {
-  await db.query("SAVEPOINT queue_estimate_write");
+  try {
+    await db.query("SAVEPOINT queue_estimate_write");
+  } catch (error) {
+    if (error?.code === "25P01") {
+      return db.query(sql, params);
+    }
+    throw error;
+  }
   try {
     const result = await db.query(sql, params);
     await db.query("RELEASE SAVEPOINT queue_estimate_write");
@@ -635,9 +698,12 @@ async function isolateQuery(db, sql, params) {
 }
 
 async function persistEstimate(db, entryId, estimate, waitPoint, { serving = false } = {}) {
-  const midpoint = roundMinutes(
-    ((estimate.estimatedWaitMinutes?.min || 0) + (estimate.estimatedWaitMinutes?.max || 0)) / 2
-  );
+  const unavailable = Boolean(estimate?.unavailable);
+  const midpoint = unavailable
+    ? 0
+    : roundMinutes(
+        ((estimate.estimatedWaitMinutes?.min || 0) + (estimate.estimatedWaitMinutes?.max || 0)) / 2
+      );
   if (serving) {
     try {
       await isolateQuery(
@@ -673,12 +739,12 @@ async function persistEstimate(db, entryId, estimate, waitPoint, { serving = fal
       [
         entryId,
         midpoint || waitPoint || 0,
-        estimate.estimatedWaitMinutes?.min ?? 0,
-        estimate.estimatedWaitMinutes?.max ?? 0,
+        unavailable ? null : estimate.estimatedWaitMinutes?.min ?? 0,
+        unavailable ? null : estimate.estimatedWaitMinutes?.max ?? 0,
         estimate.estimatedDurationMinutes,
-        estimate.estimatedCallTime?.start || null,
-        estimate.estimatedCallTime?.end || null,
-        estimate.estimationMethod,
+        unavailable ? null : estimate.estimatedCallTime?.start || null,
+        unavailable ? null : estimate.estimatedCallTime?.end || null,
+        unavailable ? "unavailable" : estimate.estimationMethod,
       ]
     );
   } catch (error) {
@@ -706,7 +772,9 @@ async function recalculateQueueWaitEstimates(db, { fromPosition = 0, branchId = 
     }
     const now = new Date();
     const rows = await loadTodayQueue(db, branchId);
-    const active = rows.filter((row) => ACTIVE_STATUSES.has(String(row.status || "").toLowerCase()));
+    const active = rows
+      .filter((row) => ACTIVE_STATUSES.has(String(row.status || "").toLowerCase()))
+      .sort(compareQueueOrder);
     let updated = 0;
     for (const entry of active) {
       const position = Number(entry.position) || 0;
@@ -719,7 +787,7 @@ async function recalculateQueueWaitEstimates(db, { fromPosition = 0, branchId = 
       }
       if (position < fromPosition) continue;
       if (!WAITING_STATUSES.has(status)) continue;
-      const ahead = active.filter((row) => Number(row.position) < position);
+      const ahead = aheadEntriesFor(entry, active);
       const estimate = await estimateWaitForQueueContext(db, { entry, aheadEntries: ahead, now });
       const waitPoint = roundMinutes(
         ((estimate.estimatedWaitMinutes?.min || 0) + (estimate.estimatedWaitMinutes?.max || 0)) / 2
@@ -741,6 +809,101 @@ async function safeRecalculateQueueWaitEstimates(db, options) {
     console.warn("Queue wait estimate recalculation failed:", error.message);
     return { ok: false, reason: error.message, updated: 0 };
   }
+}
+
+function presentPublicQueueEntry(row, { currentUserId, waitEnabled = true } = {}) {
+  const estimate = waitEnabled
+    ? publicWaitEstimate(waitEstimateFromRow(row))
+    : {
+        estimatedWaitMinutes: null,
+        estimatedCallTime: null,
+        unavailable: true,
+        calculatedAt: row.wait_estimate_at ? new Date(row.wait_estimate_at).toISOString() : null,
+      };
+  return {
+    token: row.token,
+    queueNumber: row.token,
+    position: row.position,
+    status: row.status,
+    isCurrentPatient: String(row.user_id) === String(currentUserId),
+    estimatedWaitMinutes:
+      waitEnabled && !estimate?.unavailable ? row.estimated_wait_minutes ?? null : null,
+    waitEstimate: estimate,
+    waitEstimateAt: row.wait_estimate_at ? new Date(row.wait_estimate_at).toISOString() : estimate?.calculatedAt || null,
+  };
+}
+
+async function loadPatientQueueBoard(db, { userId, waitEnabled = true } = {}) {
+  const zone = process.env.CLINIC_TIMEZONE || "Asia/Manila";
+  let own;
+  try {
+    own = await db.query(
+      `SELECT queue.id, queue.user_id, queue.token, queue.position, queue.status, queue.branch_id,
+              queue.estimated_wait_minutes, queue.wait_estimate_min_minutes, queue.wait_estimate_max_minutes,
+              queue.wait_estimate_duration_minutes, queue.wait_estimate_call_start, queue.wait_estimate_call_end,
+              queue.wait_estimate_method, queue.wait_estimate_at, queue.checked_in_at, queue.appointment_id
+       FROM patient_portal_queue_entries AS queue
+       WHERE queue.user_id = $1
+         AND (queue.checked_in_at AT TIME ZONE $2)::date = (CURRENT_TIMESTAMP AT TIME ZONE $2)::date
+       ORDER BY queue.checked_in_at DESC
+       LIMIT 1`,
+      [String(userId), zone]
+    );
+  } catch (error) {
+    if (error?.code !== "42703") throw error;
+    own = await db.query(
+      `SELECT id, user_id, token, position, status, estimated_wait_minutes, checked_in_at, appointment_id
+       FROM patient_portal_queue_entries
+       WHERE user_id = $1 AND DATE(checked_in_at) = CURRENT_DATE
+       ORDER BY checked_in_at DESC
+       LIMIT 1`,
+      [String(userId)]
+    );
+  }
+  const current = own.rows[0] || null;
+  if (!current) {
+    return { current: null, entries: [], lastUpdatedAt: null, branchId: null };
+  }
+  const branchId = current.branch_id || null;
+  let board = { rows: [current] };
+  try {
+    const params = [zone];
+    let branchSql = "";
+    if (branchId != null && branchId !== "") {
+      params.push(branchId);
+      branchSql = ` AND queue.branch_id = $${params.length}`;
+    }
+    params.push(String(userId));
+    board = await db.query(
+      `SELECT queue.id, queue.user_id, queue.token, queue.position, queue.status, queue.branch_id,
+              queue.estimated_wait_minutes, queue.wait_estimate_min_minutes, queue.wait_estimate_max_minutes,
+              queue.wait_estimate_duration_minutes, queue.wait_estimate_call_start, queue.wait_estimate_call_end,
+              queue.wait_estimate_method, queue.wait_estimate_at, queue.checked_in_at, queue.appointment_id
+       FROM patient_portal_queue_entries AS queue
+       WHERE (queue.checked_in_at AT TIME ZONE $1)::date = (CURRENT_TIMESTAMP AT TIME ZONE $1)::date
+         ${branchSql}
+         AND (
+           LOWER(queue.status) IN ('checked_in', 'waiting', 'preparing', 'dentist')
+           OR queue.user_id = $${params.length}
+         )
+       ORDER BY queue.position ASC, queue.id ASC`,
+      params
+    );
+  } catch (error) {
+    if (error?.code !== "42703") throw error;
+  }
+  const entries = board.rows.map((row) => presentPublicQueueEntry(row, { currentUserId: userId, waitEnabled }));
+  const lastUpdatedAt = entries.reduce((latest, row) => {
+    if (!row.waitEstimateAt) return latest;
+    if (!latest || row.waitEstimateAt > latest) return row.waitEstimateAt;
+    return latest;
+  }, null);
+  return {
+    current: presentPublicQueueEntry(current, { currentUserId: userId, waitEnabled }),
+    entries,
+    lastUpdatedAt,
+    branchId,
+  };
 }
 
 const QUEUE_ESTIMATE_SELECT = `
@@ -772,4 +935,9 @@ module.exports = {
   staffWaitEstimate,
   waitEstimateFromRow,
   normalizeProcedure,
+  dentistLane,
+  aheadEntriesFor,
+  compareQueueOrder,
+  loadPatientQueueBoard,
+  presentPublicQueueEntry,
 };

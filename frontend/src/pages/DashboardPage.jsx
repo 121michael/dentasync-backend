@@ -14,7 +14,9 @@ import {
 import { api } from "../api";
 import { DetailLink, ErrorState, LoadingState } from "../components/UI";
 import { PatientQrCheckInScanner } from "../components/PatientQrCheckInScanner";
+import { PatientQueueBoard } from "../components/PatientQueueBoard";
 import { getPatientNotificationTarget } from "../patientNotificationNav";
+import { compactQueueWaitCaption } from "../utils/queueWaitEstimate";
 
 function greeting() {
   const hour = new Date().getHours();
@@ -146,6 +148,10 @@ export function DashboardPage() {
 
   useEffect(() => {
     loadDashboard();
+    const interval = window.setInterval(() => {
+      api.getDashboard({ silent: true }).then(setDashboard).catch(() => {});
+    }, 12000);
+    return () => window.clearInterval(interval);
   }, [loadDashboard]);
 
   if (error) return <ErrorState message={error} onRetry={loadDashboard} />;
@@ -235,6 +241,11 @@ export function DashboardPage() {
         </div>
       </section>
 
+      <PatientQueueBoard
+        entries={dashboard.queueBoard?.entries || (dashboard.queue ? [{ ...dashboard.queue, isCurrentPatient: true }] : [])}
+        lastUpdatedAt={dashboard.queueBoard?.lastUpdatedAt || dashboard.queue?.waitEstimate?.calculatedAt}
+      />
+
       <WellnessResults wellness={dashboard.wellness} />
 
       <section className="metrics-grid" aria-label="Patient care metrics">
@@ -256,7 +267,11 @@ export function DashboardPage() {
           icon={UsersRound}
           label="Current queue token"
           value={dashboard.metrics.queueToken || "—"}
-          detail={dashboard.queue ? `${dashboard.queue.estimatedWaitMinutes} min estimated wait` : "No active queue ticket"}
+          detail={
+            dashboard.queue
+              ? compactQueueWaitCaption({ ...dashboard.queue, isCurrentPatient: true })
+              : "No active queue ticket"
+          }
           tone="amber"
         />
         <MetricCard
