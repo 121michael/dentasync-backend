@@ -14,15 +14,12 @@ import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../compone
 import { displayAppointmentStatus } from "../utils/appointmentStatus";
 import { displayQueueStatus } from "../utils/walkInQr";
 import { PatientQueueBoard } from "../components/PatientQueueBoard";
-import {
-  callRangeFromEntry,
-  QUEUE_WAIT_DISCLAIMER,
-  waitRangeFromEntry,
-} from "../utils/queueWaitEstimate";
+import { callRangeFromEntry, hasEstimatedCallTime } from "../utils/queueWaitEstimate";
 
 export function QueuePage() {
   const [queueData, setQueueData] = useState(null);
   const [appointments, setAppointments] = useState([]);
+  const [lastSuccessfulAt, setLastSuccessfulAt] = useState(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [keepWaiting, setKeepWaiting] = useState(false);
@@ -33,7 +30,8 @@ export function QueuePage() {
   const [rescheduleError, setRescheduleError] = useState("");
 
   const load = useCallback(async (options = {}) => {
-    setError("");
+    const silent = Boolean(options.silent);
+    if (!silent) setError("");
     try {
       const [queueResponse, appointmentResponse] = await Promise.all([
         api.getQueue(options),
@@ -45,6 +43,8 @@ export function QueuePage() {
           ["confirmed", "checked_in", "pending"].includes(appointment.status)
         )
       );
+      setLastSuccessfulAt(queueResponse.lastUpdatedAt || new Date().toISOString());
+      setError("");
     } catch (loadError) {
       setError(loadError.message);
     }
@@ -132,7 +132,8 @@ export function QueuePage() {
 
           <PatientQueueBoard
             entries={queueData.queue || []}
-            lastUpdatedAt={queueData.lastUpdatedAt || current?.waitEstimate?.calculatedAt}
+            selfEntry={current}
+            lastUpdatedAt={lastSuccessfulAt}
           />
 
           <section className="glass-card queue-progress-card">
@@ -167,21 +168,12 @@ export function QueuePage() {
                   </span>
                 </div>
               ) : null}
-              <div className="queue-estimate">
-                <strong>Estimated waiting time</strong>
-                <span>
-                  {current.status === "dentist"
-                    ? "Now — you are being seen"
-                    : waitRangeFromEntry(current)}
-                </span>
-              </div>
-              <div className="queue-estimate">
-                <strong>Estimated call time</strong>
-                <span>
-                  {current.status === "dentist" ? "Now" : callRangeFromEntry(current)}
-                </span>
-              </div>
-              <p className="queue-estimate-note">{QUEUE_WAIT_DISCLAIMER}</p>
+              {hasEstimatedCallTime(current) ? (
+                <div className="queue-estimate">
+                  <strong>Estimated call time</strong>
+                  <span>{callRangeFromEntry(current)}</span>
+                </div>
+              ) : null}
               {showWaitedTooLong ? (
                 <div className="queue-waited-too-long" role="region" aria-label="Waited too long">
                   <strong>Waited too long?</strong>
