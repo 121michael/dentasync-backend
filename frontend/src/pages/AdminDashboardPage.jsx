@@ -171,7 +171,7 @@ export function AdminDashboardPage() {
           detail="Non-archived patient accounts"
           tone="violet"
           icon={UserRound}
-          to="/admin/users?tab=patient"
+          to="/admin/users?tab=patient&filter=approved"
         />
         <AdminStatCard
           label="Active Dentists"
@@ -190,9 +190,9 @@ export function AdminDashboardPage() {
           to="/admin/users?tab=staff&filter=active"
         />
         <AdminStatCard
-          label="Pending Account Approvals"
+          label="Pending Patient Approvals"
           value={metrics.pendingAccountApprovals}
-          detail="Patients, staff, or dentists waiting for verification"
+          detail="Patients waiting for Admin approval"
           tone="amber"
           icon={ShieldAlert}
           to="/admin/users?tab=patient&filter=pending"

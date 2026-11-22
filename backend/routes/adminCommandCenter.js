@@ -319,11 +319,7 @@ function attachAdminCommandCenterRoutes(router, { db, passwordResetService = nul
          FROM users
          WHERE COALESCE(is_archived, FALSE) = FALSE
            AND LOWER(role) = 'patient'
-           AND LOWER(COALESCE(status, 'pending')) NOT IN ('rejected', 'active', 'suspended', 'inactive')
-           AND (
-             is_verified = FALSE
-             OR LOWER(COALESCE(status, 'pending')) IN ('pending', 'unverified')
-           )`
+           AND LOWER(COALESCE(status, 'pending')) IN ('pending', 'unverified')`
       );
       const result = await db.query(
         `SELECT
@@ -333,11 +329,7 @@ function attachAdminCommandCenterRoutes(router, { db, passwordResetService = nul
          FROM users
          WHERE COALESCE(is_archived, FALSE) = FALSE
            AND LOWER(role) = 'patient'
-           AND LOWER(COALESCE(status, 'pending')) NOT IN ('rejected', 'active', 'suspended', 'inactive')
-           AND (
-             is_verified = FALSE
-             OR LOWER(COALESCE(status, 'pending')) IN ('pending', 'unverified')
-           )
+           AND LOWER(COALESCE(status, 'pending')) IN ('pending', 'unverified')
          ORDER BY created_at DESC
          LIMIT $1 OFFSET $2`,
         [limit, offset]
@@ -350,11 +342,7 @@ function attachAdminCommandCenterRoutes(router, { db, passwordResetService = nul
            FROM users
            WHERE COALESCE(is_archived, FALSE) = FALSE
              AND LOWER(role) = 'patient'
-             AND LOWER(COALESCE(status, 'pending')) NOT IN ('rejected', 'active', 'suspended', 'inactive')
-             AND (
-               is_verified = FALSE
-               OR LOWER(COALESCE(status, 'pending')) IN ('pending', 'unverified')
-             )
+             AND LOWER(COALESCE(status, 'pending')) IN ('pending', 'unverified')
            ORDER BY created_at DESC
            LIMIT $1 OFFSET $2`,
           [limit, offset]

@@ -15,6 +15,21 @@ const TABS = [
   { id: "patient", label: "Patients" },
 ];
 
+const PATIENT_ACCOUNT_TABS = [
+  { id: "pending", label: "Pending Approval" },
+  { id: "approved", label: "Approved" },
+];
+
+function patientAccountFilter(searchParams) {
+  const filter = String(searchParams.get("filter") || "").toLowerCase();
+  if (filter === "approved" || filter === "active") return "approved";
+  return "pending";
+}
+
+function listPage(searchParams) {
+  return Math.max(1, Number.parseInt(searchParams.get("page"), 10) || 1);
+}
+
 const emptyForm = {
   firstName: "",
   lastName: "",
@@ -57,7 +72,7 @@ function sanitizeManageUserMobileInput(value) {
 
 function isPendingAccount(user) {
   const status = String(user?.status || "").toLowerCase();
-  return !user?.verified || status === "pending" || status === "unverified";
+  return status === "pending" || status === "unverified";
 }
 
 function isRejectedAccount(user) {
@@ -145,7 +160,6 @@ export function AdminManageUsersPage() {
     return TABS.some((item) => item.id === urlTab) ? urlTab : "staff";
   });
   const [data, setData] = useState(null);
-  const [pending, setPending] = useState([]);
   const [pendingDependents, setPendingDependents] = useState([]);
   const [rejected, setRejected] = useState([]);
   const [search, setSearch] = useState("");
@@ -187,21 +201,26 @@ export function AdminManageUsersPage() {
     try {
       const loader =
         tab === "patient" ? api.getAdminPatients : tab === "staff" ? api.getAdminStaff : api.getAdminDentists;
-      const [list, pendingResponse, rejectedResponse, dependentsResponse] = await Promise.all([
-        loader({ search: applied, limit: 50 }),
-        api.getAdminPendingRegistrations({ limit: 50 }),
-        api.getAdminRejectedRegistrations({ limit: 100 }),
+      const patientFilter = patientAccountFilter(searchParams);
+      const page = listPage(searchParams);
+      const [list, rejectedResponse, dependentsResponse] = await Promise.all([
+        loader({
+          search: applied,
+          limit: 50,
+          page: tab === "patient" ? page : 1,
+          status: tab === "patient" ? patientFilter : undefined,
+        }),
+        tab === "patient" ? api.getAdminRejectedRegistrations({ limit: 100 }) : Promise.resolve({ requests: [] }),
         tab === "patient" ? api.getAdminPendingDependents().catch(() => ({ dependents: [] })) : Promise.resolve({ dependents: [] }),
       ]);
       setData(list);
-      setPending((pendingResponse.requests || []).filter((request) => request.role === "patient"));
       setPendingDependents(dependentsResponse.dependents || dependentsResponse.requests || []);
       setRejected((rejectedResponse.requests || []).filter((request) => request.role === "patient"));
       setError("");
     } catch (loadError) {
       setError(loadError.message);
     }
-  }, [applied, tab]);
+  }, [applied, searchParams, tab]);
 
   useEffect(() => {
     load();
@@ -224,15 +243,21 @@ export function AdminManageUsersPage() {
   const users = useMemo(() => {
     if (!data) return [];
     const list = (tab === "patient" ? data.patients : tab === "staff" ? data.staff : data.dentists) || [];
+    if (tab === "patient") return list;
     const filter = searchParams.get("filter");
     if (filter === "pending") {
-      return list.filter((user) => isPendingAccount(user));
+      return list.filter((user) => isPendingAccount(user) || !user?.verified);
     }
     if (filter === "active") {
       return list.filter((user) => isApprovedAccount(user));
     }
     return list;
   }, [data, tab, searchParams]);
+
+  const patientFilter = tab === "patient" ? patientAccountFilter(searchParams) : "";
+  const tabCounts = data?.tabCounts || { pending: 0, approved: 0 };
+  const currentPage = listPage(searchParams);
+  const pageCount = Math.max(1, Math.ceil(Number(data?.total || 0) / Number(data?.limit || 50)));
 
   useEffect(() => {
     const urlTab = searchParams.get("tab");
@@ -241,7 +266,22 @@ export function AdminManageUsersPage() {
     }
     const focus = searchParams.get("focus");
     if (focus) setFocusKey(focus);
-  }, [searchParams, tab]);
+    if (urlTab === "patient" || tab === "patient") {
+      const filter = String(searchParams.get("filter") || "").toLowerCase();
+      if (filter === "active") {
+        const next = new URLSearchParams(searchParams);
+        next.set("tab", "patient");
+        next.set("filter", "approved");
+        setSearchParams(next, { replace: true });
+      } else if (filter !== "pending" && filter !== "approved") {
+        const next = new URLSearchParams(searchParams);
+        next.set("tab", "patient");
+        next.set("filter", "pending");
+        next.delete("page");
+        setSearchParams(next, { replace: true });
+      }
+    }
+  }, [searchParams, setSearchParams, tab]);
 
   useEffect(() => {
     let cancelled = false;
@@ -294,6 +334,30 @@ export function AdminManageUsersPage() {
     setData(null);
     const next = new URLSearchParams(searchParams);
     next.set("tab", nextTab);
+    next.delete("page");
+    if (nextTab === "patient") {
+      next.set("filter", "pending");
+    } else if (next.get("filter") === "pending" || next.get("filter") === "approved") {
+      next.delete("filter");
+    }
+    setSearchParams(next, { replace: true });
+  }
+
+  function selectPatientFilter(nextFilter) {
+    const next = new URLSearchParams(searchParams);
+    next.set("tab", "patient");
+    next.set("filter", nextFilter);
+    next.delete("page");
+    setSearch("");
+    setApplied("");
+    setData(null);
+    setSearchParams(next, { replace: true });
+  }
+
+  function setListPage(nextPage) {
+    const next = new URLSearchParams(searchParams);
+    if (nextPage <= 1) next.delete("page");
+    else next.set("page", String(nextPage));
     setSearchParams(next, { replace: true });
   }
 
@@ -802,6 +866,71 @@ export function AdminManageUsersPage() {
     }
   }
 
+  function renderPatientActions(user) {
+    const pendingUser = isPendingAccount(user);
+    const approvedUser = isApprovedAccount(user);
+    return (
+      <div className="admin-row-actions">
+        <button className="button button--secondary button--compact" onClick={() => setDetail(user)}>
+          <Eye size={14} /> View
+        </button>
+        {pendingUser ? (
+          <>
+            <button
+              className="button button--primary button--compact"
+              disabled={actionBusyId === `${user.id}:approve`}
+              onClick={() =>
+                runLifecycle(
+                  user,
+                  "approve",
+                  `Approve ${user.fullName} so they can open the patient dashboard and book appointments?`
+                )
+              }
+            >
+              Approve
+            </button>
+            <button
+              className="button button--danger button--compact"
+              disabled={actionBusyId === `${user.id}:reject`}
+              onClick={() => runLifecycle(user, "reject", "Are you sure you want to reject this patient account?")}
+            >
+              Reject
+            </button>
+            <button
+              className="button button--danger button--compact"
+              disabled={actionBusyId === `${user.id}:purge`}
+              onClick={() => deletePendingRequest(user)}
+            >
+              <Trash2 size={14} /> Delete
+            </button>
+          </>
+        ) : null}
+        {approvedUser ? (
+          <button
+            className="button button--secondary button--compact"
+            onClick={() => runLifecycle(user, "suspend", `Suspend ${user.fullName}?`)}
+          >
+            Suspend
+          </button>
+        ) : null}
+        <button
+          className="button button--secondary button--compact"
+          disabled={actionBusyId === `${user.id}:reset-password`}
+          onClick={() => resetPatientPassword(user)}
+        >
+          <KeyRound size={14} /> Reset Password
+        </button>
+        <button
+          className="button button--secondary button--compact"
+          disabled={actionBusyId === `${user.id}:archive`}
+          onClick={() => archiveUser(user)}
+        >
+          <Archive size={14} /> Archive
+        </button>
+      </div>
+    );
+  }
+
   if (searchParams.get("tab") === "archive") {
     return <Navigate to="/admin/archived-records" replace />;
   }
@@ -813,7 +942,7 @@ export function AdminManageUsersPage() {
     tab === "staff" ? "Staff Accounts" : tab === "dentist" ? "Dentist Accounts" : "Patient Portal Accounts";
 
   return (
-    <div className="admin-page">
+    <div className={`admin-page admin-page--users ${tab === "patient" ? "admin-page--patient-accounts ops-dashboard-clearance" : ""}`}>
       <div className="admin-tabs" role="tablist" aria-label="Manage users by role">
         {TABS.map((item) => (
           <button
@@ -828,19 +957,38 @@ export function AdminManageUsersPage() {
         ))}
       </div>
 
+      {tab === "patient" ? (
+        <div className="admin-tabs admin-tabs--patient-status" role="tablist" aria-label="Patient account approval status">
+          {PATIENT_ACCOUNT_TABS.map((item) => (
+            <button
+              key={item.id}
+              role="tab"
+              aria-selected={patientFilter === item.id}
+              className={`admin-tab ${patientFilter === item.id ? "is-active" : ""}`}
+              onClick={() => selectPatientFilter(item.id)}
+            >
+              {item.label}
+              <span className="admin-tab__count">{item.id === "pending" ? tabCounts.pending : tabCounts.approved}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       <section className="admin-panel">
         <div className="admin-panel__heading">
           <div>
             <span className="eyebrow">Account operations</span>
             <h2>{heading}</h2>
             <p>
-              {searchParams.get("filter") === "pending"
-                ? "Pending accounts in this category. Switch tabs to review staff or dentist approvals."
-                : searchParams.get("filter") === "active"
-                  ? "Verified operational accounts in this category."
-                  : tab === "patient"
-                    ? "Patients create their own accounts. Approve them here so they can sign in, open the dashboard, and book appointments. Admin does not create patient accounts."
-                    : "Admin can create dentist and staff accounts only. Active accounts can be edited or archived."}
+              {tab === "patient" && patientFilter === "pending"
+                ? "Patients awaiting Admin approval. OTP or email verification is not Admin approval. Approve accounts here so they can sign in and book."
+                : tab === "patient"
+                  ? "Approved, active patient accounts. Search and filters apply to this list only."
+                  : searchParams.get("filter") === "pending"
+                    ? "Pending accounts in this category. Switch tabs to review staff or dentist approvals."
+                    : searchParams.get("filter") === "active"
+                      ? "Verified operational accounts in this category."
+                      : "Admin can create dentist and staff accounts only. Active accounts can be edited or archived."}
             </p>
           </div>
           {tab !== "patient" ? (
@@ -852,6 +1000,7 @@ export function AdminManageUsersPage() {
           className="admin-toolbar"
           onSubmit={(event) => {
             event.preventDefault();
+            setListPage(1);
             setApplied(search);
           }}
         >
@@ -871,7 +1020,8 @@ export function AdminManageUsersPage() {
         </form>
 
         {users.length ? (
-          <div className="admin-table-wrap">
+          <>
+          <div className={`admin-table-wrap ${tab === "patient" ? "admin-table-wrap--desktop" : ""}`}>
             <table className="admin-table">
               <thead>
                 <tr>
@@ -942,76 +1092,22 @@ export function AdminManageUsersPage() {
                         />
                       </td>
                       <td>
-                        <div className="admin-row-actions">
-                          {tab === "patient" ? (
-                            <>
-                              <button className="button button--secondary button--compact" onClick={() => setDetail(user)}>
-                                <Eye size={14} /> View
-                              </button>
-                              {pendingUser ? (
-                                <>
-                                  <button
-                                    className="button button--primary button--compact"
-                                    disabled={actionBusyId === `${user.id}:approve`}
-                                    onClick={() =>
-                                      runLifecycle(
-                                        user,
-                                        "approve",
-                                        `Approve ${user.fullName} so they can open the patient dashboard and book appointments?`
-                                      )
-                                    }
-                                  >
-                                    Approve
-                                  </button>
-                                  <button
-                                    className="button button--danger button--compact"
-                                    disabled={actionBusyId === `${user.id}:reject`}
-                                    onClick={() =>
-                                      runLifecycle(user, "reject", "Are you sure you want to reject this patient account?")
-                                    }
-                                  >
-                                    Reject
-                                  </button>
-                                </>
-                              ) : null}
-                              {approvedUser ? (
-                                <button
-                                  className="button button--secondary button--compact"
-                                  onClick={() => runLifecycle(user, "suspend", `Suspend ${user.fullName}?`)}
-                                >
-                                  Suspend
-                                </button>
-                              ) : null}
-                              <button
-                                className="button button--secondary button--compact"
-                                disabled={actionBusyId === `${user.id}:reset-password`}
-                                onClick={() => resetPatientPassword(user)}
-                              >
-                                <KeyRound size={14} /> Reset Password
-                              </button>
-                              <button
-                                className="button button--secondary button--compact"
-                                disabled={actionBusyId === `${user.id}:archive`}
-                                onClick={() => archiveUser(user)}
-                              >
-                                <Archive size={14} /> Archive
-                              </button>
-                            </>
-                          ) : (
-                            <>
-                              <button className="button button--secondary button--compact" onClick={() => openEdit(user)}>
-                                <Pencil size={14} /> Edit
-                              </button>
-                              <button
-                                className="button button--secondary button--compact"
-                                disabled={actionBusyId === `${user.id}:archive`}
-                                onClick={() => archiveUser(user)}
-                              >
-                                <Archive size={14} /> Archive
-                              </button>
-                            </>
-                          )}
-                        </div>
+                        {tab === "patient" ? (
+                          renderPatientActions(user)
+                        ) : (
+                          <div className="admin-row-actions">
+                            <button className="button button--secondary button--compact" onClick={() => openEdit(user)}>
+                              <Pencil size={14} /> Edit
+                            </button>
+                            <button
+                              className="button button--secondary button--compact"
+                              disabled={actionBusyId === `${user.id}:archive`}
+                              onClick={() => archiveUser(user)}
+                            >
+                              <Archive size={14} /> Archive
+                            </button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   );
@@ -1019,12 +1115,89 @@ export function AdminManageUsersPage() {
               </tbody>
             </table>
           </div>
+          {tab === "patient" ? (
+            <div className="admin-account-cards">
+              {users.map((user) => {
+                const pendingUser = isPendingAccount(user);
+                const rejectedUser = isRejectedAccount(user);
+                const approvedUser = isApprovedAccount(user);
+                return (
+                  <article
+                    key={`card-${user.id}`}
+                    className={`admin-account-card ${
+                      matchesNotificationFocus(user, focusKey, ["id", "email", "phone", "patientId"])
+                        ? "is-notification-focus"
+                        : ""
+                    }`}
+                  >
+                    <div className="admin-account-card__top">
+                      <div>
+                        <strong>{user.fullName}</strong>
+                        <small><code>{user.patientId || user.id}</code></small>
+                      </div>
+                      <AdminStatusBadge
+                        status={
+                          rejectedUser
+                            ? "rejected"
+                            : pendingUser
+                              ? "pending"
+                              : approvedUser
+                                ? "active"
+                                : user.status
+                        }
+                      />
+                    </div>
+                    <p>{user.email || "—"}</p>
+                    <p>{user.phone || "—"}</p>
+                    <p>Password: {patientPasswordStatusLabel(user)}</p>
+                    {renderPatientActions(user)}
+                  </article>
+                );
+              })}
+            </div>
+          ) : null}
+          {tab === "patient" && Number(data?.total || 0) > Number(data?.limit || 50) ? (
+            <div className="admin-pager">
+              <button
+                type="button"
+                className="button button--secondary button--compact"
+                disabled={currentPage <= 1}
+                onClick={() => setListPage(currentPage - 1)}
+              >
+                Previous
+              </button>
+              <span>
+                Page {currentPage} of {pageCount}
+              </span>
+              <button
+                type="button"
+                className="button button--secondary button--compact"
+                disabled={currentPage >= pageCount}
+                onClick={() => setListPage(currentPage + 1)}
+              >
+                Next
+              </button>
+            </div>
+          ) : null}
+          </>
         ) : (
           <EmptyState
-            title={tab === "patient" ? "No patient portal accounts yet" : "No accounts found"}
+            title={
+              tab === "patient"
+                ? applied
+                  ? "No matching patients in this list"
+                  : patientFilter === "pending"
+                    ? "No patients awaiting approval"
+                    : "No approved patient accounts"
+                : "No accounts found"
+            }
             detail={
               tab === "patient"
-                ? "Patients must register themselves. Approved accounts appear here."
+                ? applied
+                  ? "Try a different name, email, or Patient ID in this tab."
+                  : patientFilter === "pending"
+                    ? "New registrations appear here until an administrator approves them."
+                    : "Approved, active patient accounts appear here."
                 : "Provision a dentist or staff profile to get started."
             }
           />
@@ -1033,76 +1206,6 @@ export function AdminManageUsersPage() {
 
       {tab === "patient" ? (
         <>
-          <section className="admin-panel">
-            <div className="admin-panel__heading">
-              <div>
-                <span className="eyebrow">Registration verification</span>
-                <h2>Pending Patient Registration Requests</h2>
-                <p>
-                  After OTP verification, patients wait here for admin approval. Once approved, they can sign in and
-                  open the dashboard to create appointments.
-                </p>
-              </div>
-            </div>
-            {pending.length ? (
-              <div className="admin-table-wrap">
-                <table className="admin-table">
-                  <thead>
-                    <tr>
-                      <th>Full Name</th>
-                      <th>Email</th>
-                      <th>Contact Number</th>
-                      <th>Requested Role</th>
-                      <th>Registration Date</th>
-                      <th>Verification Status</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pending.map((request) => (
-                      <tr key={request.id}>
-                        <td><strong>{request.fullName}</strong></td>
-                        <td>{request.email}</td>
-                        <td>{request.phone || "—"}</td>
-                        <td className="capitalize">{request.role}</td>
-                        <td>{formatAdminDate(request.createdAt)}</td>
-                        <td><AdminStatusBadge status={request.verified ? "verified" : "pending"} /></td>
-                        <td>
-                          <div className="admin-row-actions">
-                            <button
-                              className="button button--primary button--compact"
-                              disabled={actionBusyId === `${request.id}:approve`}
-                              onClick={() => approveRequest(request)}
-                            >
-                              Approve
-                            </button>
-                            <button
-                              className="button button--danger button--compact"
-                              disabled={actionBusyId === `${request.id}:reject`}
-                              onClick={() => rejectRequest(request)}
-                            >
-                              Reject
-                            </button>
-                            <button
-                              className="button button--danger button--compact"
-                              disabled={actionBusyId === `${request.id}:purge`}
-                              onClick={() => deletePendingRequest(request)}
-                            >
-                              <Trash2 size={14} /> Delete
-                            </button>
-                            <button className="button button--secondary button--compact" onClick={() => setDetail(request)}>View Details</button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <EmptyState title="No pending registrations" detail="All registration requests have been reviewed." />
-            )}
-          </section>
-
           <section className="admin-panel">
             <div className="admin-panel__heading">
               <div>

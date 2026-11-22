@@ -213,14 +213,33 @@ function mapStatusFilter(status) {
   return normalized;
 }
 
-function statusFilterClause(alias, status, params) {
+function patientPendingApprovalSql(alias) {
+  return `LOWER(${alias}.role) = 'patient'
+    AND COALESCE(${alias}.is_archived, FALSE) = FALSE
+    AND LOWER(COALESCE(${alias}.status, 'pending')) IN ('pending', 'unverified')`;
+}
+
+function patientApprovedSql(alias) {
+  return `LOWER(${alias}.role) = 'patient'
+    AND COALESCE(${alias}.is_archived, FALSE) = FALSE
+    AND LOWER(COALESCE(${alias}.status, 'active')) IN ('active', 'operational')
+    AND ${alias}.is_verified = TRUE`;
+}
+
+function statusFilterClause(alias, status, params, { role } = {}) {
   const normalized = mapStatusFilter(status);
   if (!normalized) {
     return null;
   }
 
   if (normalized === "pending") {
+    if (role === "patient") {
+      return `LOWER(COALESCE(${alias}.status, 'pending')) IN ('pending', 'unverified')`;
+    }
     return `(${alias}.is_verified = FALSE OR LOWER(COALESCE(${alias}.status, 'active')) IN ('pending', 'unverified'))`;
+  }
+  if (normalized === "approved") {
+    return `LOWER(COALESCE(${alias}.status, 'active')) IN ('active', 'operational') AND ${alias}.is_verified = TRUE`;
   }
   if (normalized === "active") {
     return `LOWER(COALESCE(${alias}.status, 'active')) = 'active' AND ${alias}.is_verified = TRUE`;
@@ -560,12 +579,7 @@ function createAdminPortalRouter({
         db.query(
           `SELECT COUNT(*) AS count
            FROM users
-           WHERE COALESCE(is_archived, FALSE) = FALSE
-             AND LOWER(role) IN ('patient', 'staff', 'dentist')
-             AND (
-               is_verified = FALSE
-               OR LOWER(COALESCE(status, 'active')) IN ('pending', 'unverified')
-             )`
+           WHERE ${patientPendingApprovalSql("users")}`
         ),
         db.query(
           `SELECT COUNT(*) AS count
@@ -690,7 +704,7 @@ function createAdminPortalRouter({
         "COALESCE(account.is_archived, FALSE) = FALSE",
       ];
 
-      const statusClause = statusFilterClause("account", req.query.status, params);
+      const statusClause = statusFilterClause("account", req.query.status, params, { role });
       if (statusClause) {
         clauses.push(statusClause);
       }
@@ -839,12 +853,23 @@ function createAdminPortalRouter({
       if (role === "dentist") {
         await recordAccess.attachDentistAuthorization(db, accounts);
       }
-      return {
+      const payload = {
         page,
         limit,
         total: count(countResult.rows[0]),
         [key]: accounts,
       };
+      if (role === "patient") {
+        const [pendingCount, approvedCount] = await Promise.all([
+          db.query(`SELECT COUNT(*) AS count FROM users WHERE ${patientPendingApprovalSql("users")}`),
+          db.query(`SELECT COUNT(*) AS count FROM users WHERE ${patientApprovedSql("users")}`),
+        ]);
+        payload.tabCounts = {
+          pending: count(pendingCount.rows[0]),
+          approved: count(approvedCount.rows[0]),
+        };
+      }
+      return payload;
     }
 
     try {
