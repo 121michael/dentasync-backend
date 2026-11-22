@@ -3,6 +3,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
+  aheadEntriesFor,
   createPredictionService,
   estimateWaitForQueueContext,
   remainingServingMinutes,
@@ -28,16 +29,22 @@ test("waitEstimateFromRow exposes remaining treatment time for a serving patient
   assert.equal(estimate.remainingTreatmentMinutes.min <= estimate.remainingTreatmentMinutes.max, true);
 });
 
-test("remaining serving time subtracts elapsed time and never goes negative", () => {
+test("remaining serving time subtracts elapsed recorded treatment progress only", () => {
   const now = new Date("2026-09-22T14:25:00.000Z");
   const remaining = remainingServingMinutes(
-    { status: "dentist", serving_started_at: "2026-09-22T14:00:00.000Z" },
+    { status: "dentist", treatment_started_at: "2026-09-22T14:00:00.000Z" },
     40,
     now
   );
   assert.equal(remaining, 15);
+  const queueStampOnly = remainingServingMinutes(
+    { status: "dentist", serving_started_at: "2026-09-22T14:00:00.000Z" },
+    40,
+    now
+  );
+  assert.equal(queueStampOnly, 40);
   const overdue = remainingServingMinutes(
-    { status: "dentist", serving_started_at: "2026-09-22T13:00:00.000Z" },
+    { status: "dentist", treatment_started_at: "2026-09-22T13:00:00.000Z" },
     40,
     now
   );
@@ -92,9 +99,9 @@ test("A104 wait uses remaining A101 plus full A102 and A103", async () => {
     ],
   });
 
-  // Remaining 15 (prophy) + 45 + 40 = 100. Range 90–115 with default 0.90/1.15.
-  assert.equal(estimate.estimatedWaitMinutes.min, 90);
-  assert.equal(estimate.estimatedWaitMinutes.max, 115);
+  // Full remaining 30 (prophy, no recorded start) + 45 + 40 = 115. Range 104–132.
+  assert.equal(estimate.estimatedWaitMinutes.min, 104);
+  assert.equal(estimate.estimatedWaitMinutes.max, 132);
   assert.equal(estimate.estimationMethod, "historical_average_v1");
   assert.equal(estimate.patientsAhead, 3);
   const published = publicWaitEstimate(estimate);
@@ -102,7 +109,7 @@ test("A104 wait uses remaining A101 plus full A102 and A103", async () => {
   assert.match(published.estimatedCallTime.start, /T/);
 });
 
-test("unknown procedure uses fallback instead of inventing a treatment", async () => {
+test("unknown procedure is unavailable instead of inventing a wait", async () => {
   invalidateDurationStatsCache();
   const db = {
     async query(sql) {
@@ -118,7 +125,8 @@ test("unknown procedure uses fallback instead of inventing a treatment", async (
     entry: { token: "A105", position: 2, status: "waiting" },
     aheadEntries: [{ token: "A101", status: "waiting" }],
   });
-  assert.equal(estimate.estimatedWaitMinutes.min, Math.round(35 * 0.9));
+  assert.equal(estimate.unavailable, true);
+  assert.equal(estimate.estimatedWaitMinutes, null);
   assert.equal(estimate.confidenceLevel, "low");
 });
 
@@ -141,6 +149,19 @@ test("historical stats require a minimum sample count before dropping fallback",
   const stats = await getHistoricalDurationStats(db, "Restoration");
   assert.equal(stats.usedFallback, true);
   assert.ok(stats.sampleCount < 5);
+});
+
+test("ahead entries stay in the assigned dentist lane", () => {
+  const ordered = [
+    { id: 1, token: "A-001", dentist_id: "d1", status: "dentist", position: 1, appointment_time: "09:00" },
+    { id: 2, token: "A-002", dentist_id: "d2", status: "waiting", position: 2, appointment_time: "09:15" },
+    { id: 3, token: "A-003", dentist_id: "d1", status: "waiting", position: 3, appointment_time: "09:30" },
+  ];
+  assert.deepEqual(
+    aheadEntriesFor(ordered[2], ordered).map((row) => row.token),
+    ["A-001"]
+  );
+  assert.deepEqual(aheadEntriesFor(ordered[1], ordered).map((row) => row.token), []);
 });
 
 test("uncertainty range is configurable on the prediction service", () => {

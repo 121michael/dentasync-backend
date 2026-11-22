@@ -1756,6 +1756,85 @@ html[data-theme="dark"] .portal-shell[data-theme="dark"] ~ .tooth-loader .tooth-
   gap: 0.9rem;
 }
 
+.patient-queue-board {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.patient-queue-board__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.patient-queue-board__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  min-width: 0;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.patient-queue-board__row > div {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.patient-queue-board__row strong {
+  font-size: 0.92rem;
+}
+
+.patient-queue-board__row small {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  text-align: right;
+  line-height: 1.35;
+}
+
+.patient-queue-board__row.is-you {
+  border-color: color-mix(in srgb, var(--amethyst-700, #6b4bb8) 45%, var(--border));
+  background: color-mix(in srgb, var(--amethyst-700, #6b4bb8) 8%, var(--surface));
+}
+
+.patient-queue-board__you {
+  flex-shrink: 0;
+  padding: 0.08rem 0.4rem;
+  border-radius: 999px;
+  background: var(--amethyst-700, #6b4bb8);
+  color: #fff;
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.patient-queue-board__meta {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+@media (max-width: 390px) {
+  .patient-queue-board__row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .patient-queue-board__row small {
+    text-align: left;
+  }
+}
+
 .wellness-card,
 .quick-actions-card {
   padding: 1.35rem;

@@ -38,17 +38,61 @@ export function formatCallTimeRange(start, end, { unavailableLabel = "Currently 
 }
 
 export function waitRangeFromEntry(entry) {
+  if (entry?.waitEstimate?.unavailable) return "Estimate unavailable";
   const estimate = entry?.waitEstimate?.estimatedWaitMinutes;
   if (estimate && (estimate.min != null || estimate.max != null)) {
-    return formatWaitRange(estimate.min, estimate.max);
+    return formatWaitRange(estimate.min, estimate.max, { unavailableLabel: "Estimate unavailable" });
   }
   if (entry?.estimatedWaitMinMinutes != null || entry?.estimatedWaitMaxMinutes != null) {
     return formatWaitRange(entry.estimatedWaitMinMinutes, entry.estimatedWaitMaxMinutes);
   }
   if (entry?.waitMinutes != null) {
-    return formatWaitRange(entry.waitMinutes, entry.waitMinutes);
+    return formatWaitRange(entry.waitMinutes, entry.waitMinutes, { unavailableLabel: "Estimate unavailable" });
   }
-  return "Currently unavailable";
+  return "Estimate unavailable";
+}
+
+function compactAbout(range) {
+  if (!range || range === "Estimate unavailable" || range === "Currently unavailable") {
+    return "Estimate unavailable";
+  }
+  if (range === "Now") return "Now";
+  return `About ${range}`;
+}
+
+export function queueStatusWaitLabel(entry) {
+  const status = String(entry?.status || "").toLowerCase();
+  if (status === "dentist" || status === "in_chair" || status === "in_treatment") return "In treatment";
+  if (status === "completed") return "Completed";
+  if (status === "no_show") return "No-show";
+  if (status === "cancelled") return "Cancelled";
+  return compactAbout(waitRangeFromEntry(entry));
+}
+
+export function compactQueueWaitCaption(entry) {
+  const status = String(entry?.status || "").toLowerCase();
+  const yours = Boolean(entry?.isCurrentPatient);
+  const label = queueStatusWaitLabel(entry);
+  if (status === "dentist" || status === "in_chair" || status === "in_treatment" || status === "completed") {
+    return yours ? `You · ${label}` : label;
+  }
+  if (yours) {
+    return label === "Estimate unavailable"
+      ? "Your estimated wait: Estimate unavailable"
+      : `Your estimated wait: ${label}`;
+  }
+  return label === "Estimate unavailable" ? "Estimated wait: Estimate unavailable" : `Estimated wait: ${label}`;
+}
+
+export function formatWaitUpdatedAt(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: CLINIC_TIMEZONE,
+  }).format(date);
 }
 
 export function callRangeFromEntry(entry) {
