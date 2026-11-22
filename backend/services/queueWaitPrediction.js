@@ -277,6 +277,19 @@ async function estimateProcedureDuration(db, entry, settings = getPredictionSett
   return { minutes: settings.fallbackMinutes, stats, source: "fallback" };
 }
 
+function servingStartTimestamp(entry) {
+  return (
+    entry?.treatment_started_at ||
+    entry?.treatmentStartedAt ||
+    entry?.recorded_started_at ||
+    entry?.started_at ||
+    entry?.startedAt ||
+    entry?.serving_started_at ||
+    entry?.servingStartedAt ||
+    null
+  );
+}
+
 function remainingServingMinutes(entry, fullMinutes, now = new Date()) {
   const status = String(entry.status || "").toLowerCase();
   const stored = Number(
@@ -286,16 +299,12 @@ function remainingServingMinutes(entry, fullMinutes, now = new Date()) {
       entry.duration_minutes ??
       fullMinutes
   );
-  const full = Math.max(0, roundMinutes(stored || fullMinutes));
+  const full = Math.max(0, roundMinutes(Number.isFinite(stored) && stored > 0 ? stored : fullMinutes));
   if (!SERVING_STATUSES.has(status)) {
     return full;
   }
-  const recordedStart =
-    entry.treatment_started_at ||
-    entry.treatmentStartedAt ||
-    entry.recorded_started_at ||
-    null;
-  if (!recordedStart) {
+  const recordedStart = servingStartTimestamp(entry);
+  if (!recordedStart || !full) {
     return full;
   }
   const started = new Date(recordedStart);
@@ -303,7 +312,7 @@ function remainingServingMinutes(entry, fullMinutes, now = new Date()) {
     return full;
   }
   const elapsed = Math.max(0, (now.getTime() - started.getTime()) / 60000);
-  return Math.max(1, roundMinutes(full - elapsed));
+  return Math.max(0, roundMinutes(full - elapsed));
 }
 
 async function loadVisitProcedures(db, entry) {
@@ -336,52 +345,142 @@ async function loadVisitProcedures(db, entry) {
   }
 }
 
+function procedureStatus(row) {
+  return String(row?.status || "").toLowerCase();
+}
+
+function isCancelledProcedure(row) {
+  return ["cancelled", "canceled", "removed", "deleted", "void"].includes(procedureStatus(row));
+}
+
+function isCompletedProcedure(row) {
+  return ["completed", "complete", "done"].includes(procedureStatus(row));
+}
+
 function isActiveProcedure(row) {
-  const status = String(row.status || "").toLowerCase();
-  return status === "in_progress" || status === "planned" || status === "pending";
+  if (isCancelledProcedure(row) || isCompletedProcedure(row)) return false;
+  const status = procedureStatus(row);
+  return status === "in_progress" || status === "planned" || status === "pending" || status === "";
+}
+
+function uniqueActiveProcedures(rows) {
+  const seen = new Set();
+  const unique = [];
+  for (const row of rows) {
+    const key =
+      row?.id != null
+        ? `id:${row.id}`
+        : `row:${row.visit_sequence || ""}:${normalizeProcedure(row.treatment)}:${procedureStatus(row)}`;
+    const signature = `sig:${normalizeProcedure(row.treatment)}:${procedureStatus(row)}:${Number(row.duration_minutes) || 0}`;
+    if (seen.has(key)) continue;
+    if (procedureStatus(row) !== "in_progress" && seen.has(signature)) continue;
+    seen.add(key);
+    seen.add(signature);
+    unique.push(row);
+  }
+  return unique;
+}
+
+async function resolveProcedureMinutes(db, procedure, settings) {
+  const recorded = Number(procedure?.duration_minutes);
+  if (Number.isFinite(recorded) && recorded > 0) {
+    const stats = emptyStats(normalizeProcedure(procedure.treatment), recorded);
+    stats.usedFallback = false;
+    stats.averageMinutes = roundMinutes(recorded);
+    return { minutes: roundMinutes(recorded), stats, source: "recorded", reliable: true };
+  }
+  const estimated = await estimateProcedureDuration(
+    db,
+    { service_name: procedure.treatment || procedure.service_name, service_id: procedure.service_id },
+    settings
+  );
+  if (estimated.source === "fallback") {
+    return { minutes: null, stats: estimated.stats, source: "fallback", reliable: false };
+  }
+  return { minutes: estimated.minutes, stats: estimated.stats, source: estimated.source, reliable: true };
 }
 
 async function expectedMinutesForEntry(db, entry, settings, now) {
-  const procedures = await loadVisitProcedures(db, entry);
-  const remainingRows = procedures.filter(isActiveProcedure);
+  const occupied = SERVING_STATUSES.has(String(entry?.status || "").toLowerCase());
+  const visitRows = await loadVisitProcedures(db, entry);
+  const remainingRows = uniqueActiveProcedures(visitRows.filter(isActiveProcedure));
+  const bookedName = normalizeProcedure(
+    entry.serviceName || entry.service_name || entry.procedure || entry.procedureType || entry.procedure_type || ""
+  );
   if (remainingRows.length) {
     let remaining = 0;
     const statsList = [];
+    let unreliable = false;
+    let overrun = false;
+    const names = new Set();
     for (const procedure of remainingRows) {
-      const estimated = await estimateProcedureDuration(
-        db,
-        { service_name: procedure.treatment, duration_minutes: procedure.duration_minutes },
-        settings
-      );
-      const full = Number(procedure.duration_minutes) > 0 ? Number(procedure.duration_minutes) : estimated.minutes;
-      const status = String(procedure.status || "").toLowerCase();
-      if (status === "in_progress") {
-        remaining += remainingServingMinutes(
+      const name = normalizeProcedure(procedure.treatment);
+      if (name && names.has(name) && procedureStatus(procedure) !== "in_progress") {
+        const alreadyInProgress = remainingRows.some(
+          (row) => normalizeProcedure(row.treatment) === name && procedureStatus(row) === "in_progress" && row !== procedure
+        );
+        if (alreadyInProgress) continue;
+      }
+      if (name) names.add(name);
+      const resolved = await resolveProcedureMinutes(db, procedure, settings);
+      statsList.push(resolved.stats);
+      if (!resolved.reliable) {
+        unreliable = true;
+        continue;
+      }
+      const full = resolved.minutes;
+      if (procedureStatus(procedure) === "in_progress") {
+        const leftover = remainingServingMinutes(
           {
             status: "dentist",
-            treatment_started_at: procedure.started_at || null,
+            treatment_started_at: procedure.started_at || servingStartTimestamp(entry),
             duration_minutes: full,
           },
           full,
           now
         );
+        remaining += leftover;
+        if (leftover === 0 && occupied) overrun = true;
       } else {
         remaining += Math.max(0, roundMinutes(full));
       }
-      statsList.push(estimated.stats);
     }
     return {
       minutes: remaining,
       remainingMinutes: remaining,
-      stats: statsList[0] || null,
+      stats: statsList[0] || emptyStats(bookedName || "unknown", settings.fallbackMinutes),
       source: "visit_procedures",
       procedureCount: remainingRows.length,
+      occupied,
+      overrun: overrun && remaining === 0,
+      unreliable,
+    };
+  }
+
+  if (occupied && visitRows.length && !visitRows.some(isActiveProcedure)) {
+    return {
+      minutes: 0,
+      remainingMinutes: 0,
+      stats: emptyStats(bookedName || "unknown", settings.fallbackMinutes),
+      source: "visit_procedures",
+      procedureCount: 0,
+      occupied: true,
+      overrun: true,
+      unreliable: false,
     };
   }
 
   const estimated = await estimateProcedureDuration(db, entry, settings);
-  const remaining = remainingServingMinutes(entry, estimated.minutes, now);
-  return { ...estimated, remainingMinutes: remaining, procedureCount: 1 };
+  const reliable = estimated.source !== "fallback";
+  const remaining = reliable ? remainingServingMinutes(entry, estimated.minutes, now) : 0;
+  return {
+    ...estimated,
+    remainingMinutes: remaining,
+    procedureCount: bookedName ? 1 : 0,
+    occupied,
+    overrun: occupied && reliable && remaining === 0 && Boolean(servingStartTimestamp(entry)),
+    unreliable: !reliable,
+  };
 }
 
 function addMinutes(date, minutes) {
@@ -399,41 +498,58 @@ function serializeEstimate({
   stats,
   patientsAhead,
   unavailable = false,
+  treatmentOverrun = false,
 }) {
   const status = String(entry.status || "").toLowerCase();
   const serving = SERVING_STATUSES.has(status);
   const waiting = WAITING_STATUSES.has(status);
-  const min = serving || unavailable ? 0 : range.min;
-  const max = serving || unavailable ? 0 : range.max;
+  const point = Math.max(0, roundMinutes(waitPoint));
+  const usePoint = !unavailable && waiting && !serving;
+  const min = serving || unavailable ? 0 : usePoint ? point : range.min;
+  const max = serving || unavailable ? 0 : usePoint ? point : range.max;
+  const hideWait = unavailable || treatmentOverrun || !(waiting || serving);
   return {
     queueNumber: entry.token || null,
     queuePosition: Number(entry.position) || null,
     patientsAhead: serving ? 0 : patientsAhead,
     estimatedDurationMinutes: durationMinutes,
-    estimatedWaitMinutes:
-      unavailable || !(waiting || serving) ? null : { min, max },
+    estimatedWaitMinutes: hideWait || serving ? (serving && !unavailable ? { min: 0, max: 0 } : null) : { min, max },
     estimatedCallTime:
-      unavailable || !(waiting || serving)
-        ? null
+      hideWait || serving
+        ? serving && !unavailable
+          ? {
+              start: now.toISOString(),
+              end: now.toISOString(),
+            }
+          : null
         : {
             start: addMinutes(now, min).toISOString(),
             end: addMinutes(now, max).toISOString(),
           },
-    estimationMethod: unavailable ? "unavailable" : settings.methodVersion,
-    confidenceLevel: unavailable ? "low" : predictor.confidenceFrom(stats),
+    estimationMethod: unavailable ? "unavailable" : treatmentOverrun ? "treatment_overrun" : settings.methodVersion,
+    confidenceLevel: unavailable || treatmentOverrun ? "low" : predictor.confidenceFrom(stats),
     calculatedAt: now.toISOString(),
     unavailable,
+    treatmentOverrun: Boolean(treatmentOverrun) && !unavailable,
   };
 }
 
 function remainingTreatmentRange(row, durationMinutes, now = new Date()) {
   const status = String(row?.status || "").toLowerCase();
   if (!SERVING_STATUSES.has(status)) return null;
-  const remaining = remainingServingMinutes(row, durationMinutes, now);
-  const settings = getPredictionSettings();
-  const min = roundMinutes(remaining * settings.lowerFactor);
-  const max = Math.max(min, roundMinutes(remaining * settings.upperFactor));
-  return { min, max };
+  let remaining = Math.max(0, roundMinutes(durationMinutes));
+  const calculatedAt = row.wait_estimate_at || row.waitEstimateAt;
+  if (calculatedAt) {
+    const stamped = new Date(calculatedAt);
+    if (!Number.isNaN(stamped.getTime())) {
+      const elapsed = Math.max(0, (now.getTime() - stamped.getTime()) / 60000);
+      remaining = Math.max(0, roundMinutes(Number(durationMinutes) - elapsed));
+    }
+  } else {
+    remaining = remainingServingMinutes(row, durationMinutes, now);
+  }
+  if (remaining <= 0) return { min: 0, max: 0, overrun: true };
+  return { min: remaining, max: remaining };
 }
 
 function waitEstimateFromRow(row) {
@@ -466,6 +582,9 @@ function waitEstimateFromRow(row) {
     estimationMethod: row.wait_estimate_method || null,
     calculatedAt: row.wait_estimate_at ? new Date(row.wait_estimate_at).toISOString() : null,
     unavailable,
+    treatmentOverrun:
+      String(row.wait_estimate_method || "").toLowerCase() === "treatment_overrun" ||
+      Boolean(remaining?.overrun),
   };
 }
 
@@ -484,6 +603,7 @@ function publicWaitEstimate(estimate) {
     remainingTreatmentMinutes: estimate.remainingTreatmentMinutes || null,
     calculatedAt: estimate.calculatedAt || null,
     unavailable: Boolean(estimate.unavailable),
+    treatmentOverrun: Boolean(estimate.treatmentOverrun),
   };
 }
 
@@ -636,13 +756,17 @@ async function estimateWaitForQueueContext(db, { entry, aheadEntries = [], now =
   let waitPoint = 0;
   const aheadStats = [];
   let unreliableAhead = false;
+  let occupiedAhead = false;
+  let overrunOnly = false;
   for (const ahead of aheadEntries) {
     const aheadStatus = String(ahead.status || "").toLowerCase();
     if (!ACTIVE_STATUSES.has(aheadStatus)) continue;
     const estimated = await expectedMinutesForEntry(db, ahead, service.settings, now);
-    waitPoint += estimated.remainingMinutes;
-    aheadStats.push(estimated.stats);
-    if (estimated.source === "fallback") unreliableAhead = true;
+    waitPoint += Math.max(0, Number(estimated.remainingMinutes) || 0);
+    if (estimated.stats) aheadStats.push(estimated.stats);
+    if (estimated.unreliable || estimated.source === "fallback") unreliableAhead = true;
+    if (estimated.occupied) occupiedAhead = true;
+    if (estimated.overrun && !(Number(estimated.remainingMinutes) > 0)) overrunOnly = true;
   }
 
   const combined = aheadStats.length
@@ -663,6 +787,7 @@ async function estimateWaitForQueueContext(db, { entry, aheadEntries = [], now =
   }
 
   const unavailable = aheadEntries.length > 0 && unreliableAhead;
+  const treatmentOverrun = !unavailable && waitPoint === 0 && occupiedAhead && overrunOnly;
   const range = unavailable ? { min: 0, max: 0 } : service.predictor.rangeFrom(waitPoint, combined);
   return serializeEstimate({
     entry,
@@ -675,6 +800,7 @@ async function estimateWaitForQueueContext(db, { entry, aheadEntries = [], now =
     stats: combined,
     patientsAhead: aheadEntries.filter((item) => ACTIVE_STATUSES.has(String(item.status || "").toLowerCase())).length,
     unavailable,
+    treatmentOverrun,
   });
 }
 
@@ -739,11 +865,11 @@ async function persistEstimate(db, entryId, estimate, waitPoint, { serving = fal
       [
         entryId,
         midpoint || waitPoint || 0,
-        unavailable ? null : estimate.estimatedWaitMinutes?.min ?? 0,
-        unavailable ? null : estimate.estimatedWaitMinutes?.max ?? 0,
+        unavailable || estimate.treatmentOverrun ? null : estimate.estimatedWaitMinutes?.min ?? 0,
+        unavailable || estimate.treatmentOverrun ? null : estimate.estimatedWaitMinutes?.max ?? 0,
         estimate.estimatedDurationMinutes,
-        unavailable ? null : estimate.estimatedCallTime?.start || null,
-        unavailable ? null : estimate.estimatedCallTime?.end || null,
+        unavailable || estimate.treatmentOverrun ? null : estimate.estimatedCallTime?.start || null,
+        unavailable || estimate.treatmentOverrun ? null : estimate.estimatedCallTime?.end || null,
         unavailable ? "unavailable" : estimate.estimationMethod,
       ]
     );

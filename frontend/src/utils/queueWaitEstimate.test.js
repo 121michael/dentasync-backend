@@ -34,6 +34,10 @@ test("compact captions highlight the signed-in patient without inventing waits",
     waitRangeFromEntry({ waitEstimate: { unavailable: true } }),
     "Estimate unavailable"
   );
+  assert.equal(
+    waitRangeFromEntry({ waitEstimate: { treatmentOverrun: true, estimatedWaitMinutes: { min: 0, max: 0 } } }),
+    "Treatment running long"
+  );
 });
 
 test("featured wait and row labels stay readable without repeating the featured line", () => {

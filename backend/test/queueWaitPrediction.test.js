@@ -42,13 +42,13 @@ test("remaining serving time subtracts elapsed recorded treatment progress only"
     40,
     now
   );
-  assert.equal(queueStampOnly, 40);
+  assert.equal(queueStampOnly, 15);
   const overdue = remainingServingMinutes(
     { status: "dentist", treatment_started_at: "2026-09-22T13:00:00.000Z" },
     40,
     now
   );
-  assert.equal(overdue, 1);
+  assert.equal(overdue, 0);
 });
 
 test("in-chair patients without a start stamp keep the stored procedure length", async () => {
@@ -99,9 +99,9 @@ test("A104 wait uses remaining A101 plus full A102 and A103", async () => {
     ],
   });
 
-  // Full remaining 30 (prophy, no recorded start) + 45 + 40 = 115. Range 104–132.
-  assert.equal(estimate.estimatedWaitMinutes.min, 104);
-  assert.equal(estimate.estimatedWaitMinutes.max, 132);
+  // Remaining 15 of 30-minute prophylaxis + 45 + 40 = 100.
+  assert.equal(estimate.estimatedWaitMinutes.min, 100);
+  assert.equal(estimate.estimatedWaitMinutes.max, 100);
   assert.equal(estimate.estimationMethod, "historical_average_v1");
   assert.equal(estimate.patientsAhead, 3);
   const published = publicWaitEstimate(estimate);
@@ -169,4 +169,216 @@ test("uncertainty range is configurable on the prediction service", () => {
   const range = service.predictor.rangeFrom(100, { usedFallback: true, sampleCount: 0, averageMinutes: 100 });
   assert.equal(range.min, 80);
   assert.equal(range.max, 125);
+});
+
+function proceduresDb(byQueue) {
+  return {
+    async query(sql, params = []) {
+      if (sql.includes("clinic_patient_treatments")) {
+        return { rows: byQueue[params[0]] || [] };
+      }
+      if (sql.includes("clinic_treatment_durations") || sql.includes("clinic_service_durations")) {
+        return { rows: [] };
+      }
+      return { rows: [] };
+    },
+  };
+}
+
+test("next patient waits remaining chair time, then added procedures, then patients ahead", async () => {
+  invalidateDurationStatsCache();
+  const now = new Date("2026-11-22T10:08:00.000Z");
+  const serving = {
+    id: 1,
+    token: "A-101",
+    status: "dentist",
+    dentist_id: "d1",
+    serving_started_at: "2026-11-22T10:00:00.000Z",
+  };
+  const firstWaiting = { id: 2, token: "A-102", status: "waiting", dentist_id: "d1" };
+  const secondWaiting = { id: 3, token: "A-103", status: "waiting", dentist_id: "d1" };
+
+  const eightMinutesLeft = proceduresDb({
+    1: [
+      {
+        id: 11,
+        treatment: "Cleaning",
+        status: "in_progress",
+        duration_minutes: 8,
+        started_at: "2026-11-22T10:08:00.000Z",
+        visit_sequence: 1,
+        queue_entry_id: 1,
+      },
+    ],
+    2: [
+      {
+        id: 21,
+        treatment: "Exam",
+        status: "planned",
+        duration_minutes: 10,
+        visit_sequence: 1,
+        queue_entry_id: 2,
+      },
+    ],
+    3: [
+      {
+        id: 31,
+        treatment: "Filling",
+        status: "planned",
+        duration_minutes: 15,
+        visit_sequence: 1,
+        queue_entry_id: 3,
+      },
+    ],
+  });
+
+  const next = await estimateWaitForQueueContext(eightMinutesLeft, {
+    now,
+    entry: firstWaiting,
+    aheadEntries: [serving],
+  });
+  assert.equal(next.estimatedWaitMinutes.min, 8);
+  assert.equal(next.unavailable, false);
+  assert.equal(next.treatmentOverrun, false);
+
+  const later = await estimateWaitForQueueContext(eightMinutesLeft, {
+    now,
+    entry: secondWaiting,
+    aheadEntries: [serving, firstWaiting],
+  });
+  assert.equal(later.estimatedWaitMinutes.min, 18);
+
+  const withExtra = proceduresDb({
+    1: [
+      {
+        id: 11,
+        treatment: "Cleaning",
+        status: "in_progress",
+        duration_minutes: 8,
+        started_at: "2026-11-22T10:08:00.000Z",
+        visit_sequence: 1,
+        queue_entry_id: 1,
+      },
+      {
+        id: 12,
+        treatment: "X-ray",
+        status: "planned",
+        duration_minutes: 12,
+        visit_sequence: 2,
+        queue_entry_id: 1,
+      },
+    ],
+    2: [
+      {
+        id: 21,
+        treatment: "Exam",
+        status: "planned",
+        duration_minutes: 10,
+        visit_sequence: 1,
+        queue_entry_id: 2,
+      },
+    ],
+    3: [
+      {
+        id: 31,
+        treatment: "Filling",
+        status: "planned",
+        duration_minutes: 15,
+        visit_sequence: 1,
+        queue_entry_id: 3,
+      },
+    ],
+  });
+
+  const nextAfterAdd = await estimateWaitForQueueContext(withExtra, {
+    now,
+    entry: firstWaiting,
+    aheadEntries: [serving],
+  });
+  assert.equal(nextAfterAdd.estimatedWaitMinutes.min, 20);
+
+  const laterAfterAdd = await estimateWaitForQueueContext(withExtra, {
+    now,
+    entry: secondWaiting,
+    aheadEntries: [serving, firstWaiting],
+  });
+  assert.equal(laterAfterAdd.estimatedWaitMinutes.min, 30);
+});
+
+test("overrun chair time is not Now, cancelled and completed procedures are ignored, and booked names are not doubled", async () => {
+  invalidateDurationStatsCache();
+  const now = new Date("2026-11-22T10:20:00.000Z");
+  const serving = { id: 1, token: "A-101", status: "dentist", dentist_id: "d1" };
+  const waiting = { id: 2, token: "A-102", status: "waiting", dentist_id: "d1", service_name: "Cleaning" };
+
+  const overrun = await estimateWaitForQueueContext(
+    proceduresDb({
+      1: [
+        {
+          id: 11,
+          treatment: "Cleaning",
+          status: "in_progress",
+          duration_minutes: 8,
+          started_at: "2026-11-22T10:00:00.000Z",
+          visit_sequence: 1,
+          queue_entry_id: 1,
+        },
+      ],
+    }),
+    { now, entry: waiting, aheadEntries: [serving] }
+  );
+  assert.equal(overrun.treatmentOverrun, true);
+  assert.equal(overrun.estimatedWaitMinutes, null);
+  assert.equal(overrun.unavailable, false);
+
+  const cleaned = await estimateWaitForQueueContext(
+    proceduresDb({
+      1: [
+        {
+          id: 11,
+          treatment: "Cleaning",
+          status: "completed",
+          duration_minutes: 8,
+          visit_sequence: 1,
+          queue_entry_id: 1,
+        },
+        {
+          id: 12,
+          treatment: "Whitening",
+          status: "cancelled",
+          duration_minutes: 40,
+          visit_sequence: 2,
+          queue_entry_id: 1,
+        },
+        {
+          id: 13,
+          treatment: "Exam",
+          status: "planned",
+          duration_minutes: 10,
+          visit_sequence: 3,
+          queue_entry_id: 1,
+        },
+      ],
+    }),
+    { now, entry: waiting, aheadEntries: [serving] }
+  );
+  assert.equal(cleaned.estimatedWaitMinutes.min, 10);
+
+  const missing = await estimateWaitForQueueContext(
+    proceduresDb({
+      1: [
+        {
+          id: 11,
+          treatment: "Mystery",
+          status: "in_progress",
+          duration_minutes: null,
+          visit_sequence: 1,
+          queue_entry_id: 1,
+        },
+      ],
+    }),
+    { now, entry: waiting, aheadEntries: [serving] }
+  );
+  assert.equal(missing.unavailable, true);
+  assert.equal(missing.estimatedWaitMinutes, null);
 });
