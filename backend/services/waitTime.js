@@ -68,9 +68,6 @@ async function estimateWaitMinutesForPosition(db, {
   now = new Date(),
 } = {}) {
   const safePosition = Math.max(1, Number(position) || 1);
-  if (safePosition <= 1) {
-    return 0;
-  }
 
   if (aheadEntries.length) {
     let total = 0;
@@ -95,6 +92,10 @@ async function estimateWaitMinutesForPosition(db, {
       total += remainingServingMinutes(entry, full, now);
     }
     return total;
+  }
+
+  if (safePosition <= 1) {
+    return 0;
   }
 
   const avg = await db

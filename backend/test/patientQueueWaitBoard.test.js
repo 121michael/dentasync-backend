@@ -226,8 +226,8 @@ test("Patient queue board estimates wait per dentist without leaking other names
 
   const remyRow = board.find((row) => row.token === "A-102");
   assert.equal(remyRow.waitEstimate?.unavailable, false);
-  assert.ok(remyRow.waitEstimate.estimatedWaitMinutes.min >= 18);
-  assert.ok(remyRow.waitEstimate.estimatedWaitMinutes.max <= 25);
+  assert.equal(remyRow.waitEstimate.estimatedWaitMinutes.min, 20);
+  assert.equal(remyRow.waitEstimate.estimatedWaitMinutes.max, 20);
 
   const lilaRow = board.find((row) => row.token === "A-201");
   assert.equal(lilaRow.waitEstimate?.unavailable, false);
