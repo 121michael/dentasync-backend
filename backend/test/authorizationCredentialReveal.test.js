@@ -181,6 +181,7 @@ test("Admin credential reveal stays masked until verified and never leaks hashes
   assert.equal(status.status, 200, status.json.message);
   assert.equal(status.json.dentist.authorizationCredentialStatus, "configured");
   assert.equal(status.json.dentist.credentialConfigured, true);
+  assert.equal(status.json.dentist.encryptionAvailable, true);
   assert.equal(status.json.dentist.password, undefined);
   assert.equal(containsSecret(status.json, dentistAuth), false);
   assert.match(String(status.headers.get("cache-control") || ""), /no-store/);
@@ -207,6 +208,14 @@ test("Admin credential reveal stays masked until verified and never leaks hashes
   );
   assert.equal(afterRename.rows[0].authorization_password_hash, stored.rows[0].authorization_password_hash);
   assert.equal(afterRename.rows[0].authorization_password_ciphertext, stored.rows[0].authorization_password_ciphertext);
+
+  const mismatch = await api("PUT", `/api/admin/dentists/${dentistId}/authorization-credential`, {
+    role: "admin",
+    id: adminId,
+    body: { password: dentistAuth, confirmPassword: "NoMatch12345" },
+  });
+  assert.equal(mismatch.status, 400);
+  assert.equal(containsSecret(mismatch.json, dentistAuth), false);
 
   const otherSaved = await api("PUT", `/api/admin/dentists/${otherId}/authorization-credential`, {
     role: "admin",
@@ -361,4 +370,46 @@ test("Admin credential reveal stays masked until verified and never leaks hashes
   assert.ok(audits.rows.some((row) => row.action === "record_access_credential_revealed"));
   assert.ok(audits.rows.some((row) => row.action === "record_access_credential_reveal_failed"));
   assert.ok(audits.rows.some((row) => row.action === "record_access_credential_revoked"));
+
+  const previousKey = process.env.DENTIST_CREDENTIAL_ENCRYPTION_KEY;
+  const previousNode = process.env.NODE_ENV;
+  process.env.NODE_ENV = "production";
+  delete process.env.DENTIST_CREDENTIAL_ENCRYPTION_KEY;
+  const missing = await api("PUT", `/api/admin/dentists/${dentistId}/authorization-credential`, {
+    role: "admin",
+    id: adminId,
+    body: { password: "FreshAuth1234", confirmPassword: "FreshAuth1234" },
+  });
+  assert.equal(missing.status, 503);
+  assert.equal(missing.json.code, "ENCRYPTION_UNAVAILABLE");
+  const missingStatus = await api("GET", `/api/admin/dentists/${dentistId}/authorization-credential`, {
+    role: "admin",
+    id: adminId,
+  });
+  assert.equal(missingStatus.json.dentist.encryptionAvailable, false);
+  assert.equal(missingStatus.json.dentist.credentialConfigured, true);
+
+  process.env.DENTIST_CREDENTIAL_ENCRYPTION_KEY = "changeme";
+  const invalid = await api("PUT", `/api/admin/dentists/${dentistId}/authorization-credential`, {
+    role: "admin",
+    id: adminId,
+    body: { password: "FreshAuth1234", confirmPassword: "FreshAuth1234" },
+  });
+  assert.equal(invalid.status, 503);
+  assert.equal(invalid.json.code, "ENCRYPTION_UNAVAILABLE");
+
+  process.env.DENTIST_CREDENTIAL_ENCRYPTION_KEY = previousKey;
+  process.env.NODE_ENV = previousNode;
+  const persisted = await db.query(
+    `SELECT authorization_password_ciphertext FROM admin_portal_dentist_profiles WHERE user_id = $1`,
+    [dentistId]
+  );
+  assert.ok(persisted.rows[0].authorization_password_ciphertext);
+  assert.equal(persisted.rows[0].authorization_password_ciphertext.includes("FreshAuth1234"), false);
+  const restoredStatus = await api("GET", `/api/admin/dentists/${dentistId}/authorization-credential`, {
+    role: "admin",
+    id: adminId,
+  });
+  assert.equal(restoredStatus.json.dentist.encryptionAvailable, true);
+  assert.equal(restoredStatus.json.dentist.credentialConfigured, true);
 });

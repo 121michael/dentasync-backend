@@ -6,6 +6,7 @@ const { writeAdminAudit } = require("./adminAudit");
 const {
   encryptAuthorizationPassword,
   decryptAuthorizationPassword,
+  resolveCredentialEncryption,
 } = require("./dentistCredentialSecret");
 
 const GRANT_MINUTES = 30;
@@ -793,6 +794,7 @@ function presentAuthorization(row = {}) {
     credentialViewable:
       hasHash &&
       (row.has_recoverable_secret === true || Boolean(row.authorization_password_ciphertext)),
+    encryptionAvailable: resolveCredentialEncryption().available,
   };
 }
 

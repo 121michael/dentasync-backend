@@ -1922,7 +1922,7 @@ function createAdminPortalRouter({
       });
     } catch (error) {
       if (error.status) {
-        return res.status(error.status).json({ message: error.message });
+        return res.status(error.status).json({ message: error.message, code: error.code });
       }
       if (error.code === "42703" || isMissingRelation(error)) {
         return migrationUnavailable(res);

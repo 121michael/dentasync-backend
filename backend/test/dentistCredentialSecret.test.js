@@ -33,8 +33,26 @@ test("AES-GCM round-trip keeps the calendar password and refuses production with
 
   const production = resolveCredentialEncryption({ NODE_ENV: "production" });
   assert.equal(production.available, false);
+  assert.equal(production.code, "ENCRYPTION_UNAVAILABLE");
   assert.throws(
     () => encryptAuthorizationPassword("DelegateAuth1234", { NODE_ENV: "production" }),
-    (error) => error.status === 503 && error.message === KEY_UNAVAILABLE_MESSAGE
+    (error) =>
+      error.status === 503 &&
+      error.code === "ENCRYPTION_UNAVAILABLE" &&
+      error.message === KEY_UNAVAILABLE_MESSAGE
+  );
+
+  const weak = resolveCredentialEncryption({
+    NODE_ENV: "production",
+    DENTIST_CREDENTIAL_ENCRYPTION_KEY: "changeme",
+  });
+  assert.equal(weak.available, false);
+  assert.throws(
+    () =>
+      encryptAuthorizationPassword("DelegateAuth1234", {
+        NODE_ENV: "production",
+        DENTIST_CREDENTIAL_ENCRYPTION_KEY: "short-key",
+      }),
+    (error) => error.status === 503 && error.code === "ENCRYPTION_UNAVAILABLE"
   );
 });

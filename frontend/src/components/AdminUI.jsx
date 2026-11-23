@@ -19,7 +19,7 @@ export function AdminModal({ title, children, onClose, wide = false, className =
       >
         <header className="admin-modal__header">
           <h2>{title}</h2>
-          <button className="icon-button" onClick={onClose} aria-label={`Close ${title}`}>
+          <button type="button" className="icon-button" onClick={onClose} aria-label={`Close ${title}`}>
             <X size={18} />
           </button>
         </header>

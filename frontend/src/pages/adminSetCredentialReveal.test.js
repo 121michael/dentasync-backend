@@ -18,5 +18,13 @@ test("Set Credential shows a fixed mask and verifies the Admin login password", 
   assert.match(page, /Reset this credential to enable viewing/);
   assert.doesNotMatch(page, /localStorage\.setItem\(["'][^"']*unlock/);
   assert.match(page, /data-credential-mask="true"/);
-  assert.match(page, /typedCredential !== CREDENTIAL_MASK/);
+  assert.match(page, /revealedPassword \|\| CREDENTIAL_MASK/);
+  assert.match(page, /Save dentist details/);
+  assert.match(page, /Save credential/);
+  assert.match(page, /Not configured/);
+  assert.match(page, /Credential saving is temporarily unavailable/);
+  assert.match(page, /encryptionAvailable/);
+  assert.match(page, /admin-form--manage-user__body/);
+  assert.match(page, /type="button"[\s\S]*admin-set-credential__toggle/);
+  assert.doesNotMatch(page, /setAdminDentistAuthorizationCredential\(editing\.id[\s\S]{0,80}updater\(/);
 });

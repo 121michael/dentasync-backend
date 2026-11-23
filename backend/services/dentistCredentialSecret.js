@@ -12,9 +12,10 @@ let warnedDevelopmentKey = false;
 const KEY_UNAVAILABLE_MESSAGE =
   "Authorization credential encryption is not configured. Set DENTIST_CREDENTIAL_ENCRYPTION_KEY.";
 
-function httpError(message, status) {
+function httpError(message, status, extra = {}) {
   const error = new Error(message);
   error.status = status;
+  Object.assign(error, extra);
   return error;
 }
 
@@ -38,7 +39,7 @@ function resolveCredentialEncryption(env = process.env) {
   let warned = false;
   if (!material || isWeakSecret(material)) {
     if (production) {
-      return { available: false, currentId, keys: new Map(), warned: false };
+      return { available: false, currentId, keys: new Map(), warned: false, code: "ENCRYPTION_UNAVAILABLE" };
     }
     material = DEV_FALLBACK_KEY;
     warned = true;
@@ -61,7 +62,7 @@ function resolveCredentialEncryption(env = process.env) {
 function requireCredentialEncryption(env = process.env) {
   const resolved = resolveCredentialEncryption(env);
   if (!resolved.available) {
-    throw httpError(KEY_UNAVAILABLE_MESSAGE, 503);
+    throw httpError(KEY_UNAVAILABLE_MESSAGE, 503, { code: "ENCRYPTION_UNAVAILABLE" });
   }
   if (resolved.warned && !warnedDevelopmentKey) {
     warnedDevelopmentKey = true;
