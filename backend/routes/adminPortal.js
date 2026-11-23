@@ -292,6 +292,10 @@ function mapAccount(row, extras = {}) {
     payload.authorizationCredentialStatus = extras.authorizationCredentialStatus || "none";
     payload.setupRequired = extras.setupRequired === true;
     payload.credentialConfigured = extras.credentialConfigured === true;
+    payload.credentialViewable = extras.credentialViewable === true;
+    if (extras.encryptionAvailable !== undefined) {
+      payload.encryptionAvailable = extras.encryptionAvailable !== false;
+    }
   }
   if (row.catalog_dentist_id !== undefined || extras.catalogDentistId !== undefined) {
     payload.catalogDentistId = extras.catalogDentistId ?? row.catalog_dentist_id ?? null;
@@ -1724,7 +1728,8 @@ function createAdminPortalRouter({
 
     const dentistBranchChange = clinicBranches.assignmentRequested(req.body);
     const approveFlagProvided = Object.prototype.hasOwnProperty.call(req.body || {}, "canApproveCrossBranchAccess");
-    if (!fields.length && !specializationProvided && !scheduleNotesProvided && !licenseProvided && !verifiedProvided && !dentistBranchChange && !approveFlagProvided) {
+    const authorizationReplacement = recordAccess.readAuthorizationReplacement(req.body || {});
+    if (!fields.length && !specializationProvided && !scheduleNotesProvided && !licenseProvided && !verifiedProvided && !dentistBranchChange && !approveFlagProvided && !authorizationReplacement) {
       return res.status(400).json({ message: "Provide at least one dentist field to update." });
     }
     await ensureLicenseVerifiedColumn();
@@ -1822,6 +1827,16 @@ function createAdminPortalRouter({
         [String(dentist.id)]
       );
 
+      let credentialWasConfigured = false;
+      if (authorizationReplacement) {
+        const previousAuthorization = await recordAccess.loadDentistAuthorization(db, dentist.id);
+        credentialWasConfigured = previousAuthorization.credentialConfigured === true;
+        await recordAccess.setAuthorizationCredential(db, req.user, dentist.id, authorizationReplacement, {
+          queryable: client,
+          skipAudit: true,
+        });
+      }
+
       if (Object.prototype.hasOwnProperty.call(req.body || {}, "canApproveCrossBranchAccess")) {
         await client.query("SAVEPOINT approve_flag");
         try {
@@ -1848,6 +1863,21 @@ function createAdminPortalRouter({
 
       await client.query("COMMIT");
       transactionOpen = false;
+
+      if (authorizationReplacement) {
+        await writeAdminAudit(db, {
+          actorId: req.user?.id,
+          actorName: `${req.user?.first_name || req.user?.firstName || ""} ${req.user?.last_name || req.user?.lastName || ""}`.trim() || null,
+          actorRole: req.user?.role || "admin",
+          action: credentialWasConfigured ? "record_access_credential_reset" : "record_access_credential_set",
+          targetType: "dentist",
+          targetId: String(dentist.id),
+          targetLabel: `${dentist.first_name || ""} ${dentist.last_name || ""}`.trim() || null,
+          detail: credentialWasConfigured
+            ? "Authorization credential replaced. Permission preserved."
+            : "Authorization credential configured. Cross-branch approval permission enabled.",
+        });
+      }
 
       const authorization = await recordAccess.loadDentistAuthorization(db, dentist.id);
       const [withBranches] = await clinicBranches.attachAssignments(db, [

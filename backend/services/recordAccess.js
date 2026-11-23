@@ -25,7 +25,8 @@ const REVEAL_TICKET_MS = 30 * 1000;
 const REVEAL_LEGACY_MESSAGE = "Reset this credential to enable viewing.";
 const REVEAL_BIND_MESSAGE = "This verification is not valid for this dentist.";
 const ADMIN_PASSWORD_WRONG = "Administrator password is incorrect.";
-const SETUP_REQUIRED_MESSAGE = "Authorization credential setup is required.";
+const SETUP_REQUIRED_MESSAGE =
+  "Authorization credential setup is required. An administrator must save this dentist's authorization password with Save credential.";
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const authFailures = new Map();
 const revealTickets = new Map();
@@ -1035,7 +1036,17 @@ async function assertActiveDentist(db, dentistId) {
   return dentist;
 }
 
-async function setAuthorizationCredential(db, admin, dentistId, { password, confirmPassword }) {
+function readAuthorizationReplacement(body = {}) {
+  const password = typeof body.authorizationPassword === "string" ? body.authorizationPassword : "";
+  const confirm =
+    typeof body.authorizationConfirmPassword === "string" ? body.authorizationConfirmPassword : password;
+  if (!password && !confirm) return null;
+  return { password, confirmPassword: confirm };
+}
+
+async function setAuthorizationCredential(db, admin, dentistId, { password, confirmPassword }, options = {}) {
+  const queryable = options.queryable || db;
+  const skipAudit = options.skipAudit === true;
   const plain = String(password || "");
   const confirm = String(confirmPassword == null ? password : confirmPassword);
   if (plain.length < AUTH_PASSWORD_MIN) {
@@ -1055,7 +1066,7 @@ async function setAuthorizationCredential(db, admin, dentistId, { password, conf
   const previous = await loadDentistAuthorization(db, dentist.id);
   const hash = await bcrypt.hash(plain, AUTH_HASH_ROUNDS);
   try {
-    await db.query(
+    await queryable.query(
       `INSERT INTO admin_portal_dentist_profiles (
          user_id, can_approve_cross_branch_access, authorization_password_hash, authorization_credential_status,
          authorization_password_ciphertext, authorization_secret_key_id, updated_at
@@ -1075,19 +1086,21 @@ async function setAuthorizationCredential(db, admin, dentistId, { password, conf
     }
     throw error;
   }
-  const action = previous.credentialConfigured ? "record_access_credential_reset" : "record_access_credential_set";
-  await writeAdminAudit(db, {
-    actorId: admin?.id,
-    actorName: `${admin?.first_name || admin?.firstName || ""} ${admin?.last_name || admin?.lastName || ""}`.trim() || null,
-    actorRole: admin?.role || "admin",
-    action,
-    targetType: "dentist",
-    targetId: String(dentist.id),
-    targetLabel: `${dentist.first_name || ""} ${dentist.last_name || ""}`.trim() || null,
-    detail: previous.credentialConfigured
-      ? "Authorization credential replaced. Permission preserved."
-      : "Authorization credential configured. Cross-branch approval permission enabled.",
-  });
+  if (!skipAudit) {
+    const action = previous.credentialConfigured ? "record_access_credential_reset" : "record_access_credential_set";
+    await writeAdminAudit(db, {
+      actorId: admin?.id,
+      actorName: `${admin?.first_name || admin?.firstName || ""} ${admin?.last_name || admin?.lastName || ""}`.trim() || null,
+      actorRole: admin?.role || "admin",
+      action,
+      targetType: "dentist",
+      targetId: String(dentist.id),
+      targetLabel: `${dentist.first_name || ""} ${dentist.last_name || ""}`.trim() || null,
+      detail: previous.credentialConfigured
+        ? "Authorization credential replaced. Permission preserved."
+        : "Authorization credential configured. Cross-branch approval permission enabled.",
+    });
+  }
   return loadDentistAuthorization(db, dentist.id);
 }
 
@@ -1384,7 +1397,10 @@ async function unlockOwnRecordAccess(db, req, { record, licenseNumber, password 
     profile = await loadDentistUnlockProfile(db, dentistId);
   } catch (error) {
     if (error.code === "42703" || error.code === "42P01") {
-      throw httpError("Authorization credential setup is required.", 403);
+      throw httpError(
+        "Record access cannot be verified because the authorization credential schema is not installed.",
+        503
+      );
     }
     throw error;
   }
@@ -1843,6 +1859,7 @@ module.exports = {
   attachDentistAuthorization,
   loadDentistAuthorization,
   setAuthorizationCredential,
+  readAuthorizationReplacement,
   revokeAuthorizationCredential,
   verifyAdminForCredentialReveal,
   revealAuthorizationCredential,

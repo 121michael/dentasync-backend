@@ -101,17 +101,29 @@ test("Set Credential stays masked and opens Admin verification", { timeout: 1800
       },
     });
   });
-  app.patch("/api/admin/dentists/:id", (_req, res) =>
-    res.json({
+  app.patch("/api/admin/dentists/:id", (req, res) => {
+    if (req.body?.authorizationPassword || req.body?.authorizationConfirmPassword) {
+      if (String(req.body.authorizationPassword || "") !== String(req.body.authorizationConfirmPassword || "")) {
+        return res.status(400).json({ message: "Authorization password and confirmation do not match." });
+      }
+      if (String(req.body.authorizationPassword || "").length < 10) {
+        return res.status(400).json({ message: "Authorization password must be at least 10 characters long." });
+      }
+      credentialStatus = "configured";
+    }
+    if (req.body?.licenseNumber !== undefined) dentist.licenseNumber = req.body.licenseNumber;
+    if (req.body?.licenseVerified !== undefined) dentist.licenseVerified = Boolean(req.body.licenseVerified);
+    return res.json({
       dentist: {
         ...dentist,
-        lastName: "Updated",
+        lastName: req.body?.lastName || dentist.lastName,
         authorizationCredentialStatus: credentialStatus,
         credentialConfigured: credentialStatus === "configured",
+        credentialViewable: credentialStatus === "configured",
         encryptionAvailable,
       },
-    })
-  );
+    });
+  });
   app.get("/api/admin/dentists", (_req, res) => res.json({ dentists: [dentist] }));
   app.get("/api/admin/staff", (_req, res) => res.json({ staff: [] }));
   app.get("/api/admin/registrations/pending", (_req, res) => res.json({ requests: [] }));
@@ -270,9 +282,8 @@ test("Set Credential stays masked and opens Admin verification", { timeout: 1800
     [...document.querySelectorAll("button")].find((button) => /Reset credential/i.test(button.textContent || ""))?.click();
   });
   await page.waitForFunction(() => document.body.innerText.includes("Save new credential"));
-  await page.type('input[autocomplete="new-password"]', "ShortPwd1");
-  const confirm = await page.$$('input[autocomplete="new-password"]');
-  if (confirm[1]) await confirm[1].type("DifferentPwd9");
+  await page.type('input[name="ds-authorization-password"]', "ShortPwd1");
+  await page.type('input[name="ds-authorization-confirm"]', "DifferentPwd9");
   await page.evaluate(() => {
     [...document.querySelectorAll("button")].find((button) => /Save new credential/i.test(button.textContent || ""))?.click();
   });

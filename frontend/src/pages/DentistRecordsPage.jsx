@@ -359,6 +359,7 @@ function AccessRecordHistory({ patientId, onAuthorized, grantExpiresAt, requestO
       {open ? (
         <DentistModal title="Request Record Access" className="dentist-modal--request-access" onClose={closeModal}>
           <form className="dentist-request-access" autoComplete="off" onSubmit={unlockRecords}>
+            <input type="text" name="username" autoComplete="username" hidden readOnly tabIndex={-1} aria-hidden="true" value="" />
             <label>
               Dentist Name
               <input value={dentistName} readOnly tabIndex={-1} autoComplete="off" />
@@ -368,6 +369,7 @@ function AccessRecordHistory({ patientId, onAuthorized, grantExpiresAt, requestO
               <input
                 value={licenseNumber}
                 autoComplete="off"
+                name="ds-record-access-license"
                 required
                 onChange={(event) => setLicenseNumber(event.target.value)}
               />
@@ -377,7 +379,8 @@ function AccessRecordHistory({ patientId, onAuthorized, grantExpiresAt, requestO
               <input
                 type="password"
                 value={password}
-                autoComplete="new-password"
+                name="ds-record-access-password"
+                autoComplete="off"
                 required
                 onChange={(event) => setPassword(event.target.value)}
               />
