@@ -27,4 +27,7 @@ test("Set Credential shows a fixed mask and verifies the Admin login password", 
   assert.match(page, /admin-form--manage-user__body/);
   assert.match(page, /type="button"[\s\S]*admin-set-credential__toggle/);
   assert.doesNotMatch(page, /setAdminDentistAuthorizationCredential\(editing\.id[\s\S]{0,80}updater\(/);
+  assert.match(page, /authorizationPassword/);
+  assert.match(page, /authorizationConfirmPassword/);
+  assert.match(page, /typedPassword === CREDENTIAL_MASK/);
 });

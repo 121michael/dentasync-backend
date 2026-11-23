@@ -462,9 +462,25 @@ export function AdminManageUsersPage() {
     if (tab === "dentist" && form.licenseVerified && !String(form.licenseNumber || "").trim()) {
       errors.licenseNumber = "Enter this dentist's own license number before marking it verified. Do not use another dentist's number.";
     }
+    const typedPassword = String(authPassword || "");
+    const typedConfirm = String(authConfirm || "");
+    const replacingCredential = tab === "dentist" && editing && Boolean(typedPassword || typedConfirm);
+    if (replacingCredential) {
+      if (typedPassword === CREDENTIAL_MASK || /^•+$/.test(typedPassword)) {
+        errors.authPassword = "Enter a new authorization password. The masked indicator is not a password.";
+      } else if (form.encryptionAvailable === false) {
+        errors.authPassword = "Credential saving is temporarily unavailable. Set DENTIST_CREDENTIAL_ENCRYPTION_KEY on the API server, then reload.";
+      } else if (typedPassword.length < 10) {
+        errors.authPassword = "Authorization password must be at least 10 characters long.";
+      }
+      if (typedPassword !== typedConfirm) {
+        errors.authConfirm = "Authorization password and confirmation do not match.";
+      }
+    }
     setFieldErrors(errors);
     setPhoneError(errors.phone || "");
     if (Object.keys(errors).length) {
+      if (errors.authPassword || errors.authConfirm) setCredentialError(errors.authPassword || errors.authConfirm);
       pushToast(Object.values(errors)[0], "error");
       return;
     }
@@ -479,6 +495,11 @@ export function AdminManageUsersPage() {
       delete payload.credentialViewable;
       delete payload.encryptionAvailable;
       delete payload.canApproveCrossBranchAccess;
+      delete payload.password;
+      if (replacingCredential) {
+        payload.authorizationPassword = typedPassword;
+        payload.authorizationConfirmPassword = typedConfirm;
+      }
     }
     saveLock.current = true;
     setBusy(true);
@@ -486,10 +507,15 @@ export function AdminManageUsersPage() {
       if (editing) {
         const updater = tab === "staff" ? api.updateAdminStaff : api.updateAdminDentist;
         const updated = await updater(editing.id, payload);
-        if (tab === "dentist" && updated?.dentist?.authorizationCredentialStatus) {
+        if (replacingCredential && !updated?.dentist?.credentialConfigured) {
+          setCredentialError("Authorization credential was not saved. The previous credential is unchanged.");
+          pushToast("Authorization credential was not saved.", "error");
+          return;
+        }
+        if (tab === "dentist" && updated?.dentist) {
           applyAuthorizationToEditor(updated.dentist);
         }
-        pushToast("Account updated successfully.");
+        pushToast(replacingCredential ? "Credential set." : "Account updated successfully.");
       } else {
         const creator = tab === "staff" ? api.createAdminStaff : api.createAdminDentist;
         const response = await creator(payload);
@@ -1329,7 +1355,7 @@ export function AdminManageUsersPage() {
           wide
           className="admin-modal--manage-user"
         >
-          <form className="admin-form admin-form--manage-user" onSubmit={saveUser} noValidate>
+          <form className="admin-form admin-form--manage-user" onSubmit={saveUser} noValidate autoComplete="off">
             <div className="admin-form--manage-user__body">
             <div className="admin-form--manage-user__grid">
               <label>
@@ -1363,6 +1389,7 @@ export function AdminManageUsersPage() {
                 <input
                   required
                   type="email"
+                  autoComplete="off"
                   value={form.email}
                   aria-invalid={fieldErrors.email ? "true" : "false"}
                   onChange={(e) => {
@@ -1403,9 +1430,10 @@ export function AdminManageUsersPage() {
               {!editing ? (
                 <label className="admin-form--manage-user__full">
                   Temporary password
-                  <input
-                    type="password"
-                    value={form.password}
+                    <input
+                      type="password"
+                      autoComplete="new-password"
+                      value={form.password}
                     aria-invalid={fieldErrors.password ? "true" : "false"}
                     onChange={(e) => {
                       setForm({ ...form, password: e.target.value });
@@ -1617,7 +1645,10 @@ export function AdminManageUsersPage() {
                               <input
                                 type={showAuthPassword ? "text" : "password"}
                                 value={authPassword}
-                                autoComplete="new-password"
+                                name="ds-authorization-password"
+                                autoComplete="off"
+                                data-1p-ignore="true"
+                                data-lpignore="true"
                                 aria-invalid={fieldErrors.authPassword ? "true" : "false"}
                                 onChange={(event) => {
                                   setAuthPassword(event.target.value);
@@ -1643,7 +1674,10 @@ export function AdminManageUsersPage() {
                             <input
                               type={showAuthPassword ? "text" : "password"}
                               value={authConfirm}
-                              autoComplete="new-password"
+                              name="ds-authorization-confirm"
+                              autoComplete="off"
+                              data-1p-ignore="true"
+                              data-lpignore="true"
                               aria-invalid={fieldErrors.authConfirm ? "true" : "false"}
                               onChange={(event) => {
                                 setAuthConfirm(event.target.value);

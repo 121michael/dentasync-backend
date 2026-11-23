@@ -209,6 +209,63 @@ test("Admin credential reveal stays masked until verified and never leaks hashes
   assert.equal(afterRename.rows[0].authorization_password_hash, stored.rows[0].authorization_password_hash);
   assert.equal(afterRename.rows[0].authorization_password_ciphertext, stored.rows[0].authorization_password_ciphertext);
 
+  const licenseOnly = await api("PATCH", `/api/admin/dentists/${dentistId}`, {
+    role: "admin",
+    id: adminId,
+    body: { licenseNumber: "PRC-1001", licenseVerified: true },
+  });
+  assert.equal(licenseOnly.status, 200, licenseOnly.json.message);
+  assert.equal(licenseOnly.json.dentist.licenseNumber, "PRC-1001");
+  assert.equal(licenseOnly.json.dentist.credentialConfigured, true);
+  const afterLicenseOnly = await db.query(
+    `SELECT authorization_password_hash, license_number, license_verified FROM admin_portal_dentist_profiles WHERE user_id = $1`,
+    [dentistId]
+  );
+  assert.equal(afterLicenseOnly.rows[0].authorization_password_hash, stored.rows[0].authorization_password_hash);
+  assert.equal(afterLicenseOnly.rows[0].license_number, "PRC-1001");
+  assert.equal(afterLicenseOnly.rows[0].license_verified, true);
+
+  const combined = await api("PATCH", `/api/admin/dentists/${otherId}`, {
+    role: "admin",
+    id: adminId,
+    body: {
+      firstName: "Omar",
+      lastName: "Other",
+      licenseNumber: "PRC-2002",
+      licenseVerified: true,
+      authorizationPassword: otherAuth,
+      authorizationConfirmPassword: otherAuth,
+    },
+  });
+  assert.equal(combined.status, 200, combined.json.message || JSON.stringify(combined.json));
+  assert.equal(combined.json.dentist.credentialConfigured, true);
+  assert.equal(combined.json.dentist.licenseNumber, "PRC-2002");
+  assert.equal(containsSecret(combined.json, otherAuth), false);
+  const combinedStored = await db.query(
+    `SELECT authorization_password_hash, license_number FROM admin_portal_dentist_profiles WHERE user_id = $1`,
+    [otherId]
+  );
+  assert.ok(combinedStored.rows[0].authorization_password_hash);
+  assert.equal(combinedStored.rows[0].license_number, "PRC-2002");
+
+  const failedTogether = await api("PATCH", `/api/admin/dentists/${otherId}`, {
+    role: "admin",
+    id: adminId,
+    body: {
+      licenseNumber: "PRC-SHOULD-NOT-SAVE",
+      licenseVerified: true,
+      authorizationPassword: "short",
+      authorizationConfirmPassword: "short",
+    },
+  });
+  assert.equal(failedTogether.status, 400);
+  const afterFailedTogether = await db.query(
+    `SELECT license_number, authorization_password_hash FROM admin_portal_dentist_profiles WHERE user_id = $1`,
+    [otherId]
+  );
+  assert.equal(afterFailedTogether.rows[0].license_number, "PRC-2002");
+  assert.equal(afterFailedTogether.rows[0].authorization_password_hash, combinedStored.rows[0].authorization_password_hash);
+
   const mismatch = await api("PUT", `/api/admin/dentists/${dentistId}/authorization-credential`, {
     role: "admin",
     id: adminId,
