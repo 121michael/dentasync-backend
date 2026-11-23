@@ -23,6 +23,19 @@ const QUEUE_ACTIONS = [
   { value: "skipped", label: "Skipped" },
 ];
 
+function isClosedDayStatus(status) {
+  return status === "not_served" || status === "needs_review";
+}
+
+function isFinishedQueueStatus(status) {
+  return (
+    status === "completed" ||
+    status === "no_show" ||
+    status === "skipped" ||
+    isClosedDayStatus(status)
+  );
+}
+
 function matchesFocus(entry, focus) {
   if (!focus) return false;
   const needle = String(focus).trim().toLowerCase();
@@ -309,26 +322,27 @@ export function StaffQueuePage() {
                         <StaffStatusBadge status={entry.status} />
                       </td>
                       <td>
-                        {entry.status === "completed" || entry.status === "no_show" || entry.status === "skipped"
-                          ? "—"
-                          : durationFromEntry(entry)}
+                        {isFinishedQueueStatus(entry.status) ? "—" : durationFromEntry(entry)}
                       </td>
                       <td>
-                        {entry.status === "completed" || entry.status === "no_show" || entry.status === "skipped"
+                        {isFinishedQueueStatus(entry.status)
                           ? "—"
                           : entry.status === "in_chair" || entry.status === "in_treatment"
                           ? "Now"
                           : waitRangeFromEntry(entry)}
                       </td>
                       <td>
-                        {entry.status === "completed" || entry.status === "no_show" || entry.status === "skipped"
+                        {isFinishedQueueStatus(entry.status)
                           ? "—"
                           : entry.status === "in_chair" || entry.status === "in_treatment"
                           ? "Now"
                           : callRangeFromEntry(entry)}
                       </td>
                       <td>
-                        <label className="staff-inline-select">
+                        {isClosedDayStatus(entry.status) ? (
+                          <StaffStatusBadge status={entry.status} />
+                        ) : (
+                          <label className="staff-inline-select">
                           <span className="sr-only">Update queue status</span>
                           <select
                             value={
@@ -349,7 +363,8 @@ export function StaffQueuePage() {
                               </option>
                             ))}
                           </select>
-                        </label>
+                          </label>
+                        )}
                         <button
                           type="button"
                           className="button button--secondary button--compact"

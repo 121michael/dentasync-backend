@@ -13,6 +13,8 @@ const statusLabelFallback = {
   cancelled: "Cancelled",
   no_show: "Skipped",
   skipped: "Skipped",
+  not_served: "Not Served",
+  needs_review: "Needs Review",
   confirmed: "Confirmed",
   pending: "Pending",
   scheduled: "Scheduled",

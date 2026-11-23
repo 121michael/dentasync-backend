@@ -1845,7 +1845,7 @@ async function loadAuthorizedPatientContext(db, userId, { includeWait = true } =
        FROM patient_portal_queue_entries
        WHERE user_id = $1
          AND (checked_in_at AT TIME ZONE $2)::date = (CURRENT_TIMESTAMP AT TIME ZONE $2)::date
-         AND status NOT IN ('completed', 'no_show')
+         AND status NOT IN ('completed', 'no_show', 'not_served', 'needs_review')
        ORDER BY checked_in_at DESC
        LIMIT 1`,
       [String(userId), tz]
@@ -1870,7 +1870,7 @@ async function loadAuthorizedPatientContext(db, userId, { includeWait = true } =
            FROM patient_portal_queue_entries
            WHERE user_id = $1
              AND DATE(checked_in_at) = CURRENT_DATE
-             AND status NOT IN ('completed', 'no_show')
+             AND status NOT IN ('completed', 'no_show', 'not_served', 'needs_review')
            ORDER BY checked_in_at DESC
            LIMIT 1`,
           [String(userId)]

@@ -29,6 +29,8 @@ function queueStatusSql(alias, key) {
   if (key === "in_treatment") return `${alias}.status IN ('preparing', 'dentist')`;
   if (key === "completed") return `${alias}.status = 'completed'`;
   if (key === "no_show") return `${alias}.status IN ('no_show', 'skipped')`;
+  if (key === "not_served") return `${alias}.status = 'not_served'`;
+  if (key === "needs_review") return `${alias}.status = 'needs_review'`;
   return null;
 }
 

@@ -1679,7 +1679,7 @@ async function findActiveQueueForUser(db, userId, { branchId = null } = {}) {
        FROM patient_portal_queue_entries
        WHERE user_id = $1
          AND (checked_in_at AT TIME ZONE $2)::date = (CURRENT_TIMESTAMP AT TIME ZONE $2)::date
-         AND status NOT IN ('completed', 'no_show')
+         AND status NOT IN ('completed', 'no_show', 'not_served', 'needs_review')
          ${scoped ? "AND branch_id = $3" : ""}
        ORDER BY id DESC
        LIMIT 1`,
@@ -1695,7 +1695,7 @@ async function findActiveQueueForUser(db, userId, { branchId = null } = {}) {
            LEFT JOIN patient_portal_appointments AS appointment ON appointment.id = queue.appointment_id
            WHERE queue.user_id = $1
              AND DATE(queue.checked_in_at) = CURRENT_DATE
-             AND queue.status NOT IN ('completed', 'no_show')
+             AND queue.status NOT IN ('completed', 'no_show', 'not_served', 'needs_review')
              ${scoped ? "AND (queue.branch_id = $2 OR appointment.branch_id = $2)" : ""}
            ORDER BY queue.id DESC
            LIMIT 1`,
@@ -1760,6 +1760,62 @@ async function listTreatmentsForQueueEntries(db, queueEntryIds) {
     return grouped;
   } catch (error) {
     if (error?.code === "42P01" || error?.code === "42703") return new Map();
+    throw error;
+  }
+}
+
+async function loadQueueEntryForRecord(db, { queueEntryId, linkedUserId, branchId = null } = {}) {
+  if (!queueEntryId || !linkedUserId) return null;
+  const scoped = branchId != null && branchId !== "";
+  try {
+    const result = await db.query(
+      `SELECT id, token, appointment_id, status, position, user_id, branch_id, checked_in_at, reviewed_at
+       FROM patient_portal_queue_entries
+       WHERE id = $1
+         AND user_id = $2
+         ${scoped ? "AND branch_id = $3" : ""}
+       LIMIT 1`,
+      scoped ? [queueEntryId, String(linkedUserId), branchId] : [queueEntryId, String(linkedUserId)]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    if (error?.code === "42P01") return null;
+    throw error;
+  }
+}
+
+async function listNeedsReviewVisitsForRecord(db, record, { branchId = null } = {}) {
+  if (!record?.linkedUserId) return [];
+  const tz = process.env.CLINIC_TIMEZONE || "Asia/Manila";
+  const scoped = branchId != null && branchId !== "";
+  try {
+    const result = await db.query(
+      `SELECT id, token, appointment_id, status, position, user_id, branch_id, checked_in_at, reviewed_at,
+              (checked_in_at AT TIME ZONE $2)::date AS visit_date
+       FROM patient_portal_queue_entries
+       WHERE user_id = $1
+         AND status = 'needs_review'
+         ${scoped ? "AND branch_id = $3" : ""}
+       ORDER BY checked_in_at DESC, id DESC`,
+      scoped ? [String(record.linkedUserId), tz, branchId] : [String(record.linkedUserId), tz]
+    );
+    const treatments = await listTreatmentsForQueueEntries(
+      db,
+      result.rows.map((row) => Number(row.id))
+    );
+    return result.rows.map((row) => ({
+      queueEntryId: Number(row.id),
+      appointmentId: row.appointment_id ? Number(row.appointment_id) : null,
+      token: row.token || null,
+      status: row.status,
+      visitDate: row.visit_date ? String(row.visit_date).slice(0, 10) : null,
+      checkedInAt: row.checked_in_at,
+      reviewedAt: row.reviewed_at || null,
+      position: row.position != null ? Number(row.position) : null,
+      procedures: treatments.get(Number(row.id)) || [],
+    }));
+  } catch (error) {
+    if (error?.code === "42P01" || error?.code === "42703") return [];
     throw error;
   }
 }
@@ -2041,6 +2097,8 @@ module.exports = {
   listTreatmentsForVisit,
   listTreatmentsForQueueEntries,
   listCurrentVisitForRecord,
+  listNeedsReviewVisitsForRecord,
+  loadQueueEntryForRecord,
   findActiveQueueForUser,
   nextVisitSequence,
   promoteNextVisitProcedure,

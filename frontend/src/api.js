@@ -504,6 +504,8 @@ export const api = {
     }),
   addDentistTreatment: (patientId, body) =>
     request(`/dentist/patients/${patientId}/treatments`, { method: "POST", body }),
+  reviewDentistQueueVisit: (patientId, queueId, body) =>
+    request(`/dentist/patients/${patientId}/queue-visits/${queueId}/review`, { method: "POST", body }),
   updateDentistTreatment: (patientId, treatmentId, body) =>
     request(`/dentist/patients/${patientId}/treatments/${treatmentId}`, { method: "PUT", body }),
   deleteDentistTreatment: (patientId, treatmentId) =>
