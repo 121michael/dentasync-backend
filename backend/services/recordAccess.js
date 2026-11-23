@@ -93,35 +93,106 @@ async function authorizedBranchIds(db, userId) {
   }
 }
 
-async function qualifyingRelationship(db, dentist, record) {
+const NO_TREATMENT_RELATIONSHIP_MESSAGE =
+  "A confirmed appointment or an active encounter with this patient is required before the chart can be opened.";
+
+function dentistMatchParams(dentist) {
+  const ids = [];
+  const names = [];
+  if (dentist?.id != null) ids.push(String(dentist.id));
+  if (dentist?.catalog_dentist_id) ids.push(String(dentist.catalog_dentist_id));
+  const fullName = `${dentist?.first_name || ""} ${dentist?.last_name || ""}`.trim().toLowerCase();
+  if (fullName) {
+    names.push(fullName);
+    names.push(`dr. ${fullName}`);
+  }
+  return { ids, names };
+}
+
+function appendEligibilityClause(params, { branchId, dentist = null } = {}) {
+  if (branchId == null || branchId === "") return "FALSE";
+  params.push(String(branchId));
+  const branchP = params.length;
+  params.push(OPEN_APPOINTMENT_STATUSES);
+  const openP = params.length;
+  params.push(ACTIVE_ENCOUNTER_STATUSES);
+  const encounterP = params.length;
+  let dentistSql = "";
+  if (dentist) {
+    const { ids, names } = dentistMatchParams(dentist);
+    params.push(ids);
+    const idP = params.length;
+    params.push(names);
+    const nameP = params.length;
+    dentistSql = `AND (
+      (cardinality($${idP}::text[]) > 0 AND appointment.dentist_id::text = ANY($${idP}::text[]))
+      OR (cardinality($${nameP}::text[]) > 0 AND LOWER(TRIM(appointment.dentist_name)) = ANY($${nameP}::text[]))
+    )`;
+  }
+  return `(
+    record.linked_user_id IS NOT NULL
+    AND (
+      EXISTS (
+        SELECT 1
+        FROM patient_portal_appointments AS appointment
+        WHERE appointment.user_id::text = record.linked_user_id::text
+          AND appointment.branch_id::text = $${branchP}
+          AND appointment.status = ANY($${openP}::text[])
+          ${dentistSql}
+      )
+      OR EXISTS (
+        SELECT 1
+        FROM patient_portal_queue_entries AS queue
+        JOIN patient_portal_appointments AS appointment ON appointment.id = queue.appointment_id
+        WHERE queue.user_id::text = record.linked_user_id::text
+          AND queue.status = ANY($${encounterP}::text[])
+          AND appointment.status NOT IN ('cancelled', 'no_show', 'rescheduled', 'pending')
+          AND appointment.branch_id::text = $${branchP}
+          ${dentistSql}
+      )
+    )
+  )`;
+}
+
+async function loadQualifyingRows(db, linkedUserId, branches) {
+  const appointments = await db.query(
+    `SELECT id, branch_id, status, dentist_id, dentist_name
+     FROM patient_portal_appointments
+     WHERE user_id = $1
+       AND status = ANY($2::text[])
+       AND branch_id::text = ANY($3::text[])`,
+    [String(linkedUserId), OPEN_APPOINTMENT_STATUSES, branches]
+  );
+  const encounters = await db.query(
+    `SELECT appointment.id, appointment.branch_id, appointment.dentist_id, appointment.dentist_name
+     FROM patient_portal_queue_entries AS queue
+     JOIN patient_portal_appointments AS appointment ON appointment.id = queue.appointment_id
+     WHERE queue.user_id = $1
+       AND queue.status = ANY($2::text[])
+       AND appointment.status NOT IN ('cancelled', 'no_show', 'rescheduled', 'pending')
+       AND appointment.branch_id::text = ANY($3::text[])`,
+    [String(linkedUserId), ACTIVE_ENCOUNTER_STATUSES, branches]
+  );
+  return [...appointments.rows, ...encounters.rows];
+}
+
+async function qualifyingRelationship(db, dentist, record, { branchId } = {}) {
   const linkedUserId = record?.linkedUserId || record?.linked_user_id || null;
   if (!dentist?.id || !linkedUserId) {
     return { allowed: false, branchIds: [] };
   }
-  const branches = await authorizedBranchIds(db, dentist.id);
+  let branches = await authorizedBranchIds(db, dentist.id);
   if (!branches.length) return { allowed: false, branchIds: [] };
+  if (branchId != null && branchId !== "") {
+    if (!branches.includes(String(branchId))) {
+      return { allowed: false, branchIds: [] };
+    }
+    branches = [String(branchId)];
+  }
 
-  let appointments;
-  let encounters;
+  let rows;
   try {
-    appointments = await db.query(
-      `SELECT id, branch_id, status, dentist_id, dentist_name
-       FROM patient_portal_appointments
-       WHERE user_id = $1
-         AND status = ANY($2::text[])
-         AND branch_id::text = ANY($3::text[])`,
-      [String(linkedUserId), OPEN_APPOINTMENT_STATUSES, branches]
-    );
-    encounters = await db.query(
-      `SELECT appointment.id, appointment.branch_id, appointment.dentist_id, appointment.dentist_name
-       FROM patient_portal_queue_entries AS queue
-       JOIN patient_portal_appointments AS appointment ON appointment.id = queue.appointment_id
-       WHERE queue.user_id = $1
-         AND queue.status = ANY($2::text[])
-         AND appointment.status NOT IN ('cancelled', 'no_show', 'rescheduled', 'pending')
-         AND appointment.branch_id::text = ANY($3::text[])`,
-      [String(linkedUserId), ACTIVE_ENCOUNTER_STATUSES, branches]
-    );
+    rows = await loadQualifyingRows(db, linkedUserId, branches);
   } catch (error) {
     if (error.code === "42P01" || error.code === "42703") {
       return { allowed: false, branchIds: [] };
@@ -130,10 +201,35 @@ async function qualifyingRelationship(db, dentist, record) {
   }
 
   const branchIds = new Set();
-  for (const row of [...appointments.rows, ...encounters.rows]) {
+  for (const row of rows) {
     if (appointmentMatchesDentist(row, dentist)) branchIds.add(String(row.branch_id));
   }
   return { allowed: branchIds.size > 0, branchIds: [...branchIds] };
+}
+
+async function staffQualifyingRelationship(db, record, branchId) {
+  const linkedUserId = record?.linkedUserId || record?.linked_user_id || null;
+  if (!linkedUserId || branchId == null || branchId === "") {
+    return { allowed: false, branchIds: [] };
+  }
+  let rows;
+  try {
+    rows = await loadQualifyingRows(db, linkedUserId, [String(branchId)]);
+  } catch (error) {
+    if (error.code === "42P01" || error.code === "42703") {
+      return { allowed: false, branchIds: [] };
+    }
+    throw error;
+  }
+  const allowed = rows.some((row) => String(row.branch_id) === String(branchId));
+  return { allowed, branchIds: allowed ? [String(branchId)] : [] };
+}
+
+function denyNoRelationship(record, { includeIdentity = false } = {}) {
+  return httpError(NO_TREATMENT_RELATIONSHIP_MESSAGE, 403, {
+    code: "NO_TREATMENT_RELATIONSHIP",
+    ...(includeIdentity ? { patient: identityOf(record) } : {}),
+  });
 }
 
 async function expireGrants(db, dentistId, recordId) {
@@ -1720,9 +1816,14 @@ module.exports = {
   RESTRICTED_SCOPES,
   OPEN_APPOINTMENT_STATUSES,
   ACTIVE_ENCOUNTER_STATUSES,
+  NO_TREATMENT_RELATIONSHIP_MESSAGE,
   identityOf,
   authorizedBranchIds,
+  dentistMatchParams,
+  appendEligibilityClause,
   qualifyingRelationship,
+  staffQualifyingRelationship,
+  denyNoRelationship,
   activeGrants,
   restrictedAllowed,
   staffCanViewTreatment,

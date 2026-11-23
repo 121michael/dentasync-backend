@@ -1488,11 +1488,44 @@ function createStaffPortalRouter({
     }
   });
 
+  async function requireStaffEligibleRecord(req, recordId) {
+    const branchId = req.branchAccess?.activeBranch?.id;
+    if (!branchId) {
+      const error = new Error("No branch is assigned to this account.");
+      error.status = 403;
+      throw error;
+    }
+    const detail = await clinicalPatients.getClinicalRecord(db, recordId);
+    if (!detail || detail.record.archived) {
+      const error = new Error("Patient record not found.");
+      error.status = 404;
+      throw error;
+    }
+    const relationship = await recordAccess.staffQualifyingRelationship(db, detail.record, branchId);
+    if (!relationship.allowed) {
+      throw recordAccess.denyNoRelationship(detail.record);
+    }
+    return { detail, relationship, branchId };
+  }
+
   router.get("/patients", async (req, res) => {
     const search = stringValue(req.query.search, 100);
+    const branchId = req.branchAccess?.activeBranch?.id;
+    if (!branchId) {
+      return res.status(403).json({ message: "No branch is assigned to this account." });
+    }
     try {
-      const patients = await clinicalPatients.listClinicalRecords(db, { search, limit: 100 });
+      const [patients, total] = await Promise.all([
+        clinicalPatients.listClinicalRecords(db, {
+          search,
+          limit: 100,
+          branchId,
+          eligibleOnly: true,
+        }),
+        clinicalPatients.countClinicalRecords(db, { search, branchId, eligibleOnly: true }),
+      ]);
       return res.json({
+        total,
         patients: patients.map((record) => {
           const nextAppointment = clinicalPatients.resolveClinicalNextAppointment(record, []);
           return {
@@ -1624,6 +1657,7 @@ function createStaffPortalRouter({
     }
 
     try {
+      await requireStaffEligibleRecord(req, recordId);
       const record = await clinicalPatients.updateClinicalRecord(db, recordId, allowed, {
         id: req.staff.id,
         role: "staff",
@@ -1701,6 +1735,7 @@ function createStaffPortalRouter({
       if (!staffBranchId) {
         return res.status(403).json({ message: "No branch is assigned to this account." });
       }
+      await requireStaffEligibleRecord(req, recordId);
       let currentTreatment;
       try {
         const existing = await db.query(
@@ -1781,10 +1816,8 @@ function createStaffPortalRouter({
     }
 
     try {
-      const detail = await clinicalPatients.getClinicalRecord(db, recordId);
-      if (!detail || detail.record.archived) {
-        return res.status(404).json({ message: "Patient record not found." });
-      }
+      const opened = await requireStaffEligibleRecord(req, recordId);
+      const detail = opened.detail;
 
       let appointments = [];
       try {
@@ -1881,6 +1914,9 @@ function createStaffPortalRouter({
         },
       });
     } catch (error) {
+      if (error.status) {
+        return res.status(error.status).json({ message: error.message, code: error.code });
+      }
       if (clinicalPatients.isMissingRelation(error)) {
         return res.status(503).json({
           message: "Clinical patient records are not available. Run npm run migrate:clinical-records.",
@@ -1899,6 +1935,7 @@ function createStaffPortalRouter({
 
     const dentalChartSync = require("../services/dentalChartSync");
     try {
+      await requireStaffEligibleRecord(req, recordId);
       const record = await db.query(
         `SELECT id FROM clinic_patient_records
          WHERE id = $1 AND COALESCE(is_archived, FALSE) = FALSE
@@ -1971,6 +2008,9 @@ function createStaffPortalRouter({
         }),
       });
     } catch (error) {
+      if (error.status) {
+        return res.status(error.status).json({ message: error.message, code: error.code });
+      }
       if (clinicalPatients.isMissingRelation(error) || error?.code === "42P01") {
         return res.status(503).json({
           message: "Dental chart is not available. Run npm run migrate:paper-gaps.",

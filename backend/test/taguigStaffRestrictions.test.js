@@ -380,8 +380,9 @@ test("Taguig Staff cannot read or change Mandaluyong operational records", async
   const patients = await request("GET", "/api/staff/patients", { token: tStaff });
   assert.equal(patients.status, 200, JSON.stringify(patients.body));
   const names = (patients.body.patients || []).map((row) => row.fullName || row.patientName || "");
-  assert.ok(names.some((name) => name.includes("Mina")), "centralized profiles include Mandaluyong patients");
+  assert.equal(names.some((name) => name.includes("Mina")), false);
   assert.ok(names.some((name) => name.includes("Tomas")));
+  assert.equal(patients.body.total, 1);
 
   const tPatient = await request("GET", `/api/staff/patients/${taguigRecord.rows[0].id}`, { token: tStaff });
   assert.equal(tPatient.status, 200, JSON.stringify(tPatient.body));
@@ -392,9 +393,10 @@ test("Taguig Staff cannot read or change Mandaluyong operational records", async
   assert.equal(Number(tPatient.body.patient.currentVisit.appointmentId), Number(taguigVisit.id));
 
   const tOtherPatient = await request("GET", `/api/staff/patients/${mandaluyongRecord.rows[0].id}`, { token: tStaff });
-  assert.equal(tOtherPatient.status, 200, JSON.stringify(tOtherPatient.body));
-  assert.equal((tOtherPatient.body.patient.treatments || []).length, 0);
-  assert.equal(tOtherPatient.body.patient.currentVisit, null);
+  assert.equal(tOtherPatient.status, 403);
+  assert.equal(tOtherPatient.body.code, "NO_TREATMENT_RELATIONSHIP");
+  assert.equal(tOtherPatient.body.patient, undefined);
+  assert.equal(JSON.stringify(tOtherPatient.body).includes("Mild stain"), false);
 
   const tPayOther = await request(
     "PATCH",

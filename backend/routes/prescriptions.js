@@ -2,6 +2,8 @@
 
 const fs = require("fs");
 const prescriptions = require("../services/prescriptions");
+const clinicalPatients = require("../services/clinicalPatients");
+const recordAccess = require("../services/recordAccess");
 
 function sendError(res, error) {
   const status = Number(error.status) || (error.code === "42P01" || error.code === "42703" ? 503 : 500);
@@ -33,8 +35,10 @@ function attachPrescriptionRoutes(router, { db, role, uploadDirectory, notifySta
     try {
       const branchId = staffBranchId(req);
       if (branchId === null) return res.json({ prescriptions: [] });
+      const clinicalRecordId = req.query.patientId || req.query.clinicalRecordId;
+      if (clinicalRecordId) await requirePatientEligibility(req, clinicalRecordId);
       const list = await prescriptions.listPrescriptions(db, {
-        clinicalRecordId: req.query.patientId || req.query.clinicalRecordId,
+        clinicalRecordId,
         workflowStatus: req.query.status,
         search: req.query.search,
         staffBranchId: branchId,
@@ -45,10 +49,38 @@ function attachPrescriptionRoutes(router, { db, role, uploadDirectory, notifySta
     }
   });
 
+  async function requirePatientEligibility(req, patientId) {
+    const recordId = Number.parseInt(patientId, 10);
+    if (!Number.isSafeInteger(recordId) || recordId <= 0) {
+      const error = new Error("A valid patient record ID is required.");
+      error.status = 400;
+      throw error;
+    }
+    const detail = await clinicalPatients.getClinicalRecord(db, recordId);
+    if (!detail || detail.record.archived) {
+      const error = new Error("Patient record not found.");
+      error.status = 404;
+      throw error;
+    }
+    const branchId = req.branchAccess?.activeBranch?.id;
+    if (role === "staff") {
+      const relationship = await recordAccess.staffQualifyingRelationship(db, detail.record, branchId);
+      if (!relationship.allowed) throw recordAccess.denyNoRelationship(detail.record);
+      return;
+    }
+    if (role === "dentist") {
+      const relationship = await recordAccess.qualifyingRelationship(db, req.dentist, detail.record, {
+        branchId: branchId || null,
+      });
+      if (!relationship.allowed) throw recordAccess.denyNoRelationship(detail.record, { includeIdentity: true });
+    }
+  }
+
   router.get("/patients/:patientId/prescriptions", async (req, res) => {
     try {
       const branchId = staffBranchId(req);
       if (branchId === null) return res.json({ prescriptions: [] });
+      await requirePatientEligibility(req, req.params.patientId);
       const list = await prescriptions.listPrescriptions(db, {
         clinicalRecordId: req.params.patientId,
         staffBranchId: branchId,

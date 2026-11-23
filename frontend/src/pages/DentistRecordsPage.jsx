@@ -484,6 +484,20 @@ export function DentistRecordsPage() {
   }, [load, patientId]);
 
   useEffect(() => {
+    function onBranchChange() {
+      setPatients(null);
+      setDetail(null);
+      if (patientId) {
+        navigate("/dentist/patient-records");
+        return;
+      }
+      load();
+    }
+    window.addEventListener("dentasync-branch-change", onBranchChange);
+    return () => window.removeEventListener("dentasync-branch-change", onBranchChange);
+  }, [load, navigate, patientId]);
+
+  useEffect(() => {
     const focusId = searchParams.get("focus");
     if (focusId) setFocusKey(focusId);
     if (!focusId || !patients?.length) return;

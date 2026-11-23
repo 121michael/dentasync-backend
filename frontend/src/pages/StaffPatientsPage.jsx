@@ -114,6 +114,16 @@ export function StaffPatientsPage() {
   }, [load]);
 
   useEffect(() => {
+    function onBranchChange() {
+      setPatients([]);
+      setDetail(null);
+      load();
+    }
+    window.addEventListener("dentasync-branch-change", onBranchChange);
+    return () => window.removeEventListener("dentasync-branch-change", onBranchChange);
+  }, [load]);
+
+  useEffect(() => {
     const focusId = searchParams.get("focus");
     if (!focusId) return;
     (async () => {
