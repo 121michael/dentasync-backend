@@ -89,11 +89,11 @@ function todayIsoDate() {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
 }
 
-function newProcedureDraft() {
+function newProcedureDraft(treatmentDate = todayIsoDate()) {
   return {
     key: `proc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     name: "",
-    treatmentDate: todayIsoDate(),
+    treatmentDate: treatmentDate || todayIsoDate(),
     durationMinutes: "",
     toothNumber: "",
     diagnosisNotes: "",
@@ -469,6 +469,8 @@ export function DentistRecordsPage() {
   const focusedRowRef = useRef(null);
   const [focusKey, setFocusKey] = useState(() => searchParams.get("focus") || "");
   const [recordSection, setRecordSection] = useState(null);
+  const [reviewVisit, setReviewVisit] = useState(null);
+  const [reviewingOutcome, setReviewingOutcome] = useState("");
 
   const load = useCallback(async (options = {}) => {
     try {
@@ -745,16 +747,40 @@ export function DentistRecordsPage() {
     return true;
   }
 
-  function openAddTreatment() {
+  function openAddTreatment(visit = null) {
     if (!requestCloseEdit()) return;
     setRecordSection("clinical");
     setError("");
     setSuccess("");
+    setReviewVisit(visit || null);
     setTreatmentForm(emptyTreatment);
-    setTreatmentDrafts([newProcedureDraft()]);
+    setTreatmentDrafts([newProcedureDraft(visit?.visitDate)]);
     setActiveDraftIndex(0);
     setProcedureErrors({});
     revealTreatmentForm();
+  }
+
+  async function finalizeReviewVisit(visit, outcome) {
+    if (!detail?.patient?.id || !visit?.queueEntryId) return;
+    const confirmed = window.confirm(
+      outcome === "completed"
+        ? `Mark queue ${visit.token || visit.queueEntryId} from ${visit.visitDate || "this visit"} as Completed? Treatment must already be recorded.`
+        : `Mark queue ${visit.token || visit.queueEntryId} from ${visit.visitDate || "this visit"} as Not Served? Confirm that no treatment was performed.`
+    );
+    if (!confirmed) return;
+    setReviewingOutcome(`${visit.queueEntryId}:${outcome}`);
+    setError("");
+    setSuccess("");
+    try {
+      const response = await api.reviewDentistQueueVisit(detail.patient.id, visit.queueEntryId, { outcome });
+      setSuccess(response.message || "Visit review saved.");
+      if (reviewVisit?.queueEntryId === visit.queueEntryId) setReviewVisit(null);
+      await refreshPatientDetail(detail.patient.id, { silent: true });
+    } catch (err) {
+      setError(err.message || "Unable to finalize this visit.");
+    } finally {
+      setReviewingOutcome("");
+    }
   }
 
   function appendProcedureDraft() {
@@ -762,7 +788,7 @@ export function DentistRecordsPage() {
     setEditingTreatmentId(null);
     setEditSnapshot(null);
     setTreatmentDrafts((current) => {
-      const next = [...current, newProcedureDraft()];
+      const next = [...current, newProcedureDraft(reviewVisit?.visitDate)];
       setActiveDraftIndex(next.length - 1);
       return next;
     });
@@ -788,6 +814,7 @@ export function DentistRecordsPage() {
     setProcedureErrors({});
     setEditingTreatmentId(null);
     setEditSnapshot(null);
+    setReviewVisit(null);
   }
 
   function updateProcedureDraft(index, patch) {
@@ -907,15 +934,16 @@ export function DentistRecordsPage() {
     setSavingTreatment(true);
     setProcedureErrors({});
     try {
-      const attachToVisit = Boolean(detail.currentVisit?.queueEntryId);
+      const attachVisit = reviewVisit || detail.currentVisit;
+      const attachToVisit = Boolean(attachVisit?.queueEntryId);
       const response = await api.addDentistTreatment(detail.patient.id, {
         forCurrentVisit: attachToVisit,
-        queueEntryId: detail.currentVisit?.queueEntryId || undefined,
-        appointmentId: detail.currentVisit?.appointmentId || undefined,
+        queueEntryId: attachVisit?.queueEntryId || undefined,
+        appointmentId: attachVisit?.appointmentId || undefined,
         procedures: treatmentDrafts.map((draft) => ({
           name: draft.name,
           treatment: draft.name,
-          treatmentDate: draft.treatmentDate || todayIsoDate(),
+          treatmentDate: draft.treatmentDate || attachVisit?.visitDate || todayIsoDate(),
           durationMinutes: Number(draft.durationMinutes) || undefined,
           diagnosisNotes: draft.diagnosisNotes,
           diagnosis: draft.diagnosisNotes,
@@ -1582,6 +1610,12 @@ export function DentistRecordsPage() {
                     <div>
                       <span className="eyebrow">Clinical information</span>
                       <h2>Add Treatment</h2>
+                      {reviewVisit ? (
+                        <p className="muted-copy">
+                          Recording against queue {reviewVisit.token || reviewVisit.queueEntryId} from{" "}
+                          {reviewVisit.visitDate || "the original visit date"}.
+                        </p>
+                      ) : null}
                     </div>
                   </div>
                   <p className="muted-copy">
@@ -1705,6 +1739,74 @@ export function DentistRecordsPage() {
               updateProcedureDraft(activeDraftIndex, { toothNumber: teeth.join(", ") });
             }}
           />
+
+          {(detail.needsReviewVisits || []).length ? (
+            <section className="glass-card profile-section treatment-record">
+              <div className="treatment-record__header">
+                <div>
+                  <span className="eyebrow">Closed-day follow-up</span>
+                  <h2>Needs Review</h2>
+                  <p className="muted-copy">
+                    These visits were still in treatment at closing time. Add any missing treatment on the original
+                    service date, then mark Completed or Not Served.
+                  </p>
+                </div>
+              </div>
+              <div className="dentist-needs-review-list">
+                {detail.needsReviewVisits.map((visit) => {
+                  const busyKey = reviewingOutcome.startsWith(`${visit.queueEntryId}:`);
+                  return (
+                    <article key={visit.queueEntryId} className="dentist-needs-review-card">
+                      <div className="dentist-needs-review-card__meta">
+                        <strong>Queue {visit.token || visit.queueEntryId}</strong>
+                        <span>Visit date {visit.visitDate || "—"}</span>
+                        <StatusBadge status="needs_review">Needs Review</StatusBadge>
+                      </div>
+                      {(visit.procedures || []).length ? (
+                        <ol className="visit-procedure-list">
+                          {visit.procedures.map((procedure, index) => (
+                            <li key={procedure.id || index}>
+                              <strong>
+                                {index + 1}. {procedure.treatment || procedure.name}
+                              </strong>
+                              <span>Status: <StatusBadge status={procedure.status} /></span>
+                            </li>
+                          ))}
+                        </ol>
+                      ) : (
+                        <p className="muted-copy">No treatment recorded for this visit yet.</p>
+                      )}
+                      <div className="dentist-needs-review-card__actions">
+                        <button
+                          type="button"
+                          className="button button--secondary"
+                          onClick={() => openAddTreatment(visit)}
+                        >
+                          <Plus size={16} /> Add or verify treatment
+                        </button>
+                        <button
+                          type="button"
+                          className="button button--primary"
+                          disabled={Boolean(reviewingOutcome)}
+                          onClick={() => finalizeReviewVisit(visit, "completed")}
+                        >
+                          {busyKey && reviewingOutcome.endsWith(":completed") ? "Saving…" : "Mark Completed"}
+                        </button>
+                        <button
+                          type="button"
+                          className="button button--secondary"
+                          disabled={Boolean(reviewingOutcome)}
+                          onClick={() => finalizeReviewVisit(visit, "not_served")}
+                        >
+                          {busyKey && reviewingOutcome.endsWith(":not_served") ? "Saving…" : "Mark Not Served"}
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+          ) : null}
 
           {detail.currentVisit?.procedures?.length || detail.currentVisit?.queueEntryId ? (
             <section className="glass-card profile-section treatment-record">

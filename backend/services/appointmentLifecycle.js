@@ -5,7 +5,7 @@ const AUTO_CANCEL_HOUR = 18;
 const WAIT_TOO_LONG_MS = 2 * 60 * 60 * 1000;
 const IN_TREATMENT_QUEUE = new Set(["dentist"]);
 const PROCEEDED_QUEUE = new Set(["preparing", "called", "dentist"]);
-const INACTIVE_QUEUE = new Set(["completed", "no_show", "cancelled"]);
+const INACTIVE_QUEUE = new Set(["completed", "no_show", "cancelled", "not_served", "needs_review"]);
 const CANCELABLE_APPOINTMENT = new Set(["pending", "confirmed", "checked_in"]);
 const RESCHEDULABLE_APPOINTMENT = new Set(["pending", "confirmed", "checked_in"]);
 const TERMINAL_APPOINTMENT = new Set(["completed", "cancelled", "rescheduled", "no_show"]);
@@ -133,7 +133,7 @@ async function loadActiveQueueForAppointment(db, appointmentId) {
       `SELECT id, status, checked_in_at, appointment_id
        FROM patient_portal_queue_entries
        WHERE appointment_id = $1
-         AND status NOT IN ('completed', 'no_show')
+         AND status NOT IN ('completed', 'no_show', 'not_served', 'needs_review')
        ORDER BY checked_in_at DESC
        LIMIT 1`,
       [appointmentId]
@@ -152,7 +152,7 @@ async function closeQueueForAppointment(db, appointmentId, nextStatus = "no_show
       `UPDATE patient_portal_queue_entries
        SET status = $2, updated_at = CURRENT_TIMESTAMP
        WHERE appointment_id = $1
-         AND status NOT IN ('completed', 'no_show')`,
+         AND status NOT IN ('completed', 'no_show', 'not_served', 'needs_review')`,
       [appointmentId, nextStatus]
     );
   } catch (error) {

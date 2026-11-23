@@ -322,6 +322,8 @@ const documentSyncCleanupJob = createDocumentSyncCleanupJob({
 });
 const backupScheduleJob = createBackupScheduleJob({ db });
 const unproceededAppointmentJob = createUnproceededAppointmentCancelJob({ db });
+const { createQueueDayClosureJob } = require("./services/queueDayClosure");
+const queueDayClosureJob = createQueueDayClosureJob({ db });
 
 app.post(
   "/api/internal/backups/run",
@@ -382,6 +384,7 @@ if (require.main === module) {
     documentSyncCleanupJob.start();
     backupScheduleJob.start();
     unproceededAppointmentJob.start();
+    queueDayClosureJob.start();
     applyPrescriptionSchema(db)
       .then(() => applyPrescriptionBranchSchema(db))
       .then(() => console.log("Prescription tables ready (CREATE IF NOT EXISTS)."))
@@ -402,6 +405,7 @@ if (require.main === module) {
         : "Backup scheduler: in-process timer only. Render Free sleep can skip jobs unless a Cron Job calls /api/internal/backups/run."
     );
     console.log("Pending and confirmed appointments are cancelled after their scheduled clinic time if the patient has not checked in.");
+    console.log("Queue entries close at each branch's clinic closing time (CLINIC_TIMEZONE): Waiting/Called → Not Served, In Treatment → Needs Review.");
       });
     })
     .catch((error) => {
