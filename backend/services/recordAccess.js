@@ -1044,6 +1044,37 @@ function readAuthorizationReplacement(body = {}) {
   return { password, confirmPassword: confirm };
 }
 
+async function writeAuthorizationHash(queryable, dentistId, hash, secret = null) {
+  if (secret) {
+    await queryable.query(
+      `INSERT INTO admin_portal_dentist_profiles (
+         user_id, can_approve_cross_branch_access, authorization_password_hash, authorization_credential_status,
+         authorization_password_ciphertext, authorization_secret_key_id, updated_at
+       ) VALUES ($1, TRUE, $2, 'configured', $3, $4, CURRENT_TIMESTAMP)
+       ON CONFLICT (user_id) DO UPDATE SET
+         can_approve_cross_branch_access = TRUE,
+         authorization_password_hash = EXCLUDED.authorization_password_hash,
+         authorization_credential_status = 'configured',
+         authorization_password_ciphertext = EXCLUDED.authorization_password_ciphertext,
+         authorization_secret_key_id = EXCLUDED.authorization_secret_key_id,
+         updated_at = CURRENT_TIMESTAMP`,
+      [String(dentistId), hash, secret.ciphertext, secret.keyId]
+    );
+    return;
+  }
+  await queryable.query(
+    `INSERT INTO admin_portal_dentist_profiles (
+       user_id, can_approve_cross_branch_access, authorization_password_hash, authorization_credential_status, updated_at
+     ) VALUES ($1, TRUE, $2, 'configured', CURRENT_TIMESTAMP)
+     ON CONFLICT (user_id) DO UPDATE SET
+       can_approve_cross_branch_access = TRUE,
+       authorization_password_hash = EXCLUDED.authorization_password_hash,
+       authorization_credential_status = 'configured',
+       updated_at = CURRENT_TIMESTAMP`,
+    [String(dentistId), hash]
+  );
+}
+
 async function setAuthorizationCredential(db, admin, dentistId, { password, confirmPassword }, options = {}) {
   const queryable = options.queryable || db;
   const skipAudit = options.skipAudit === true;
@@ -1062,29 +1093,33 @@ async function setAuthorizationCredential(db, admin, dentistId, { password, conf
   if (dentist.password_hash && (await bcrypt.compare(plain, dentist.password_hash))) {
     throw httpError("Choose an authorization password that is different from the sign-in password.", 400);
   }
-  const secret = encryptAuthorizationPassword(plain);
   const previous = await loadDentistAuthorization(db, dentist.id);
   const hash = await bcrypt.hash(plain, AUTH_HASH_ROUNDS);
+  const secret = encryptAuthorizationPassword(plain);
+  const inTransaction = Boolean(options.queryable);
+  if (inTransaction) {
+    await queryable.query("SAVEPOINT credential_secret");
+  }
   try {
-    await queryable.query(
-      `INSERT INTO admin_portal_dentist_profiles (
-         user_id, can_approve_cross_branch_access, authorization_password_hash, authorization_credential_status,
-         authorization_password_ciphertext, authorization_secret_key_id, updated_at
-       ) VALUES ($1, TRUE, $2, 'configured', $3, $4, CURRENT_TIMESTAMP)
-       ON CONFLICT (user_id) DO UPDATE SET
-         can_approve_cross_branch_access = TRUE,
-         authorization_password_hash = EXCLUDED.authorization_password_hash,
-         authorization_credential_status = 'configured',
-         authorization_password_ciphertext = EXCLUDED.authorization_password_ciphertext,
-         authorization_secret_key_id = EXCLUDED.authorization_secret_key_id,
-         updated_at = CURRENT_TIMESTAMP`,
-      [String(dentist.id), hash, secret.ciphertext, secret.keyId]
-    );
+    await writeAuthorizationHash(queryable, dentist.id, hash, secret);
+    if (inTransaction) await queryable.query("RELEASE SAVEPOINT credential_secret");
   } catch (error) {
-    if (error.code === "42703") {
-      throw httpError("Apply the authorization credential secret migration before saving a viewable credential.", 503);
+    if (inTransaction) {
+      try {
+        await queryable.query("ROLLBACK TO SAVEPOINT credential_secret");
+      } catch {
+        // Pool queries are autocommit; there may be no savepoint.
+      }
     }
-    throw error;
+    if (error.code !== "42703") throw error;
+    try {
+      await writeAuthorizationHash(queryable, dentist.id, hash, null);
+    } catch (fallbackError) {
+      if (fallbackError.code === "42703") {
+        throw httpError("Apply the authorization credential secret migration before saving a viewable credential.", 503);
+      }
+      throw fallbackError;
+    }
   }
   if (!skipAudit) {
     const action = previous.credentialConfigured ? "record_access_credential_reset" : "record_access_credential_set";
