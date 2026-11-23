@@ -7040,6 +7040,40 @@ body.is-queue-display .staff-mobile-nav {
 .admin-form--manage-user {
   min-width: 0;
 }
+.admin-modal--manage-user,
+.admin-page .admin-modal.admin-modal--manage-user {
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 720px);
+  max-height: min(760px, calc(100dvh - 2rem));
+  overflow: hidden;
+  padding: 1.1rem 1.1rem 0.95rem;
+}
+.admin-form.admin-form--manage-user {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+.admin-form--manage-user__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 0.15rem 1.1rem;
+  -webkit-overflow-scrolling: touch;
+}
+.admin-form--manage-user > .admin-modal__actions {
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 2;
+  margin-top: 0;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  background: var(--surface-solid);
+}
 .admin-form--manage-user__grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -7239,7 +7273,8 @@ body.is-queue-display .staff-mobile-nav {
   overflow-x: hidden;
   overflow-y: auto;
 }
-.admin-page .admin-modal.admin-modal--branch {
+.admin-page .admin-modal.admin-modal--branch,
+.admin-page .admin-modal.admin-modal--manage-user {
   overflow: hidden;
 }
 .admin-modal__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .5rem; margin-top: .15rem; }
@@ -8057,6 +8092,12 @@ body.is-queue-display .staff-mobile-nav {
   .admin-heading-actions .button { width: 100%; }
   .admin-modal-backdrop { padding: .5rem; }
   .admin-modal { max-height: calc(100vh - 1rem); padding: .9rem; border-radius: 15px; }
+  .admin-modal--manage-user,
+  .admin-page .admin-modal.admin-modal--manage-user {
+    max-height: calc(100dvh - 1rem);
+    overflow: hidden;
+    padding: 0.9rem 0.9rem 0.8rem;
+  }
   .admin-modal__actions > .button { flex: 1; }
   .admin-row-actions .button { flex: 1; }
 }
@@ -15505,10 +15546,22 @@ body.is-queue-display .fab-menu {
   gap: 8px;
 }
 
-.admin-license-verify {
+.admin-license-verify,
+.admin-form--manage-user .admin-license-verify {
   display: flex;
-  gap: 10px;
   align-items: flex-start;
+  gap: 0.55rem;
+  text-align: left;
+}
+.admin-form--manage-user .admin-license-verify input[type="checkbox"] {
+  width: 1.05rem;
+  min-width: 1.05rem;
+  max-width: 1.05rem;
+  height: 1.05rem;
+  margin: 0.18rem 0 0;
+  padding: 0;
+  flex: 0 0 auto;
+  accent-color: var(--amethyst-500, #7c3aed);
 }
 
 .admin-set-credential {
@@ -15585,23 +15638,33 @@ body.is-queue-display .fab-menu {
   color: var(--amethyst-500);
   cursor: pointer;
 }
+.admin-set-credential__heading {
+  display: grid;
+  gap: 0.55rem;
+}
+.admin-set-credential__heading p {
+  margin: 0;
+}
 .admin-set-credential__badge {
   display: inline-flex;
   align-items: center;
-  margin-top: 0.28rem;
-  margin-left: 0.4rem;
-  padding: 0.16rem 0.48rem;
+  width: max-content;
+  margin: 0;
+  padding: 0.22rem 0.55rem;
   border-radius: 999px;
   color: var(--amethyst-800, #5b2a86);
   background: var(--amethyst-100, #f3e8ff);
-  font-size: 0.62rem;
+  font-size: 0.68rem;
   font-weight: 800;
-  line-height: 1;
-  vertical-align: middle;
+  line-height: 1.2;
 }
 .admin-set-credential__badge--ok {
   color: var(--emerald);
   background: var(--emerald-wash);
+}
+.admin-set-credential__badge--unsaved {
+  color: #8a5a00;
+  background: #fff4d6;
 }
 .record-access-authorize .admin-set-credential {
   background: var(--surface);
@@ -15611,10 +15674,10 @@ body.is-queue-display .fab-menu {
   .admin-set-credential__actions .button {
     flex: 1 1 100%;
   }
-  .admin-set-credential__badge {
-    display: flex;
-    margin-left: 0;
-    width: max-content;
+  .admin-modal--manage-user,
+  .admin-page .admin-modal.admin-modal--manage-user {
+    width: min(100%, 720px);
+    max-height: calc(100dvh - 1rem);
   }
 }
 

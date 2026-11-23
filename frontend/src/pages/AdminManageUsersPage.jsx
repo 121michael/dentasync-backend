@@ -43,6 +43,7 @@ const emptyForm = {
   licenseVerified: false,
   authorizationCredentialStatus: "none",
   credentialViewable: false,
+  encryptionAvailable: true,
   branchId: "",
   branchIds: [],
 };
@@ -196,6 +197,7 @@ export function AdminManageUsersPage() {
   const [verifyBusy, setVerifyBusy] = useState(false);
   const [revealedPassword, setRevealedPassword] = useState("");
   const [legacyRevealMessage, setLegacyRevealMessage] = useState("");
+  const [credentialError, setCredentialError] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -401,6 +403,7 @@ export function AdminManageUsersPage() {
       licenseVerified: Boolean(user.licenseVerified),
       authorizationCredentialStatus: user.authorizationCredentialStatus || (user.setupRequired ? "setup_required" : "none"),
       credentialViewable: Boolean(user.credentialViewable),
+      encryptionAvailable: user.encryptionAvailable !== false,
       branchId: user.branches?.[0] ? String(user.branches[0].id) : "",
       branchIds: (user.branches || []).map((branch) => String(branch.id)),
     });
@@ -412,6 +415,7 @@ export function AdminManageUsersPage() {
     closeVerifyDialog();
     setPhoneError("");
     setFieldErrors({});
+    setCredentialError("");
     setFormOpen(true);
     if (tab === "dentist") {
       try {
@@ -473,36 +477,13 @@ export function AdminManageUsersPage() {
       delete payload.branchId;
       delete payload.authorizationCredentialStatus;
       delete payload.credentialViewable;
+      delete payload.encryptionAvailable;
       delete payload.canApproveCrossBranchAccess;
-    }
-    const typedCredential = String(authPassword || "");
-    const typedConfirm = String(authConfirm || "");
-    const wantsCredentialSave =
-      tab === "dentist" &&
-      editing &&
-      Boolean(typedCredential || typedConfirm) &&
-      typedCredential !== CREDENTIAL_MASK;
-    if (wantsCredentialSave) {
-      if (typedCredential.length < 10) {
-        pushToast("Authorization password must be at least 10 characters long.", "error");
-        return;
-      }
-      if (typedCredential !== typedConfirm) {
-        pushToast("Authorization password and confirmation do not match.", "error");
-        return;
-      }
     }
     saveLock.current = true;
     setBusy(true);
     try {
       if (editing) {
-        if (wantsCredentialSave) {
-          const credentialResponse = await api.setAdminDentistAuthorizationCredential(editing.id, {
-            password: typedCredential,
-            confirmPassword: typedConfirm,
-          });
-          applyAuthorizationToEditor(credentialResponse.dentist);
-        }
         const updater = tab === "staff" ? api.updateAdminStaff : api.updateAdminDentist;
         const updated = await updater(editing.id, payload);
         if (tab === "dentist" && updated?.dentist?.authorizationCredentialStatus) {
@@ -548,42 +529,54 @@ export function AdminManageUsersPage() {
 
   function applyAuthorizationToEditor(authorization) {
     const status = authorization?.authorizationCredentialStatus || "none";
+    const encryptionAvailable = authorization?.encryptionAvailable !== false;
     setForm((current) => ({
       ...current,
       authorizationCredentialStatus: status,
       credentialViewable: Boolean(authorization?.credentialViewable),
+      encryptionAvailable,
     }));
     setEditing((current) =>
-      current ? { ...current, ...authorization, authorizationCredentialStatus: status } : current
+      current
+        ? { ...current, ...authorization, authorizationCredentialStatus: status, encryptionAvailable }
+        : current
     );
     setAuthPassword("");
     setAuthConfirm("");
     setResettingCredential(false);
+    setCredentialError("");
     hideRevealedCredential();
     closeVerifyDialog();
   }
 
   async function saveAuthorizationCredential() {
     if (!editing || tab !== "dentist" || credentialBusy) return;
-    if (authPassword.length < 10) {
-      pushToast("Authorization password must be at least 10 characters long.", "error");
+    if (form.encryptionAvailable === false) {
+      setCredentialError("Credential saving is temporarily unavailable. Set DENTIST_CREDENTIAL_ENCRYPTION_KEY on the API server, then reload.");
       return;
+    }
+    const nextErrors = {};
+    if (authPassword.length < 10) {
+      nextErrors.authPassword = "Authorization password must be at least 10 characters long.";
     }
     if (authPassword !== authConfirm) {
-      pushToast("Authorization password and confirmation do not match.", "error");
-      return;
+      nextErrors.authConfirm = "Authorization password and confirmation do not match.";
     }
+    setFieldErrors((current) => ({ ...current, ...nextErrors }));
+    if (Object.keys(nextErrors).length) return;
     setCredentialBusy(true);
+    setCredentialError("");
     try {
-      const response = await api.setAdminDentistAuthorizationCredential(editing.id, {
+      await api.setAdminDentistAuthorizationCredential(editing.id, {
         password: authPassword,
         confirmPassword: authConfirm,
       });
-      applyAuthorizationToEditor(response.dentist);
-      pushToast(response.message || "Credential configured.");
+      const status = await api.getAdminDentistAuthorizationCredential(editing.id);
+      applyAuthorizationToEditor(status.dentist || {});
+      pushToast("Credential set.");
       await load();
     } catch (credentialError) {
-      pushToast(credentialError.message, "error");
+      setCredentialError(credentialError.message);
     } finally {
       setCredentialBusy(false);
     }
@@ -1319,15 +1312,25 @@ export function AdminManageUsersPage() {
 
       {formOpen ? (
         <AdminModal
-          title={editing ? "Edit account" : "Provision Profile"}
+          title={
+            editing
+              ? tab === "dentist"
+                ? "Edit Dentist"
+                : tab === "staff"
+                  ? "Edit Staff"
+                  : "Edit account"
+              : "Provision Profile"
+          }
           onClose={() => {
             hideRevealedCredential();
             closeVerifyDialog();
             setFormOpen(false);
           }}
           wide
+          className="admin-modal--manage-user"
         >
           <form className="admin-form admin-form--manage-user" onSubmit={saveUser} noValidate>
+            <div className="admin-form--manage-user__body">
             <div className="admin-form--manage-user__grid">
               <label>
                 First name
@@ -1514,12 +1517,36 @@ export function AdminManageUsersPage() {
                   {editing ? (
                     <fieldset className="admin-form--manage-user__full admin-set-credential">
                       <legend>Set Credential</legend>
-                      <p>
-                        Separate authorization password this dentist uses to approve another dentist’s access to
-                        restricted cross-branch records. It does not sign them in and does not open charts by itself.
-                      </p>
-                      {form.authorizationCredentialStatus === "setup_required" ? (
-                        <p className="admin-set-credential__status admin-set-credential__status--warn">Setup required</p>
+                      <div className="admin-set-credential__heading">
+                        <p>
+                          Separate authorization password this dentist uses to approve another dentist’s access to
+                          restricted cross-branch records. It does not sign them in and does not open charts by itself.
+                        </p>
+                        <span
+                          className={`admin-set-credential__badge${
+                            form.encryptionAvailable === false
+                              ? ""
+                              : form.authorizationCredentialStatus === "configured" && !resettingCredential
+                                ? " admin-set-credential__badge--ok"
+                                : authPassword || authConfirm
+                                  ? " admin-set-credential__badge--unsaved"
+                                  : ""
+                          }`}
+                        >
+                          {form.encryptionAvailable === false
+                            ? "Not configured"
+                            : form.authorizationCredentialStatus === "configured" && !resettingCredential
+                              ? "Credential set"
+                              : authPassword || authConfirm
+                                ? "Unsaved changes"
+                                : "Not set"}
+                        </span>
+                      </div>
+                      {form.encryptionAvailable === false ? (
+                        <p className="admin-set-credential__status admin-set-credential__status--warn" role="alert">
+                          Credential saving is temporarily unavailable until the API encryption key is configured. You
+                          can still save this dentist’s other details.
+                        </p>
                       ) : null}
                       {form.authorizationCredentialStatus === "configured" && !resettingCredential ? (
                         <>
@@ -1557,7 +1584,7 @@ export function AdminManageUsersPage() {
                             <button
                               type="button"
                               className="button button--secondary"
-                              disabled={credentialBusy}
+                              disabled={credentialBusy || form.encryptionAvailable === false}
                               onClick={() => {
                                 hideRevealedCredential();
                                 setResettingCredential(true);
@@ -1575,7 +1602,7 @@ export function AdminManageUsersPage() {
                             </button>
                           </div>
                         </>
-                      ) : (
+                      ) : form.encryptionAvailable === false ? null : (
                         <>
                           {form.authorizationCredentialStatus === "revoked" && !resettingCredential ? (
                             <p className="admin-set-credential__status">Authorization revoked. Set a new credential to restore approval permission.</p>
@@ -1591,7 +1618,12 @@ export function AdminManageUsersPage() {
                                 type={showAuthPassword ? "text" : "password"}
                                 value={authPassword}
                                 autoComplete="new-password"
-                                onChange={(event) => setAuthPassword(event.target.value)}
+                                aria-invalid={fieldErrors.authPassword ? "true" : "false"}
+                                onChange={(event) => {
+                                  setAuthPassword(event.target.value);
+                                  clearFieldError("authPassword");
+                                  setCredentialError("");
+                                }}
                               />
                               <button
                                 type="button"
@@ -1602,6 +1634,9 @@ export function AdminManageUsersPage() {
                                 {showAuthPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                               </button>
                             </span>
+                            {fieldErrors.authPassword ? (
+                              <span className="admin-form--manage-user__error">{fieldErrors.authPassword}</span>
+                            ) : null}
                           </label>
                           <label>
                             Confirm password
@@ -1609,9 +1644,22 @@ export function AdminManageUsersPage() {
                               type={showAuthPassword ? "text" : "password"}
                               value={authConfirm}
                               autoComplete="new-password"
-                              onChange={(event) => setAuthConfirm(event.target.value)}
+                              aria-invalid={fieldErrors.authConfirm ? "true" : "false"}
+                              onChange={(event) => {
+                                setAuthConfirm(event.target.value);
+                                clearFieldError("authConfirm");
+                                setCredentialError("");
+                              }}
                             />
+                            {fieldErrors.authConfirm ? (
+                              <span className="admin-form--manage-user__error">{fieldErrors.authConfirm}</span>
+                            ) : null}
                           </label>
+                          {credentialError ? (
+                            <p className="admin-form--manage-user__error" role="alert">
+                              {credentialError}
+                            </p>
+                          ) : null}
                           <div className="admin-set-credential__actions">
                             <button
                               type="button"
@@ -1647,6 +1695,7 @@ export function AdminManageUsersPage() {
                 </>
               ) : null}
             </div>
+            </div>
             <div className="admin-modal__actions">
               <button
                 type="button"
@@ -1659,7 +1708,9 @@ export function AdminManageUsersPage() {
               >
                 Cancel
               </button>
-              <button className="button button--primary" disabled={busy}>{busy ? "Saving…" : "Save"}</button>
+              <button className="button button--primary" disabled={busy}>
+                {busy ? "Saving…" : tab === "dentist" ? "Save dentist details" : "Save"}
+              </button>
             </div>
           </form>
         </AdminModal>

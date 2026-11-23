@@ -29,6 +29,8 @@ test("Set Credential stays masked and opens Admin verification", { timeout: 1800
     phone: "09170003333",
     role: "admin",
   };
+  let encryptionAvailable = true;
+  let credentialStatus = "configured";
   const dentist = {
     id: "91",
     firstName: "Dina",
@@ -76,12 +78,40 @@ test("Set Credential stays masked and opens Admin verification", { timeout: 1800
     return res.json({
       dentist: {
         id: dentist.id,
-        authorizationCredentialStatus: "configured",
-        credentialConfigured: true,
-        credentialViewable: true,
+        authorizationCredentialStatus: credentialStatus,
+        credentialConfigured: credentialStatus === "configured",
+        credentialViewable: credentialStatus === "configured",
+        encryptionAvailable,
       },
     });
   });
+  app.put("/api/admin/dentists/:id/authorization-credential", (req, res) => {
+    if (String(req.body?.password || "") !== String(req.body?.confirmPassword || "")) {
+      return res.status(400).json({ message: "Authorization password and confirmation do not match." });
+    }
+    credentialStatus = "configured";
+    return res.json({
+      message: "Credential configured.",
+      dentist: {
+        id: dentist.id,
+        authorizationCredentialStatus: "configured",
+        credentialConfigured: true,
+        credentialViewable: true,
+        encryptionAvailable,
+      },
+    });
+  });
+  app.patch("/api/admin/dentists/:id", (_req, res) =>
+    res.json({
+      dentist: {
+        ...dentist,
+        lastName: "Updated",
+        authorizationCredentialStatus: credentialStatus,
+        credentialConfigured: credentialStatus === "configured",
+        encryptionAvailable,
+      },
+    })
+  );
   app.get("/api/admin/dentists", (_req, res) => res.json({ dentists: [dentist] }));
   app.get("/api/admin/staff", (_req, res) => res.json({ staff: [] }));
   app.get("/api/admin/registrations/pending", (_req, res) => res.json({ requests: [] }));
@@ -142,7 +172,7 @@ test("Set Credential stays masked and opens Admin verification", { timeout: 1800
   const origin = `http://127.0.0.1:${frontendPort}`;
   const token = jwt.sign({ id: String(admin.id), role: "admin" }, jwtSecret, { expiresIn: "1h" });
 
-  async function openCredential(width, height, mobile) {
+  async function openCredential(width, height, mobile, { expectMask = true } = {}) {
     await page.setViewport({ width, height, isMobile: Boolean(mobile), hasTouch: Boolean(mobile) });
     await page.goto(`${origin}/login`, { waitUntil: "domcontentloaded" });
     await page.evaluate((value) => {
@@ -159,12 +189,16 @@ test("Set Credential stays masked and opens Admin verification", { timeout: 1800
       [...(row?.querySelectorAll("button") || [])].find((button) => /Edit/i.test(button.textContent || ""))?.click();
     });
     await page.waitForFunction(() => document.body.innerText.includes("Set Credential"));
-    const maskReady = await page.waitForSelector('input[data-credential-mask="true"]', { timeout: 8000 }).catch(async () => {
-      t.diagnostic(await page.evaluate(() => document.querySelector(".admin-set-credential")?.innerText || document.body.innerText.slice(0, 1500)));
-      return null;
-    });
-    if (!maskReady) {
-      throw new Error("masked credential input did not render");
+    if (expectMask) {
+      const maskReady = await page.waitForSelector('input[data-credential-mask="true"]', { timeout: 8000 }).catch(async () => {
+        t.diagnostic(await page.evaluate(() => document.querySelector(".admin-set-credential")?.innerText || document.body.innerText.slice(0, 1500)));
+        return null;
+      });
+      if (!maskReady) {
+        throw new Error("masked credential input did not render");
+      }
+    } else {
+      await page.waitForFunction(() => /Not configured|temporarily unavailable/i.test(document.body.innerText));
     }
     await page.$eval(".admin-set-credential", (node) => node.scrollIntoView({ block: "center" }));
   }
@@ -177,14 +211,37 @@ test("Set Credential stays masked and opens Admin verification", { timeout: 1800
 
   await openCredential(1280, 900, false);
   const desktop = await page.evaluate(() => document.body.innerText);
+  assert.match(desktop, /Edit Dentist/);
   assert.match(desktop, /Set Credential/);
-  assert.match(desktop, /Credential set\./);
+  assert.match(desktop, /Credential set/);
+  assert.match(desktop, /Save dentist details/);
   assert.match(desktop, /Reset credential/);
   assert.match(desktop, /Revoke credential/);
   assert.doesNotMatch(desktop, /\$2[aby]\$/);
   assert.doesNotMatch(desktop, /dscred1/);
   const maskValue = await page.$eval('input[data-credential-mask="true"]', (input) => input.value);
   assert.equal(maskValue, "••••••••");
+  const layout = await page.evaluate(() => {
+    const dialog = document.querySelector(".admin-modal--manage-user");
+    const body = document.querySelector(".admin-form--manage-user__body");
+    const footer = document.querySelector(".admin-form--manage-user .admin-modal__actions");
+    const checkbox = document.querySelector(".admin-license-verify input[type='checkbox']");
+    const label = document.querySelector(".admin-license-verify");
+    const dialogBox = dialog?.getBoundingClientRect();
+    const footerBox = footer?.getBoundingClientRect();
+    return {
+      dialogCentered: Boolean(dialogBox && Math.abs((window.innerWidth - dialogBox.width) / 2 - dialogBox.left) < 24),
+      bodyScrollable: Boolean(body && getComputedStyle(body).overflowY !== "visible"),
+      footerBelowBody: Boolean(footerBox && body && footerBox.top >= body.getBoundingClientRect().bottom - 2),
+      checkboxBesideLabel: Boolean(
+        checkbox && label && Math.abs(checkbox.getBoundingClientRect().left - label.getBoundingClientRect().left) < 8
+      ),
+    };
+  });
+  assert.equal(layout.dialogCentered, true);
+  assert.equal(layout.bodyScrollable, true);
+  assert.equal(layout.footerBelowBody, true);
+  assert.equal(layout.checkboxBesideLabel, true);
   await shot("admin-set-credential-desktop.png");
 
   await page.click('button[aria-label="View authorization password"]');
@@ -208,4 +265,35 @@ test("Set Credential stays masked and opens Admin verification", { timeout: 1800
   );
   assert.equal(overflow320, false);
   await shot("admin-set-credential-320.png");
+
+  await page.evaluate(() => {
+    [...document.querySelectorAll("button")].find((button) => /Reset credential/i.test(button.textContent || ""))?.click();
+  });
+  await page.waitForFunction(() => document.body.innerText.includes("Save new credential"));
+  await page.type('input[autocomplete="new-password"]', "ShortPwd1");
+  const confirm = await page.$$('input[autocomplete="new-password"]');
+  if (confirm[1]) await confirm[1].type("DifferentPwd9");
+  await page.evaluate(() => {
+    [...document.querySelectorAll("button")].find((button) => /Save new credential/i.test(button.textContent || ""))?.click();
+  });
+  await page.waitForFunction(() =>
+    /at least 10 characters|do not match/i.test(document.body.innerText)
+  );
+  await page.evaluate(() => {
+    document.querySelector(".admin-set-credential")?.scrollIntoView({ block: "end" });
+    [...document.querySelectorAll(".admin-form--manage-user__error")]
+      .at(-1)
+      ?.scrollIntoView({ block: "center" });
+  });
+  await shot("admin-set-credential-mismatch-320.png");
+
+  encryptionAvailable = false;
+  credentialStatus = "none";
+  await openCredential(390, 844, true, { expectMask: false });
+  const unavailable = await page.evaluate(() => document.body.innerText);
+  assert.match(unavailable, /Not configured/);
+  assert.match(unavailable, /temporarily unavailable/);
+  assert.match(unavailable, /Save dentist details/);
+  assert.doesNotMatch(unavailable, /Save credential/);
+  await shot("admin-set-credential-unavailable-390.png");
 });
