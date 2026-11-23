@@ -356,6 +356,27 @@ test("Phase 5 centralized records and cross-branch grants", async (t) => {
   const listed = search.json.patients.find((row) => Number(row.id) === Number(recordId));
   assert.equal(listed.fullName, "Mina Patient");
   assert.equal(listed.lastTreatment, "Oral Prophylaxis");
+  const treatingMandaluyongList = await api("GET", "/api/dentist/patients", {
+    role: "dentist",
+    id: treatingId,
+    branchId: mandaluyongId,
+  });
+  assert.equal(
+    (treatingMandaluyongList.json.patients || []).some((row) => Number(row.id) === Number(recordId)),
+    false
+  );
+  const unrelatedList = await api("GET", "/api/dentist/patients", {
+    role: "dentist",
+    id: unrelatedId,
+    branchId: pasigId,
+  });
+  assert.equal((unrelatedList.json.patients || []).some((row) => Number(row.id) === Number(recordId)), false);
+  const coworkerList = await api("GET", "/api/dentist/patients", {
+    role: "dentist",
+    id: coworkerId,
+    branchId: mandaluyongId,
+  });
+  assert.ok((coworkerList.json.patients || []).some((row) => Number(row.id) === Number(recordId)));
 
   const unrelatedDetail = await api("GET", `/api/dentist/patients/${recordId}`, {
     role: "dentist",

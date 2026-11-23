@@ -608,15 +608,11 @@ function createDentistPortalRouter({
       error.status = 404;
       throw error;
     }
-    const relationship = await recordAccess.qualifyingRelationship(db, req.dentist, detail.record);
+    const relationship = await recordAccess.qualifyingRelationship(db, req.dentist, detail.record, {
+      branchId: req.branchAccess?.activeBranch?.id || null,
+    });
     if (!relationship.allowed) {
-      const error = new Error(
-        "A confirmed appointment or an active encounter with this patient is required before the chart can be opened."
-      );
-      error.status = 403;
-      error.code = "NO_TREATMENT_RELATIONSHIP";
-      error.patient = recordAccess.identityOf(detail.record);
-      throw error;
+      throw recordAccess.denyNoRelationship(detail.record, { includeIdentity: true });
     }
     const grants = await recordAccess.activeGrants(db, req.dentist.id, detail.record.id);
     return { detail, access: { encounterBranchIds: relationship.branchIds, grants } };
@@ -1862,29 +1858,33 @@ function createDentistPortalRouter({
 
   router.get("/patients", async (req, res) => {
     const search = stringValue(req.query.search, 100);
+    const branchId = req.branchAccess?.activeBranch?.id;
+    if (!branchId && !req.branchAccess?.legacy) {
+      return res.json({ patients: [], total: 0 });
+    }
     try {
-      const patients = await clinicalPatients.listClinicalRecords(db, {
+      const listOptions = {
         search,
         limit: 100,
-      });
-      const visible = [];
-      for (const record of patients) {
-        const relationship = await recordAccess.qualifyingRelationship(db, req.dentist, record);
-        const identity = recordAccess.identityOf(record);
-        if (!relationship.allowed) {
-          visible.push(identity);
-          continue;
-        }
-        visible.push({
-          ...identity,
-          recordCode: record.recordCode,
-          patientCategory: record.patientCategory || null,
-          lastTreatment: record.lastTreatment,
-          lastTreatmentDate: record.lastTreatmentDate,
-          isClinicalRecord: true,
-        });
-      }
-      return res.json({ patients: visible });
+        ...(req.branchAccess?.legacy
+          ? {}
+          : { branchId, dentist: req.dentist, eligibleOnly: true }),
+      };
+      const [patients, total] = await Promise.all([
+        clinicalPatients.listClinicalRecords(db, listOptions),
+        req.branchAccess?.legacy
+          ? Promise.resolve(null)
+          : clinicalPatients.countClinicalRecords(db, listOptions),
+      ]);
+      const visible = patients.map((record) => ({
+        ...recordAccess.identityOf(record),
+        recordCode: record.recordCode,
+        patientCategory: record.patientCategory || null,
+        lastTreatment: record.lastTreatment,
+        lastTreatmentDate: record.lastTreatmentDate,
+        isClinicalRecord: true,
+      }));
+      return res.json({ patients: visible, total: total == null ? visible.length : total });
     } catch (error) {
       if (clinicalPatients.isMissingRelation(error)) {
         return res.status(503).json({
@@ -1966,6 +1966,7 @@ function createDentistPortalRouter({
     }
 
     try {
+      await openPatientChart(req, recordId);
       const record = await clinicalPatients.updateClinicalRecord(db, recordId, allowed, {
         id: req.dentist.id,
         role: "dentist",
@@ -1994,6 +1995,7 @@ function createDentistPortalRouter({
       return res.status(400).json({ message: "A valid patient record ID is required." });
     }
     try {
+      await openPatientChart(req, recordId);
       const record = await clinicalPatients.archiveClinicalRecord(db, recordId, {
         id: req.dentist.id,
         role: "dentist",

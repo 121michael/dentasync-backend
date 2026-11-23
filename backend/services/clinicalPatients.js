@@ -3,6 +3,7 @@
 const crypto = require("crypto");
 const dentalChartSync = require("./dentalChartSync");
 const patientData = require("./patientData");
+const recordAccess = require("./recordAccess");
 
 function stringValue(value, maxLength = 500) {
   if (typeof value !== "string") {
@@ -385,11 +386,20 @@ async function enrichRecordsFromLinkedProfiles(db, records) {
   });
 }
 
-async function listClinicalRecords(db, { search = null, includeArchived = false, limit = 100, offset = 0 } = {}) {
+function buildClinicalRecordFilters({
+  search = null,
+  includeArchived = false,
+  branchId = null,
+  dentist = null,
+  eligibleOnly = false,
+} = {}) {
   const params = [];
   const clauses = [];
   if (!includeArchived) {
     clauses.push("COALESCE(record.is_archived, FALSE) = FALSE");
+  }
+  if (eligibleOnly || branchId != null) {
+    clauses.push(recordAccess.appendEligibilityClause(params, { branchId, dentist }));
   }
   if (search) {
     params.push(`%${search}%`);
@@ -403,7 +413,32 @@ async function listClinicalRecords(db, { search = null, includeArchived = false,
       OR record.linked_user_id ILIKE $${params.length}
     )`);
   }
-  const whereSql = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  return {
+    params,
+    whereSql: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "",
+  };
+}
+
+async function countClinicalRecords(db, options = {}) {
+  const { params, whereSql } = buildClinicalRecordFilters(options);
+  const result = await db.query(
+    `SELECT COUNT(*)::int AS count FROM clinic_patient_records AS record ${whereSql}`,
+    params
+  );
+  return result.rows[0]?.count || 0;
+}
+
+async function listClinicalRecords(
+  db,
+  { search = null, includeArchived = false, limit = 100, offset = 0, branchId = null, dentist = null, eligibleOnly = false } = {}
+) {
+  const { params, whereSql } = buildClinicalRecordFilters({
+    search,
+    includeArchived,
+    branchId,
+    dentist,
+    eligibleOnly,
+  });
   const unlimited = limit == null;
   let limitSql = "";
   if (!unlimited) {
@@ -1988,6 +2023,7 @@ async function findOrCreateClinicalRecordForUser(db, userId, actor = {}) {
 
 module.exports = {
   listClinicalRecords,
+  countClinicalRecords,
   getClinicalRecord,
   listLinkedAppointments,
   resolveNextAppointment,

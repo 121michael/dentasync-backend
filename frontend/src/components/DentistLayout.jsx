@@ -69,6 +69,7 @@ export function DentistLayout() {
   function chooseBranch(nextId) {
     sessionStorage.setItem("dentasync.activeBranchId", String(nextId));
     setSelectedBranchId(String(nextId));
+    window.dispatchEvent(new Event("dentasync-branch-change"));
   }
   const date = new Intl.DateTimeFormat("en-US", {
     weekday: "long",
