@@ -141,11 +141,12 @@ test("Staff navigation hides HMO Verification while Patient booking still offers
   app.get("/api/patient/branches", (_req, res) =>
     res.json({
       legacy: false,
-      requiresSelection: false,
-      autoSelectedBranchId: 1,
+      requiresSelection: true,
+      autoSelectedBranchId: null,
       branches: [{ id: 1, name: "Mandaluyong" }],
     })
   );
+  app.get("/api/patient/profile", (_req, res) => res.json({ profile: {} }));
   app.get("/api/patient/availability", (_req, res) =>
     res.json({
       closed: false,
@@ -223,30 +224,15 @@ test("Staff navigation hides HMO Verification while Patient booking still offers
   await page.evaluate((token) => localStorage.setItem("amethyst_access_token", token), tokenFor(patientRow));
   await page.goto(`${frontendUrl}/appointments/book`, { waitUntil: "domcontentloaded" });
   try {
-    await page.waitForFunction(() => document.body.innerText.includes("Select your service"), { timeout: 15000 });
+    await page.waitForFunction(() => document.body.innerText.includes("Select your branch and coverage"), { timeout: 15000 });
   } catch (error) {
     const debug = await page.evaluate(() => document.body.innerText);
-    throw new Error(`booking page did not load service step: ${debug.slice(0, 800)}`);
+    throw new Error(`booking page did not load branch step: ${debug.slice(0, 800)}`);
   }
-  await page.evaluate(() => {
-    const option = [...document.querySelectorAll(".treatment-option")].find((node) =>
-      /Consultation/i.test(node.textContent || "")
-    );
-    option?.click();
-  });
-  await page.evaluate(() => document.querySelector('[aria-label="Close service details"]')?.click());
-  await page.evaluate(() =>
-    [...document.querySelectorAll("button")].find((button) => /Continue to schedule/i.test(button.textContent || ""))?.click()
-  );
-  await page.waitForFunction(() => document.body.innerText.includes("Choose date and optional time"), { timeout: 10000 });
-  await page.evaluate(() =>
-    [...document.querySelectorAll("button")].find((button) => /Continue to coverage/i.test(button.textContent || ""))?.click()
-  );
-  await page.waitForFunction(() => document.body.innerText.includes("Will you be using an HMO?"), { timeout: 10000 });
   const coverage = await page.evaluate(() => document.body.innerText);
-  assert.match(coverage, /Yes, I have HMO coverage/);
+  assert.match(coverage, /With HMO/);
   await page.click('input[value="hmo"]');
   const hmoSelected = await page.$eval(".coverage-option.is-selected", (node) => node.textContent);
-  assert.match(hmoSelected, /Yes, I have HMO coverage/);
+  assert.match(hmoSelected, /With HMO/);
   await page.screenshot({ path: path.join(artifactsDir, "patient_book_appointment_hmo_option.png"), fullPage: true });
 });
