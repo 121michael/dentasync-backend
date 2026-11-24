@@ -1195,8 +1195,13 @@ function createPatientPortalRouter({
     const normalizedMemberNumber = stringValue(hmoMemberNumber, 120);
     const normalizedCompanyName = stringValue(hmoCompanyName, 160);
     const normalizedBirthDate = isIsoDate(hmoBirthDate) ? hmoBirthDate : null;
-    if (normalizedCoverage === "hmo" && (!normalizedProvider || !normalizedMemberNumber)) {
-      return res.status(400).json({ message: "HMO provider and member number are required for HMO coverage." });
+    if (
+      normalizedCoverage === "hmo" &&
+      (!normalizedProvider || !normalizedMemberNumber || !normalizedCompanyName || !normalizedBirthDate)
+    ) {
+      return res.status(400).json({
+        message: "HMO provider, member number, company name, and birth date are required for HMO coverage.",
+      });
     }
     if (
       normalizedCoverage === "hmo" &&

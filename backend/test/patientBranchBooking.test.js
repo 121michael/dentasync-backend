@@ -175,6 +175,36 @@ test("patient branch booking", async (t) => {
     body: { serviceId: "cleaning", appointmentDate: day, coverageType: "self_pay" },
   });
   assert.equal(missingBranch.status, 400);
+  const missingCoverage = await request("POST", "/api/patient/appointments", {
+    token: patientToken,
+    body: { serviceId: "cleaning", appointmentDate: day, branchId: main.rows[0].id },
+  });
+  assert.equal(missingCoverage.status, 400);
+  const incompleteHmo = await request("POST", "/api/patient/appointments", {
+    token: patientToken,
+    body: {
+      serviceId: "cleaning",
+      appointmentDate: day,
+      coverageType: "hmo",
+      hmoProvider: "Maxicare",
+      branchId: main.rows[0].id,
+    },
+  });
+  assert.equal(incompleteHmo.status, 400);
+  const unknownHmo = await request("POST", "/api/patient/appointments", {
+    token: patientToken,
+    body: {
+      serviceId: "cleaning",
+      appointmentDate: day,
+      coverageType: "hmo",
+      hmoProvider: "InventedPlan",
+      hmoMemberNumber: "M-1",
+      hmoCompanyName: "Acme",
+      hmoBirthDate: "1990-01-01",
+      branchId: main.rows[0].id,
+    },
+  });
+  assert.equal(unknownHmo.status, 400);
 
   const invalid = await request("POST", "/api/patient/appointments", {
     token: patientToken,
@@ -343,8 +373,13 @@ test("patient branch booking", async (t) => {
   const review = await patientBranchBooking.listInactiveBranchReview(db);
   assert.ok(review.some((row) => String(row.branch_id) === String(pasig.rows[0].id)));
   const onlyMain = await request("GET", "/api/patient/branches", { token: patientToken });
-  assert.equal(onlyMain.body.requiresSelection, false);
-  assert.equal(String(onlyMain.body.autoSelectedBranchId), String(main.rows[0].id));
+  assert.equal(onlyMain.body.requiresSelection, true);
+  assert.equal(onlyMain.body.autoSelectedBranchId, null);
+  const silentMain = await request("POST", "/api/patient/appointments", {
+    token: patientToken,
+    body: { serviceId: "cleaning", appointmentDate: "2099-01-21", coverageType: "self_pay" },
+  });
+  assert.equal(silentMain.status, 400);
 
   await db.query(`UPDATE clinic_branches SET status = 'active' WHERE id = $1`, [pasig.rows[0].id]);
   await db.query(

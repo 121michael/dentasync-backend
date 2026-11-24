@@ -68,8 +68,8 @@ async function publicBranchChoices(db) {
     const branches = await loadActiveBranches(db);
     return {
       branches,
-      requiresSelection: branches.length > 1,
-      autoSelectedBranchId: branches.length === 1 ? branches[0].id : null,
+      requiresSelection: branches.length > 0,
+      autoSelectedBranchId: null,
       message: branches.length ? null : NO_BRANCHES_MESSAGE,
     };
   } catch (error) {
@@ -101,9 +101,6 @@ async function resolveBookingBranch(db, requestedId) {
   }
   if (!choices.branches.length) {
     throw bookingError(NO_BRANCHES_MESSAGE, 409);
-  }
-  if (choices.branches.length === 1 && (requestedId == null || requestedId === "")) {
-    return { branch: choices.branches[0], branches: choices.branches, autoSelected: true };
   }
   if (requestedId == null || requestedId === "") {
     throw bookingError("Select Clinic Branch.", 400);

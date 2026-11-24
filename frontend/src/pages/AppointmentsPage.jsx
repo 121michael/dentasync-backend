@@ -273,7 +273,7 @@ function ServicePriceDetails({ price, open, selectedOptionId, onSelectOption, on
   );
 }
 
-function TreatmentServiceOption({ service, selected, onSelect }) {
+function TreatmentServiceOption({ service, selected, onSelect, priceLabel, description }) {
   const visual = attachServiceVisual(service);
   const photoUrl = servicePhotoUrl(visual);
 
@@ -285,7 +285,7 @@ function TreatmentServiceOption({ service, selected, onSelect }) {
         aria-checked={selected}
         aria-haspopup="dialog"
         aria-expanded={selected}
-        aria-label={service.name}
+        aria-label={`${service.name}${selected ? ", selected" : ""}`}
         className={`treatment-option ${selected ? "is-selected" : ""}`}
         onClick={onSelect}
       >
@@ -301,11 +301,16 @@ function TreatmentServiceOption({ service, selected, onSelect }) {
           )}
         </span>
         {selected ? (
-          <span className="treatment-option__check">
-            <Check size={12} aria-hidden="true" />
+          <span className="treatment-option__check" aria-hidden="true">
+            <Check size={12} />
           </span>
         ) : null}
-        <strong>{service.name}</strong>
+        <span className="treatment-option__copy">
+          <strong>{service.name}</strong>
+          {description ? <small className="treatment-option__desc">{description}</small> : null}
+          {priceLabel ? <span className="treatment-option__price">{priceLabel}</span> : null}
+          <span className="treatment-option__select">{selected ? "Selected" : "Select"}</span>
+        </span>
       </button>
     </div>
   );
@@ -334,66 +339,85 @@ function fileKindLabel(name, mime) {
   return "Document";
 }
 
+function coverageReady(form) {
+  if (form.coverageType === "self_pay") return true;
+  if (form.coverageType === "hmo") {
+    return Boolean(
+      String(form.hmoProvider || "").trim() &&
+        String(form.hmoMemberNumber || "").trim() &&
+        String(form.hmoCompanyName || "").trim() &&
+        form.hmoBirthDate
+    );
+  }
+  return false;
+}
+
+function branchReady(form, branchChoices) {
+  if (!branchChoices || branchChoices.legacy) return true;
+  if (!(branchChoices.branches || []).length) return false;
+  return Boolean(form.branchId);
+}
+
 function validateBooking(form, { selectedServicePrice, availability, throughStep, branchChoices, availabilityLoading, availabilityError }) {
   if (throughStep >= 1) {
+    if (branchChoices && !branchChoices.legacy && !(branchChoices.branches || []).length) {
+      return {
+        step: 1,
+        message: "No clinic branches are currently available for appointment booking. Please contact the clinic.",
+      };
+    }
+    if (!branchChoices?.legacy && !form.branchId) {
+      return { step: 1, message: "Select a branch." };
+    }
+    if (form.coverageType !== "hmo" && form.coverageType !== "self_pay") {
+      return { step: 1, message: "Choose Without HMO / Self-paying or With HMO." };
+    }
+    if (form.coverageType === "hmo") {
+      if (!String(form.hmoProvider || "").trim()) {
+        return { step: 1, message: "Select your HMO provider." };
+      }
+      if (!String(form.hmoMemberNumber || "").trim()) {
+        return { step: 1, message: "Enter your HMO member number." };
+      }
+      if (!String(form.hmoCompanyName || "").trim()) {
+        return { step: 1, message: "Enter the company name on your HMO." };
+      }
+      if (!form.hmoBirthDate) {
+        return { step: 1, message: "Enter the birth date on your HMO record." };
+      }
+    }
+  }
+  if (throughStep >= 2) {
     if (!form.serviceId) {
-      return { step: 1, message: "Select a dental service before continuing." };
+      return { step: 2, message: "Select a dental service before continuing." };
     }
     if (selectedServicePrice?.options?.length && !form.bracesOption) {
       return {
-        step: 1,
+        step: 2,
         message: "Choose Standard Metal Braces, Invisible Braces, or Ortho Adjustment before continuing.",
       };
     }
   }
-  if (throughStep >= 2) {
-    if (branchChoices && !branchChoices.legacy && !(branchChoices.branches || []).length) {
-      return {
-        step: 2,
-        message: "No clinic branches are currently available for appointment booking. Please contact the clinic.",
-      };
-    }
-    if (branchChoices?.requiresSelection && !form.branchId) {
-      return { step: 2, message: "Select Clinic Branch." };
-    }
+  if (throughStep >= 3) {
     if (!form.appointmentDate) {
-      return { step: 2, message: "Choose an appointment date." };
+      return { step: 3, message: "Choose an appointment date." };
     }
     if (availabilityLoading) {
-      return { step: 2, message: "Appointment availability is still loading." };
+      return { step: 3, message: "Appointment availability is still loading." };
     }
     if (availabilityError) {
-      return { step: 2, message: availabilityError };
+      return { step: 3, message: availabilityError };
     }
     if (availability?.closed) {
-      return { step: 2, message: `The clinic is closed on ${displayDate(form.appointmentDate)}. Choose another date.` };
+      return { step: 3, message: `The clinic is closed on ${displayDate(form.appointmentDate)}. Choose another date.` };
     }
     if (form.appointmentTime) {
       const bookable = availability?.availableTimes || [];
       if (availability && !bookable.includes(form.appointmentTime)) {
-        return { step: 2, message: "That time is no longer available. Choose another appointment slot." };
+        return { step: 3, message: "That time is no longer available. Choose another appointment slot." };
       }
     } else if (availability && availability.dateOnlyBookable === false) {
-      return { step: 2, message: "That date is fully booked. Choose another date or a preferred time that is still open." };
-    }
-  }
-  if (throughStep >= 3) {
-    if (form.coverageType !== "hmo" && form.coverageType !== "self_pay") {
-      return { step: 3, message: "Choose HMO coverage or pay out of pocket." };
-    }
-    if (form.coverageType === "hmo") {
-      if (!String(form.hmoProvider || "").trim()) {
-        return { step: 3, message: "Select your HMO provider." };
-      }
-      if (!String(form.hmoMemberNumber || "").trim()) {
-        return { step: 3, message: "Enter your HMO member number." };
-      }
-      if (!String(form.hmoCompanyName || "").trim()) {
-        return { step: 3, message: "Enter the company name on your HMO." };
-      }
-      if (!form.hmoBirthDate) {
-        return { step: 3, message: "Enter the birth date on your HMO record." };
-      }
+      return { step: 3, message: "That date is fully booked. Choose another date or a preferred time that is still open." };
     }
   }
   return null;
@@ -427,7 +451,7 @@ export function AppointmentsPage() {
     branchId: "",
     appointmentDate: tomorrow(),
     appointmentTime: "",
-    coverageType: "self_pay",
+    coverageType: "",
     hmoProvider: "",
     hmoMemberNumber: "",
     hmoCompanyName: "",
@@ -451,20 +475,24 @@ export function AppointmentsPage() {
   const [visitSummaryOpen, setVisitSummaryOpen] = useState(false);
   const [bookingStep, setBookingStep] = useState(1);
   const [detailsDismissed, setDetailsDismissed] = useState(false);
+  const [bookingNotice, setBookingNotice] = useState("");
+  const [savedProfileHmo, setSavedProfileHmo] = useState(null);
+  const [catalogError, setCatalogError] = useState("");
+  const [catalogLoading, setCatalogLoading] = useState(false);
   const errorAlertRef = useRef(null);
   const [focusKey, setFocusKey] = useState(() => searchParams.get("focus") || "");
   const focusedCardRef = useRef(null);
 
   const load = useCallback(async () => {
     setError("");
+    setCatalogError("");
+    setCatalogLoading(true);
     try {
-      const [catalogResponse, appointmentResponse, dependentsResponse] = await Promise.all([
-        api.getCatalog(),
+      const [appointmentResponse, dependentsResponse, profileResponse] = await Promise.all([
         api.getAppointments(),
         api.getDependents().catch(() => ({ dependents: [] })),
+        api.getProfile().catch(() => ({ profile: null })),
       ]);
-      setCatalog(catalogResponse);
-      applyApprovedClinicPriceOverrides(catalogResponse.clinicServices || []);
       setAppointments(appointmentResponse.appointments || []);
       setDependents(
         (dependentsResponse.dependents || dependentsResponse.items || []).filter(
@@ -473,9 +501,30 @@ export function AppointmentsPage() {
             String(dependent.dependentUserId || "").trim()
         )
       );
-      setLoaded(true);
+      const profile = profileResponse.profile || {};
+      const savedProvider = String(profile.hmo_provider || profile.hmoProvider || "").trim();
+      setSavedProfileHmo(
+        savedProvider
+          ? {
+              hmoProvider: savedProvider,
+              hmoMemberNumber: String(profile.hmo_member_number || profile.hmoMemberNumber || "").trim(),
+              hmoBirthDate: String(profile.date_of_birth || profile.dateOfBirth || profile.birth_date || "").slice(0, 10),
+            }
+          : null
+      );
     } catch (loadError) {
       setError(loadError.message);
+    }
+    try {
+      const catalogResponse = await api.getCatalog();
+      setCatalog(catalogResponse);
+      applyApprovedClinicPriceOverrides(catalogResponse.clinicServices || []);
+      setCatalogError("");
+    } catch (catalogLoadError) {
+      setCatalog(null);
+      setCatalogError(catalogLoadError.message || "Unable to load clinic services.");
+    } finally {
+      setCatalogLoading(false);
       setLoaded(true);
     }
   }, [user?.id]);
@@ -496,10 +545,6 @@ export function AppointmentsPage() {
       .then((response) => {
         if (!active) return;
         setBranchChoices(response);
-        const only = response.autoSelectedBranchId;
-        if (only) {
-          setForm((current) => ({ ...current, branchId: String(only) }));
-        }
       })
       .catch((loadError) => {
         if (!active) return;
@@ -535,6 +580,9 @@ export function AppointmentsPage() {
       .getAppointmentAvailability(form.appointmentDate, form.branchId || undefined)
       .then((response) => {
         if (requestId !== availabilityRequest.current) return;
+        if (form.branchId && response.branch?.id && String(response.branch.id) !== String(form.branchId)) {
+          return;
+        }
         setAvailability(response);
         const bookable = new Set(response.availableTimes || []);
         setForm((current) =>
@@ -619,10 +667,50 @@ export function AppointmentsPage() {
   const bookableServices = (catalog?.services || []).filter(
     (service) =>
       service?.id &&
+      service.bookable !== false &&
       service.id !== "emergency-care" &&
       service.id !== "dental-crowns" &&
       service.id !== "oral-surgery"
   );
+  const canViewServices = branchReady(form, branchChoices) && coverageReady(form);
+
+  function serviceCardMeta(service) {
+    const priced = getApprovedClinicPrice(attachServiceVisual(service));
+    const description = String(service.description || priced?.description || "").trim();
+    const short = description.length > 120 ? `${description.slice(0, 117)}…` : description;
+    const priceLabel =
+      priced?.priceLabel && !isPatientBookingPriceCopy(priced.priceLabel) ? priced.priceLabel : "";
+    return { description: short, priceLabel };
+  }
+
+  function changeBranch(branchId) {
+    setError("");
+    setAvailability(null);
+    setForm((current) => {
+      if (String(current.branchId) === String(branchId)) return current;
+      if (current.appointmentTime) {
+        setBookingNotice("Appointment time was cleared because available slots belong to the selected branch.");
+      } else {
+        setBookingNotice("");
+      }
+      return { ...current, branchId, appointmentTime: "" };
+    });
+  }
+
+  function changeCoverage(coverageType) {
+    setError("");
+    setForm((current) => {
+      const next = { ...current, coverageType };
+      if (coverageType === "hmo" && savedProfileHmo) {
+        if (!next.hmoProvider) next.hmoProvider = savedProfileHmo.hmoProvider;
+        if (!next.hmoMemberNumber) next.hmoMemberNumber = savedProfileHmo.hmoMemberNumber;
+        if (!next.hmoBirthDate && /^\d{4}-\d{2}-\d{2}$/.test(savedProfileHmo.hmoBirthDate || "")) {
+          next.hmoBirthDate = savedProfileHmo.hmoBirthDate;
+        }
+      }
+      return next;
+    });
+  }
 
   function updateForm(event) {
     setError("");
@@ -672,6 +760,10 @@ export function AppointmentsPage() {
       return;
     }
     setError("");
+    if (bookingStep >= 3) {
+      setVisitSummaryOpen(true);
+      return;
+    }
     setBookingStep((current) => Math.min(3, current + 1));
   }
 
@@ -791,6 +883,7 @@ export function AppointmentsPage() {
         serviceId: "",
         bracesOption: "",
         appointmentTime: "",
+        coverageType: "",
         hmoProvider: "",
         hmoMemberNumber: "",
         hmoCompanyName: "",
@@ -994,14 +1087,14 @@ export function AppointmentsPage() {
     );
   }
 
-  if (!catalog) return <LoadingState label="Preparing your booking experience" />;
+  if (!catalog && catalogLoading) return <LoadingState label="Preparing your booking experience" />;
 
   return (
     <div className="appointments-page">
       <SectionHeading
         eyebrow="Reserve a visit"
         title="Book an Appointment"
-        detail="Choose a service and schedule. Your selected service will appear later in Appointment History."
+        detail="Choose a branch and coverage first. Your selected service will appear later in Appointment History."
       />
 
       <div className="admin-heading-actions" style={{ marginBottom: "1rem" }}>
@@ -1012,9 +1105,9 @@ export function AppointmentsPage() {
 
       <div className="booking-progress" aria-label="Appointment booking progress">
         {[
-          { id: 1, label: "Service" },
-          { id: 2, label: "Schedule" },
-          { id: 3, label: "Coverage" },
+          { id: 1, label: "Branch and Coverage" },
+          { id: 2, label: "Service" },
+          { id: 3, label: "Schedule" },
           { id: 4, label: "Confirmation" },
         ].map((step) => {
           const current = visitSummaryOpen ? 4 : bookingStep;
@@ -1054,38 +1147,220 @@ export function AppointmentsPage() {
           <Check size={17} /> {success}
         </p>
       ) : null}
+      {bookingNotice ? (
+        <p className="inline-alert" role="status">
+          {bookingNotice}
+        </p>
+      ) : null}
 
       <form id="patient-booking-form" className="booking-layout" onSubmit={confirmAppointment} noValidate>
         <div className="booking-form">
           <section className={`glass-card booking-section${bookingStep === 1 ? "" : " is-hidden"}`} hidden={bookingStep !== 1}>
             <div className="card-heading">
               <div>
-                <span className="eyebrow">01 — Service</span>
+                <span className="eyebrow">01 — Branch and Coverage</span>
+                <h2>Select your branch and coverage</h2>
+              </div>
+              <ShieldCheck className="card-heading__icon" size={21} />
+            </div>
+            {branchesLoading ? <p className="muted">Loading clinic branches…</p> : null}
+            {branchesError ? (
+              <p className="inline-alert inline-alert--error" role="alert">
+                {branchesError}
+              </p>
+            ) : null}
+            {branchChoices && !branchChoices.legacy && !(branchChoices.branches || []).length ? (
+              <p className="inline-alert" role="status">
+                No clinic branches are currently available for appointment booking. Please contact the clinic.
+              </p>
+            ) : null}
+            {!branchChoices?.legacy ? (
+              <label className="field booking-select-field" style={{ marginBottom: "1rem" }}>
+                <span>Select a branch</span>
+                <select
+                  name="branchId"
+                  value={form.branchId}
+                  onChange={(event) => changeBranch(event.target.value)}
+                  required
+                  aria-label="Select a branch"
+                >
+                  <option value="">Select a branch</option>
+                  {(branchChoices?.branches || []).map((branch) => (
+                    <option key={branch.id} value={branch.id}>
+                      {branch.name}
+                      {branch.isMain ? " (Main Branch)" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            <div className="coverage-options">
+              <label className={`coverage-option ${form.coverageType === "self_pay" ? "is-selected" : ""}`}>
+                <input
+                  type="radio"
+                  name="coverageType"
+                  value="self_pay"
+                  checked={form.coverageType === "self_pay"}
+                  onChange={(event) => changeCoverage(event.target.value)}
+                />
+                <span>
+                  <strong>Without HMO / Self-paying</strong>
+                  <small>Continue without an HMO provider. Pay at the clinic after your visit.</small>
+                </span>
+              </label>
+              <label className={`coverage-option ${form.coverageType === "hmo" ? "is-selected" : ""}`}>
+                <input
+                  type="radio"
+                  name="coverageType"
+                  value="hmo"
+                  checked={form.coverageType === "hmo"}
+                  onChange={(event) => changeCoverage(event.target.value)}
+                />
+                <span>
+                  <strong>With HMO</strong>
+                  <small>Selecting an HMO does not verify coverage. Clinic staff still verify your plan and benefits.</small>
+                </span>
+              </label>
+            </div>
+            {form.coverageType === "hmo" ? (
+              <div className="hmo-fields">
+                {savedProfileHmo ? (
+                  <p className="muted booking-hmo-note" role="status">
+                    Using HMO details saved on your profile: {savedProfileHmo.hmoProvider}
+                    {form.hmoProvider ? `. Current selection: ${form.hmoProvider}.` : "."} Staff still verify eligibility.
+                  </p>
+                ) : null}
+                <div className="field-row">
+                  <label className="field booking-select-field">
+                    <span>HMO provider</span>
+                    <select
+                      name="hmoProvider"
+                      value={form.hmoProvider}
+                      onChange={updateForm}
+                      required
+                      aria-label="Select HMO provider"
+                    >
+                      <option value="">Select HMO provider</option>
+                      {hmoProviders.map((provider) => (
+                        <option key={provider.id || provider.name} value={provider.name}>
+                          {provider.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>Member number</span>
+                    <input name="hmoMemberNumber" value={form.hmoMemberNumber} onChange={updateForm} required />
+                  </label>
+                </div>
+                <div className="field-row">
+                  <label className="field">
+                    <span>Company name</span>
+                    <input name="hmoCompanyName" value={form.hmoCompanyName} onChange={updateForm} required />
+                  </label>
+                  <label className="field">
+                    <span>Birth date</span>
+                    <input
+                      type="date"
+                      name="hmoBirthDate"
+                      value={form.hmoBirthDate}
+                      onChange={updateForm}
+                      required
+                    />
+                  </label>
+                </div>
+                {form.hmoProvider ? (
+                  <p className="muted booking-hmo-note">
+                    {selectedHmo?.filipinoDoctors
+                      ? `${form.hmoProvider} is listed under Filipino Doctors, subject to the clinic's applicable accreditation and verification arrangements. `
+                      : ""}
+                    Being listed does not guarantee eligibility or coverage for a particular dental service. Clinic staff
+                    must verify your account, plan benefits, and the requested service.
+                  </p>
+                ) : null}
+                <label className="file-drop">
+                  <FileUp size={21} />
+                  <span>
+                    <strong>Upload authorization document</strong>
+                    <small>{authorizationFile ? authorizationFile.name : "PDF, JPG, or PNG — up to 5 MB"}</small>
+                  </span>
+                  <input
+                    type="file"
+                    accept=".pdf,image/jpeg,image/png"
+                    onChange={(event) => setAuthorizationFile(event.target.files?.[0] || null)}
+                  />
+                </label>
+              </div>
+            ) : null}
+            <div className="booking-step-actions">
+              <button type="button" className="button button--primary" onClick={continueBooking}>
+                Continue to services <ChevronRight size={18} />
+              </button>
+            </div>
+          </section>
+
+          <section className={`glass-card booking-section${bookingStep === 2 ? "" : " is-hidden"}`} hidden={bookingStep !== 2}>
+            <div className="card-heading">
+              <div>
+                <span className="eyebrow">02 — Service</span>
                 <h2>Select your service</h2>
               </div>
+              <button type="button" className="button button--secondary button--compact" onClick={load} disabled={catalogLoading}>
+                {catalogLoading ? "Loading…" : "Retry"}
+              </button>
             </div>
-            <div className="treatment-grid" role="radiogroup" aria-label="Select a service">
-              {bookableServices.map((service) => (
-                <TreatmentServiceOption
-                  key={service.id}
-                  service={service}
-                  selected={form.serviceId === service.id}
-                  onSelect={() => {
-                    setError("");
-                    setForm((current) => {
-                      if (current.serviceId === service.id && !detailsDismissed) {
-                        return { ...current, serviceId: "", bracesOption: "" };
-                      }
-                      return { ...current, serviceId: service.id, bracesOption: current.serviceId === service.id ? current.bracesOption : "" };
-                    });
-                    setDetailsDismissed(false);
-                  }}
-                />
-              ))}
-            </div>
+            {!canViewServices ? (
+              <p className="muted booking-services-gate" role="status">
+                Select your branch and coverage option to view services.
+              </p>
+            ) : catalogLoading ? (
+              <p className="muted">Loading services…</p>
+            ) : catalogError ? (
+              <div className="booking-services-empty">
+                <p className="inline-alert inline-alert--error" role="alert">
+                  {catalogError}
+                </p>
+                <button type="button" className="button button--secondary" onClick={load}>
+                  Retry
+                </button>
+              </div>
+            ) : !bookableServices.length ? (
+              <p className="muted" role="status">
+                No bookable services are available for this selection.
+              </p>
+            ) : (
+              <div className="treatment-grid" role="radiogroup" aria-label="Select a service">
+                {bookableServices.map((service) => {
+                  const meta = serviceCardMeta(service);
+                  return (
+                    <TreatmentServiceOption
+                      key={service.id}
+                      service={service}
+                      selected={form.serviceId === service.id}
+                      description={meta.description}
+                      priceLabel={meta.priceLabel}
+                      onSelect={() => {
+                        setError("");
+                        setForm((current) => {
+                          if (current.serviceId === service.id && !detailsDismissed) {
+                            return { ...current, serviceId: "", bracesOption: "" };
+                          }
+                          return {
+                            ...current,
+                            serviceId: service.id,
+                            bracesOption: current.serviceId === service.id ? current.bracesOption : "",
+                          };
+                        });
+                        setDetailsDismissed(false);
+                      }}
+                    />
+                  );
+                })}
+              </div>
+            )}
             <ServicePriceDetails
               price={selectedServicePrice}
-              open={detailsOpen && bookingStep === 1}
+              open={detailsOpen && bookingStep === 2 && canViewServices}
               selectedOptionId={form.bracesOption}
               photoUrl={servicePhotoUrl(selectedService)}
               imageFit={selectedService?.imageFit}
@@ -1096,16 +1371,19 @@ export function AppointmentsPage() {
               onClose={closeServiceDetails}
             />
             <div className="booking-step-actions">
-              <button type="button" className="button button--primary" onClick={continueBooking}>
+              <button type="button" className="button button--secondary" onClick={() => goToBookingStep(1)}>
+                <ChevronLeft size={16} /> Back
+              </button>
+              <button type="button" className="button button--primary" onClick={continueBooking} disabled={!canViewServices}>
                 Continue to schedule <ChevronRight size={18} />
               </button>
             </div>
           </section>
 
-          <section className={`glass-card booking-section${bookingStep === 2 ? "" : " is-hidden"}`} hidden={bookingStep !== 2}>
+          <section className={`glass-card booking-section${bookingStep === 3 ? "" : " is-hidden"}`} hidden={bookingStep !== 3}>
             <div className="card-heading">
               <div>
-                <span className="eyebrow">02 — Schedule</span>
+                <span className="eyebrow">03 — Schedule</span>
                 <h2>Choose date and optional time</h2>
               </div>
               <CalendarDays className="card-heading__icon" size={21} />
@@ -1123,41 +1401,6 @@ export function AppointmentsPage() {
                       value={dependent.dependentUserId}
                     >
                       {dependent.fullName || dependent.name || "Dependent"} (Approved Dependent)
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : null}
-            {branchesLoading ? <p className="muted">Loading clinic branches…</p> : null}
-            {branchesError ? (
-              <p className="inline-alert inline-alert--error" role="alert">
-                {branchesError}
-              </p>
-            ) : null}
-            {branchChoices && !branchChoices.legacy && !(branchChoices.branches || []).length ? (
-              <p className="inline-alert" role="status">
-                No clinic branches are currently available for appointment booking. Please contact the clinic.
-              </p>
-            ) : null}
-            {branchChoices?.requiresSelection ? (
-              <label className="field" style={{ marginBottom: "1rem" }}>
-                <span>Select Clinic Branch.</span>
-                <select
-                  name="branchId"
-                  value={form.branchId}
-                  onChange={(event) => {
-                    const branchId = event.target.value;
-                    setError("");
-                    setAvailability(null);
-                    setForm((current) => ({ ...current, branchId, appointmentTime: "" }));
-                  }}
-                  required
-                >
-                  <option value="">Select Clinic Branch.</option>
-                  {(branchChoices.branches || []).map((branch) => (
-                    <option key={branch.id} value={branch.id}>
-                      {branch.name}
-                      {branch.isMain ? " (Main Branch)" : ""}
                     </option>
                   ))}
                 </select>
@@ -1236,119 +1479,16 @@ export function AppointmentsPage() {
               <p className="muted">No appointment slots are available on this date.</p>
             ) : null}
             <div className="booking-step-actions">
-              <button type="button" className="button button--secondary" onClick={() => goToBookingStep(1)}>
+              <button type="button" className="button button--secondary" onClick={() => goToBookingStep(2)}>
                 <ChevronLeft size={16} /> Back
               </button>
-              <button type="button" className="button button--primary" onClick={continueBooking}>
-                Continue to coverage <ChevronRight size={18} />
+              <button type="button" className="button button--primary booking-done" onClick={openVisitSummary}>
+                Review confirmation <ChevronRight size={18} />
               </button>
             </div>
           </section>
 
           <section className={`glass-card booking-section${bookingStep === 3 ? "" : " is-hidden"}`} hidden={bookingStep !== 3}>
-            <div className="card-heading">
-              <div>
-                <span className="eyebrow">03 — Coverage</span>
-                <h2>Will you be using an HMO?</h2>
-              </div>
-              <ShieldCheck className="card-heading__icon" size={21} />
-            </div>
-            <div className="coverage-options">
-              <label className={`coverage-option ${form.coverageType === "hmo" ? "is-selected" : ""}`}>
-                <input
-                  type="radio"
-                  name="coverageType"
-                  value="hmo"
-                  checked={form.coverageType === "hmo"}
-                  onChange={updateForm}
-                />
-                <span>
-                  <strong>Yes, I have HMO coverage</strong>
-                  <small>We’ll securely validate your benefits before your visit.</small>
-                </span>
-              </label>
-              <label className={`coverage-option ${form.coverageType === "self_pay" ? "is-selected" : ""}`}>
-                <input
-                  type="radio"
-                  name="coverageType"
-                  value="self_pay"
-                  checked={form.coverageType === "self_pay"}
-                  onChange={updateForm}
-                />
-                <span>
-                  <strong>No, I’ll pay out of pocket</strong>
-                  <small>Pay at the clinic after your visit.</small>
-                </span>
-              </label>
-            </div>
-
-            {form.coverageType === "hmo" ? (
-              <div className="hmo-fields">
-                <div className="field-row">
-                  <label className="field booking-select-field">
-                    <span>HMO provider</span>
-                    <select
-                      name="hmoProvider"
-                      value={form.hmoProvider}
-                      onChange={updateForm}
-                      required
-                      aria-label="Select HMO provider"
-                    >
-                      <option value="" disabled>
-                        Select HMO provider
-                      </option>
-                      {hmoProviders.map((provider) => (
-                        <option key={provider.id || provider.name} value={provider.name}>
-                          {provider.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field">
-                    <span>Member number</span>
-                    <input name="hmoMemberNumber" value={form.hmoMemberNumber} onChange={updateForm} required />
-                  </label>
-                </div>
-                <div className="field-row">
-                  <label className="field">
-                    <span>Company name</span>
-                    <input name="hmoCompanyName" value={form.hmoCompanyName} onChange={updateForm} required />
-                  </label>
-                  <label className="field">
-                    <span>Birth date</span>
-                    <input
-                      type="date"
-                      name="hmoBirthDate"
-                      value={form.hmoBirthDate}
-                      onChange={updateForm}
-                      required
-                    />
-                  </label>
-                </div>
-                {form.hmoProvider ? (
-                  <p className="muted booking-hmo-note">
-                    {selectedHmo?.filipinoDoctors
-                      ? `${form.hmoProvider} is listed under Filipino Doctors, subject to the clinic's applicable accreditation and verification arrangements. `
-                      : ""}
-                    Being listed does not guarantee eligibility or coverage for a particular dental service. Clinic staff
-                    must verify your account, plan benefits, and the requested service.
-                  </p>
-                ) : null}
-                <label className="file-drop">
-                  <FileUp size={21} />
-                  <span>
-                    <strong>Upload authorization document</strong>
-                    <small>{authorizationFile ? authorizationFile.name : "PDF, JPG, or PNG — up to 5 MB"}</small>
-                  </span>
-                  <input
-                    type="file"
-                    accept=".pdf,image/jpeg,image/png"
-                    onChange={(event) => setAuthorizationFile(event.target.files?.[0] || null)}
-                  />
-                </label>
-              </div>
-            ) : null}
-
             <label className="field booking-section__notes">
               <span>
                 Anything your care team should know? <small>(optional)</small>
@@ -1565,9 +1705,11 @@ export function AppointmentsPage() {
                       <strong>
                         {form.coverageType === "hmo"
                           ? form.hmoProvider
-                            ? `HMO coverage · ${form.hmoProvider}`
-                            : "HMO coverage"
-                          : "Out of pocket"}
+                            ? `HMO selected · ${form.hmoProvider} (not verified)`
+                            : "HMO selected (not verified)"
+                          : form.coverageType === "self_pay"
+                            ? "Without HMO / Self-paying"
+                            : "Select coverage"}
                       </strong>
                     </div>
                     <div className="booking-summary__line">
