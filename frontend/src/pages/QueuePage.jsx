@@ -7,11 +7,12 @@ import {
   Ticket,
 } from "lucide-react";
 import { api } from "../api";
+import { useAuth } from "../useAuth";
 import { PatientQrCheckInScanner } from "../components/PatientQrCheckInScanner";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { RescheduleAppointmentModal } from "../components/RescheduleAppointmentModal";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
-import { displayAppointmentStatus } from "../utils/appointmentStatus";
+import { clinicTodayYmd, displayAppointmentStatus } from "../utils/appointmentStatus";
 import { displayQueueStatus } from "../utils/walkInQr";
 import { PatientQueueBoard } from "../components/PatientQueueBoard";
 import {
@@ -24,6 +25,7 @@ import {
 } from "../utils/queueWaitEstimate";
 
 export function QueuePage() {
+  const { user } = useAuth();
   const [queueData, setQueueData] = useState(null);
   const [appointments, setAppointments] = useState([]);
   const [error, setError] = useState("");
@@ -54,10 +56,12 @@ export function QueuePage() {
   }, []);
 
   useEffect(() => {
+    setQueueData(null);
+    setAppointments([]);
     load();
     const interval = window.setInterval(() => load({ silent: true }), 12000);
     return () => window.clearInterval(interval);
-  }, [load]);
+  }, [load, user?.id]);
 
   useEffect(() => {
     setKeepWaiting(false);
@@ -84,8 +88,7 @@ export function QueuePage() {
   const showWaitedTooLong = Boolean(current?.waitedTooLong) && !keepWaiting && Boolean(linkedAppointment);
   const todayAppointments = appointments.filter((appointment) => {
     const date = String(appointment.date || "").slice(0, 10);
-    const today = new Date().toISOString().slice(0, 10);
-    return date === today || appointment.status === "checked_in";
+    return date === clinicTodayYmd();
   });
 
   return (

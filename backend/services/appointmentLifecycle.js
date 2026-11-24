@@ -18,7 +18,7 @@ const PATIENT_STATUS_LABELS = {
   completed: "Completed",
   cancelled: "Cancelled",
   rescheduled: "Rescheduled",
-  no_show: "Cancelled",
+  no_show: "No-show",
 };
 
 function clinicTimezone() {
@@ -97,19 +97,38 @@ function normalizeClock(value) {
 
 // Timed visits cancel after the scheduled clock time in clinic TZ.
 // Date-only visits stay eligible through that clinic date and cancel the next local day.
-function missedCutoffPassed({ appointmentDate, appointmentTime, now = new Date(), timeZone = clinicTimezone() }) {
+function isWalkInAppointment(appointment = {}) {
+  const service = `${appointment.service_name || appointment.service || appointment.treatment || ""}`;
+  const notes = `${appointment.notes || ""}`;
+  const method = `${appointment.check_in_method || appointment.checkInMethod || ""}`;
+  return /walk-?in/i.test(service) || /walk-in check-in/i.test(notes) || /^(rfid|qr)$/i.test(method);
+}
+
+function overlayAppointmentStatus(appointmentStatus, queueStatus) {
+  const queue = normalizeStatus(queueStatus);
+  if (queue === "not_served") {
+    return { status: appointmentStatus, statusLabel: "Not served", queueOutcome: "not_served" };
+  }
+  if (queue === "needs_review") {
+    return { status: appointmentStatus, statusLabel: "Needs review", queueOutcome: "needs_review" };
+  }
+  const status = normalizeStatus(appointmentStatus) || "pending";
+  return {
+    status,
+    statusLabel: displayAppointmentStatus(status),
+    queueOutcome: queue || null,
+  };
+}
+
+// Missed booked visits become no-show at 18:00 on the appointment's clinic date.
+// Catch-up includes earlier clinic dates. Scheduled start time is not a cutoff.
+function missedCutoffPassed({ appointmentDate, now = new Date(), timeZone = clinicTimezone() }) {
   const parts = clinicParts(now, timeZone);
   const date = String(appointmentDate || "").slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
-  const clock = normalizeClock(appointmentTime);
-  if (!clock) {
-    return parts.date > date;
-  }
   if (parts.date > date) return true;
   if (parts.date < date) return false;
-  const nowMinutes = parts.hour * 60 + parts.minute;
-  const [hours, minutes] = clock.split(":").map(Number);
-  return nowMinutes > hours * 60 + minutes;
+  return parts.hour >= AUTO_CANCEL_HOUR;
 }
 
 function appointmentOwnershipSql(alias = "appointments") {
@@ -176,6 +195,8 @@ module.exports = {
   waitedTooLong,
   shouldRunAutoCancel,
   missedCutoffPassed,
+  isWalkInAppointment,
+  overlayAppointmentStatus,
   appointmentOwnershipSql,
   loadActiveQueueForAppointment,
   closeQueueForAppointment,

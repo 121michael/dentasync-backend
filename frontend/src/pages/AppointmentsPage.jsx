@@ -311,8 +311,11 @@ function TreatmentServiceOption({ service, selected, onSelect }) {
   );
 }
 
-function displayStatus(status) {
-  return displayAppointmentStatus(status);
+function displayStatus(appointment) {
+  if (appointment && typeof appointment === "object") {
+    return displayAppointmentStatus(appointment.status, appointment.statusLabel);
+  }
+  return displayAppointmentStatus(appointment);
 }
 
 function formatFileSize(bytes) {
@@ -475,11 +478,13 @@ export function AppointmentsPage() {
       setError(loadError.message);
       setLoaded(true);
     }
-  }, []);
+  }, [user?.id]);
 
   useEffect(() => {
+    setAppointments([]);
+    setLoaded(false);
     load();
-  }, [load]);
+  }, [load, user?.id]);
 
   useEffect(() => {
     if (!isBooking) return undefined;
@@ -890,9 +895,9 @@ export function AppointmentsPage() {
                   }`}
                 >
                   <header className="appointment-history-card__header">
-                    <strong>Appointment</strong>
+                    <strong>{appointment.visitTypeLabel || (appointment.visitType === "walk_in" ? "Walk-in visit" : "Appointment")}</strong>
                     <span className={`status-pill status-pill--${appointment.status}`}>
-                      {displayStatus(appointment.status)}
+                      {displayStatus(appointment)}
                     </span>
                   </header>
                   <dl className="appointment-history-card__details">
@@ -919,7 +924,11 @@ export function AppointmentsPage() {
                     </div>
                     <div>
                       <dt>Status</dt>
-                      <dd>{displayStatus(appointment.status)}</dd>
+                      <dd>{displayStatus(appointment)}</dd>
+                    </div>
+                    <div>
+                      <dt>Visit type</dt>
+                      <dd>{appointment.visitTypeLabel || (appointment.visitType === "walk_in" ? "Walk-in visit" : "Booked appointment")}</dd>
                     </div>
                   </dl>
                   {canManageAppointment(appointment).cancel || canManageAppointment(appointment).reschedule ? (

@@ -3,6 +3,7 @@
 const clinicSchedule = require("./clinicSchedule");
 const clinicBranches = require("./clinicBranches");
 const hmoVerification = require("./hmoVerification");
+const { ACTIVE_QUEUE_STATUS_SQL } = require("./queueStatuses");
 
 function clinicTimezone() {
   const raw = process.env.CLINIC_TIMEZONE || "Asia/Manila";
@@ -17,6 +18,10 @@ function clinicDateSql() {
 function clinicQueueTodaySql(alias = "queue") {
   const tz = clinicTimezone().replace(/'/g, "''");
   return `(${alias}.checked_in_at AT TIME ZONE '${tz}')::date = ${clinicDateSql()}`;
+}
+
+function activeQueueTodaySql(alias = "queue") {
+  return `${clinicQueueTodaySql(alias)} AND ${alias}.status IN ${ACTIVE_QUEUE_STATUS_SQL}`;
 }
 
 function count(row, key = "count") {
@@ -548,6 +553,7 @@ module.exports = {
   clinicTimezone,
   clinicDateSql,
   clinicQueueTodaySql,
+  activeQueueTodaySql,
   clinicQueueOnDateSql,
   appointmentTodaySql,
   queueStatusSql,

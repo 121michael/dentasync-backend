@@ -816,12 +816,12 @@ async function findActiveQueueForPatient(client, patientId, branchId = null) {
            queue.check_in_method
          FROM patient_portal_queue_entries AS queue
          WHERE queue.user_id = $1
-           AND DATE(queue.checked_in_at) = CURRENT_DATE
+           AND (queue.checked_in_at AT TIME ZONE $3)::date = (CURRENT_TIMESTAMP AT TIME ZONE $3)::date
            AND queue.status NOT IN ('completed', 'no_show', 'not_served', 'needs_review')
            AND ($2::bigint IS NULL OR queue.branch_id = $2)
          ORDER BY queue.checked_in_at DESC
          LIMIT 1`,
-        [String(patientId), scopedBranchId]
+        [String(patientId), scopedBranchId, clinicTimezone()]
       )
     );
   } catch (error) {
@@ -838,11 +838,11 @@ async function findActiveQueueForPatient(client, patientId, branchId = null) {
          queue.user_id
        FROM patient_portal_queue_entries AS queue
        WHERE queue.user_id = $1
-         AND DATE(queue.checked_in_at) = CURRENT_DATE
+         AND (queue.checked_in_at AT TIME ZONE $2)::date = (CURRENT_TIMESTAMP AT TIME ZONE $2)::date
          AND queue.status NOT IN ('completed', 'no_show', 'not_served', 'needs_review')
        ORDER BY queue.checked_in_at DESC
        LIMIT 1`,
-      [String(patientId)]
+      [String(patientId), clinicTimezone()]
     );
   }
   return result.rows[0] || null;
@@ -959,9 +959,9 @@ async function performStaffCheckIn(client, { appointment, staff, notifyClinicSta
   const positionResult = await client.query(
     `SELECT COALESCE(MAX(position), 0) + 1 AS next_position
      FROM patient_portal_queue_entries
-     WHERE DATE(checked_in_at) = CURRENT_DATE
+     WHERE (checked_in_at AT TIME ZONE $2)::date = (CURRENT_TIMESTAMP AT TIME ZONE $2)::date
        AND ($1::bigint IS NULL OR branch_id = $1)`,
-    [scopedBranchId]
+    [scopedBranchId, clinicTimezone()]
   );
   const position = Number(positionResult.rows[0].next_position);
   const identityRow = await loadPatientQueueIdentity(client, appointment.user_id);
