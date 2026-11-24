@@ -148,7 +148,9 @@ test("Patient booking requires branch and coverage before compact service cards"
     if (body.coverageType === "hmo" && (!body.hmoProvider || !body.hmoMemberNumber || !body.hmoCompanyName || !body.hmoBirthDate)) {
       return res.status(400).json({ message: "HMO details are required." });
     }
-    if (!body.serviceId) return res.status(400).json({ message: "Please select a treatment." });
+    if (!body.serviceId && !(Array.isArray(body.serviceIds) && body.serviceIds.length)) {
+      return res.status(400).json({ message: "Please select a treatment." });
+    }
     created.push(body);
     return res.status(201).json({
       appointment: {
@@ -237,6 +239,7 @@ test("Patient booking requires branch and coverage before compact service cards"
     [...document.querySelectorAll("button")].find((button) => /Continue to services/i.test(button.textContent || ""))?.click()
   );
   await page.waitForFunction(() => document.body.innerText.includes("Dental Cleaning"));
+  assert.match(await page.evaluate(() => document.body.innerText), /0\/3 selected/);
   assert.doesNotMatch(await page.evaluate(() => document.body.innerText), /HMO-covered|covered by HMO/i);
   await page.screenshot({ path: path.join(artifactsDir, "book_services_selfpay_desktop.png"), fullPage: true });
 
@@ -251,7 +254,7 @@ test("Patient booking requires branch and coverage before compact service cards"
   await page.evaluate(() =>
     [...document.querySelectorAll("button")].find((button) => /Continue to services/i.test(button.textContent || ""))?.click()
   );
-  await page.waitForFunction(() => document.body.innerText.includes("Select your service"));
+  await page.waitForFunction(() => document.body.innerText.includes("Select up to three services"));
   await page.evaluate(() =>
     [...document.querySelectorAll(".booking-section:not([hidden]) button")].find((button) =>
       /^Retry$/i.test(button.textContent?.trim() || "")
@@ -288,7 +291,7 @@ test("Patient booking requires branch and coverage before compact service cards"
       /^Back$/i.test(button.textContent?.trim() || "")
     )?.click()
   );
-  await page.waitForFunction(() => document.body.innerText.includes("Select your service"));
+  await page.waitForFunction(() => document.body.innerText.includes("Select up to three services"));
   await page.evaluate(() =>
     [...document.querySelectorAll(".booking-section:not([hidden]) button")].find((button) =>
       /^Back$/i.test(button.textContent?.trim() || "")
@@ -301,7 +304,11 @@ test("Patient booking requires branch and coverage before compact service cards"
     [...document.querySelectorAll("button")].find((button) => /Continue to services/i.test(button.textContent || ""))?.click()
   );
   await page.waitForFunction(() => document.body.innerText.includes("Dental Cleaning"));
-  await page.evaluate(() => document.querySelector(".treatment-option.is-selected, .treatment-option")?.click());
+  await page.evaluate(() => {
+    if (!document.querySelector(".treatment-option.is-selected")) {
+      document.querySelector(".treatment-option")?.click();
+    }
+  });
   await page.evaluate(() => document.querySelector('[aria-label="Close service details"]')?.click());
   await page.evaluate(() =>
     [...document.querySelectorAll("button")].find((button) => /Continue to schedule/i.test(button.textContent || ""))?.click()

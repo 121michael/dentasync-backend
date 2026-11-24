@@ -33,6 +33,7 @@ const {
 const dashboardOps = require("../services/dashboardOps");
 const { isClosedDayQueueStatus, isReviewableQueueStatus } = require("../services/queueStatuses");
 const { finalizeNeedsReviewVisit } = require("../services/queueDayClosure");
+const appointmentBookingServices = require("../services/appointmentBookingServices");
 
 const QUEUE_STATUS_MAP = {
   checked_in: "checked_in",
@@ -352,6 +353,8 @@ function mapAppointment(row) {
     patientName: row.patient_name || "Patient",
     patientPhone: row.patient_phone || null,
     treatment: row.service_name,
+    services: row.services || [],
+    durationMinutes: Number(row.duration_minutes) || null,
     dentistId: row.dentist_id,
     dentist: row.dentist_name,
     date: row.appointment_date,
@@ -1857,8 +1860,12 @@ function createDentistPortalRouter({
       ]);
 
       return res.json({
-        todayAppointments: todayResult.rows.map(mapAppointment),
-        upcomingAppointments: upcomingResult.rows.map(mapAppointment),
+        todayAppointments: (await appointmentBookingServices.decorateRows(db, todayResult.rows)).map(
+          mapAppointment
+        ),
+        upcomingAppointments: (await appointmentBookingServices.decorateRows(db, upcomingResult.rows)).map(
+          mapAppointment
+        ),
       });
     } catch (error) {
       console.error("Dentist appointments error:", error.message);

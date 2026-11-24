@@ -188,9 +188,10 @@ export const api = {
   getDashboard: (options = {}) => request("/patient/dashboard", options),
   getCatalog: () => request("/patient/catalog"),
   getBookingBranches: () => request("/patient/branches"),
-  getAppointmentAvailability: (date, branchId) => {
+  getAppointmentAvailability: (date, branchId, durationMinutes) => {
     const params = new URLSearchParams({ date });
     if (branchId != null && branchId !== "") params.set("branchId", String(branchId));
+    if (Number(durationMinutes) > 0) params.set("durationMinutes", String(Number(durationMinutes)));
     return request(`/patient/availability?${params}`);
   },
   getAppointments: (options = {}) => request("/patient/appointments", options),

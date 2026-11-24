@@ -28,6 +28,7 @@ import {
 import { attachServiceVisual } from "../clinic/serviceVisuals";
 
 const PERIOD_ORDER = ["Morning", "Afternoon", "Evening"];
+const MAX_BOOKING_SERVICES = 3;
 
 const APPROVED_HMO_PROVIDERS = [
   { id: "maxicare", name: "Maxicare", filipinoDoctors: false },
@@ -130,8 +131,19 @@ function displayTime(value) {
 }
 
 function displayServiceName(appointment) {
+  const listed = (appointment?.services || [])
+    .map((service) => service?.name)
+    .filter(Boolean);
+  if (listed.length) return listed.join(" · ");
   const raw = appointment?.treatment || appointment?.service || "";
   return LEGACY_SERVICE_NAMES[raw] || raw || "Service not recorded";
+}
+
+function selectedBookingIds(form) {
+  const fromArray = Array.isArray(form?.serviceIds) ? form.serviceIds : [];
+  const ids = fromArray.map((id) => String(id || "").trim()).filter(Boolean);
+  if (ids.length) return [...new Set(ids)];
+  return form?.serviceId ? [form.serviceId] : [];
 }
 
 function servicePhotoUrl(service) {
@@ -273,7 +285,7 @@ function ServicePriceDetails({ price, open, selectedOptionId, onSelectOption, on
   );
 }
 
-function TreatmentServiceOption({ service, selected, onSelect, priceLabel, description }) {
+function TreatmentServiceOption({ service, selected, onSelect, priceLabel, description, disabled }) {
   const visual = attachServiceVisual(service);
   const photoUrl = servicePhotoUrl(visual);
 
@@ -281,8 +293,9 @@ function TreatmentServiceOption({ service, selected, onSelect, priceLabel, descr
     <div className={`treatment-option-wrap ${selected ? "is-open" : ""}`}>
       <button
         type="button"
-        role="radio"
+        role="checkbox"
         aria-checked={selected}
+        aria-disabled={disabled && !selected}
         aria-haspopup="dialog"
         aria-expanded={selected}
         aria-label={`${service.name}${selected ? ", selected" : ""}`}
@@ -388,8 +401,8 @@ function validateBooking(form, { selectedServicePrice, availability, throughStep
     }
   }
   if (throughStep >= 2) {
-    if (!form.serviceId) {
-      return { step: 2, message: "Select a dental service before continuing." };
+    if (!selectedBookingIds(form).length) {
+      return { step: 2, message: "Select at least one dental service before continuing." };
     }
     if (selectedServicePrice?.options?.length && !form.bracesOption) {
       return {
@@ -447,6 +460,7 @@ export function AppointmentsPage() {
   const availabilityRequest = useRef(0);
   const [form, setForm] = useState({
     serviceId: "",
+    serviceIds: [],
     bracesOption: "",
     branchId: "",
     appointmentDate: tomorrow(),
@@ -573,11 +587,15 @@ export function AppointmentsPage() {
     }
     const requestId = availabilityRequest.current + 1;
     availabilityRequest.current = requestId;
+    const durationMinutes = selectedBookingIds(form).reduce((sum, id) => {
+      const service = (catalog?.services || []).find((item) => item.id === id);
+      return sum + Math.max(Number(service?.durationMinutes) || 30, 1);
+    }, 0);
     setAvailabilityLoading(true);
     setAvailabilityError("");
     setAvailability(null);
     api
-      .getAppointmentAvailability(form.appointmentDate, form.branchId || undefined)
+      .getAppointmentAvailability(form.appointmentDate, form.branchId || undefined, durationMinutes)
       .then((response) => {
         if (requestId !== availabilityRequest.current) return;
         if (form.branchId && response.branch?.id && String(response.branch.id) !== String(form.branchId)) {
@@ -604,7 +622,7 @@ export function AppointmentsPage() {
         if (requestId === availabilityRequest.current) setAvailabilityLoading(false);
       });
     return undefined;
-  }, [form.appointmentDate, form.branchId, isBooking, branchChoices, branchesLoading]);
+  }, [form.appointmentDate, form.branchId, form.serviceIds, form.serviceId, isBooking, branchChoices, branchesLoading, catalog]);
 
   useEffect(() => {
     const focus = searchParams.get("focus");
@@ -646,11 +664,19 @@ export function AppointmentsPage() {
     };
   }, [visitSummaryOpen, isBusy]);
 
-  const selectedService = useMemo(
+  const selectedIds = selectedBookingIds(form);
+  const selectedServices = useMemo(
     () =>
-      attachServiceVisual((catalog?.services || []).find((service) => service.id === form.serviceId)),
-    [catalog, form.serviceId]
+      selectedIds
+        .map((id) => attachServiceVisual((catalog?.services || []).find((service) => service.id === id)))
+        .filter(Boolean),
+    [catalog, form.serviceId, form.serviceIds]
   );
+  const selectedDurationMinutes = selectedServices.reduce(
+    (sum, service) => sum + Math.max(Number(service.durationMinutes) || 30, 1),
+    0
+  );
+  const selectedService = selectedServices[selectedServices.length - 1] || null;
   const selectedServicePrice = useMemo(
     () => getApprovedClinicPrice(selectedService),
     [selectedService]
@@ -673,6 +699,30 @@ export function AppointmentsPage() {
       service.id !== "oral-surgery"
   );
   const canViewServices = branchReady(form, branchChoices) && coverageReady(form);
+
+  function toggleService(serviceId) {
+    setError("");
+    setForm((current) => {
+      const ids = selectedBookingIds(current);
+      const selected = ids.includes(serviceId);
+      if (selected && ids.length === 1 && !detailsDismissed) {
+        return { ...current, serviceId: "", serviceIds: [], bracesOption: "" };
+      }
+      let next = selected ? ids.filter((id) => id !== serviceId) : [...ids, serviceId];
+      if (!selected && next.length > MAX_BOOKING_SERVICES) {
+        setBookingNotice(`You can select up to ${MAX_BOOKING_SERVICES} services for one appointment.`);
+        return current;
+      }
+      setBookingNotice("");
+      return {
+        ...current,
+        serviceIds: next,
+        serviceId: next[next.length - 1] || "",
+        bracesOption: next.some((id) => id === current.serviceId) ? current.bracesOption : "",
+      };
+    });
+    setDetailsDismissed(false);
+  }
 
   function serviceCardMeta(service) {
     const priced = getApprovedClinicPrice(attachServiceVisual(service));
@@ -870,6 +920,8 @@ export function AppointmentsPage() {
       const { bracesOption: _bracesOption, ...appointmentFields } = form;
       const response = await api.createAppointment({
         ...appointmentFields,
+        serviceId: selectedIds[0],
+        serviceIds: selectedIds,
         notes: [form.notes, optionNote].filter(Boolean).join("\n"),
         forPatientUserId: form.forPatientUserId || undefined,
         authorizationDocumentId,
@@ -881,6 +933,7 @@ export function AppointmentsPage() {
       setForm((current) => ({
         ...current,
         serviceId: "",
+        serviceIds: [],
         bracesOption: "",
         appointmentTime: "",
         coverageType: "",
@@ -1302,8 +1355,12 @@ export function AppointmentsPage() {
           <section className={`glass-card booking-section${bookingStep === 2 ? "" : " is-hidden"}`} hidden={bookingStep !== 2}>
             <div className="card-heading">
               <div>
-                <span className="eyebrow">02 — Service</span>
-                <h2>Select your service</h2>
+                <span className="eyebrow">02 — Services</span>
+                <h2>Select up to three services</h2>
+                <p className="muted booking-service-count" role="status">
+                  {selectedIds.length}/{MAX_BOOKING_SERVICES} selected
+                  {selectedDurationMinutes ? ` · ${selectedDurationMinutes} minutes total` : ""}
+                </p>
               </div>
               <button type="button" className="button button--secondary button--compact" onClick={load} disabled={catalogLoading}>
                 {catalogLoading ? "Loading…" : "Retry"}
@@ -1329,30 +1386,19 @@ export function AppointmentsPage() {
                 No bookable services are available for this selection.
               </p>
             ) : (
-              <div className="treatment-grid" role="radiogroup" aria-label="Select a service">
+              <div className="treatment-grid" role="group" aria-label="Select up to three services">
                 {bookableServices.map((service) => {
                   const meta = serviceCardMeta(service);
+                  const selected = selectedIds.includes(service.id);
                   return (
                     <TreatmentServiceOption
                       key={service.id}
                       service={service}
-                      selected={form.serviceId === service.id}
+                      selected={selected}
+                      disabled={!selected && selectedIds.length >= MAX_BOOKING_SERVICES}
                       description={meta.description}
                       priceLabel={meta.priceLabel}
-                      onSelect={() => {
-                        setError("");
-                        setForm((current) => {
-                          if (current.serviceId === service.id && !detailsDismissed) {
-                            return { ...current, serviceId: "", bracesOption: "" };
-                          }
-                          return {
-                            ...current,
-                            serviceId: service.id,
-                            bracesOption: current.serviceId === service.id ? current.bracesOption : "",
-                          };
-                        });
-                        setDetailsDismissed(false);
-                      }}
+                      onSelect={() => toggleService(service.id)}
                     />
                   );
                 })}
@@ -1433,6 +1479,9 @@ export function AppointmentsPage() {
             {availability && !availability.closed && availability.hours ? (
               <p className="muted">
                 Clinic hours: {displayTime(availability.hours.open)} – {displayTime(availability.hours.close)}
+                {selectedDurationMinutes
+                  ? ` · Selected services need ${selectedDurationMinutes} minutes (${availability.slotsNeeded || Math.ceil(selectedDurationMinutes / 30)} consecutive slot${(availability.slotsNeeded || 1) === 1 ? "" : "s"}).`
+                  : ""}
               </p>
             ) : null}
             <div className="time-filter-row">
@@ -1657,10 +1706,12 @@ export function AppointmentsPage() {
                   </div>
                   <div className="booking-summary__body">
                     <div className="booking-summary__line">
-                      <span>Service</span>
+                      <span>Services</span>
                       <strong>
-                        {selectedService
-                          ? `${selectedService.name}${selectedBracesOption ? ` — ${selectedBracesOption.title}` : ""}`
+                        {selectedServices.length
+                          ? `${selectedServices.map((service) => service.name).join(" · ")}${
+                              selectedBracesOption ? ` — ${selectedBracesOption.title}` : ""
+                            }`
                           : "Select a service"}
                       </strong>
                     </div>
@@ -1736,7 +1787,7 @@ export function AppointmentsPage() {
                   >
                     {isBusy ? "Submitting your request…" : "Request appointment"} <ChevronRight size={18} />
                   </button>
-                  <p>The service you select is saved with this appointment and shown in Appointment History.</p>
+                  <p>All selected services are saved on one appointment and shown in Appointment History.</p>
                 </aside>
               </div>,
               document.body

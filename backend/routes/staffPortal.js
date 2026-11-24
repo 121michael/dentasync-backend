@@ -34,6 +34,7 @@ const branchCheckIn = require("../services/branchCheckIn");
 const dashboardOps = require("../services/dashboardOps");
 const hmoVerification = require("../services/hmoVerification");
 const { isClosedDayQueueStatus } = require("../services/queueStatuses");
+const appointmentBookingServices = require("../services/appointmentBookingServices");
 
 const QUEUE_STATUS_MAP = {
   checked_in: "checked_in",
@@ -212,6 +213,8 @@ function mapAppointment(row) {
     patientEmail: row.patient_email || null,
     treatment: row.service_name,
     service: row.service_name,
+    services: row.services || [],
+    durationMinutes: Number(row.duration_minutes) || null,
     dentistId: row.dentist_id,
     dentist: row.dentist_name,
     date: row.appointment_date,
@@ -1081,9 +1084,9 @@ function createStaffPortalRouter({
 
       return res.json({
         tab,
-        appointments: listResult.rows.map(mapAppointment),
-        todayAppointments: todayResult.rows.map(mapAppointment),
-        pendingRequests: pendingResult.rows.map(mapAppointment),
+        appointments: (await appointmentBookingServices.decorateRows(db, listResult.rows)).map(mapAppointment),
+        todayAppointments: (await appointmentBookingServices.decorateRows(db, todayResult.rows)).map(mapAppointment),
+        pendingRequests: (await appointmentBookingServices.decorateRows(db, pendingResult.rows)).map(mapAppointment),
       });
     } catch (error) {
       console.error("Staff appointments error:", error.message);
@@ -1117,7 +1120,7 @@ function createStaffPortalRouter({
       if (!result.rows.length) {
         return res.status(404).json({ message: "Appointment not found." });
       }
-      const row = result.rows[0];
+      const [row] = await appointmentBookingServices.decorateRows(db, result.rows);
       const reminders = clinicSms?.listReminders
         ? await clinicSms.listReminders(appointmentId).catch(() => [])
         : [];

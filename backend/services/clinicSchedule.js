@@ -10,6 +10,24 @@ const DEFAULTS = {
   slotMinutes: 30,
 };
 
+async function queryMaybeMissingColumn(db, sql, params) {
+  let savepoint = false;
+  try {
+    await db.query("SAVEPOINT missing_column");
+    savepoint = true;
+  } catch (error) {
+    if (error?.code !== "25P01") throw error;
+  }
+  try {
+    const result = await db.query(sql, params);
+    if (savepoint) await db.query("RELEASE SAVEPOINT missing_column");
+    return result;
+  } catch (error) {
+    if (savepoint) await db.query("ROLLBACK TO SAVEPOINT missing_column").catch(() => {});
+    throw error;
+  }
+}
+
 function isIsoDate(value) {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     return false;
@@ -180,6 +198,43 @@ function generateSlotTimes(open, close, slotMinutes = DEFAULTS.slotMinutes) {
   return times;
 }
 
+function slotsNeededForDuration(durationMinutes, slotMinutes = DEFAULTS.slotMinutes) {
+  const step = Number.parseInt(slotMinutes, 10);
+  const size = Number.isFinite(step) && step >= 5 ? step : DEFAULTS.slotMinutes;
+  const duration = Math.max(Number(durationMinutes) || size, 1);
+  return Math.max(1, Math.ceil(duration / size));
+}
+
+function occupySlotTimes(startTime, durationMinutes, slotMinutes = DEFAULTS.slotMinutes) {
+  const start = toMinutes(startTime);
+  const step = Number.parseInt(slotMinutes, 10);
+  const size = Number.isFinite(step) && step >= 5 ? step : DEFAULTS.slotMinutes;
+  if (start == null) return [];
+  const count = slotsNeededForDuration(durationMinutes, size);
+  const times = [];
+  for (let index = 0; index < count; index += 1) {
+    times.push(fromMinutes(start + index * size));
+  }
+  return times;
+}
+
+function consecutiveSlotTimes(startTime, count, open, close, slotMinutes = DEFAULTS.slotMinutes) {
+  const needed = Math.max(Number.parseInt(count, 10) || 1, 1);
+  const times = generateSlotTimes(open, close, slotMinutes);
+  const start = normalizeTime(startTime);
+  const index = times.indexOf(start);
+  if (!start || index < 0) return null;
+  const slice = times.slice(index, index + needed);
+  return slice.length ? slice : null;
+}
+
+function addOccupiedTimes(bookedTimes, startTime, durationMinutes, slotMinutes = DEFAULTS.slotMinutes) {
+  for (const time of occupySlotTimes(startTime, durationMinutes, slotMinutes)) {
+    bookedTimes.set(time, (Number(bookedTimes.get(time) || 0) || 0) + 1);
+  }
+  return bookedTimes;
+}
+
 function slotPeriod(time) {
   const minutes = toMinutes(time);
   if (minutes == null) return "Afternoon";
@@ -340,27 +395,30 @@ async function loadSlotMap(db, scheduleDate, branchId) {
   }
 }
 
-async function loadBookedTimes(db, scheduleDate, branchId) {
+async function loadBookedTimes(db, scheduleDate, branchId, slotMinutes = DEFAULTS.slotMinutes) {
   const scoped = await scopeBranchId(db, branchId);
+  const booked = new Map();
   try {
-    const result = await db.query(
-      `SELECT appointment_time::text AS appointment_time, COUNT(*) AS count
+    const result = await queryMaybeMissingColumn(
+      db,
+      `SELECT appointment_time::text AS appointment_time,
+              COALESCE(duration_minutes, $3) AS duration_minutes
        FROM patient_portal_appointments
        WHERE appointment_date = $1::date
          AND appointment_time IS NOT NULL
          AND LOWER(COALESCE(status, 'pending')) NOT IN ('cancelled', 'no_show', 'rescheduled')
-         AND ($2::bigint IS NULL OR branch_id = $2)
-       GROUP BY appointment_time`,
-      [scheduleDate, scoped]
+         AND ($2::bigint IS NULL OR branch_id = $2)`,
+      [scheduleDate, scoped, DEFAULTS.slotMinutes]
     );
-    return new Map(
-      result.rows
-        .map((row) => [
-          normalizeTime(String(row.appointment_time || "").slice(0, 5)),
-          Number.parseInt(row.count, 10) || 0,
-        ])
-        .filter(([time]) => time)
-    );
+    for (const row of result.rows) {
+      addOccupiedTimes(
+        booked,
+        String(row.appointment_time || "").slice(0, 5),
+        row.duration_minutes,
+        slotMinutes
+      );
+    }
+    return booked;
   } catch (error) {
     if (error?.code === "42703") {
       const result = await db.query(
@@ -385,21 +443,37 @@ async function loadBookedTimes(db, scheduleDate, branchId) {
   }
 }
 
-async function loadDateOnlyCount(db, scheduleDate, branchId) {
+async function loadDateOnlyCount(db, scheduleDate, branchId, slotMinutes = DEFAULTS.slotMinutes) {
   const scoped = await scopeBranchId(db, branchId);
   try {
-    const result = await db.query(
-      `SELECT COUNT(*) AS count
+    const result = await queryMaybeMissingColumn(
+      db,
+      `SELECT COALESCE(duration_minutes, $3) AS duration_minutes
        FROM patient_portal_appointments
        WHERE appointment_date = $1::date
          AND appointment_time IS NULL
          AND LOWER(COALESCE(status, 'pending')) NOT IN ('cancelled', 'no_show', 'rescheduled')
          AND ($2::bigint IS NULL OR branch_id = $2)`,
-      [scheduleDate, scoped]
+      [scheduleDate, scoped, DEFAULTS.slotMinutes]
     );
-    return Number.parseInt(result.rows[0]?.count, 10) || 0;
+    return result.rows.reduce(
+      (sum, row) => sum + slotsNeededForDuration(row.duration_minutes, slotMinutes),
+      0
+    );
   } catch (error) {
-    if (error?.code === "42P01" || error?.code === "42703") return 0;
+    if (error?.code === "42703") {
+      const result = await db.query(
+        `SELECT COUNT(*) AS count
+         FROM patient_portal_appointments
+         WHERE appointment_date = $1::date
+           AND appointment_time IS NULL
+           AND LOWER(COALESCE(status, 'pending')) NOT IN ('cancelled', 'no_show', 'rescheduled')
+           AND ($2::bigint IS NULL OR branch_id = $2)`,
+        [scheduleDate, scoped]
+      );
+      return Number.parseInt(result.rows[0]?.count, 10) || 0;
+    }
+    if (error?.code === "42P01") return 0;
     throw error;
   }
 }
@@ -485,10 +559,11 @@ function assessCapacity(hours, defaults, savedSlots, bookedTimes, dateOnlyCount 
   };
 }
 
-function buildSlots(hours, defaults, savedSlots, bookedTimes, dateOnlyCount = 0) {
+function buildSlots(hours, defaults, savedSlots, bookedTimes, dateOnlyCount = 0, durationMinutes = 0) {
   if (hours.closed) return [];
   const times = generateSlotTimes(hours.open, hours.close, defaults.slotMinutes);
   const capacity = assessCapacity(hours, defaults, savedSlots, bookedTimes, dateOnlyCount);
+  const needed = slotsNeededForDuration(durationMinutes, defaults.slotMinutes);
   return times.map((time) => {
     const booked = Number(bookedTimes.get(time) || 0) > 0;
     const saved = savedSlots.get(time);
@@ -496,20 +571,33 @@ function buildSlots(hours, defaults, savedSlots, bookedTimes, dateOnlyCount = 0)
     if (booked) status = "booked";
     else if (saved === "unavailable") status = "unavailable";
     else if (capacity.remaining <= 0) status = "full";
+    const block = consecutiveSlotTimes(time, needed, hours.open, hours.close, defaults.slotMinutes);
+    const consecutiveOpen =
+      needed <= 1 ||
+      (block &&
+        block.every((slotTime) => {
+          if (slotTime === time) return status === "available";
+          const later = Number(bookedTimes.get(slotTime) || 0) > 0;
+          const laterSaved = savedSlots.get(slotTime);
+          return !later && laterSaved !== "unavailable";
+        }));
     return {
       time,
       period: slotPeriod(time),
       status,
       booked,
-      bookable: status === "available",
+      slotsNeeded: needed,
+      bookable: status === "available" && Boolean(consecutiveOpen),
     };
   });
 }
 
-function isSlotBookable(hours, defaults, savedSlots, bookedTimes, appointmentTime, dateOnlyCount = 0) {
+function isSlotBookable(hours, defaults, savedSlots, bookedTimes, appointmentTime, dateOnlyCount = 0, durationMinutes = 0) {
   const time = normalizeTime(appointmentTime);
   if (!time || hours.closed) return false;
-  const slot = buildSlots(hours, defaults, savedSlots, bookedTimes, dateOnlyCount).find((item) => item.time === time);
+  const slot = buildSlots(hours, defaults, savedSlots, bookedTimes, dateOnlyCount, durationMinutes).find(
+    (item) => item.time === time
+  );
   return Boolean(slot?.bookable);
 }
 
@@ -575,7 +663,12 @@ module.exports = {
   weekdayIndex,
   mergeDefaults,
   resolveOperatingHours,
+  queryMaybeMissingColumn,
   generateSlotTimes,
+  slotsNeededForDuration,
+  occupySlotTimes,
+  consecutiveSlotTimes,
+  addOccupiedTimes,
   slotPeriod,
   monthDateRange,
   datesInMonth,

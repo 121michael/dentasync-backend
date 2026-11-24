@@ -2415,6 +2415,11 @@ html[data-theme="dark"] .portal-shell[data-theme="dark"] ~ .tooth-loader .tooth-
   isolation: isolate;
 }
 
+.booking-service-count {
+  margin: 0.35rem 0 0;
+  font-size: 0.92rem;
+}
+
 .treatment-option-wrap {
   position: relative;
   z-index: 1;

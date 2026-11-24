@@ -3,6 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 const clinicSchedule = require("./clinicSchedule");
+const appointmentBookingServices = require("./appointmentBookingServices");
 
 const NO_BRANCHES_MESSAGE =
   "No clinic branches are currently available for appointment booking. Please contact the clinic.";
@@ -116,23 +117,26 @@ async function resolveBookingBranch(db, requestedId) {
   throw bookingError("Select a valid clinic branch.", 400);
 }
 
-async function availabilityForBranch(db, { date, branchId }) {
+async function availabilityForBranch(db, { date, branchId, durationMinutes = 0 }) {
   const resolved = await resolveBookingBranch(db, branchId);
   const scopedBranchId = resolved.branch?.id ?? null;
   const defaults = await clinicSchedule.loadDefaults(db);
+  const needed = clinicSchedule.slotsNeededForDuration(durationMinutes, defaults.slotMinutes);
   const dayMap = await clinicSchedule.loadDayMap(db, date, date, scopedBranchId);
   const hours = clinicSchedule.resolveOperatingHours(date, dayMap.get(date), defaults);
   const savedSlots = await clinicSchedule.loadSlotMap(db, date, scopedBranchId);
-  const bookedTimes = await clinicSchedule.loadBookedTimes(db, date, scopedBranchId);
-  const dateOnlyCount = await clinicSchedule.loadDateOnlyCount(db, date, scopedBranchId);
+  const bookedTimes = await clinicSchedule.loadBookedTimes(db, date, scopedBranchId, defaults.slotMinutes);
+  const dateOnlyCount = await clinicSchedule.loadDateOnlyCount(db, date, scopedBranchId, defaults.slotMinutes);
   const capacity = clinicSchedule.assessCapacity(hours, defaults, savedSlots, bookedTimes, dateOnlyCount);
-  const slots = clinicSchedule.buildSlots(hours, defaults, savedSlots, bookedTimes, dateOnlyCount);
+  const slots = clinicSchedule.buildSlots(hours, defaults, savedSlots, bookedTimes, dateOnlyCount, durationMinutes);
   return {
     date,
     branch: resolved.branch,
     closed: hours.closed,
     hours,
     slots,
+    durationMinutes: Number(durationMinutes) || 0,
+    slotsNeeded: needed,
     availableTimes: slots.filter((slot) => slot.bookable).map((slot) => slot.time),
     dateOnlyBookable: clinicSchedule.isDateOnlyBookable(hours, defaults, savedSlots, bookedTimes, dateOnlyCount),
     capacity: capacity.capacity,
@@ -172,29 +176,59 @@ async function dentistsForBranch(client, branchId, catalog) {
   }
 }
 
-async function dentistIsFree(client, dentistId, date, time, ignoreAppointmentId) {
-  if (!time) return true;
-  const result = await client.query(
-    `SELECT id
-     FROM patient_portal_appointments
-     WHERE dentist_id = $1
-       AND appointment_date = $2::date
-       AND appointment_time = $3::time
-       AND status NOT IN ('cancelled', 'no_show', 'rescheduled')
-       AND ($4::bigint IS NULL OR id <> $4)
-     LIMIT 1`,
-    [dentistId, date, time, ignoreAppointmentId || null]
-  );
-  return result.rows.length === 0;
+function timesOverlap(startA, durationA, startB, durationB, slotMinutes) {
+  const occupiedA = new Set(clinicSchedule.occupySlotTimes(startA, durationA, slotMinutes));
+  return clinicSchedule.occupySlotTimes(startB, durationB, slotMinutes).some((time) => occupiedA.has(time));
 }
 
-async function chooseDentist(client, { branchId, date, time, catalog, ignoreAppointmentId }) {
+async function dentistIsFree(client, dentistId, date, time, ignoreAppointmentId, durationMinutes = 30) {
+  if (!time) return true;
+  try {
+    const result = await clinicSchedule.queryMaybeMissingColumn(
+      client,
+      `SELECT appointment_time::text AS appointment_time,
+              COALESCE(duration_minutes, 30) AS duration_minutes
+       FROM patient_portal_appointments
+       WHERE dentist_id = $1
+         AND appointment_date = $2::date
+         AND appointment_time IS NOT NULL
+         AND status NOT IN ('cancelled', 'no_show', 'rescheduled')
+         AND ($3::bigint IS NULL OR id <> $3)`,
+      [dentistId, date, ignoreAppointmentId || null]
+    );
+    return !result.rows.some((row) =>
+      timesOverlap(
+        time,
+        durationMinutes,
+        String(row.appointment_time || "").slice(0, 5),
+        row.duration_minutes,
+        clinicSchedule.DEFAULTS.slotMinutes
+      )
+    );
+  } catch (error) {
+    if (error?.code !== "42703") throw error;
+    const result = await client.query(
+      `SELECT id
+       FROM patient_portal_appointments
+       WHERE dentist_id = $1
+         AND appointment_date = $2::date
+         AND appointment_time = $3::time
+         AND status NOT IN ('cancelled', 'no_show', 'rescheduled')
+         AND ($4::bigint IS NULL OR id <> $4)
+       LIMIT 1`,
+      [dentistId, date, time, ignoreAppointmentId || null]
+    );
+    return result.rows.length === 0;
+  }
+}
+
+async function chooseDentist(client, { branchId, date, time, catalog, ignoreAppointmentId, durationMinutes }) {
   const dentists = await dentistsForBranch(client, branchId, catalog);
   if (!dentists.length) {
     throw bookingError("No dentists are assigned to this clinic branch.", 503);
   }
   for (const candidate of dentists) {
-    if (await dentistIsFree(client, candidate.id, date, time, ignoreAppointmentId)) {
+    if (await dentistIsFree(client, candidate.id, date, time, ignoreAppointmentId, durationMinutes)) {
       return candidate;
     }
   }
@@ -253,13 +287,13 @@ async function claimEarliestWalkInSlot(client, { branchId, catalog } = {}) {
   throw bookingError(NO_WALK_IN_SLOTS_MESSAGE, 409);
 }
 
-async function assertPlaceAvailable(client, { branchId, date, time, ignoreAppointmentId }) {
+async function assertPlaceAvailable(client, { branchId, date, time, ignoreAppointmentId, durationMinutes = 0 }) {
   const defaults = await clinicSchedule.loadDefaults(client);
   const dayMap = await clinicSchedule.loadDayMap(client, date, date, branchId);
   const hours = clinicSchedule.resolveOperatingHours(date, dayMap.get(date), defaults);
   const savedSlots = await clinicSchedule.loadSlotMap(client, date, branchId);
-  const bookedTimes = await clinicSchedule.loadBookedTimes(client, date, branchId);
-  let dateOnlyCount = await clinicSchedule.loadDateOnlyCount(client, date, branchId);
+  const bookedTimes = await clinicSchedule.loadBookedTimes(client, date, branchId, defaults.slotMinutes);
+  let dateOnlyCount = await clinicSchedule.loadDateOnlyCount(client, date, branchId, defaults.slotMinutes);
   if (ignoreAppointmentId) {
     const ignored = await client.query(
       `SELECT appointment_time
@@ -271,19 +305,21 @@ async function assertPlaceAvailable(client, { branchId, date, time, ignoreAppoin
       [ignoreAppointmentId, date]
     );
     if (ignored.rows[0] && ignored.rows[0].appointment_time == null) {
-      dateOnlyCount = Math.max(0, dateOnlyCount - 1);
+      dateOnlyCount = Math.max(0, dateOnlyCount - clinicSchedule.slotsNeededForDuration(durationMinutes, defaults.slotMinutes));
     }
     if (ignored.rows[0]?.appointment_time) {
       const ignoredTime = clinicSchedule.normalizeTime(String(ignored.rows[0].appointment_time).slice(0, 5));
-      const current = Number(bookedTimes.get(ignoredTime) || 0);
-      if (current > 0) bookedTimes.set(ignoredTime, current - 1);
+      for (const occupied of clinicSchedule.occupySlotTimes(ignoredTime, durationMinutes, defaults.slotMinutes)) {
+        const current = Number(bookedTimes.get(occupied) || 0);
+        if (current > 0) bookedTimes.set(occupied, current - 1);
+      }
     }
   }
   if (hours.closed) {
     throw bookingError("The clinic is closed on that date. Please choose another day.", 409);
   }
   if (time) {
-    if (!clinicSchedule.isSlotBookable(hours, defaults, savedSlots, bookedTimes, time, dateOnlyCount)) {
+    if (!clinicSchedule.isSlotBookable(hours, defaults, savedSlots, bookedTimes, time, dateOnlyCount, durationMinutes)) {
       throw bookingError("That time is outside clinic hours or is not available. Please choose another slot.", 409);
     }
   } else if (!clinicSchedule.isDateOnlyBookable(hours, defaults, savedSlots, bookedTimes, dateOnlyCount)) {
@@ -303,7 +339,30 @@ async function queryOrRollback(client, sql, params) {
   }
 }
 
+function bookingDurationMinutes(values) {
+  if (values.services?.length) return appointmentBookingServices.totalDurationMinutes(values.services);
+  return Math.max(Number(values.durationMinutes || values.service?.durationMinutes) || 30, 1);
+}
+
+async function stampDurationMinutes(client, appointmentId, durationMinutes) {
+  try {
+    const updated = await queryOrRollback(
+      client,
+      `UPDATE patient_portal_appointments
+       SET duration_minutes = $2
+       WHERE id = $1
+       RETURNING *`,
+      [appointmentId, durationMinutes]
+    );
+    return updated.rows[0] || null;
+  } catch (error) {
+    if (error?.code === "42703") return null;
+    throw error;
+  }
+}
+
 async function insertAppointment(client, values) {
+  const durationMinutes = bookingDurationMinutes(values);
   const params = [
     values.userId,
     values.service.id,
@@ -325,9 +384,28 @@ async function insertAppointment(client, values) {
     values.branchId,
     values.clinicLocation || null,
     values.rescheduledFromId || null,
+    durationMinutes,
   ];
+  let inserted;
   try {
-    return await queryOrRollback(client,
+    inserted = await queryOrRollback(client,
+      `INSERT INTO patient_portal_appointments (
+         user_id, service_id, service_name, dentist_id, dentist_name,
+         appointment_date, appointment_time, coverage_type, hmo_provider,
+         hmo_member_number, hmo_company_name, hmo_birth_date, hmo_verification_status,
+         authorization_document_id, estimated_cost, notes, status, branch_id,
+         clinic_location, rescheduled_from_id, duration_minutes
+       ) VALUES (
+         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
+       )
+       RETURNING *`,
+      params
+    );
+  } catch (error) {
+    if (error?.code !== "42703") throw error;
+  }
+  if (!inserted) try {
+    inserted = await queryOrRollback(client,
       `INSERT INTO patient_portal_appointments (
          user_id, service_id, service_name, dentist_id, dentist_name,
          appointment_date, appointment_time, coverage_type, hmo_provider,
@@ -338,13 +416,13 @@ async function insertAppointment(client, values) {
          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
        )
        RETURNING *`,
-      params
+      params.slice(0, 20)
     );
   } catch (error) {
     if (error?.code !== "42703") throw error;
   }
-  try {
-    return await queryOrRollback(client,
+  if (!inserted) try {
+    inserted = await queryOrRollback(client,
       `INSERT INTO patient_portal_appointments (
          user_id, service_id, service_name, dentist_id, dentist_name,
          appointment_date, appointment_time, coverage_type, hmo_provider,
@@ -359,8 +437,8 @@ async function insertAppointment(client, values) {
   } catch (error) {
     if (error?.code !== "42703") throw error;
   }
-  try {
-    return await queryOrRollback(client,
+  if (!inserted) try {
+    inserted = await queryOrRollback(client,
       `INSERT INTO patient_portal_appointments (
          user_id, service_id, service_name, dentist_id, dentist_name,
          appointment_date, appointment_time, coverage_type, hmo_provider,
@@ -390,7 +468,7 @@ async function insertAppointment(client, values) {
   } catch (error) {
     if (error?.code !== "42703") throw error;
   }
-  return queryOrRollback(client,
+  if (!inserted) inserted = await queryOrRollback(client,
     `INSERT INTO patient_portal_appointments (
        user_id, service_id, service_name, dentist_id, dentist_name,
        appointment_date, appointment_time, coverage_type, hmo_provider,
@@ -416,10 +494,15 @@ async function insertAppointment(client, values) {
       values.status || "pending",
     ]
   );
+  const stamped = await stampDurationMinutes(client, inserted.rows[0].id, durationMinutes);
+  if (stamped) inserted.rows[0] = stamped;
+  return inserted;
 }
 
 async function createBooking(db, input) {
   const resolved = await resolveBookingBranch(db, input.branchId);
+  const services = input.services?.length ? input.services : input.service ? [input.service] : [];
+  const durationMinutes = appointmentBookingServices.totalDurationMinutes(services);
   const client = await db.connect();
   let open = false;
   try {
@@ -431,6 +514,7 @@ async function createBooking(db, input) {
       branchId,
       date: input.appointmentDate,
       time: input.appointmentTime,
+      durationMinutes,
     });
     const dentist = input.dentist
       ? input.dentist
@@ -439,20 +523,28 @@ async function createBooking(db, input) {
           date: input.appointmentDate,
           time: input.appointmentTime,
           catalog: input.catalog || [],
+          durationMinutes,
         });
-    if (input.appointmentTime && !(await dentistIsFree(client, dentist.id, input.appointmentDate, input.appointmentTime))) {
+    if (
+      input.appointmentTime &&
+      !(await dentistIsFree(client, dentist.id, input.appointmentDate, input.appointmentTime, null, durationMinutes))
+    ) {
       throw bookingError("That time was just booked. Please choose another available slot.", 409);
     }
     const inserted = await insertAppointment(client, {
       ...input,
+      services,
+      durationMinutes,
       dentist,
       branchId,
       status: "pending",
       clinicLocation: input.clinicLocation || resolved.branch?.name || "Amethyst Dental Clinic",
     });
+    await appointmentBookingServices.saveForAppointment(client, inserted.rows[0].id, services);
     await client.query("COMMIT");
     open = false;
-    return { appointment: inserted.rows[0], branch: resolved.branch };
+    const decorated = appointmentBookingServices.decorateRow(inserted.rows[0], services);
+    return { appointment: decorated, branch: resolved.branch };
   } catch (error) {
     if (open) await client.query("ROLLBACK");
     if (error?.code === "23505") {
@@ -471,6 +563,11 @@ async function rescheduleBooking(db, { current, appointmentDate, appointmentTime
     const branch = await loadBranchById(db, branchId);
     if (!branch) throw bookingError("The original clinic branch could not be found.", 409);
   }
+  const loaded = await appointmentBookingServices.loadForAppointments(db, [current.id]);
+  const services = loaded.get(String(current.id))?.length
+    ? loaded.get(String(current.id))
+    : appointmentBookingServices.decorateRow(current).services;
+  const durationMinutes = appointmentBookingServices.totalDurationMinutes(services);
   const client = await db.connect();
   let open = false;
   try {
@@ -482,10 +579,11 @@ async function rescheduleBooking(db, { current, appointmentDate, appointmentTime
       date: appointmentDate,
       time: appointmentTime,
       ignoreAppointmentId: current.id,
+      durationMinutes,
     });
     const sameDentistFree =
       !appointmentTime ||
-      (await dentistIsFree(client, current.dentist_id, appointmentDate, appointmentTime, current.id));
+      (await dentistIsFree(client, current.dentist_id, appointmentDate, appointmentTime, current.id, durationMinutes));
     const dentist = sameDentistFree
       ? { id: current.dentist_id, name: current.dentist_name }
       : await chooseDentist(client, {
@@ -494,14 +592,18 @@ async function rescheduleBooking(db, { current, appointmentDate, appointmentTime
           time: appointmentTime,
           catalog,
           ignoreAppointmentId: current.id,
+          durationMinutes,
         });
     const nextStatus = current.status === "pending" ? "pending" : "confirmed";
     const inserted = await insertAppointment(client, {
       userId: current.user_id,
+      services,
+      durationMinutes,
       service: {
-        id: current.service_id,
-        name: current.service_name,
-        estimatedCost: current.estimated_cost,
+        id: services[0]?.id || current.service_id,
+        name: appointmentBookingServices.compoundServiceName(services) || current.service_name,
+        estimatedCost: appointmentBookingServices.totalEstimatedCost(services) || current.estimated_cost,
+        durationMinutes,
       },
       dentist,
       appointmentDate,
@@ -542,9 +644,14 @@ async function rescheduleBooking(db, { current, appointmentDate, appointmentTime
         [current.id]
       );
     }
+    await appointmentBookingServices.saveForAppointment(client, inserted.rows[0].id, services);
     await client.query("COMMIT");
     open = false;
-    return { appointment: inserted.rows[0], original: original.rows[0], branchId };
+    return {
+      appointment: appointmentBookingServices.decorateRow(inserted.rows[0], services),
+      original: original.rows[0],
+      branchId,
+    };
   } catch (error) {
     if (open) await client.query("ROLLBACK");
     if (error?.code === "23505") {

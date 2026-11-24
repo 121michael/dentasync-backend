@@ -53,6 +53,7 @@ const medicalDocuments = require("../services/medicalDocuments");
 const appointmentLifecycle = require("../services/appointmentLifecycle");
 const dashboardOps = require("../services/dashboardOps");
 const hmoVerification = require("../services/hmoVerification");
+const appointmentBookingServices = require("../services/appointmentBookingServices");
 
 const SERVICES = [
   {
@@ -204,6 +205,7 @@ function mapCatalogService(service) {
     name: service.name,
     description: service.description || "",
     estimatedCost: service.estimatedCost,
+    durationMinutes: Number(service.durationMinutes) || 30,
   };
 }
 
@@ -460,6 +462,9 @@ function mapAppointment(appointment, queueStatus) {
   return {
     id: appointment.id,
     serviceId: appointment.service_id || null,
+    serviceIds: (appointment.services || []).map((service) => service.id).filter(Boolean),
+    services: appointment.services || [],
+    durationMinutes: Number(appointment.duration_minutes) || null,
     treatment: appointment.service_name,
     service: appointment.service_name,
     date: normalizeIsoDate(appointment.appointment_date),
@@ -515,7 +520,8 @@ async function mapAppointmentsWithQueue(db, rows) {
       }
     }
   }
-  return rows.map((row) => mapAppointment(row, queueByAppointment.get(String(row.id))));
+  const decorated = await appointmentBookingServices.decorateRows(db, rows);
+  return decorated.map((row) => mapAppointment(row, queueByAppointment.get(String(row.id))));
 }
 
 function createPatientPortalRouter({
@@ -706,6 +712,7 @@ function createPatientPortalRouter({
       const availability = await patientBranchBooking.availabilityForBranch(db, {
         date,
         branchId: req.query.branchId,
+        durationMinutes: Number.parseInt(req.query.durationMinutes, 10) || 0,
       });
       return res.json(availability);
     } catch (error) {
@@ -1150,6 +1157,7 @@ function createPatientPortalRouter({
     const guardianUserId = principalUserIdFor(req);
     const {
       serviceId,
+      serviceIds,
       dentistId,
       appointmentDate,
       appointmentTime,
@@ -1169,7 +1177,21 @@ function createPatientPortalRouter({
     const bookingFor =
       stringValue(forPatientUserId || dependentUserId, 120) || actorUserId;
 
-    const service = SERVICES.find((item) => item.id === serviceId);
+    let selectedServices;
+    try {
+      selectedServices = appointmentBookingServices.resolveSelectedServices(
+        appointmentBookingServices.requestedServiceIds({ serviceId, serviceIds }),
+        SERVICES.filter(isPublicBookableService)
+      );
+    } catch (selectionError) {
+      return res.status(selectionError.status || 400).json({ message: selectionError.message });
+    }
+    const service = {
+      ...appointmentBookingServices.primaryService(selectedServices),
+      name: appointmentBookingServices.compoundServiceName(selectedServices),
+      estimatedCost: appointmentBookingServices.totalEstimatedCost(selectedServices),
+      durationMinutes: appointmentBookingServices.totalDurationMinutes(selectedServices),
+    };
     const normalizedCoverage = coverageType === "hmo" ? "hmo" : coverageType === "self_pay" ? "self_pay" : null;
     const requestedTime = appointmentTime == null || String(appointmentTime).trim() === "" ? null : String(appointmentTime);
     const normalizedAppointmentTime = requestedTime == null ? null : normalizeTime(requestedTime);
@@ -1272,6 +1294,7 @@ function createPatientPortalRouter({
       const booked = await patientBranchBooking.createBooking(db, {
         userId,
         service,
+        services: selectedServices,
         appointmentDate,
         appointmentTime: normalizedAppointmentTime,
         coverageType: normalizedCoverage,
