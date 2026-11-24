@@ -44,12 +44,41 @@ const emptyForm = {
   authorizationCredentialStatus: "none",
   credentialViewable: false,
   encryptionAvailable: true,
+  credentialHashSchemaReady: true,
+  credentialSecretSchemaReady: true,
+  credentialStorageReady: true,
+  credentialSaveReady: true,
+  credentialSetupCode: null,
+  credentialSetupMessage: "",
   branchId: "",
   branchIds: [],
 };
 
 const CREDENTIAL_MASK = "••••••••";
 const REVEAL_MS = 15000;
+
+function deriveCredentialSaveReady(auth = {}) {
+  if (auth.credentialSaveReady === false) return false;
+  if (auth.encryptionAvailable === false) return false;
+  if (auth.credentialHashSchemaReady === false) return false;
+  if (auth.credentialSecretSchemaReady === false) return false;
+  return true;
+}
+
+function credentialSaveBlocked(form) {
+  return !deriveCredentialSaveReady(form);
+}
+
+function credentialSetupAlert(form) {
+  if (form?.credentialSetupMessage) return form.credentialSetupMessage;
+  if (form?.credentialSecretSchemaReady === false) {
+    return "An administrator must finish backend setup before a viewable credential can be stored. From the backend folder run npm run migrate:record-access.";
+  }
+  if (form?.encryptionAvailable === false) {
+    return "Credential saving is temporarily unavailable until the API encryption key is configured. You can still save this dentist’s other details.";
+  }
+  return "";
+}
 const PH_MOBILE_PATTERN = /^09[0-9]{9}$/;
 const PH_MOBILE_MESSAGE = "Enter a valid 11-digit mobile number starting with 09.";
 const INCOMPLETE_EMAIL_MESSAGE = "Enter a complete email address, including the full domain.";
@@ -404,6 +433,12 @@ export function AdminManageUsersPage() {
       authorizationCredentialStatus: user.authorizationCredentialStatus || (user.setupRequired ? "setup_required" : "none"),
       credentialViewable: Boolean(user.credentialViewable),
       encryptionAvailable: user.encryptionAvailable !== false,
+      credentialHashSchemaReady: user.credentialHashSchemaReady !== false,
+      credentialSecretSchemaReady: user.credentialSecretSchemaReady !== false,
+      credentialStorageReady: user.credentialStorageReady !== false,
+      credentialSaveReady: deriveCredentialSaveReady(user),
+      credentialSetupCode: user.credentialSetupCode || null,
+      credentialSetupMessage: user.credentialSetupMessage || "",
       branchId: user.branches?.[0] ? String(user.branches[0].id) : "",
       branchIds: (user.branches || []).map((branch) => String(branch.id)),
     });
@@ -468,8 +503,8 @@ export function AdminManageUsersPage() {
     if (replacingCredential) {
       if (typedPassword === CREDENTIAL_MASK || /^•+$/.test(typedPassword)) {
         errors.authPassword = "Enter a new authorization password. The masked indicator is not a password.";
-      } else if (form.encryptionAvailable === false) {
-        errors.authPassword = "Credential saving is temporarily unavailable. Set DENTIST_CREDENTIAL_ENCRYPTION_KEY on the API server, then reload.";
+      } else if (credentialSaveBlocked(form)) {
+        errors.authPassword = credentialSetupAlert(form) || "Credential saving is unavailable until backend setup is finished.";
       } else if (typedPassword.length < 10) {
         errors.authPassword = "Authorization password must be at least 10 characters long.";
       }
@@ -494,6 +529,12 @@ export function AdminManageUsersPage() {
       delete payload.authorizationCredentialStatus;
       delete payload.credentialViewable;
       delete payload.encryptionAvailable;
+      delete payload.credentialHashSchemaReady;
+      delete payload.credentialSecretSchemaReady;
+      delete payload.credentialStorageReady;
+      delete payload.credentialSaveReady;
+      delete payload.credentialSetupCode;
+      delete payload.credentialSetupMessage;
       delete payload.canApproveCrossBranchAccess;
       delete payload.password;
       if (replacingCredential) {
@@ -556,15 +597,39 @@ export function AdminManageUsersPage() {
   function applyAuthorizationToEditor(authorization) {
     const status = authorization?.authorizationCredentialStatus || "none";
     const encryptionAvailable = authorization?.encryptionAvailable !== false;
+    const credentialHashSchemaReady = authorization?.credentialHashSchemaReady !== false;
+    const credentialSecretSchemaReady = authorization?.credentialSecretSchemaReady !== false;
+    const credentialStorageReady = authorization?.credentialStorageReady !== false;
+    const credentialSaveReady = deriveCredentialSaveReady({
+      ...authorization,
+      encryptionAvailable,
+      credentialHashSchemaReady,
+      credentialSecretSchemaReady,
+    });
     setForm((current) => ({
       ...current,
       authorizationCredentialStatus: status,
       credentialViewable: Boolean(authorization?.credentialViewable),
       encryptionAvailable,
+      credentialHashSchemaReady,
+      credentialSecretSchemaReady,
+      credentialStorageReady,
+      credentialSaveReady,
+      credentialSetupCode: authorization?.credentialSetupCode || null,
+      credentialSetupMessage: authorization?.credentialSetupMessage || "",
     }));
     setEditing((current) =>
       current
-        ? { ...current, ...authorization, authorizationCredentialStatus: status, encryptionAvailable }
+        ? {
+            ...current,
+            ...authorization,
+            authorizationCredentialStatus: status,
+            encryptionAvailable,
+            credentialHashSchemaReady,
+            credentialSecretSchemaReady,
+            credentialStorageReady,
+            credentialSaveReady,
+          }
         : current
     );
     setAuthPassword("");
@@ -577,8 +642,8 @@ export function AdminManageUsersPage() {
 
   async function saveAuthorizationCredential() {
     if (!editing || tab !== "dentist" || credentialBusy) return;
-    if (form.encryptionAvailable === false) {
-      setCredentialError("Credential saving is temporarily unavailable. Set DENTIST_CREDENTIAL_ENCRYPTION_KEY on the API server, then reload.");
+    if (credentialSaveBlocked(form)) {
+      setCredentialError(credentialSetupAlert(form) || "Credential saving is unavailable until backend setup is finished.");
       return;
     }
     const nextErrors = {};
@@ -1552,7 +1617,7 @@ export function AdminManageUsersPage() {
                         </p>
                         <span
                           className={`admin-set-credential__badge${
-                            form.encryptionAvailable === false
+                            credentialSaveBlocked(form)
                               ? ""
                               : form.authorizationCredentialStatus === "configured" && !resettingCredential
                                 ? " admin-set-credential__badge--ok"
@@ -1561,8 +1626,8 @@ export function AdminManageUsersPage() {
                                   : ""
                           }`}
                         >
-                          {form.encryptionAvailable === false
-                            ? "Not configured"
+                          {credentialSaveBlocked(form)
+                            ? "Setup required"
                             : form.authorizationCredentialStatus === "configured" && !resettingCredential
                               ? "Credential set"
                               : authPassword || authConfirm
@@ -1570,10 +1635,12 @@ export function AdminManageUsersPage() {
                                 : "Not set"}
                         </span>
                       </div>
-                      {form.encryptionAvailable === false ? (
+                      {credentialSaveBlocked(form) ? (
                         <p className="admin-set-credential__status admin-set-credential__status--warn" role="alert">
-                          Credential saving is temporarily unavailable until the API encryption key is configured. You
-                          can still save this dentist’s other details.
+                          {credentialSetupAlert(form)}
+                          {/other details/i.test(credentialSetupAlert(form) || "")
+                            ? ""
+                            : " You can still save this dentist’s other details."}
                         </p>
                       ) : null}
                       {form.authorizationCredentialStatus === "configured" && !resettingCredential ? (
@@ -1612,7 +1679,7 @@ export function AdminManageUsersPage() {
                             <button
                               type="button"
                               className="button button--secondary"
-                              disabled={credentialBusy || form.encryptionAvailable === false}
+                              disabled={credentialBusy || credentialSaveBlocked(form)}
                               onClick={() => {
                                 hideRevealedCredential();
                                 setResettingCredential(true);
@@ -1630,7 +1697,7 @@ export function AdminManageUsersPage() {
                             </button>
                           </div>
                         </>
-                      ) : form.encryptionAvailable === false ? null : (
+                      ) : credentialSaveBlocked(form) ? null : (
                         <>
                           {form.authorizationCredentialStatus === "revoked" && !resettingCredential ? (
                             <p className="admin-set-credential__status">Authorization revoked. Set a new credential to restore approval permission.</p>

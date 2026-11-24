@@ -210,7 +210,9 @@ test("Set Credential stays masked and opens Admin verification", { timeout: 1800
         throw new Error("masked credential input did not render");
       }
     } else {
-      await page.waitForFunction(() => /Not configured|temporarily unavailable/i.test(document.body.innerText));
+      await page.waitForFunction(() =>
+        /Setup required|Not configured|temporarily unavailable|migrate:record-access/i.test(document.body.innerText)
+      );
     }
     await page.$eval(".admin-set-credential", (node) => node.scrollIntoView({ block: "center" }));
   }
@@ -302,8 +304,8 @@ test("Set Credential stays masked and opens Admin verification", { timeout: 1800
   credentialStatus = "none";
   await openCredential(390, 844, true, { expectMask: false });
   const unavailable = await page.evaluate(() => document.body.innerText);
-  assert.match(unavailable, /Not configured/);
-  assert.match(unavailable, /temporarily unavailable/);
+  assert.match(unavailable, /Setup required|Not configured|temporarily unavailable|migrate:record-access/);
+  assert.match(unavailable, /temporarily unavailable|encryption key|migrate:record-access/);
   assert.match(unavailable, /Save dentist details/);
   assert.doesNotMatch(unavailable, /Save credential/);
   await shot("admin-set-credential-unavailable-390.png");

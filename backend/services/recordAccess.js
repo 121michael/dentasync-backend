@@ -7,6 +7,7 @@ const {
   encryptAuthorizationPassword,
   decryptAuthorizationPassword,
   resolveCredentialEncryption,
+  KEY_UNAVAILABLE_MESSAGE,
 } = require("./dentistCredentialSecret");
 
 const GRANT_MINUTES = 30;
@@ -27,6 +28,12 @@ const REVEAL_BIND_MESSAGE = "This verification is not valid for this dentist.";
 const ADMIN_PASSWORD_WRONG = "Administrator password is incorrect.";
 const SETUP_REQUIRED_MESSAGE =
   "Authorization credential setup is required. An administrator must save this dentist's authorization password with Save credential.";
+const HASH_SCHEMA_CODE = "CREDENTIAL_HASH_SCHEMA_MISSING";
+const SECRET_SCHEMA_CODE = "CREDENTIAL_SECRET_SCHEMA_MISSING";
+const HASH_SCHEMA_MESSAGE =
+  "An administrator must finish backend setup before a credential can be stored. From the backend folder run npm run migrate:record-access (060_record_access_authorization_credential.sql). This does not rewrite patient records.";
+const SECRET_SCHEMA_MESSAGE =
+  "An administrator must finish backend setup before a viewable credential can be stored. From the backend folder run npm run migrate:record-access (061_authorization_credential_secret.sql). Existing hashes, grants, and patient data are kept.";
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const authFailures = new Map();
 const revealTickets = new Map();
@@ -778,7 +785,80 @@ function hasAuthorizationHash(row) {
   return Boolean(row?.authorization_password_hash) || row?.has_authorization_credential === true;
 }
 
-function presentAuthorization(row = {}) {
+async function inspectAuthorizationCredentialStorage(db) {
+  const empty = {
+    tableReady: false,
+    hashReady: false,
+    secretReady: false,
+    missingColumns: [
+      "can_approve_cross_branch_access",
+      "authorization_password_hash",
+      "authorization_credential_status",
+      "authorization_password_ciphertext",
+      "authorization_secret_key_id",
+    ],
+  };
+  if (!db || typeof db.query !== "function") return empty;
+  try {
+    const table = await db.query(`SELECT to_regclass('public.admin_portal_dentist_profiles') AS table_name`);
+    if (!table.rows[0]?.table_name) return empty;
+    const result = await db.query(
+      `SELECT column_name
+       FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND table_name = 'admin_portal_dentist_profiles'
+         AND column_name = ANY($1::text[])`,
+      [empty.missingColumns]
+    );
+    const present = new Set(result.rows.map((row) => row.column_name));
+    const hashReady =
+      present.has("can_approve_cross_branch_access") &&
+      present.has("authorization_password_hash") &&
+      present.has("authorization_credential_status");
+    const secretReady =
+      present.has("authorization_password_ciphertext") && present.has("authorization_secret_key_id");
+    return {
+      tableReady: true,
+      hashReady,
+      secretReady,
+      missingColumns: empty.missingColumns.filter((name) => !present.has(name)),
+    };
+  } catch (error) {
+    if (error?.code === "42P01" || error?.code === "42703") return empty;
+    throw error;
+  }
+}
+
+function credentialSetupFromStorage(storage, encryption) {
+  const encryptionAvailable = encryption?.available !== false;
+  const hashReady = storage?.hashReady === true;
+  const secretReady = storage?.secretReady === true;
+  const credentialStorageReady = hashReady && secretReady;
+  let credentialSetupCode = null;
+  let credentialSetupMessage = null;
+  if (!hashReady) {
+    credentialSetupCode = HASH_SCHEMA_CODE;
+    credentialSetupMessage = HASH_SCHEMA_MESSAGE;
+  } else if (!secretReady) {
+    credentialSetupCode = SECRET_SCHEMA_CODE;
+    credentialSetupMessage = SECRET_SCHEMA_MESSAGE;
+  } else if (!encryptionAvailable) {
+    credentialSetupCode = "ENCRYPTION_UNAVAILABLE";
+    credentialSetupMessage =
+      "Authorization credential encryption is not configured. Set DENTIST_CREDENTIAL_ENCRYPTION_KEY on the API service, then reload. Schema is ready.";
+  }
+  return {
+    encryptionAvailable,
+    credentialHashSchemaReady: hashReady,
+    credentialSecretSchemaReady: secretReady,
+    credentialStorageReady,
+    credentialSaveReady: credentialStorageReady && encryptionAvailable,
+    credentialSetupCode,
+    credentialSetupMessage,
+  };
+}
+
+function presentAuthorization(row = {}, options = {}) {
   const canApprove = row.can_approve_cross_branch_access === true;
   const hasHash = hasAuthorizationHash(row);
   const configured = canApprove && hasHash;
@@ -787,6 +867,13 @@ function presentAuthorization(row = {}) {
   if (hasHash || stored === "configured") authorizationCredentialStatus = "configured";
   else if (canApprove) authorizationCredentialStatus = "setup_required";
   else if (stored === "revoked") authorizationCredentialStatus = "revoked";
+  const encryption = options.encryption || resolveCredentialEncryption();
+  const storage = options.storage || {
+    tableReady: true,
+    hashReady: true,
+    secretReady: true,
+    missingColumns: [],
+  };
   return {
     canApproveCrossBranchAccess: canApprove,
     authorizationCredentialStatus,
@@ -795,7 +882,7 @@ function presentAuthorization(row = {}) {
     credentialViewable:
       hasHash &&
       (row.has_recoverable_secret === true || Boolean(row.authorization_password_ciphertext)),
-    encryptionAvailable: resolveCredentialEncryption().available,
+    ...credentialSetupFromStorage(storage, encryption),
   };
 }
 
@@ -918,15 +1005,21 @@ async function loadSessionApprover(db, user, { requireCredential = true } = {}) 
   }
 }
 
-function presentStoredAuthorization(row = {}) {
-  return presentAuthorization({
-    ...row,
-    has_authorization_credential: Boolean(row.authorization_password_hash),
-    has_recoverable_secret: Boolean(row.authorization_password_ciphertext),
-  });
+function presentStoredAuthorization(row = {}, options = {}) {
+  return presentAuthorization(
+    {
+      ...row,
+      has_authorization_credential: Boolean(row.authorization_password_hash),
+      has_recoverable_secret: Boolean(row.authorization_password_ciphertext),
+    },
+    options
+  );
 }
 
 async function loadDentistAuthorization(db, dentistId) {
+  const storage = await inspectAuthorizationCredentialStorage(db);
+  const encryption = resolveCredentialEncryption();
+  const options = { storage, encryption };
   try {
     const result = await db.query(
       `SELECT can_approve_cross_branch_access, authorization_password_hash, authorization_credential_status,
@@ -936,7 +1029,7 @@ async function loadDentistAuthorization(db, dentistId) {
        LIMIT 1`,
       [String(dentistId)]
     );
-    return presentStoredAuthorization(result.rows[0] || {});
+    return presentStoredAuthorization(result.rows[0] || {}, options);
   } catch (error) {
     if (error.code === "42703") {
       try {
@@ -947,16 +1040,16 @@ async function loadDentistAuthorization(db, dentistId) {
            LIMIT 1`,
           [String(dentistId)]
         );
-        return presentStoredAuthorization(result.rows[0] || {});
+        return presentStoredAuthorization(result.rows[0] || {}, options);
       } catch (fallbackError) {
         if (fallbackError.code === "42703" || fallbackError.code === "42P01") {
-          return presentAuthorization({});
+          return presentAuthorization({}, options);
         }
         throw fallbackError;
       }
     }
     if (error.code === "42P01") {
-      return presentAuthorization({});
+      return presentAuthorization({}, options);
     }
     throw error;
   }
@@ -964,8 +1057,11 @@ async function loadDentistAuthorization(db, dentistId) {
 
 async function attachDentistAuthorization(db, accounts) {
   if (!accounts?.length) return accounts;
+  const storage = await inspectAuthorizationCredentialStorage(db);
+  const encryption = resolveCredentialEncryption();
+  const options = { storage, encryption };
   for (const account of accounts) {
-    Object.assign(account, presentAuthorization({}));
+    Object.assign(account, presentAuthorization({}, options));
   }
   try {
     const flags = await db.query(
@@ -977,7 +1073,7 @@ async function attachDentistAuthorization(db, accounts) {
     );
     const byUser = new Map(flags.rows.map((row) => [String(row.user_id), row]));
     for (const account of accounts) {
-      Object.assign(account, presentAuthorization(byUser.get(String(account.id)) || {}));
+      Object.assign(account, presentAuthorization(byUser.get(String(account.id)) || {}, options));
     }
   } catch (error) {
     if (error.code === "42703") {
@@ -990,7 +1086,7 @@ async function attachDentistAuthorization(db, accounts) {
         );
         const byUser = new Map(flags.rows.map((row) => [String(row.user_id), row]));
         for (const account of accounts) {
-          Object.assign(account, presentAuthorization(byUser.get(String(account.id)) || {}));
+          Object.assign(account, presentAuthorization(byUser.get(String(account.id)) || {}, options));
         }
         return accounts;
       } catch (hashFallbackError) {
@@ -1008,7 +1104,7 @@ async function attachDentistAuthorization(db, accounts) {
         );
         const byUser = new Map(flags.rows.map((row) => [String(row.user_id), row]));
         for (const account of accounts) {
-          Object.assign(account, presentAuthorization(byUser.get(String(account.id)) || {}));
+          Object.assign(account, presentAuthorization(byUser.get(String(account.id)) || {}, options));
         }
       } catch (fallbackError) {
         if (fallbackError.code !== "42703" && fallbackError.code !== "42P01") throw fallbackError;
@@ -1093,34 +1189,21 @@ async function setAuthorizationCredential(db, admin, dentistId, { password, conf
   if (dentist.password_hash && (await bcrypt.compare(plain, dentist.password_hash))) {
     throw httpError("Choose an authorization password that is different from the sign-in password.", 400);
   }
+  const storage = await inspectAuthorizationCredentialStorage(db);
+  const encryption = resolveCredentialEncryption();
+  if (!storage.hashReady) {
+    throw httpError(HASH_SCHEMA_MESSAGE, 503, { code: HASH_SCHEMA_CODE });
+  }
+  if (!storage.secretReady) {
+    throw httpError(SECRET_SCHEMA_MESSAGE, 503, { code: SECRET_SCHEMA_CODE });
+  }
+  if (!encryption.available) {
+    throw httpError(KEY_UNAVAILABLE_MESSAGE, 503, { code: "ENCRYPTION_UNAVAILABLE" });
+  }
   const previous = await loadDentistAuthorization(db, dentist.id);
   const hash = await bcrypt.hash(plain, AUTH_HASH_ROUNDS);
   const secret = encryptAuthorizationPassword(plain);
-  const inTransaction = Boolean(options.queryable);
-  if (inTransaction) {
-    await queryable.query("SAVEPOINT credential_secret");
-  }
-  try {
-    await writeAuthorizationHash(queryable, dentist.id, hash, secret);
-    if (inTransaction) await queryable.query("RELEASE SAVEPOINT credential_secret");
-  } catch (error) {
-    if (inTransaction) {
-      try {
-        await queryable.query("ROLLBACK TO SAVEPOINT credential_secret");
-      } catch {
-        // Pool queries are autocommit; there may be no savepoint.
-      }
-    }
-    if (error.code !== "42703") throw error;
-    try {
-      await writeAuthorizationHash(queryable, dentist.id, hash, null);
-    } catch (fallbackError) {
-      if (fallbackError.code === "42703") {
-        throw httpError("Apply the authorization credential secret migration before saving a viewable credential.", 503);
-      }
-      throw fallbackError;
-    }
-  }
+  await writeAuthorizationHash(queryable, dentist.id, hash, secret);
   if (!skipAudit) {
     const action = previous.credentialConfigured ? "record_access_credential_reset" : "record_access_credential_set";
     await writeAdminAudit(db, {
@@ -1892,6 +1975,7 @@ module.exports = {
   presentAuthorization,
   assertActiveDentist,
   attachDentistAuthorization,
+  inspectAuthorizationCredentialStorage,
   loadDentistAuthorization,
   setAuthorizationCredential,
   readAuthorizationReplacement,
@@ -1901,6 +1985,7 @@ module.exports = {
   unlockOwnRecordAccess,
   decideRequest,
   approverMayDecide,
+  verifyApproverPassword,
   loadGrantMinutes,
   saveGrantMinutes,
   clampGrantMinutes,
