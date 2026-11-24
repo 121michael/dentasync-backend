@@ -43,6 +43,7 @@ const QUEUE_STATUS_MAP = {
   in_chair: "dentist",
   dentist: "dentist",
   completed: "completed",
+  cancelled: "cancelled",
   no_show: "no_show",
 };
 
@@ -2170,6 +2171,7 @@ function createDentistPortalRouter({
         patientUserId: linkedUserId,
         branchId: req.branchAccess?.activeBranch?.id || null,
         outcome,
+        reason: stringValue(req.body?.reason, 500),
         actor: {
           actorId: req.dentist.id,
           actorName: `Dr. ${`${req.dentist.first_name || ""} ${req.dentist.last_name || ""}`.trim()}`.trim(),
@@ -2180,7 +2182,7 @@ function createDentistPortalRouter({
         message:
           saved.status === "completed"
             ? "Visit marked Completed after dentist review."
-            : "Visit marked Not Served after dentist review.",
+            : "Visit marked Cancelled after dentist review.",
         visit: {
           queueEntryId: Number(saved.id),
           token: saved.token,

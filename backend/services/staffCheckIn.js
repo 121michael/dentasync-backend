@@ -432,7 +432,7 @@ async function findAppointmentForCheckIn(client, { appointmentId, patientId, bra
            SELECT 1
            FROM patient_portal_queue_entries AS queue
            WHERE queue.appointment_id = appointment.id
-             AND queue.status NOT IN ('completed', 'no_show', 'not_served', 'needs_review')
+             AND queue.status NOT IN ('completed', 'cancelled', 'no_show', 'not_served', 'needs_review')
          ) THEN 1
          ELSE 0
        END,
@@ -817,7 +817,7 @@ async function findActiveQueueForPatient(client, patientId, branchId = null) {
          FROM patient_portal_queue_entries AS queue
          WHERE queue.user_id = $1
            AND (queue.checked_in_at AT TIME ZONE $3)::date = (CURRENT_TIMESTAMP AT TIME ZONE $3)::date
-           AND queue.status NOT IN ('completed', 'no_show', 'not_served', 'needs_review')
+           AND queue.status NOT IN ('completed', 'cancelled', 'no_show', 'not_served', 'needs_review')
            AND ($2::bigint IS NULL OR queue.branch_id = $2)
          ORDER BY queue.checked_in_at DESC
          LIMIT 1`,
@@ -839,7 +839,7 @@ async function findActiveQueueForPatient(client, patientId, branchId = null) {
        FROM patient_portal_queue_entries AS queue
        WHERE queue.user_id = $1
          AND (queue.checked_in_at AT TIME ZONE $2)::date = (CURRENT_TIMESTAMP AT TIME ZONE $2)::date
-         AND queue.status NOT IN ('completed', 'no_show', 'not_served', 'needs_review')
+         AND queue.status NOT IN ('completed', 'cancelled', 'no_show', 'not_served', 'needs_review')
        ORDER BY queue.checked_in_at DESC
        LIMIT 1`,
       [String(patientId), clinicTimezone()]

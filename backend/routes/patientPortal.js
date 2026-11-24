@@ -450,7 +450,7 @@ function mapAppointment(appointment, queueStatus) {
 
   const overlay = appointmentLifecycle.overlayAppointmentStatus(appointment.status, queueStatus);
   const visitType = appointmentLifecycle.isWalkInAppointment(appointment) ? "walk_in" : "booked";
-  const closedQueue = ["not_served", "needs_review", "completed", "no_show"].includes(
+  const closedQueue = ["cancelled", "not_served", "needs_review", "completed", "no_show"].includes(
     String(queueStatus || "").toLowerCase()
   );
   const activeQueue = closedQueue ? null : queueStatus;

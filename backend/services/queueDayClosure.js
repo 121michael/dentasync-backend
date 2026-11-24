@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const clinicSchedule = require("./clinicSchedule");
 const { writeAdminAudit } = require("./adminAudit");
+const lifecycle = require("./appointmentLifecycle");
 
 const LOOKBACK_DAYS = 14;
 const ADVISORY_LOCK_NS = 87201401;
@@ -12,6 +13,10 @@ const SYSTEM_ACTOR = {
   actorName: "Queue day closure",
   actorRole: "system",
 };
+const END_OF_DAY_CANCEL_REASON = "end_of_clinic_day_unprocessed";
+const END_OF_DAY_CANCEL_NOTE = "Cancelled at end of clinic day—visit not processed";
+const DENTIST_REVIEW_CANCEL_REASON = "dentist_end_of_day_review";
+const CLOSABLE = "('checked_in', 'waiting', 'preparing', 'called', 'dentist')";
 
 function addDaysYmd(ymd, days) {
   const [year, month, day] = String(ymd).split("-").map(Number);
@@ -36,15 +41,15 @@ function isClosingDue(isoDate, hours, now = new Date()) {
   const today = clinicSchedule.clinicTodayYmd(now);
   if (!isoDate || isoDate > today) return false;
   if (isoDate < today) return true;
-  if (!hours || hours.closed) return true;
-  const close = hours.close || "23:59";
-  return clinicClockHm(now) >= close;
+  const hour = Number.parseInt(clinicClockHm(now).slice(0, 2), 10);
+  return Number.isFinite(hour) && hour >= lifecycle.AUTO_CANCEL_HOUR;
 }
 
 async function applyQueueDayClosureSchema(db) {
-  const sqlPath = path.join(__dirname, "..", "migrations", "062_queue_day_closure.sql");
-  await db.query(fs.readFileSync(sqlPath, "utf8"));
-  return { file: "062_queue_day_closure.sql" };
+  for (const name of ["062_queue_day_closure.sql", "063_queue_eod_cancelled.sql"]) {
+    await db.query(fs.readFileSync(path.join(__dirname, "..", "migrations", name), "utf8"));
+  }
+  return { file: "063_queue_eod_cancelled.sql" };
 }
 
 async function listCloseableBranches(db) {
@@ -59,6 +64,38 @@ async function listCloseableBranches(db) {
   }
 }
 
+async function cancelLinkedAppointments(client, { appointmentIds, reason, note, cancelledBy = "system" }) {
+  const ids = [...new Set((appointmentIds || []).map((id) => Number(id)).filter((id) => Number.isSafeInteger(id) && id > 0))];
+  if (!ids.length) return 0;
+  try {
+    const updated = await client.query(
+      `UPDATE patient_portal_appointments AS appointment
+       SET status = 'cancelled',
+           cancellation_reason = $2,
+           cancelled_at = CURRENT_TIMESTAMP,
+           cancelled_by = $3,
+           notes = LEFT(CONCAT_WS(E'\\n', NULLIF(appointment.notes, ''), $4::text), 1200),
+           updated_at = CURRENT_TIMESTAMP
+       WHERE appointment.id = ANY($1::bigint[])
+         AND appointment.status IN ('pending', 'confirmed', 'checked_in')
+       RETURNING id`,
+      [ids, reason, cancelledBy, note]
+    );
+    return updated.rowCount;
+  } catch (error) {
+    if (error?.code !== "42703") throw error;
+    const updated = await client.query(
+      `UPDATE patient_portal_appointments
+       SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
+       WHERE id = ANY($1::bigint[])
+         AND status IN ('pending', 'confirmed', 'checked_in')
+       RETURNING id`,
+      [ids]
+    );
+    return updated.rowCount;
+  }
+}
+
 async function closeBranchOperatingDate(client, { branchId, operatingDate, now = new Date() }) {
   const tz = process.env.CLINIC_TIMEZONE || "Asia/Manila";
   await client.query(
@@ -70,17 +107,17 @@ async function closeBranchOperatingDate(client, { branchId, operatingDate, now =
 
   const updated = await client.query(
     `WITH closing AS (
-       SELECT id, status AS previous_status, token, user_id
+       SELECT id, status AS previous_status, token, user_id, appointment_id
        FROM patient_portal_queue_entries
        WHERE branch_id = $1
          AND (checked_in_at AT TIME ZONE $2)::date = $3::date
-         AND status IN ('checked_in', 'waiting', 'preparing', 'dentist')
+         AND status IN ${CLOSABLE}
        FOR UPDATE
      )
      UPDATE patient_portal_queue_entries AS queue
      SET status = CASE
            WHEN queue.status = 'dentist' THEN 'needs_review'
-           WHEN queue.status IN ('checked_in', 'waiting', 'preparing') THEN 'not_served'
+           WHEN queue.status IN ('checked_in', 'waiting', 'preparing', 'called') THEN 'cancelled'
            ELSE queue.status
          END,
          closed_at = COALESCE(queue.closed_at, CURRENT_TIMESTAMP),
@@ -88,9 +125,20 @@ async function closeBranchOperatingDate(client, { branchId, operatingDate, now =
          updated_at = CURRENT_TIMESTAMP
      FROM closing
      WHERE queue.id = closing.id
-     RETURNING queue.id, queue.token, queue.status, closing.previous_status, queue.user_id`,
+       AND queue.status IN ${CLOSABLE}
+     RETURNING queue.id, queue.token, queue.status, queue.appointment_id, closing.previous_status, queue.user_id`,
     [branchId, tz, operatingDate]
   );
+
+  const cancelledAppointmentIds = updated.rows
+    .filter((row) => row.status === "cancelled" && row.appointment_id)
+    .map((row) => row.appointment_id);
+  await cancelLinkedAppointments(client, {
+    appointmentIds: cancelledAppointmentIds,
+    reason: END_OF_DAY_CANCEL_REASON,
+    note: END_OF_DAY_CANCEL_NOTE,
+    cancelledBy: "system",
+  });
 
   if (updated.rowCount) {
     await client.query(
@@ -105,6 +153,10 @@ async function closeBranchOperatingDate(client, { branchId, operatingDate, now =
 
   for (const row of updated.rows) {
     const fromStatus = row.previous_status;
+    const detail =
+      row.status === "cancelled"
+        ? `Automatic 6:00 PM Asia/Manila end-of-day cancel on ${operatingDate}. Status ${fromStatus} → cancelled. ${END_OF_DAY_CANCEL_NOTE}. Check-in timestamp unchanged.`
+        : `Automatic 6:00 PM Asia/Manila end-of-day review on ${operatingDate}. Status ${fromStatus} → ${row.status}. Encounter left unresolved for the assigned dentist. Check-in timestamp unchanged.`;
     await writeAdminAudit(client, {
       ...SYSTEM_ACTOR,
       action: "queue_day_closure",
@@ -112,7 +164,7 @@ async function closeBranchOperatingDate(client, { branchId, operatingDate, now =
       targetId: String(row.id),
       targetLabel: row.token || `queue-${row.id}`,
       result: "success",
-      detail: `Automatic end-of-day closure on ${operatingDate}. Status ${fromStatus} → ${row.status}. Check-in timestamp unchanged.`,
+      detail,
     });
   }
 
@@ -131,7 +183,6 @@ async function closeDueQueueDays(db, now = new Date(), { lookbackDays = LOOKBACK
 
   const today = clinicSchedule.clinicTodayYmd(now);
   const start = addDaysYmd(today, -Math.max(1, lookbackDays));
-  const defaults = await clinicSchedule.loadDefaults(db);
   const dates = [];
   for (let cursor = start; cursor <= today; cursor = addDaysYmd(cursor, 1)) {
     dates.push(cursor);
@@ -139,14 +190,12 @@ async function closeDueQueueDays(db, now = new Date(), { lookbackDays = LOOKBACK
 
   const results = [];
   for (const branchId of branches) {
-    const dayMap = await clinicSchedule.loadDayMap(db, start, today, branchId);
     const client = await db.connect();
     try {
       await client.query("BEGIN");
       await client.query("SELECT pg_advisory_xact_lock($1, $2)", [ADVISORY_LOCK_NS, branchId]);
       for (const operatingDate of dates) {
-        const hours = clinicSchedule.resolveOperatingHours(operatingDate, dayMap.get(operatingDate), defaults);
-        if (!isClosingDue(operatingDate, hours, now)) continue;
+        if (!isClosingDue(operatingDate, null, now)) continue;
         results.push(await closeBranchOperatingDate(client, { branchId, operatingDate, now }));
       }
       await client.query("COMMIT");
@@ -169,13 +218,45 @@ async function closeDueQueueDays(db, now = new Date(), { lookbackDays = LOOKBACK
   };
 }
 
+function reviewOutcomeStatus(outcome) {
+  const key = String(outcome || "").toLowerCase();
+  if (key === "completed" || key === "complete") return "completed";
+  if (key === "cancelled" || key === "cancel" || key === "not_served") return "cancelled";
+  return null;
+}
+
+async function completeLinkedAppointment(client, appointmentId) {
+  if (!appointmentId) return;
+  try {
+    await client.query(
+      `UPDATE patient_portal_appointments
+       SET status = 'completed', updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1
+         AND status IN ('pending', 'confirmed', 'checked_in', 'cancelled')`,
+      [appointmentId]
+    );
+  } catch (error) {
+    if (error?.code !== "42703") throw error;
+    await client.query(
+      `UPDATE patient_portal_appointments SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+      [appointmentId]
+    );
+  }
+}
+
 async function finalizeNeedsReviewVisit(
   db,
-  { queueId, patientUserId, branchId = null, outcome, actor = {} } = {}
+  { queueId, patientUserId, branchId = null, outcome, reason = null, actor = {} } = {}
 ) {
-  const nextStatus = outcome === "completed" ? "completed" : outcome === "not_served" ? "not_served" : null;
+  const nextStatus = reviewOutcomeStatus(outcome);
   if (!nextStatus) {
-    const error = new Error("Choose Completed or Not Served after reviewing this visit.");
+    const error = new Error("Choose Complete visit or Cancel visit after reviewing this encounter.");
+    error.status = 400;
+    throw error;
+  }
+  const cancelReason = String(reason || "").trim().slice(0, 500);
+  if (nextStatus === "cancelled" && cancelReason.length < 3) {
+    const error = new Error("A cancellation reason is required.");
     error.status = 400;
     throw error;
   }
@@ -236,12 +317,15 @@ async function finalizeNeedsReviewVisit(
     }
 
     if (row.appointment_id && nextStatus === "completed") {
-      await client.query(
-        `UPDATE patient_portal_appointments
-         SET status = 'completed', updated_at = CURRENT_TIMESTAMP
-         WHERE id = $1`,
-        [row.appointment_id]
-      );
+      await completeLinkedAppointment(client, row.appointment_id);
+    }
+    if (row.appointment_id && nextStatus === "cancelled") {
+      await cancelLinkedAppointments(client, {
+        appointmentIds: [row.appointment_id],
+        reason: DENTIST_REVIEW_CANCEL_REASON,
+        note: cancelReason,
+        cancelledBy: actor.actorId || "dentist",
+      });
     }
 
     const saved = updated.rows[0];
@@ -254,7 +338,10 @@ async function finalizeNeedsReviewVisit(
       targetId: String(saved.id),
       targetLabel: saved.token || `queue-${saved.id}`,
       result: "success",
-      detail: `Dentist review needs_review → ${nextStatus}. Original check-in timestamp preserved. Review recorded at reviewed_at.`,
+      detail:
+        nextStatus === "completed"
+          ? `Dentist review needs_review → completed. Original check-in, treatments, notes, and prescriptions preserved.`
+          : `Dentist review needs_review → cancelled. Reason: ${cancelReason}. Treatments, notes, prescriptions, and audit history were kept.`,
     });
     await client.query("COMMIT");
     transactionOpen = false;
@@ -317,6 +404,9 @@ function createQueueDayClosureJob({ db, intervalMs = 60 * 1000 } = {}) {
 
 module.exports = {
   LOOKBACK_DAYS,
+  END_OF_DAY_CANCEL_REASON,
+  END_OF_DAY_CANCEL_NOTE,
+  DENTIST_REVIEW_CANCEL_REASON,
   addDaysYmd,
   clinicClockHm,
   isClosingDue,

@@ -1679,7 +1679,7 @@ async function findActiveQueueForUser(db, userId, { branchId = null } = {}) {
        FROM patient_portal_queue_entries
        WHERE user_id = $1
          AND (checked_in_at AT TIME ZONE $2)::date = (CURRENT_TIMESTAMP AT TIME ZONE $2)::date
-         AND status NOT IN ('completed', 'no_show', 'not_served', 'needs_review')
+         AND status NOT IN ('completed', 'cancelled', 'no_show', 'not_served', 'needs_review')
          ${scoped ? "AND branch_id = $3" : ""}
        ORDER BY id DESC
        LIMIT 1`,
@@ -1695,7 +1695,7 @@ async function findActiveQueueForUser(db, userId, { branchId = null } = {}) {
            LEFT JOIN patient_portal_appointments AS appointment ON appointment.id = queue.appointment_id
            WHERE queue.user_id = $1
              AND DATE(queue.checked_in_at) = CURRENT_DATE
-             AND queue.status NOT IN ('completed', 'no_show', 'not_served', 'needs_review')
+             AND queue.status NOT IN ('completed', 'cancelled', 'no_show', 'not_served', 'needs_review')
              ${scoped ? "AND (queue.branch_id = $2 OR appointment.branch_id = $2)" : ""}
            ORDER BY queue.id DESC
            LIMIT 1`,

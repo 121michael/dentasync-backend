@@ -1,8 +1,8 @@
 "use strict";
 
-const ACTIVE_QUEUE_STATUSES = ["checked_in", "waiting", "preparing", "dentist"];
-const CLOSED_DAY_STATUSES = ["not_served", "needs_review"];
-const TERMINAL_QUEUE_STATUSES = ["completed", "no_show", "not_served", "needs_review"];
+const ACTIVE_QUEUE_STATUSES = ["checked_in", "waiting", "preparing", "called", "dentist"];
+const CLOSED_DAY_STATUSES = ["cancelled", "not_served", "needs_review"];
+const TERMINAL_QUEUE_STATUSES = ["completed", "cancelled", "no_show", "not_served", "needs_review"];
 
 function sqlInList(values) {
   return `(${values.map((value) => `'${value}'`).join(", ")})`;
@@ -33,7 +33,8 @@ function closedDayTargetStatus(status) {
   const key = normalizeQueueStatus(status);
   if (key === "dentist") return "needs_review";
   if (key === "completed") return "completed";
-  if (key === "checked_in" || key === "waiting" || key === "preparing") return "not_served";
+  if (key === "cancelled") return "cancelled";
+  if (key === "checked_in" || key === "waiting" || key === "preparing" || key === "called") return "cancelled";
   return null;
 }
 

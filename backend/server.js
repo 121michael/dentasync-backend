@@ -405,7 +405,7 @@ if (require.main === module) {
         : "Backup scheduler: in-process timer only. Render Free sleep can skip jobs unless a Cron Job calls /api/internal/backups/run."
     );
     console.log("Pending and confirmed appointments are cancelled after their scheduled clinic time if the patient has not checked in.");
-    console.log("Queue entries close at each branch's clinic closing time (CLINIC_TIMEZONE): Waiting/Called → Not Served, In Treatment → Needs Review.");
+    console.log("Queue entries close at 6:00 PM Asia/Manila: Waiting/Called → Cancelled (not no-show), In Treatment → dentist end-of-day review.");
       });
     })
     .catch((error) => {

@@ -106,6 +106,9 @@ function isWalkInAppointment(appointment = {}) {
 
 function overlayAppointmentStatus(appointmentStatus, queueStatus) {
   const queue = normalizeStatus(queueStatus);
+  if (queue === "cancelled") {
+    return { status: "cancelled", statusLabel: "Cancelled", queueOutcome: "cancelled" };
+  }
   if (queue === "not_served") {
     return { status: appointmentStatus, statusLabel: "Not served", queueOutcome: "not_served" };
   }
@@ -152,7 +155,7 @@ async function loadActiveQueueForAppointment(db, appointmentId) {
       `SELECT id, status, checked_in_at, appointment_id
        FROM patient_portal_queue_entries
        WHERE appointment_id = $1
-         AND status NOT IN ('completed', 'no_show', 'not_served', 'needs_review')
+         AND status NOT IN ('completed', 'cancelled', 'no_show', 'not_served', 'needs_review')
        ORDER BY checked_in_at DESC
        LIMIT 1`,
       [appointmentId]
@@ -171,7 +174,7 @@ async function closeQueueForAppointment(db, appointmentId, nextStatus = "no_show
       `UPDATE patient_portal_queue_entries
        SET status = $2, updated_at = CURRENT_TIMESTAMP
        WHERE appointment_id = $1
-         AND status NOT IN ('completed', 'no_show', 'not_served', 'needs_review')`,
+         AND status NOT IN ('completed', 'cancelled', 'no_show', 'not_served', 'needs_review')`,
       [appointmentId, nextStatus]
     );
   } catch (error) {

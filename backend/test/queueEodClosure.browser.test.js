@@ -30,7 +30,7 @@ function formatUser(row) {
   };
 }
 
-test("Queue closure statuses and dentist Needs Review fit Amethyst layouts", { timeout: 120000 }, async (t) => {
+test("Queue 6 PM cancellation and dentist end-of-day review fit Amethyst layouts", { timeout: 120000 }, async (t) => {
   assert.ok(fs.existsSync(chrome), "google-chrome is required");
   const { resolveAppSecrets } = require("../lib/securityConfig");
   const { jwtSecret } = resolveAppSecrets(process.env);
@@ -51,6 +51,14 @@ test("Queue closure statuses and dentist Needs Review fit Amethyst layouts", { t
     phone: "09170002222",
     role: "staff",
   };
+  const patient = {
+    id: "77",
+    first_name: "Pearl",
+    last_name: "Amethyst",
+    email: "pearl.amethyst@example.test",
+    phone: "09171234888",
+    role: "patient",
+  };
 
   let visitStatus = "needs_review";
   const reviews = [];
@@ -67,7 +75,7 @@ test("Queue closure statuses and dentist Needs Review fit Amethyst layouts", { t
     const header = String(req.headers.authorization || "");
     const token = header.replace(/^Bearer\s+/i, "");
     const payload = jwt.verify(token, jwtSecret);
-    const row = String(payload.role) === "staff" ? staff : dentist;
+    const row = String(payload.role) === "staff" ? staff : String(payload.role) === "patient" ? patient : dentist;
     return res.json({ user: formatUser(row), session: { actingAs: false, principal: formatUser(row) } });
   });
   app.get("/api/dentist/branch-context", (_req, res) =>
@@ -91,6 +99,104 @@ test("Queue closure statuses and dentist Needs Review fit Amethyst layouts", { t
   app.post("/api/dentist/patients/:id/record-access", (_req, res) =>
     res.status(403).json({ message: "You cannot use a dentist grant from this workstation." })
   );
+  const patientAppointments = [
+    {
+      id: 12,
+      service: "Cleaning",
+      treatment: "Cleaning",
+      date: "2026-11-20",
+      time: "10:00",
+      status: "cancelled",
+      statusLabel: "Cancelled",
+      queueOutcome: "cancelled",
+      visitType: "booked",
+      canCancel: false,
+      canReschedule: false,
+      branchName: "Mandaluyong",
+    },
+    {
+      id: 13,
+      service: "Filling",
+      treatment: "Filling",
+      date: "2026-11-20",
+      time: "10:30",
+      status: "completed",
+      statusLabel: "Completed",
+      queueOutcome: "completed",
+      visitType: "booked",
+      canCancel: false,
+      canReschedule: false,
+      branchName: "Mandaluyong",
+    },
+  ];
+  app.get("/api/patient/dashboard", (_req, res) =>
+    res.json({
+      patient: formatUser(patient),
+      nextAppointment: null,
+      metrics: { activeAppointments: 0, completedVisits: 1, queueToken: null, hmoStatus: "not_enrolled" },
+      wellness: { hasAssessment: false },
+      queue: null,
+      queueBoard: { entries: [], lastUpdatedAt: null },
+      unreadNotifications: 0,
+      recentNotifications: [],
+      smsPreferences: { notifySms: true },
+    })
+  );
+  app.get("/api/patient/queue", (_req, res) =>
+    res.json({ nowServing: null, current: null, queue: [], lastUpdatedAt: null, notifyWhenNear: false })
+  );
+  app.get("/api/patient/appointments", (_req, res) => res.json({ appointments: patientAppointments }));
+  app.get("/api/patient/catalog", (_req, res) => res.json({ clinicServices: [], dentists: [] }));
+  app.get("/api/patient/dependents", (_req, res) => res.json({ dependents: [] }));
+  app.get("/api/patient/notifications", (_req, res) => res.json({ notifications: [], unreadCount: 0 }));
+  app.get("/api/staff/appointments", (req, res) => {
+    const tab = String(req.query.tab || "today");
+    const cancelled = [
+      {
+        id: 12,
+        patientName: "Pearl Amethyst",
+        patientPhone: "09171234888",
+        date: "2026-11-20",
+        time: "10:00",
+        service: "Cleaning",
+        dentist: "Dr. Tala Reyes",
+        status: "cancelled",
+      },
+    ];
+    const completed = [
+      {
+        id: 13,
+        patientName: "Pearl Amethyst",
+        patientPhone: "09171234888",
+        date: "2026-11-20",
+        time: "10:30",
+        service: "Filling",
+        dentist: "Dr. Tala Reyes",
+        status: "completed",
+      },
+    ];
+    return res.json({
+      tab,
+      appointments: tab === "cancelled" ? cancelled : tab === "completed" ? completed : [],
+      todayAppointments: [],
+      pendingRequests: [],
+    });
+  });
+  app.get("/api/dentist/appointments", (_req, res) =>
+    res.json({
+      todayAppointments: [
+        {
+          id: 13,
+          patientName: "Pearl Amethyst",
+          patientPhone: "09171234888",
+          time: "10:30",
+          treatment: "Filling",
+          status: "completed",
+        },
+      ],
+      upcomingAppointments: [],
+    })
+  );
   app.get("/api/dentist/patients/:id", (_req, res) =>
     res.json({
       patient: {
@@ -108,20 +214,22 @@ test("Queue closure statuses and dentist Needs Review fit Amethyst layouts", { t
         profileLocked: true,
         linkedUserId: "77",
       },
-      treatments: [],
-      appointments: [],
+      treatments: [{ id: 1, treatment: "Cleaning / Oral Prophylaxis", status: "completed", notes: "Kept after cancel" }],
+      appointments: patientAppointments,
       access: { grantExpiresAt: null },
       currentVisit: null,
       needsReviewVisits: [
-        {
-          queueEntryId: 88,
-          appointmentId: 12,
-          token: "A-003",
-          status: visitStatus,
-          visitDate: "2026-11-20",
-          checkedInAt: "2026-11-20T02:00:00.000Z",
-          procedures: [],
-        },
+        visitStatus === "needs_review"
+          ? {
+              queueEntryId: 88,
+              appointmentId: 12,
+              token: "A-003",
+              status: visitStatus,
+              visitDate: "2026-11-20",
+              checkedInAt: "2026-11-20T02:00:00.000Z",
+              procedures: [],
+            }
+          : null,
         {
           queueEntryId: 89,
           appointmentId: 13,
@@ -131,15 +239,15 @@ test("Queue closure statuses and dentist Needs Review fit Amethyst layouts", { t
           checkedInAt: "2026-11-18T03:00:00.000Z",
           procedures: [{ id: 1, treatment: "Cleaning / Oral Prophylaxis", status: "completed" }],
         },
-      ],
+      ].filter(Boolean),
       wellness: { hasAssessment: false },
     })
   );
   app.post("/api/dentist/patients/:id/queue-visits/:queueId/review", (req, res) => {
     reviews.push(req.body);
-    visitStatus = req.body?.outcome === "not_served" ? "not_served" : "completed";
+    visitStatus = req.body?.outcome === "cancelled" || req.body?.outcome === "not_served" ? "cancelled" : "completed";
     return res.json({
-      message: visitStatus === "completed" ? "Visit marked Completed after dentist review." : "Visit marked Not Served after dentist review.",
+      message: visitStatus === "completed" ? "Visit marked Completed after dentist review." : "Visit marked Cancelled after dentist review.",
       visit: { queueEntryId: Number(req.params.queueId), token: "A-003", status: visitStatus },
     });
   });
@@ -153,7 +261,7 @@ test("Queue closure statuses and dentist Needs Review fit Amethyst layouts", { t
       token: "A-001",
       patientName: "Pearl Amethyst",
       timestamp: "2026-11-20T02:00:00.000Z",
-      status: "not_served",
+      status: "cancelled",
       appointment: { treatment: "Cleaning", dentist: "Dr. Tala Reyes", time: "10:00" },
       checkInMethod: "qr",
       procedures: [],
@@ -180,7 +288,7 @@ test("Queue closure statuses and dentist Needs Review fit Amethyst layouts", { t
     },
   ];
   app.get("/api/staff/queue/summary", (_req, res) =>
-    res.json({ waiting: 0, called: 0, inTreatment: 0, completed: 1, notServed: 1, needsReview: 1 })
+    res.json({ waiting: 0, called: 0, inTreatment: 0, completed: 1, cancelled: 1, needsReview: 1 })
   );
   app.get("/api/staff/rfid-events", (_req, res) => res.json({ events: [] }));
   app.get("/api/staff/check-in/qr-session", (_req, res) => res.json({ session: null }));
@@ -242,12 +350,13 @@ test("Queue closure statuses and dentist Needs Review fit Amethyst layouts", { t
   });
   const page = await browser.newPage();
   page.setDefaultTimeout(25000);
-  page.on("dialog", (dialog) => dialog.accept());
+  page.on("dialog", (dialog) => dialog.accept("Visit not processed after dentist review"));
   fs.mkdirSync(artifactsDir, { recursive: true });
   const url = `http://127.0.0.1:${frontendPort}`;
 
   async function signIn(role) {
-    const token = jwt.sign({ id: role === "staff" ? staff.id : dentist.id, role }, jwtSecret, { expiresIn: "1h" });
+    const id = role === "staff" ? staff.id : role === "patient" ? patient.id : dentist.id;
+    const token = jwt.sign({ id, role }, jwtSecret, { expiresIn: "1h" });
     await page.goto(`${url}/login`, { waitUntil: "domcontentloaded" });
     await page.evaluate((value) => {
       localStorage.clear();
@@ -259,18 +368,39 @@ test("Queue closure statuses and dentist Needs Review fit Amethyst layouts", { t
   await page.setViewport({ width: 1280, height: 1100 });
   await signIn("staff");
   await page.goto(`${url}/staff/queue`, { waitUntil: "networkidle0" });
-  await page.waitForFunction(() => document.body.innerText.includes("Not Served"));
+  await page.waitForFunction(() => document.body.innerText.includes("Cancelled"));
   const queueText = await page.evaluate(() => document.body.innerText);
-  assert.match(queueText, /Needs Review/);
+  assert.match(queueText, /Needs end-of-day review/i);
   assert.match(queueText, /Completed/);
+  assert.doesNotMatch(queueText, /No-show/);
   await page.screenshot({ path: path.join(artifactsDir, "queue_eod_staff_queue_desktop.png"), fullPage: true });
 
   await page.goto(`${url}/staff/check-in`, { waitUntil: "networkidle0" });
-  await page.waitForFunction(() => document.body.innerText.includes("Not Served"));
-  assert.match(await page.evaluate(() => document.body.innerText), /Needs Review/);
+  await page.waitForFunction(() => document.body.innerText.includes("Cancelled"));
+  assert.match(await page.evaluate(() => document.body.innerText), /Needs end-of-day review/i);
   await page.screenshot({ path: path.join(artifactsDir, "queue_eod_staff_checkin_desktop.png"), fullPage: true });
 
+  await page.goto(`${url}/staff/appointments?tab=cancelled`, { waitUntil: "networkidle0" });
+  await page.waitForFunction(() => document.body.innerText.includes("Pearl Amethyst"));
+  assert.match(await page.evaluate(() => document.body.innerText), /Cancelled/);
+  await page.screenshot({ path: path.join(artifactsDir, "queue_eod_staff_appointments_desktop.png"), fullPage: true });
+
+  await signIn("patient");
+  await page.goto(`${url}/appointments`, { waitUntil: "networkidle0" });
+  await page.waitForFunction(() => document.body.innerText.includes("Cancelled"));
+  const history = await page.evaluate(() => document.body.innerText);
+  assert.match(history, /Completed/);
+  assert.doesNotMatch(history, /No-show/);
+  await page.screenshot({ path: path.join(artifactsDir, "queue_eod_patient_history_desktop.png"), fullPage: true });
+  await page.reload({ waitUntil: "networkidle0" });
+  await page.waitForFunction(() => document.body.innerText.includes("Cancelled") && document.body.innerText.includes("Completed"));
+
   await signIn("dentist");
+  await page.goto(`${url}/dentist/appointments`, { waitUntil: "networkidle0" });
+  await page.waitForFunction(() => document.body.innerText.includes("Pearl Amethyst"));
+  assert.match(await page.evaluate(() => document.body.innerText), /completed/i);
+  await page.screenshot({ path: path.join(artifactsDir, "queue_eod_dentist_appointments_desktop.png"), fullPage: true });
+
   await page.goto(`${url}/dentist/patient-records/42`, { waitUntil: "networkidle0" });
   await page.waitForFunction(() => document.body.innerText.includes("Pearl Amethyst"));
   await page.evaluate(() =>
@@ -278,20 +408,29 @@ test("Queue closure statuses and dentist Needs Review fit Amethyst layouts", { t
       /Clinical Information/i.test(button.textContent || "")
     )?.click()
   );
-  await page.waitForFunction(() => document.body.innerText.includes("Needs Review"));
+  await page.waitForFunction(() => /needs end-of-day review/i.test(document.body.innerText));
   const clinical = await page.evaluate(() => document.body.innerText);
   assert.match(clinical, /Queue A-003/);
   assert.match(clinical, /2026-11-20/);
   assert.match(clinical, /Queue A-009/);
-  assert.match(clinical, /Mark Completed/);
-  assert.match(clinical, /Mark Not Served/);
+  assert.match(clinical, /Complete visit/);
+  assert.match(clinical, /Cancel visit/);
+  assert.match(clinical, /not new queue tickets/i);
   await page.screenshot({ path: path.join(artifactsDir, "queue_eod_dentist_review_desktop.png"), fullPage: true });
 
   await page.evaluate(() =>
-    [...document.querySelectorAll("button")].find((button) => /Mark Completed/i.test(button.textContent || ""))?.click()
+    [...document.querySelectorAll("button")].find((button) => /Complete visit/i.test(button.textContent || ""))?.click()
   );
   await page.waitForFunction(() => document.body.innerText.includes("Visit marked Completed") || document.body.innerText.includes("review saved"));
   assert.ok(reviews.length >= 1);
+  await page.goto(`${url}/dentist/patient-records/42`, { waitUntil: "networkidle0" });
+  await page.evaluate(() =>
+    [...document.querySelectorAll(".profile-menu__item")].find((button) =>
+      /Clinical Information/i.test(button.textContent || "")
+    )?.click()
+  );
+  await page.waitForFunction(() => document.body.innerText.includes("Queue A-009"));
+  assert.doesNotMatch(await page.evaluate(() => document.body.innerText), /Queue A-003/);
 
   await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
   await page.goto(`${url}/dentist/patient-records/42`, { waitUntil: "networkidle0" });
@@ -312,7 +451,7 @@ test("Queue closure statuses and dentist Needs Review fit Amethyst layouts", { t
       /Clinical Information/i.test(button.textContent || "")
     )?.click()
   );
-  await page.waitForFunction(() => document.body.innerText.includes("Needs Review"));
+  await page.waitForFunction(() => /needs end-of-day review/i.test(document.body.innerText));
   const overflow320 = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
   assert.equal(overflow320, false);
   const overlap = await page.evaluate(() => {

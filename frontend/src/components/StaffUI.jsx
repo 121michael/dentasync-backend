@@ -14,7 +14,7 @@ const statusLabelFallback = {
   no_show: "Skipped",
   skipped: "Skipped",
   not_served: "Not Served",
-  needs_review: "Needs Review",
+  needs_review: "Needs end-of-day review",
   confirmed: "Confirmed",
   pending: "Pending",
   scheduled: "Scheduled",
