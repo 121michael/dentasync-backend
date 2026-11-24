@@ -16,6 +16,11 @@ export function PatientQueueTicket({ entry, lastUpdatedAt }) {
           <span className={`status-pill status-pill--${String(entry.status || "waiting").toLowerCase()}`}>
             {displayQueueStatus(entry.status)}
           </span>
+          {entry.visitType === "walk_in" ? (
+            <span className="status-pill">Walk-in visit</span>
+          ) : entry.visitType === "booked" ? (
+            <span className="status-pill">Booked appointment</span>
+          ) : null}
         </div>
         <span className="patient-queue-ticket__icon" aria-hidden="true">
           <Ticket size={22} />

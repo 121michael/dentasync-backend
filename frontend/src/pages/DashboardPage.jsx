@@ -12,6 +12,7 @@ import {
   UsersRound,
 } from "lucide-react";
 import { api } from "../api";
+import { useAuth } from "../useAuth";
 import { DetailLink, ErrorState, LoadingState } from "../components/UI";
 import { PatientQrCheckInScanner } from "../components/PatientQrCheckInScanner";
 import { PatientQueueBoard } from "../components/PatientQueueBoard";
@@ -135,6 +136,7 @@ function MetricCard({ icon: Icon, label, value, tone, detail }) {
 
 export function DashboardPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [dashboard, setDashboard] = useState(null);
   const [error, setError] = useState("");
 
@@ -148,12 +150,13 @@ export function DashboardPage() {
   }, []);
 
   useEffect(() => {
+    setDashboard(null);
     loadDashboard();
     const interval = window.setInterval(() => {
       api.getDashboard({ silent: true }).then(setDashboard).catch(() => {});
     }, 12000);
     return () => window.clearInterval(interval);
-  }, [loadDashboard]);
+  }, [loadDashboard, user?.id]);
 
   if (error) return <ErrorState message={error} onRetry={loadDashboard} />;
   if (!dashboard) return <LoadingState label="Loading" />;

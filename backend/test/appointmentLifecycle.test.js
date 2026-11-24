@@ -12,6 +12,7 @@ test("patient-facing labels distinguish checked in from completed", () => {
   assert.equal(lifecycle.displayAppointmentStatus("completed"), "Completed");
   assert.equal(lifecycle.displayAppointmentStatus("cancelled"), "Cancelled");
   assert.equal(lifecycle.displayAppointmentStatus("rescheduled"), "Rescheduled");
+  assert.equal(lifecycle.displayAppointmentStatus("no_show"), "No-show");
 });
 
 test("patients cannot cancel or reschedule a visit already with the dentist", () => {
@@ -58,9 +59,10 @@ test("waited-too-long uses check-in time and ignores inactive or in-chair visits
   );
 });
 
-test("timed visits cancel after the scheduled Manila clock; date-only waits until the next local day", () => {
-  const beforeSlot = new Date("2026-10-29T01:59:00.000Z");
-  const afterSlot = new Date("2026-10-29T02:01:00.000Z");
+test("missed visits become no-show at 6 PM Manila on the clinic date, not at the scheduled start", () => {
+  const beforeSlot = new Date("2026-10-29T02:01:00.000Z");
+  const beforeSix = new Date("2026-10-29T09:59:00.000Z");
+  const atSix = new Date("2026-10-29T10:00:00.000Z");
   assert.equal(
     lifecycle.missedCutoffPassed({
       appointmentDate: "2026-10-29",
@@ -73,7 +75,15 @@ test("timed visits cancel after the scheduled Manila clock; date-only waits unti
     lifecycle.missedCutoffPassed({
       appointmentDate: "2026-10-29",
       appointmentTime: "10:00",
-      now: afterSlot,
+      now: beforeSix,
+    }),
+    false
+  );
+  assert.equal(
+    lifecycle.missedCutoffPassed({
+      appointmentDate: "2026-10-29",
+      appointmentTime: "10:00",
+      now: atSix,
     }),
     true
   );
@@ -81,7 +91,7 @@ test("timed visits cancel after the scheduled Manila clock; date-only waits unti
     lifecycle.missedCutoffPassed({
       appointmentDate: "2026-10-29",
       appointmentTime: null,
-      now: new Date("2026-10-29T15:59:00.000Z"),
+      now: new Date("2026-10-29T09:59:00.000Z"),
     }),
     false
   );
@@ -89,7 +99,7 @@ test("timed visits cancel after the scheduled Manila clock; date-only waits unti
     lifecycle.missedCutoffPassed({
       appointmentDate: "2026-10-29",
       appointmentTime: null,
-      now: new Date("2026-10-29T16:00:00.000Z"),
+      now: new Date("2026-10-29T10:00:00.000Z"),
     }),
     true
   );
@@ -113,9 +123,10 @@ test("missed appointment job is idempotent and never targets checked-in visits",
 
   const update = updates.find((entry) => entry.sql.includes("UPDATE patient_portal_appointments"));
   assert.ok(update);
-  assert.match(update.sql, /appointment\.status IN \('pending', 'confirmed'\)/);
-  assert.doesNotMatch(update.sql, /appointment\.status IN \('pending', 'confirmed', 'checked_in'\)/);
-  assert.match(update.sql, /appointment_time IS NULL/);
+  assert.match(update.sql, /status IN \('pending', 'confirmed'\)/);
+  assert.doesNotMatch(update.sql, /status IN \('pending', 'confirmed', 'checked_in'\)/);
+  assert.match(update.sql, /EXTRACT\(HOUR FROM/);
+  assert.match(update.sql, /FOR UPDATE SKIP LOCKED/);
   assert.equal(update.params[1], "Asia/Manila");
   assert.equal(update.params[2], AUTO_REASON);
 

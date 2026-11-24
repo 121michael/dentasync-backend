@@ -20,6 +20,9 @@ test("dashboard queue ticket reuses the queue wait helper", () => {
   assert.match(queue, /queueStatusWaitLabel\(current\)/);
   assert.match(estimate, /export function ticketWaitLine/);
   assert.doesNotMatch(queue, /Now — you are being seen/);
+  assert.match(queue, /clinicTodayYmd/);
+  assert.match(dashboard, /user\?\.id/);
+  assert.match(ticket, /Walk-in visit/);
 });
 
 test("queue ticket wraps at 320px and 390px", () => {

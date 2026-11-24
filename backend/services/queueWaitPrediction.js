@@ -971,6 +971,7 @@ async function loadPatientQueueBoard(db, { userId, waitEnabled = true } = {}) {
        FROM patient_portal_queue_entries AS queue
        WHERE queue.user_id = $1
          AND (queue.checked_in_at AT TIME ZONE $2)::date = (CURRENT_TIMESTAMP AT TIME ZONE $2)::date
+         AND LOWER(queue.status) IN ('checked_in', 'waiting', 'preparing', 'dentist')
        ORDER BY queue.checked_in_at DESC
        LIMIT 1`,
       [String(userId), zone]
@@ -980,7 +981,9 @@ async function loadPatientQueueBoard(db, { userId, waitEnabled = true } = {}) {
     own = await db.query(
       `SELECT id, user_id, token, position, status, estimated_wait_minutes, checked_in_at, appointment_id
        FROM patient_portal_queue_entries
-       WHERE user_id = $1 AND DATE(checked_in_at) = CURRENT_DATE
+       WHERE user_id = $1
+         AND DATE(checked_in_at) = CURRENT_DATE
+         AND LOWER(status) IN ('checked_in', 'waiting', 'preparing', 'dentist')
        ORDER BY checked_in_at DESC
        LIMIT 1`,
       [String(userId)]

@@ -51,6 +51,7 @@ const prescriptions = require("../services/prescriptions");
 const { loadApprovedClinicCatalog, resolveCatalog } = require("../services/approvedClinicCatalog");
 const medicalDocuments = require("../services/medicalDocuments");
 const appointmentLifecycle = require("../services/appointmentLifecycle");
+const dashboardOps = require("../services/dashboardOps");
 const hmoVerification = require("../services/hmoVerification");
 
 const SERVICES = [
@@ -447,6 +448,13 @@ function mapAppointment(appointment, queueStatus) {
     return null;
   }
 
+  const overlay = appointmentLifecycle.overlayAppointmentStatus(appointment.status, queueStatus);
+  const visitType = appointmentLifecycle.isWalkInAppointment(appointment) ? "walk_in" : "booked";
+  const closedQueue = ["not_served", "needs_review", "completed", "no_show"].includes(
+    String(queueStatus || "").toLowerCase()
+  );
+  const activeQueue = closedQueue ? null : queueStatus;
+
   // Patient-facing appointment payload intentionally omits assigned dentist.
   // Dentist assignment remains stored internally for staff/dentist workflows.
   return {
@@ -469,17 +477,45 @@ function mapAppointment(appointment, queueStatus) {
     hmoBirthDate: normalizeIsoDate(appointment.hmo_birth_date),
     hmoVerificationStatus: appointment.hmo_verification_status || "not_applicable",
     estimatedCost: Number(appointment.estimated_cost),
-    status: appointment.status,
-    statusLabel: appointmentLifecycle.displayAppointmentStatus(appointment.status),
+    status: overlay.status || appointment.status,
+    statusLabel: overlay.statusLabel,
+    visitType,
+    visitTypeLabel: visitType === "walk_in" ? "Walk-in visit" : "Booked appointment",
+    queueStatus: queueStatus || null,
+    queueOutcome: overlay.queueOutcome,
     notes: appointment.notes,
     cancellationReason: appointment.cancellation_reason || null,
     cancelledAt: appointment.cancelled_at || null,
     cancelledBy: appointment.cancelled_by || null,
     rescheduledFromId: appointment.rescheduled_from_id || null,
     rescheduledToId: appointment.rescheduled_to_id || null,
-    canCancel: appointmentLifecycle.canPatientCancel(appointment.status, queueStatus),
-    canReschedule: appointmentLifecycle.canPatientReschedule(appointment.status, queueStatus),
+    canCancel: !closedQueue && appointmentLifecycle.canPatientCancel(appointment.status, activeQueue),
+    canReschedule: !closedQueue && appointmentLifecycle.canPatientReschedule(appointment.status, activeQueue),
   };
+}
+
+async function mapAppointmentsWithQueue(db, rows) {
+  const appointmentIds = rows.map((row) => row.id);
+  const queueByAppointment = new Map();
+  if (appointmentIds.length) {
+    try {
+      const queueResult = await db.query(
+        `SELECT DISTINCT ON (appointment_id) appointment_id, status
+         FROM patient_portal_queue_entries
+         WHERE appointment_id = ANY($1::bigint[])
+         ORDER BY appointment_id, checked_in_at DESC`,
+        [appointmentIds]
+      );
+      for (const row of queueResult.rows) {
+        queueByAppointment.set(String(row.appointment_id), row.status);
+      }
+    } catch (queueError) {
+      if (queueError.code !== "42P01" && queueError.code !== "42703") {
+        console.warn("Appointment queue flags skipped:", queueError.message);
+      }
+    }
+  }
+  return rows.map((row) => mapAppointment(row, queueByAppointment.get(String(row.id))));
 }
 
 function createPatientPortalRouter({
@@ -826,8 +862,10 @@ function createPatientPortalRouter({
           `SELECT *
            FROM patient_portal_appointments
            WHERE user_id = $1
-             AND appointment_date >= CURRENT_DATE
-             AND status IN ('pending', 'confirmed', 'checked_in')
+             AND (
+               (appointment_date >= ${dashboardOps.clinicDateSql()} AND status IN ('pending', 'confirmed'))
+               OR (appointment_date = ${dashboardOps.clinicDateSql()} AND status = 'checked_in')
+             )
            ORDER BY appointment_date, appointment_time
            LIMIT 1`,
           [userId]
@@ -835,7 +873,10 @@ function createPatientPortalRouter({
         db.query(
           `SELECT
              COUNT(*) FILTER (
-               WHERE status IN ('pending', 'confirmed', 'checked_in')
+               WHERE (
+                 (appointment_date >= ${dashboardOps.clinicDateSql()} AND status IN ('pending', 'confirmed'))
+                 OR (appointment_date = ${dashboardOps.clinicDateSql()} AND status = 'checked_in')
+               )
              ) AS active_appointments,
              COUNT(*) FILTER (WHERE status = 'completed') AS completed_visits
            FROM patient_portal_appointments
@@ -843,14 +884,27 @@ function createPatientPortalRouter({
           [userId]
         ),
         db.query(
-          `SELECT token, position, status, estimated_wait_minutes
-           FROM patient_portal_queue_entries
-           WHERE user_id = $1
-             AND status <> 'completed'
-           ORDER BY checked_in_at DESC
+          `SELECT queue.token, queue.position, queue.status, queue.estimated_wait_minutes, queue.appointment_id,
+                  queue.branch_id, queue.check_in_method, appointment.service_name, appointment.notes
+           FROM patient_portal_queue_entries AS queue
+           LEFT JOIN patient_portal_appointments AS appointment ON appointment.id = queue.appointment_id
+           WHERE queue.user_id = $1
+             AND ${dashboardOps.activeQueueTodaySql("queue")}
+           ORDER BY queue.checked_in_at DESC
            LIMIT 1`,
           [userId]
-        ),
+        ).catch(async (error) => {
+          if (error.code !== "42703" && error.code !== "42P01") throw error;
+          return db.query(
+            `SELECT token, position, status, estimated_wait_minutes
+             FROM patient_portal_queue_entries AS queue
+             WHERE queue.user_id = $1
+               AND ${dashboardOps.activeQueueTodaySql("queue")}
+             ORDER BY queue.checked_in_at DESC
+             LIMIT 1`,
+            [userId]
+          );
+        }),
         db.query(
           `SELECT oral_health_score, last_cleaning, next_checkup,
                   hmo_provider, hmo_status, hmo_verified_at, membership_tier
@@ -904,7 +958,11 @@ function createPatientPortalRouter({
 
       const user = userResult.rows[0];
       const profile = profileResult.rows[0] || {};
-      const queue = queueResult.rows[0] || null;
+      const queue = ["checked_in", "waiting", "preparing", "dentist"].includes(
+        String(queueResult.rows[0]?.status || "").toLowerCase()
+      )
+        ? queueResult.rows[0]
+        : null;
       const aiSettings = await loadAiSettings(db).catch(() => null);
       const waitEnabled = aiSettings ? isAiFeatureEnabled(aiSettings, "waitingTimePrediction") : true;
       const queueBoard = await loadPatientQueueBoard(db, { userId, waitEnabled }).catch(() => ({
@@ -964,6 +1022,7 @@ function createPatientPortalRouter({
               token: queue.token,
               position: queue.position,
               status: queue.status,
+              visitType: appointmentLifecycle.isWalkInAppointment(queue) ? "walk_in" : "booked",
               estimatedWaitMinutes: waitEnabled ? queue.estimated_wait_minutes : null,
               waitEstimate:
                 queueBoard.current?.waitEstimate ||
@@ -997,7 +1056,7 @@ function createPatientPortalRouter({
     let statusClause = "";
     let fallbackStatusClause = "";
 
-    if (status && ["pending", "confirmed", "checked_in", "completed", "cancelled", "rescheduled"].includes(status)) {
+    if (status && ["pending", "confirmed", "checked_in", "completed", "cancelled", "rescheduled", "no_show"].includes(status)) {
       params.push(status);
       statusClause = ` AND appointments.status = $${params.length}`;
       fallbackStatusClause = ` AND status = $${params.length}`;
@@ -1027,31 +1086,8 @@ function createPatientPortalRouter({
         params
       );
 
-      const appointmentIds = result.rows.map((row) => row.id);
-      const queueByAppointment = new Map();
-      if (appointmentIds.length) {
-        try {
-          const queueResult = await db.query(
-            `SELECT DISTINCT ON (appointment_id) appointment_id, status
-             FROM patient_portal_queue_entries
-             WHERE appointment_id = ANY($1::bigint[])
-               AND status NOT IN ('completed', 'no_show', 'not_served', 'needs_review')
-             ORDER BY appointment_id, checked_in_at DESC`,
-            [appointmentIds]
-          );
-          for (const row of queueResult.rows) {
-            queueByAppointment.set(String(row.appointment_id), row.status);
-          }
-        } catch (queueError) {
-          if (queueError.code !== "42P01" && queueError.code !== "42703") {
-            console.warn("Appointment queue flags skipped:", queueError.message);
-          }
-        }
-      }
       return res.json({
-        appointments: result.rows.map((row) =>
-          mapAppointment(row, queueByAppointment.get(String(row.id)))
-        ),
+        appointments: await mapAppointmentsWithQueue(db, result.rows),
       });
     } catch (error) {
       if (error?.code === "42703") {
@@ -1077,7 +1113,7 @@ function createPatientPortalRouter({
              ORDER BY appointments.appointment_date DESC, appointments.appointment_time DESC NULLS LAST`,
             params
           );
-          return res.json({ appointments: fallback.rows.map(mapAppointment) });
+          return res.json({ appointments: await mapAppointmentsWithQueue(db, fallback.rows) });
         } catch (fallbackError) {
           console.error("Patient appointments error:", fallbackError.message);
           return res.status(500).json({ message: "Unable to load appointments." });
@@ -1098,7 +1134,7 @@ function createPatientPortalRouter({
              ORDER BY appointments.appointment_date DESC, appointments.appointment_time DESC NULLS LAST`,
             params
           );
-          return res.json({ appointments: fallback.rows.map(mapAppointment) });
+          return res.json({ appointments: await mapAppointmentsWithQueue(db, fallback.rows) });
         } catch (fallbackError) {
           console.error("Patient appointments error:", fallbackError.message);
           return res.status(500).json({ message: "Unable to load appointments." });
@@ -1561,13 +1597,14 @@ function createPatientPortalRouter({
           `SELECT queue.id, queue.token, queue.position, queue.status, queue.estimated_wait_minutes,
                   queue.checked_in_at, queue.check_in_method, queue.appointment_id, queue.branch_id,
                   branch.name AS branch_name,
+                  appointment.service_name, appointment.notes,
                   queue.wait_estimate_min_minutes, queue.wait_estimate_max_minutes, queue.wait_estimate_duration_minutes,
                   queue.wait_estimate_call_start, queue.wait_estimate_call_end, queue.wait_estimate_at
            FROM patient_portal_queue_entries AS queue
            LEFT JOIN clinic_branches AS branch ON branch.id = queue.branch_id
+           LEFT JOIN patient_portal_appointments AS appointment ON appointment.id = queue.appointment_id
            WHERE queue.user_id = $1
-             AND DATE(queue.checked_in_at) = CURRENT_DATE
-             AND queue.status NOT IN ('completed', 'no_show', 'not_served', 'needs_review')
+             AND ${dashboardOps.activeQueueTodaySql("queue")}
            ORDER BY queue.checked_in_at DESC
            LIMIT 1`,
           [userId]
@@ -1575,11 +1612,10 @@ function createPatientPortalRouter({
           if (error.code !== "42703" && error.code !== "42P01") throw error;
           return db.query(
             `SELECT id, token, position, status, estimated_wait_minutes, checked_in_at, appointment_id
-             FROM patient_portal_queue_entries
-             WHERE user_id = $1
-               AND DATE(checked_in_at) = CURRENT_DATE
-               AND status NOT IN ('completed', 'no_show', 'not_served', 'needs_review')
-             ORDER BY checked_in_at DESC
+             FROM patient_portal_queue_entries AS queue
+             WHERE queue.user_id = $1
+               AND ${dashboardOps.activeQueueTodaySql("queue")}
+             ORDER BY queue.checked_in_at DESC
              LIMIT 1`,
             [userId]
           );
@@ -1591,7 +1627,7 @@ function createPatientPortalRouter({
           `SELECT queue.token
            FROM patient_portal_queue_entries AS queue
            LEFT JOIN patient_portal_appointments AS appointment ON appointment.id = queue.appointment_id
-           WHERE DATE(queue.checked_in_at) = CURRENT_DATE
+           WHERE ${dashboardOps.clinicQueueTodaySql("queue")}
              AND queue.status IN ('dentist', 'preparing')
              AND ($1::bigint IS NULL OR queue.branch_id = $1)
            ORDER BY ${require("../services/branchCheckIn").QUEUE_ORDER_SQL}
@@ -1602,10 +1638,10 @@ function createPatientPortalRouter({
           if (!currentPreview) return { rows: [] };
           return db.query(
             `SELECT token
-             FROM patient_portal_queue_entries
-             WHERE DATE(checked_in_at) = CURRENT_DATE
-               AND status = 'dentist'
-             ORDER BY updated_at DESC NULLS LAST, position ASC
+             FROM patient_portal_queue_entries AS queue
+             WHERE ${dashboardOps.clinicQueueTodaySql("queue")}
+               AND queue.status = 'dentist'
+             ORDER BY queue.updated_at DESC NULLS LAST, queue.position ASC
              LIMIT 1`
           );
         })
@@ -1681,6 +1717,13 @@ function createPatientPortalRouter({
                 queueStatus: current.status,
               }),
               appointmentId: current.appointment_id || null,
+              visitType: appointmentLifecycle.isWalkInAppointment({
+                service_name: current.service_name,
+                notes: current.notes,
+                check_in_method: current.check_in_method,
+              })
+                ? "walk_in"
+                : "booked",
               branchId: current.branch_id || null,
               branchName: current.branch_name || null,
               steps: queueSteps(current.status),
