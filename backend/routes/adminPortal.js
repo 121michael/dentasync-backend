@@ -296,6 +296,24 @@ function mapAccount(row, extras = {}) {
     if (extras.encryptionAvailable !== undefined) {
       payload.encryptionAvailable = extras.encryptionAvailable !== false;
     }
+    if (extras.credentialHashSchemaReady !== undefined) {
+      payload.credentialHashSchemaReady = extras.credentialHashSchemaReady === true;
+    }
+    if (extras.credentialSecretSchemaReady !== undefined) {
+      payload.credentialSecretSchemaReady = extras.credentialSecretSchemaReady === true;
+    }
+    if (extras.credentialStorageReady !== undefined) {
+      payload.credentialStorageReady = extras.credentialStorageReady === true;
+    }
+    if (extras.credentialSaveReady !== undefined) {
+      payload.credentialSaveReady = extras.credentialSaveReady === true;
+    }
+    if (extras.credentialSetupCode !== undefined) {
+      payload.credentialSetupCode = extras.credentialSetupCode || null;
+    }
+    if (extras.credentialSetupMessage !== undefined) {
+      payload.credentialSetupMessage = extras.credentialSetupMessage || null;
+    }
   }
   if (row.catalog_dentist_id !== undefined || extras.catalogDentistId !== undefined) {
     payload.catalogDentistId = extras.catalogDentistId ?? row.catalog_dentist_id ?? null;
@@ -1900,7 +1918,7 @@ function createAdminPortalRouter({
         });
       }
       if (error.status) {
-        return res.status(error.status).json({ message: error.message });
+        return res.status(error.status).json({ message: error.message, code: error.code || undefined });
       }
       if (isMissingRelation(error)) {
         return migrationUnavailable(res);
