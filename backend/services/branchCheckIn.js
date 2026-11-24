@@ -185,7 +185,7 @@ async function findQueueForAppointment(client, appointmentId) {
     `SELECT id, token, position, status, estimated_wait_minutes, checked_in_at, check_in_method, appointment_id, user_id
      FROM patient_portal_queue_entries
      WHERE appointment_id = $1
-       AND status NOT IN ('completed', 'no_show', 'not_served', 'needs_review')
+       AND status NOT IN ('completed', 'cancelled', 'no_show', 'not_served', 'needs_review')
      ORDER BY checked_in_at DESC
      LIMIT 1`,
     [appointmentId]
@@ -220,7 +220,7 @@ async function publicQueueBoard(db, { monitor = "" } = {}) {
      FROM patient_portal_queue_entries AS queue
      LEFT JOIN patient_portal_appointments AS appointment ON appointment.id = queue.appointment_id
      WHERE DATE(queue.checked_in_at) = CURRENT_DATE
-       AND queue.status NOT IN ('completed', 'no_show', 'not_served', 'needs_review')
+       AND queue.status NOT IN ('completed', 'cancelled', 'no_show', 'not_served', 'needs_review')
        ${branchSql}
      ORDER BY ${QUEUE_ORDER_SQL}
      LIMIT 40`,

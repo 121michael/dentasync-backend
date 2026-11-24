@@ -50,7 +50,9 @@ export function displayQueueStatus(status) {
     return "In Treatment";
   }
   if (normalized === "completed") return "Finished";
-  if (normalized === "no_show" || normalized === "cancelled" || normalized === "skipped") {
+  if (normalized === "needs_review") return "Needs end-of-day review";
+  if (normalized === "no_show") return "No-show";
+  if (normalized === "cancelled" || normalized === "skipped") {
     return "Cancelled";
   }
   return normalized.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) || "Waiting";

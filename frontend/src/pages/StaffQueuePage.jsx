@@ -24,7 +24,7 @@ const QUEUE_ACTIONS = [
 ];
 
 function isClosedDayStatus(status) {
-  return status === "not_served" || status === "needs_review";
+  return status === "cancelled" || status === "not_served" || status === "needs_review";
 }
 
 function isFinishedQueueStatus(status) {

@@ -764,15 +764,25 @@ export function DentistRecordsPage() {
     if (!detail?.patient?.id || !visit?.queueEntryId) return;
     const confirmed = window.confirm(
       outcome === "completed"
-        ? `Mark queue ${visit.token || visit.queueEntryId} from ${visit.visitDate || "this visit"} as Completed? Treatment must already be recorded.`
-        : `Mark queue ${visit.token || visit.queueEntryId} from ${visit.visitDate || "this visit"} as Not Served? Confirm that no treatment was performed.`
+        ? `Complete visit ${visit.token || visit.queueEntryId} from ${visit.visitDate || "this visit"}? This updates the encounter, appointment, and queue to Completed.`
+        : `Cancel visit ${visit.token || visit.queueEntryId} from ${visit.visitDate || "this visit"}? Saved treatments, notes, prescriptions, and audit history stay on the record.`
     );
     if (!confirmed) return;
+    let reason = null;
+    if (outcome === "cancelled") {
+      reason = window.prompt("Enter a cancellation reason for this visit.");
+      if (reason == null) return;
+      reason = String(reason).trim();
+      if (reason.length < 3) {
+        setError("A cancellation reason is required.");
+        return;
+      }
+    }
     setReviewingOutcome(`${visit.queueEntryId}:${outcome}`);
     setError("");
     setSuccess("");
     try {
-      const response = await api.reviewDentistQueueVisit(detail.patient.id, visit.queueEntryId, { outcome });
+      const response = await api.reviewDentistQueueVisit(detail.patient.id, visit.queueEntryId, { outcome, reason });
       setSuccess(response.message || "Visit review saved.");
       if (reviewVisit?.queueEntryId === visit.queueEntryId) setReviewVisit(null);
       await refreshPatientDetail(detail.patient.id, { silent: true });
@@ -1745,10 +1755,11 @@ export function DentistRecordsPage() {
               <div className="treatment-record__header">
                 <div>
                   <span className="eyebrow">Closed-day follow-up</span>
-                  <h2>Needs Review</h2>
+                  <h2>Needs end-of-day review</h2>
                   <p className="muted-copy">
-                    These visits were still in treatment at closing time. Add any missing treatment on the original
-                    service date, then mark Completed or Not Served.
+                    These encounters were still In Treatment at 6:00 PM on the original clinic date. They are not new
+                    queue tickets and are not placed ahead of today&apos;s patients. Add any missing treatment on the
+                    original service date, then choose Complete visit or Cancel visit.
                   </p>
                 </div>
               </div>
@@ -1760,7 +1771,7 @@ export function DentistRecordsPage() {
                       <div className="dentist-needs-review-card__meta">
                         <strong>Queue {visit.token || visit.queueEntryId}</strong>
                         <span>Visit date {visit.visitDate || "—"}</span>
-                        <StatusBadge status="needs_review">Needs Review</StatusBadge>
+                        <StatusBadge status="needs_review">Needs end-of-day review</StatusBadge>
                       </div>
                       {(visit.procedures || []).length ? (
                         <ol className="visit-procedure-list">
@@ -1790,15 +1801,15 @@ export function DentistRecordsPage() {
                           disabled={Boolean(reviewingOutcome)}
                           onClick={() => finalizeReviewVisit(visit, "completed")}
                         >
-                          {busyKey && reviewingOutcome.endsWith(":completed") ? "Saving…" : "Mark Completed"}
+                          {busyKey && reviewingOutcome.endsWith(":completed") ? "Saving…" : "Complete visit"}
                         </button>
                         <button
                           type="button"
                           className="button button--secondary"
                           disabled={Boolean(reviewingOutcome)}
-                          onClick={() => finalizeReviewVisit(visit, "not_served")}
+                          onClick={() => finalizeReviewVisit(visit, "cancelled")}
                         >
-                          {busyKey && reviewingOutcome.endsWith(":not_served") ? "Saving…" : "Mark Not Served"}
+                          {busyKey && reviewingOutcome.endsWith(":cancelled") ? "Saving…" : "Cancel visit"}
                         </button>
                       </div>
                     </article>

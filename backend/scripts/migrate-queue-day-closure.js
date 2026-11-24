@@ -5,17 +5,20 @@ const path = require("path");
 const db = require("../db");
 
 async function migrate() {
-  const sqlPath = path.join(__dirname, "..", "migrations", "062_queue_day_closure.sql");
-  await db.query(fs.readFileSync(sqlPath, "utf8"));
-  console.log("Applied migrations/062_queue_day_closure.sql");
-  console.log("Queue entries can now close as Not Served or Needs Review at clinic closing time.");
+  const files = ["062_queue_day_closure.sql", "063_queue_eod_cancelled.sql"];
+  for (const name of files) {
+    await db.query(fs.readFileSync(path.join(__dirname, "..", "migrations", name), "utf8"));
+    console.log(`Applied migrations/${name}`);
+  }
+  console.log("At 6:00 PM Asia/Manila, Waiting/Called visits cancel; In Treatment goes to dentist review.");
 }
 
 async function rollback() {
-  const sqlPath = path.join(__dirname, "..", "migrations", "062_queue_day_closure_rollback.sql");
-  await db.query(fs.readFileSync(sqlPath, "utf8"));
-  console.log("Reversed migrations/062_queue_day_closure.sql");
-  console.log("Queue tickets were kept. Not Served became Skipped and Needs Review returned to In Treatment.");
+  const files = ["063_queue_eod_cancelled_rollback.sql", "062_queue_day_closure_rollback.sql"];
+  for (const name of files) {
+    await db.query(fs.readFileSync(path.join(__dirname, "..", "migrations", name), "utf8"));
+    console.log(`Reversed migrations/${name}`);
+  }
 }
 
 if (require.main === module) {

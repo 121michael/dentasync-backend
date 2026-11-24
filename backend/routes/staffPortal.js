@@ -117,6 +117,7 @@ function count(row, key) {
 
 function displayQueueStatus(status) {
   if (status === "dentist") return "in_chair";
+  if (status === "cancelled") return "cancelled";
   if (status === "not_served") return "not_served";
   if (status === "needs_review") return "needs_review";
   return status;
@@ -145,6 +146,7 @@ function appointmentNoticeChanged(previous, saved) {
 function mapCheckIn(row) {
   const completed =
     row.status === "completed" ||
+    row.status === "cancelled" ||
     row.status === "no_show" ||
     row.status === "not_served" ||
     row.status === "needs_review";
@@ -814,7 +816,7 @@ function createStaffPortalRouter({
         await client.query("ROLLBACK");
         transactionOpen = false;
         return res.status(409).json({
-          message: "Closed-day visits cannot be changed from Queue Management. Dentists review Needs Review in Patient Records.",
+          message: "Closed-day visits cannot be changed from Queue Management. Dentists review unresolved In Treatment visits in Patient Records.",
         });
       }
       if (req.branchAccess?.paused) {
@@ -2839,7 +2841,7 @@ function createStaffPortalRouter({
         `UPDATE patient_portal_queue_entries
          SET status = 'completed', updated_at = CURRENT_TIMESTAMP
          WHERE DATE(checked_in_at) = CURRENT_DATE
-           AND status NOT IN ('completed', 'no_show', 'not_served', 'needs_review')
+           AND status NOT IN ('completed', 'cancelled', 'no_show', 'not_served', 'needs_review')
            AND branch_id = $1
          RETURNING id`,
         [req.branchAccess.activeBranch.id]
