@@ -31,6 +31,8 @@ const {
   recordTreatmentStart,
 } = require("../services/treatmentDuration");
 const dashboardOps = require("../services/dashboardOps");
+const { isClosedDayQueueStatus, isReviewableQueueStatus } = require("../services/queueStatuses");
+const { finalizeNeedsReviewVisit } = require("../services/queueDayClosure");
 
 const QUEUE_STATUS_MAP = {
   checked_in: "checked_in",
@@ -1458,6 +1460,13 @@ function createDentistPortalRouter({
           message: "Queue entry not found for this dentist.",
         });
       }
+      if (isClosedDayQueueStatus(current.status) || isClosedDayQueueStatus(databaseStatus)) {
+        await client.query("ROLLBACK");
+        transactionOpen = false;
+        return res.status(409).json({
+          message: "Closed-day visits are finalized from Patient Records, not the live queue.",
+        });
+      }
       if (req.branchAccess?.paused) {
         const underway = ["dentist", "preparing"].includes(String(current.status || "").toLowerCase());
         const finishing = databaseStatus === "completed" || databaseStatus === "no_show";
@@ -2122,7 +2131,12 @@ function createDentistPortalRouter({
               .filter(Boolean)
               .sort()[0] || null,
         },
-        currentVisit: await clinicalPatients.listCurrentVisitForRecord(db, detail.record),
+        currentVisit: await clinicalPatients.listCurrentVisitForRecord(db, detail.record, {
+          branchId: req.branchAccess?.activeBranch?.id || null,
+        }),
+        needsReviewVisits: await clinicalPatients.listNeedsReviewVisitsForRecord(db, detail.record, {
+          branchId: req.branchAccess?.activeBranch?.id || null,
+        }),
         wellness: await visibleWellness(db, detail, access),
       });
     } catch (error) {
@@ -2134,6 +2148,51 @@ function createDentistPortalRouter({
       }
       console.error("Dentist patient detail error:", error.message);
       return res.status(500).json({ message: "Unable to load the patient record." });
+    }
+  });
+
+  router.post("/patients/:id/queue-visits/:queueId/review", async (req, res) => {
+    const recordId = Number.parseInt(req.params.id, 10);
+    const queueId = numericId(req.params.queueId);
+    const outcome = stringValue(req.body?.outcome, 40)?.toLowerCase();
+    if (!Number.isSafeInteger(recordId) || recordId <= 0 || !queueId) {
+      return res.status(400).json({ message: "A valid patient record and visit are required." });
+    }
+
+    try {
+      const opened = await openPatientChart(req, recordId);
+      const linkedUserId = opened.detail?.record?.linkedUserId;
+      if (!linkedUserId) {
+        return res.status(409).json({ message: "This clinical record is not linked to a patient visit." });
+      }
+      const saved = await finalizeNeedsReviewVisit(db, {
+        queueId,
+        patientUserId: linkedUserId,
+        branchId: req.branchAccess?.activeBranch?.id || null,
+        outcome,
+        actor: {
+          actorId: req.dentist.id,
+          actorName: `Dr. ${`${req.dentist.first_name || ""} ${req.dentist.last_name || ""}`.trim()}`.trim(),
+          actorRole: "dentist",
+        },
+      });
+      return res.json({
+        message:
+          saved.status === "completed"
+            ? "Visit marked Completed after dentist review."
+            : "Visit marked Not Served after dentist review.",
+        visit: {
+          queueEntryId: Number(saved.id),
+          token: saved.token,
+          status: displayQueueStatus(saved.status),
+          checkedInAt: saved.checked_in_at,
+          reviewedAt: saved.reviewed_at,
+        },
+      });
+    } catch (error) {
+      if (error.status) return sendAccessError(res, error, error.message);
+      console.error("Dentist queue visit review error:", error.message);
+      return res.status(500).json({ message: "Unable to finalize this visit." });
     }
   });
 
@@ -2838,10 +2897,41 @@ function createDentistPortalRouter({
         req.body?.forCurrentVisit ?? procedureBodies.some((item) => item?.forCurrentVisit)
       );
       if (!queueEntryId && detail?.record?.linkedUserId && (requestedCurrentVisit || procedureBodies.length > 1)) {
-        const activeQueue = await clinicalPatients.findActiveQueueForUser(db, detail.record.linkedUserId);
+        const activeQueue = await clinicalPatients.findActiveQueueForUser(db, detail.record.linkedUserId, {
+          branchId: req.branchAccess?.activeBranch?.id || null,
+        });
         if (activeQueue) {
           queueEntryId = Number(activeQueue.id);
           appointmentId = appointmentId || Number(activeQueue.appointment_id) || null;
+        }
+      }
+      let reviewVisitDate = null;
+      if (queueEntryId) {
+        const visit = await clinicalPatients.loadQueueEntryForRecord(db, {
+          queueEntryId,
+          linkedUserId: detail.record.linkedUserId,
+          branchId: req.branchAccess?.activeBranch?.id || null,
+        });
+        if (!visit) {
+          return res.status(409).json({ message: "That visit does not belong to this patient at this branch." });
+        }
+        if (!isReviewableQueueStatus(visit.status)) {
+          return res.status(409).json({
+            message: "Treatments can only be attached to the live visit or a Needs Review visit.",
+          });
+        }
+        appointmentId = appointmentId || Number(visit.appointment_id) || null;
+        const tz = process.env.CLINIC_TIMEZONE || "Asia/Manila";
+        reviewVisitDate = new Date(visit.checked_in_at).toLocaleDateString("en-CA", { timeZone: tz });
+        if (String(visit.status).toLowerCase() === "needs_review") {
+          for (const body of procedureBodies) {
+            if (body && !stringValue(body.treatmentDate, 10)) {
+              body.treatmentDate = reviewVisitDate;
+            }
+          }
+          if (!stringValue(req.body?.treatmentDate, 10)) {
+            req.body.treatmentDate = reviewVisitDate;
+          }
         }
       }
       const forCurrentVisit = Boolean(requestedCurrentVisit || queueEntryId);

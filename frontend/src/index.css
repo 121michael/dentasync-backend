@@ -5498,9 +5498,11 @@ body.is-queue-display .staff-mobile-nav {
 .staff-status--checked_in { color: #3974ad; background: #eaf3ff; }
 .staff-status--cancelled,
 .staff-status--no_show,
+.staff-status--not_served,
 .staff-status--inactive,
 .staff-status--unavailable,
 .staff-status--on_leave { color: var(--danger); background: var(--danger-wash); }
+.staff-status--needs_review { color: var(--amber); background: var(--amber-wash); }
 .staff-status-editor { display: flex; align-items: center; gap: .45rem; }
 .staff-status-editor select { min-width: 112px; min-height: 31px; padding: .25rem .45rem; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--surface-solid); font-size: .66rem; }
 .staff-appointment-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(275px, 1fr)); gap: .8rem; }
@@ -6276,7 +6278,9 @@ body.is-queue-display .staff-mobile-nav {
 .staff-status--partially_paid { color: #a16207; background: #fef9c3; }
 .staff-status--cancelled,
 .staff-status--no_show,
+.staff-status--not_served,
 .staff-status--cancelledled { color: #9f1239; background: #ffe4e6; }
+.staff-status--needs_review { color: #a16207; background: #fef9c3; }
 .sr-only {
   position: absolute;
   width: 1px;
@@ -8708,7 +8712,41 @@ body.is-queue-display .staff-mobile-nav {
 .dentist-status--in_chair,
 .dentist-status--checked_in { color: #3974ad; background: #eaf3ff; }
 .dentist-status--cancelled,
-.dentist-status--no_show { color: var(--danger); background: var(--danger-wash); }
+.dentist-status--no_show,
+.dentist-status--not_served { color: var(--danger); background: var(--danger-wash); }
+.dentist-status--needs_review { color: var(--amber); background: var(--amber-wash); }
+.dentist-needs-review-list {
+  display: grid;
+  gap: .7rem;
+  min-width: 0;
+}
+.dentist-needs-review-card {
+  display: grid;
+  gap: .55rem;
+  min-width: 0;
+  padding: .85rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+}
+.dentist-needs-review-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem .7rem;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: .72rem;
+}
+.dentist-needs-review-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .45rem;
+}
+@media (max-width: 390px) {
+  .dentist-needs-review-card__actions .button {
+    width: 100%;
+  }
+}
 .dentist-date-pill {
   display: inline-flex;
   padding: .28rem .55rem;

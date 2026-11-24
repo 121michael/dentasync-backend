@@ -1035,7 +1035,7 @@ function createPatientPortalRouter({
             `SELECT DISTINCT ON (appointment_id) appointment_id, status
              FROM patient_portal_queue_entries
              WHERE appointment_id = ANY($1::bigint[])
-               AND status NOT IN ('completed', 'no_show')
+               AND status NOT IN ('completed', 'no_show', 'not_served', 'needs_review')
              ORDER BY appointment_id, checked_in_at DESC`,
             [appointmentIds]
           );
@@ -1567,7 +1567,7 @@ function createPatientPortalRouter({
            LEFT JOIN clinic_branches AS branch ON branch.id = queue.branch_id
            WHERE queue.user_id = $1
              AND DATE(queue.checked_in_at) = CURRENT_DATE
-             AND queue.status NOT IN ('completed', 'no_show')
+             AND queue.status NOT IN ('completed', 'no_show', 'not_served', 'needs_review')
            ORDER BY queue.checked_in_at DESC
            LIMIT 1`,
           [userId]
@@ -1578,7 +1578,7 @@ function createPatientPortalRouter({
              FROM patient_portal_queue_entries
              WHERE user_id = $1
                AND DATE(checked_in_at) = CURRENT_DATE
-               AND status NOT IN ('completed', 'no_show')
+               AND status NOT IN ('completed', 'no_show', 'not_served', 'needs_review')
              ORDER BY checked_in_at DESC
              LIMIT 1`,
             [userId]

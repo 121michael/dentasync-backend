@@ -33,6 +33,7 @@ const recordAccess = require("../services/recordAccess");
 const branchCheckIn = require("../services/branchCheckIn");
 const dashboardOps = require("../services/dashboardOps");
 const hmoVerification = require("../services/hmoVerification");
+const { isClosedDayQueueStatus } = require("../services/queueStatuses");
 
 const QUEUE_STATUS_MAP = {
   checked_in: "checked_in",
@@ -115,7 +116,10 @@ function count(row, key) {
 }
 
 function displayQueueStatus(status) {
-  return status === "dentist" ? "in_chair" : status;
+  if (status === "dentist") return "in_chair";
+  if (status === "not_served") return "not_served";
+  if (status === "needs_review") return "needs_review";
+  return status;
 }
 
 function schedulePart(value, length) {
@@ -139,7 +143,11 @@ function appointmentNoticeChanged(previous, saved) {
 }
 
 function mapCheckIn(row) {
-  const completed = row.status === "completed" || row.status === "no_show";
+  const completed =
+    row.status === "completed" ||
+    row.status === "no_show" ||
+    row.status === "not_served" ||
+    row.status === "needs_review";
   return {
     id: row.id,
     checkInId: staffCheckIn.padCheckInId(row.id),
@@ -801,6 +809,13 @@ function createStaffPortalRouter({
         await client.query("ROLLBACK");
         transactionOpen = false;
         return res.status(404).json({ message: "Queue entry not found." });
+      }
+      if (isClosedDayQueueStatus(current.status) || isClosedDayQueueStatus(databaseStatus)) {
+        await client.query("ROLLBACK");
+        transactionOpen = false;
+        return res.status(409).json({
+          message: "Closed-day visits cannot be changed from Queue Management. Dentists review Needs Review in Patient Records.",
+        });
       }
       if (req.branchAccess?.paused) {
         const underway = ["dentist", "preparing"].includes(String(current.status || "").toLowerCase());
@@ -2824,7 +2839,7 @@ function createStaffPortalRouter({
         `UPDATE patient_portal_queue_entries
          SET status = 'completed', updated_at = CURRENT_TIMESTAMP
          WHERE DATE(checked_in_at) = CURRENT_DATE
-           AND status NOT IN ('completed', 'no_show')
+           AND status NOT IN ('completed', 'no_show', 'not_served', 'needs_review')
            AND branch_id = $1
          RETURNING id`,
         [req.branchAccess.activeBranch.id]
