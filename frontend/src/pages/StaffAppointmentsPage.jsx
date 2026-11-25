@@ -348,21 +348,21 @@ export function StaffAppointmentsPage() {
                         : undefined
                     }
                   >
-                    <td>
+                    <td data-label="Appointment ID">
                       <code>#{appointment.id}</code>
                     </td>
-                    <td>
+                    <td data-label="Patient">
                       <strong>{appointment.patientName}</strong>
                       <small>{appointment.patientPhone || "No phone"}</small>
                     </td>
-                    <td>{formatStaffDate(appointment.date)}</td>
-                    <td>
+                    <td data-label="Date">{formatStaffDate(appointment.date)}</td>
+                    <td data-label="Time">
                       {appointment.time ? formatStaffTime(String(appointment.time).slice(0, 5)) : "—"}
                       {appointment.queueHoldReason ? <small>{appointment.queueHoldReason}</small> : null}
                     </td>
-                    <td>{appointment.service || appointment.treatment}</td>
-                    <td>{appointment.dentist}</td>
-                    <td>
+                    <td data-label="Service">{appointment.service || appointment.treatment}</td>
+                    <td data-label="Dentist">{appointment.dentist}</td>
+                    <td data-label="HMO">
                       {appointment.coverageType === "hmo" ? (
                         <>
                           <strong>{appointment.hmoProvider || "HMO"}</strong>
@@ -374,13 +374,13 @@ export function StaffAppointmentsPage() {
                         appointment.coverageType || "Self-pay"
                       )}
                     </td>
-                    <td>
+                    <td data-label="Status">
                       <StaffStatusBadge status={appointment.status} />
                       {appointment.coverageType === "hmo" ? (
                         <small>{appointmentHmoLine(appointment)}</small>
                       ) : null}
                     </td>
-                    <td>
+                    <td data-label="Action">
                       <div className="staff-row-actions">
                         <button
                           className="button button--secondary button--compact"

@@ -1918,26 +1918,26 @@ export function DentistRecordsPage() {
                   <tbody>
                     {detail.treatments.map((treatment) => (
                       <tr key={treatment.id}>
-                        <td>{formatDentistDate(treatment.date || treatment.treatmentDate)}</td>
-                        <td>
+                        <td data-label="Date">{formatDentistDate(treatment.date || treatment.treatmentDate)}</td>
+                        <td data-label="Originating branch">
                           {treatment.originatingBranchName ||
                             (treatment.attributionReview ? "Unknown" : "—")}
                         </td>
-                        <td>{treatment.createdAt ? formatDentistDate(treatment.createdAt) : "—"}</td>
-                        <td>
+                        <td data-label="Recorded">{treatment.createdAt ? formatDentistDate(treatment.createdAt) : "—"}</td>
+                        <td data-label="Tooth">
                           {treatment.toothNumber || treatment.tooth_number
                             ? `#${treatment.toothNumber || treatment.tooth_number}`
                             : "—"}
                         </td>
-                        <td>{treatment.name || treatment.treatment || "—"}</td>
-                        <td><StatusBadge status={treatment.status} /></td>
-                        <td>{treatment.diagnosis || treatment.diagnosisNotes || "—"}</td>
-                        <td>{treatment.dentist || "—"}</td>
-                        <td>{formatMoney(treatment.amountCharged)}</td>
-                        <td>{formatMoney(treatment.amountPaid)}</td>
-                        <td>{formatMoney(treatmentBalance(treatment))}</td>
-                        <td>{nextAppointmentLabel(treatment, detail.nextAppointment, detail.patient)}</td>
-                        <td>
+                        <td data-label="Procedure">{treatment.name || treatment.treatment || "—"}</td>
+                        <td data-label="Status"><StatusBadge status={treatment.status} /></td>
+                        <td data-label="Diagnosis">{treatment.diagnosis || treatment.diagnosisNotes || "—"}</td>
+                        <td data-label="Dentist">{treatment.dentist || "—"}</td>
+                        <td data-label="Amount Charged">{formatMoney(treatment.amountCharged)}</td>
+                        <td data-label="Amount Paid">{formatMoney(treatment.amountPaid)}</td>
+                        <td data-label="Balance">{formatMoney(treatmentBalance(treatment))}</td>
+                        <td data-label="Next Appointment">{nextAppointmentLabel(treatment, detail.nextAppointment, detail.patient)}</td>
+                        <td data-label="Actions">
                           <div className="treatment-record__actions">
                             <button
                               type="button"

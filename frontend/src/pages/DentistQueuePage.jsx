@@ -765,35 +765,35 @@ export function DentistQueuePage() {
                       if (entry.status === "called" || entry.status === "in_chair") openTreatment(entry);
                     }}
                   >
-                    <td>
+                    <td data-label="Sequence">
                       <strong>#{String(entry.sequence).padStart(2, "0")}</strong>
                     </td>
-                    <td>
+                    <td data-label="Patient Profile">
                       <strong>{entry.patientName}</strong>
                       <small>{entry.patientPhone || entry.token || "Checked in"}</small>
                     </td>
-                    <td>
+                    <td data-label="Procedure Schema">
                       <QueueProcedureList entry={entry} />
                     </td>
-                    <td>
+                    <td data-label="Est. Duration">
                       {formatDurationMinutes(visitDurationMinutes(entry)) !== "—"
                         ? formatDurationMinutes(visitDurationMinutes(entry))
                         : durationFromEntry(entry)}
                     </td>
-                    <td>
+                    <td data-label="Est. Wait">
                       <strong>{formatWaitLabel(entry)}</strong>
                     </td>
-                    <td>
+                    <td data-label="Est. Call">
                       {entry.status === "in_chair"
                         ? "Now"
                         : entry.status === "completed" || entry.status === "no_show"
                           ? "—"
                           : callRangeFromEntry(entry)}
                     </td>
-                    <td>
+                    <td data-label="Status Check">
                       <DentistStatusBadge status={entry.status} />
                     </td>
-                    <td>
+                    <td data-label="Operational Control">
                       <div className="dentist-row-actions">
                         {entry.status === "called" || entry.status === "in_chair" ? (
                           <button

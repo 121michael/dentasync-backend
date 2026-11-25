@@ -103,13 +103,13 @@ export function DentistAppointmentsPage() {
                         : undefined
                     }
                   >
-                    <td>{formatDentistTime(String(appointment.time || "").slice(0, 5))}</td>
-                    <td>
+                    <td data-label="Time">{formatDentistTime(String(appointment.time || "").slice(0, 5))}</td>
+                    <td data-label="Patient">
                       <strong>{appointment.patientName}</strong>
                       <small>{appointment.patientPhone || "—"}</small>
                     </td>
-                    <td>{appointment.treatment}</td>
-                    <td><DentistStatusBadge status={appointment.status} /></td>
+                    <td data-label="Procedure">{appointment.treatment}</td>
+                    <td data-label="Status"><DentistStatusBadge status={appointment.status} /></td>
                   </tr>
                 ))}
               </tbody>
@@ -150,11 +150,11 @@ export function DentistAppointmentsPage() {
                         : undefined
                     }
                   >
-                    <td>{formatDentistDate(appointment.date)}</td>
-                    <td>{formatDentistTime(String(appointment.time || "").slice(0, 5))}</td>
-                    <td>{appointment.patientName}</td>
-                    <td>{appointment.treatment}</td>
-                    <td><DentistStatusBadge status={appointment.status} /></td>
+                    <td data-label="Date">{formatDentistDate(appointment.date)}</td>
+                    <td data-label="Time">{formatDentistTime(String(appointment.time || "").slice(0, 5))}</td>
+                    <td data-label="Patient">{appointment.patientName}</td>
+                    <td data-label="Procedure">{appointment.treatment}</td>
+                    <td data-label="Status"><DentistStatusBadge status={appointment.status} /></td>
                   </tr>
                 ))}
               </tbody>

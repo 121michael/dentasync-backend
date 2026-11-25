@@ -221,22 +221,22 @@ export function StaffDashboardPage() {
               <tbody>
                 {activity.map((row) => (
                   <tr key={`${row.appointmentId}-${row.queueEntryId || "none"}`}>
-                    <td>
+                    <td data-label="Queue Number">
                       <code>{row.queueNumber}</code>
                     </td>
-                    <td>
+                    <td data-label="Patient Name">
                       <strong>{row.patientName}</strong>
                     </td>
-                    <td>{formatStaffTime(String(row.appointmentTime || "").slice(0, 5))}</td>
-                    <td>{row.service}</td>
-                    <td>{row.dentist}</td>
-                    <td>
+                    <td data-label="Appointment Time">{formatStaffTime(String(row.appointmentTime || "").slice(0, 5))}</td>
+                    <td data-label="Service">{row.service}</td>
+                    <td data-label="Assigned Dentist">{row.dentist}</td>
+                    <td data-label="Check-In Status">
                       <StaffStatusBadge status={row.checkInStatus} />
                     </td>
-                    <td>
+                    <td data-label="Appointment Status">
                       <StaffStatusBadge status={row.appointmentStatus} />
                     </td>
-                    <td>
+                    <td data-label="Action">
                       <div className="staff-row-actions">
                         <Link
                           className="button button--secondary button--compact"

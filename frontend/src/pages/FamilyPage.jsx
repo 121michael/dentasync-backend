@@ -343,12 +343,12 @@ export function FamilyPage() {
                   const canSwitch = status === "approved" && String(dependent.dependentUserId || "").trim();
                   return (
                     <tr key={dependent.id || dependent.dependentUserId}>
-                      <td>
+                      <td data-label="Dependent">
                         <strong>{dependent.fullName || dependent.name || "Dependent"}</strong>
                         <div><small>{relationshipLabel(dependent.relationship)}</small></div>
                       </td>
-                      <td>{dependent.patientId || "—"}</td>
-                      <td>
+                      <td data-label="Patient ID">{dependent.patientId || "—"}</td>
+                      <td data-label="Status">
                         <span className={`status-pill status-pill--${status === "approved" ? "confirmed" : status === "rejected" ? "cancelled" : "pending"}`}>
                           {statusLabel(status)}
                         </span>
@@ -358,7 +358,7 @@ export function FamilyPage() {
                           </p>
                         ) : null}
                       </td>
-                      <td>
+                      <td data-label="Actions">
                         <div className="family-dependent-actions">
                           <button
                             type="button"

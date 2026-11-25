@@ -505,14 +505,14 @@ export function AdminPatientRecordsPage() {
                       <tbody>
                         {treatments.map((treatment) => (
                           <tr key={treatment.id}>
-                            <td>{formatHistoryDate(treatment.treatmentDate)}</td>
-                            <td>{treatment.toothNumber || "—"}</td>
-                            <td>{treatment.treatment || "—"}</td>
-                            <td>{treatment.dentistName || "—"}</td>
-                            <td>{formatMoney(treatment.amountCharged)}</td>
-                            <td>{formatMoney(treatment.amountPaid)}</td>
-                            <td>{formatMoney(treatmentBalance(treatment))}</td>
-                            <td>{nextAppointmentLabel(treatment, nextAppointment)}</td>
+                            <td data-label="Date">{formatHistoryDate(treatment.treatmentDate)}</td>
+                            <td data-label="Tooth No/s">{treatment.toothNumber || "—"}</td>
+                            <td data-label="Procedure">{treatment.treatment || "—"}</td>
+                            <td data-label="Dentist">{treatment.dentistName || "—"}</td>
+                            <td data-label="Amount Charged">{formatMoney(treatment.amountCharged)}</td>
+                            <td data-label="Amount Paid">{formatMoney(treatment.amountPaid)}</td>
+                            <td data-label="Balance">{formatMoney(treatmentBalance(treatment))}</td>
+                            <td data-label="Next Appt.">{nextAppointmentLabel(treatment, nextAppointment)}</td>
                           </tr>
                         ))}
                       </tbody>

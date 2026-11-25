@@ -289,14 +289,14 @@ export function StaffQueuePage() {
                       ref={isFocused ? focusedRowRef : null}
                       className={isFocused ? "is-notification-focus" : undefined}
                     >
-                      <td>
+                      <td data-label="Queue #">
                         <code>{entry.token || entry.queueNumber}</code>
                       </td>
-                      <td>
+                      <td data-label="Patient">
                         <strong>{entry.patientName}</strong>
                       </td>
-                      <td>{formatStaffTime(String(entry.appointment?.time || "").slice(0, 5))}</td>
-                      <td>
+                      <td data-label="Appointment">{formatStaffTime(String(entry.appointment?.time || "").slice(0, 5))}</td>
+                      <td data-label="Service">
                         {entry.procedures?.length ? (
                           <div className="queue-procedure-cell">
                             <ul>
@@ -315,30 +315,30 @@ export function StaffQueuePage() {
                           entry.appointment?.treatment || "—"
                         )}
                       </td>
-                      <td>{entry.appointment?.dentist || "—"}</td>
-                      <td>{formatStaffDateTime(entry.timestamp)}</td>
-                      <td className="capitalize">{entry.checkInMethod || "—"}</td>
-                      <td>
+                      <td data-label="Dentist">{entry.appointment?.dentist || "—"}</td>
+                      <td data-label="Check-In Time">{formatStaffDateTime(entry.timestamp)}</td>
+                      <td className="capitalize" data-label="Method">{entry.checkInMethod || "—"}</td>
+                      <td data-label="Queue Status">
                         <StaffStatusBadge status={entry.status} />
                       </td>
-                      <td>
+                      <td data-label="Est. Duration">
                         {isFinishedQueueStatus(entry.status) ? "—" : durationFromEntry(entry)}
                       </td>
-                      <td>
+                      <td data-label="Est. Wait">
                         {isFinishedQueueStatus(entry.status)
                           ? "—"
                           : entry.status === "in_chair" || entry.status === "in_treatment"
                           ? "Now"
                           : waitRangeFromEntry(entry)}
                       </td>
-                      <td>
+                      <td data-label="Est. Call">
                         {isFinishedQueueStatus(entry.status)
                           ? "—"
                           : entry.status === "in_chair" || entry.status === "in_treatment"
                           ? "Now"
                           : callRangeFromEntry(entry)}
                       </td>
-                      <td>
+                      <td data-label="Action">
                         {isClosedDayStatus(entry.status) ? (
                           <StaffStatusBadge status={entry.status} />
                         ) : (

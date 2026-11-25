@@ -12511,9 +12511,13 @@ body.is-queue-display .fab-menu {
   .portal-shell {
     padding-bottom: calc(5.25rem + env(safe-area-inset-bottom, 0px));
     padding-left: max(0.75rem, env(safe-area-inset-left, 0px));
-    padding-right: max(0.75rem, env(safe-area-inset-right, 0px));
+    padding-right: max(4.85rem, calc(4.15rem + env(safe-area-inset-right, 0px)));
     min-width: 0;
     overflow-x: hidden;
+  }
+
+  body:has(.patient-assistant__bubble) .portal-shell {
+    padding-left: max(3.85rem, calc(3.15rem + env(safe-area-inset-left, 0px)));
   }
 
   .booking-layout {
@@ -16515,7 +16519,8 @@ html[data-theme="dark"] .admin-set-credential__badge--warn,
   }
 
   .record-section-select select,
-  .patient-registry-picker select {
+  .patient-registry-picker select,
+  .patient-registry-picker input {
     width: 100%;
     min-height: 44px;
     padding: 0.55rem 0.7rem;
@@ -16526,7 +16531,8 @@ html[data-theme="dark"] .admin-set-credential__badge--warn,
   }
 
   .record-section-select select:focus-visible,
-  .patient-registry-picker select:focus-visible {
+  .patient-registry-picker select:focus-visible,
+  .patient-registry-picker input:focus-visible {
     outline: 2px solid var(--amethyst-500, #7c3aed);
     outline-offset: 1px;
   }
@@ -16669,4 +16675,154 @@ html[data-theme="dark"] .admin-set-credential__badge--warn,
 html[data-theme="dark"] .appointment-history-card__more summary,
 .portal-shell[data-theme="dark"] .appointment-history-card__more summary {
   color: #d8c4f5;
+}
+
+@media (max-width: 980px) {
+  .admin-table-wrap--desktop {
+    display: none;
+  }
+
+  .admin-page--patient-accounts .admin-account-cards {
+    display: grid;
+    gap: 0.7rem;
+  }
+
+  .admin-toolbar,
+  .dentist-toolbar {
+    flex-wrap: wrap;
+    align-items: stretch;
+  }
+
+  .admin-search,
+  .dentist-search,
+  .admin-toolbar .button,
+  .dentist-toolbar .button {
+    flex: 1 1 100%;
+  }
+
+  .staff-table-wrap,
+  .dentist-table-wrap,
+  .admin-table-wrap,
+  .treatment-record__table-wrap {
+    overflow: visible;
+    margin-inline: 0;
+    max-width: 100%;
+  }
+
+  .staff-table,
+  .dentist-table,
+  .admin-table,
+  .treatment-record__table {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .staff-table thead,
+  .dentist-table thead,
+  .admin-table thead,
+  .treatment-record__table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .staff-table,
+  .dentist-table,
+  .admin-table,
+  .treatment-record__table,
+  .staff-table tbody,
+  .dentist-table tbody,
+  .admin-table tbody,
+  .treatment-record__table tbody {
+    display: block;
+  }
+
+  .staff-table tbody tr,
+  .dentist-table tbody tr,
+  .admin-table tbody tr,
+  .treatment-record__table tbody tr {
+    display: grid;
+    gap: 0.35rem;
+    margin: 0 0 0.75rem;
+    padding: 0.85rem 0.9rem;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: var(--surface-solid, #fff);
+  }
+
+  .staff-table td,
+  .dentist-table td,
+  .admin-table td,
+  .treatment-record__table td {
+    display: grid;
+    grid-template-columns: minmax(6.4rem, 38%) minmax(0, 1fr);
+    align-items: start;
+    gap: 0.4rem;
+    min-width: 0;
+    padding: 0.12rem 0;
+    border: 0;
+  }
+
+  .staff-table td::before,
+  .dentist-table td::before,
+  .admin-table td::before,
+  .treatment-record__table td::before {
+    content: attr(data-label);
+    color: var(--text-muted);
+    font-size: 0.62rem;
+    font-weight: 750;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
+  .staff-table td[data-label="Action"],
+  .staff-table td[data-label="Actions"],
+  .dentist-table td[data-label="Action"],
+  .dentist-table td[data-label="Actions"],
+  .dentist-table td[data-label="Operational Control"],
+  .admin-table td[data-label="Actions"],
+  .treatment-record__table td[data-label="Actions"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .staff-row-actions .button,
+  .dentist-row-actions .button,
+  .admin-row-actions .button,
+  .family-dependent-actions .button,
+  .treatment-record__actions .button {
+    min-height: 44px;
+  }
+
+  .admin-modal-backdrop,
+  .dentist-modal-backdrop,
+  .staff-modal-backdrop {
+    align-items: flex-end;
+    padding: max(0.5rem, env(safe-area-inset-top, 0px)) 0.55rem
+      max(0.55rem, env(safe-area-inset-bottom, 0px));
+  }
+
+  .admin-modal,
+  .dentist-modal,
+  .staff-modal {
+    max-height: min(92dvh, calc(100dvh - env(safe-area-inset-bottom, 0px) - 0.75rem));
+  }
+
+  .staff-modal--confirm {
+    overflow: auto;
+  }
+}
+
+@media (max-width: 360px) {
+  .staff-table td,
+  .dentist-table td,
+  .admin-table td,
+  .treatment-record__table td {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

@@ -191,24 +191,24 @@ export function StaffBillingPage() {
                         : undefined
                     }
                   >
-                    <td>
+                    <td data-label="Transaction ID">
                       <code>TXN-{invoice.id}</code>
                     </td>
-                    <td>
+                    <td data-label="Invoice ID">
                       <code>{invoice.invoiceCode}</code>
                     </td>
-                    <td>
+                    <td data-label="Patient">
                       <strong>{invoice.patientName}</strong>
                     </td>
-                    <td>{invoice.appointmentId ? `#${invoice.appointmentId}` : "—"}</td>
-                    <td>{invoice.serviceName}</td>
-                    <td>₱{Number(invoice.amount).toFixed(2)}</td>
-                    <td>
+                    <td data-label="Appointment">{invoice.appointmentId ? `#${invoice.appointmentId}` : "—"}</td>
+                    <td data-label="Service">{invoice.serviceName}</td>
+                    <td data-label="Amount">₱{Number(invoice.amount).toFixed(2)}</td>
+                    <td data-label="Payment Status">
                       <StaffStatusBadge status={invoice.paymentStatus} />
                     </td>
-                    <td>{formatStaffDate(invoice.invoiceDate)}</td>
-                    <td>{invoice.createdByName || "—"}</td>
-                    <td>
+                    <td data-label="Date">{formatStaffDate(invoice.invoiceDate)}</td>
+                    <td data-label="Processed By">{invoice.createdByName || "—"}</td>
+                    <td data-label="Action">
                       <div className="staff-row-actions">
                         <button
                           className="button button--secondary button--compact"

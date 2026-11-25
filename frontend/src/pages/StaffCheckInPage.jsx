@@ -630,21 +630,21 @@ export function StaffCheckInPage() {
               <tbody>
                 {checkIns.map((entry) => (
                   <tr key={entry.id}>
-                    <td>{formatStaffLogDate(entry.timestamp)}</td>
-                    <td>{formatStaffLogTime(entry.timestamp)}</td>
-                    <td>
+                    <td data-label="Date">{formatStaffLogDate(entry.timestamp)}</td>
+                    <td data-label="Time">{formatStaffLogTime(entry.timestamp)}</td>
+                    <td data-label="Queue No.">
                       <code>{entry.token || entry.queueNumber}</code>
                     </td>
-                    <td>
+                    <td data-label="Patient">
                       <strong>{entry.patientName}</strong>
                     </td>
-                    <td>
+                    <td data-label="Patient ID">
                       <code>{entry.clinicPatientId || entry.patientId || "—"}</code>
                     </td>
-                    <td>
+                    <td data-label="Status">
                       <StaffStatusBadge status={entry.status} />
                     </td>
-                    <td>
+                    <td data-label="Action">
                       <button type="button" className="button button--secondary button--compact" onClick={() => setViewing(entry)}>
                         View
                       </button>

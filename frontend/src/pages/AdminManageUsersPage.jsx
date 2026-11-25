@@ -1156,9 +1156,9 @@ export function AdminManageUsersPage() {
                       }
                     >
                       {tab === "patient" ? (
-                        <td><code>{user.patientId || user.id}</code></td>
+                        <td data-label="Patient ID"><code>{user.patientId || user.id}</code></td>
                       ) : null}
-                      <td>
+                      <td data-label={tab === "patient" ? "Name" : "Account Name"}>
                         <strong>{user.fullName}</strong>
                         {tab === "dentist" && user.setupRequired ? (
                           <span className="admin-set-credential__badge">Setup required</span>
@@ -1167,19 +1167,19 @@ export function AdminManageUsersPage() {
                           <span className="admin-set-credential__badge admin-set-credential__badge--ok">Credential set</span>
                         ) : null}
                       </td>
-                      {tab !== "patient" ? <td><code>{user.id}</code></td> : null}
+                      {tab !== "patient" ? <td data-label="System ID"><code>{user.id}</code></td> : null}
                       {tab === "staff" ? (
-                        <td>{user.operationalRole || user.position || "Clinic Staff"}</td>
+                        <td data-label="Operational Role">{user.operationalRole || user.position || "Clinic Staff"}</td>
                       ) : null}
                       {tab === "dentist" ? (
-                        <td>{user.specialization || "General Dentistry"}</td>
+                        <td data-label="Specialization">{user.specialization || "General Dentistry"}</td>
                       ) : null}
-                      {tab === "patient" ? <td>{user.email || "—"}</td> : null}
-                      {tab === "patient" ? <td>{user.phone || "—"}</td> : null}
-                      {tab !== "patient" ? <td>{user.email}</td> : null}
-                      {tab !== "patient" ? <td>{assignmentSummary(user)}</td> : null}
-                      {tab === "patient" ? <td>{patientPasswordStatusLabel(user)}</td> : null}
-                      <td>
+                      {tab === "patient" ? <td data-label="Email">{user.email || "—"}</td> : null}
+                      {tab === "patient" ? <td data-label="Phone">{user.phone || "—"}</td> : null}
+                      {tab !== "patient" ? <td data-label="Contact Endpoint">{user.email}</td> : null}
+                      {tab !== "patient" ? <td data-label="Assigned Branch">{assignmentSummary(user)}</td> : null}
+                      {tab === "patient" ? <td data-label="Password Status">{patientPasswordStatusLabel(user)}</td> : null}
+                      <td data-label={tab === "patient" ? "Status" : "Operational Status"}>
                         <AdminStatusBadge
                           status={
                             rejectedUser
@@ -1192,7 +1192,7 @@ export function AdminManageUsersPage() {
                           }
                         />
                       </td>
-                      <td>
+                      <td data-label="Actions">
                         {tab === "patient" ? (
                           renderPatientActions(user)
                         ) : (

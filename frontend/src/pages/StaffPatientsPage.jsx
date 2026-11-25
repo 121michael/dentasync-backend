@@ -619,22 +619,22 @@ export function StaffPatientsPage() {
                       <tbody>
                         {treatments.map((treatment) => (
                           <tr key={treatment.id}>
-                            <td>{formatDentistDate(treatment.date || treatment.treatmentDate)}</td>
-                            <td>{treatment.toothNumber ? `#${treatment.toothNumber}` : "—"}</td>
-                            <td>{treatment.treatment || treatment.name || "—"}</td>
-                            <td>
+                            <td data-label="Date">{formatDentistDate(treatment.date || treatment.treatmentDate)}</td>
+                            <td data-label="Tooth">{treatment.toothNumber ? `#${treatment.toothNumber}` : "—"}</td>
+                            <td data-label="Procedure">{treatment.treatment || treatment.name || "—"}</td>
+                            <td data-label="Status">
                               {String(treatment.status || "").toLowerCase() === "planned"
                                 ? "Pending"
                                 : treatment.status
                                   ? String(treatment.status).replaceAll("_", " ")
                                   : "—"}
                             </td>
-                            <td>{treatment.diagnosis || treatment.diagnosisNotes || "—"}</td>
-                            <td>{treatment.dentist || "—"}</td>
-                            <td>{formatMoney(treatment.amountCharged)}</td>
-                            <td>{formatMoney(treatment.amountPaid)}</td>
-                            <td>{formatMoney(treatmentBalance(treatment))}</td>
-                            <td>{nextAppointmentLabel(detail, treatment.nextAppointment)}</td>
+                            <td data-label="Diagnosis">{treatment.diagnosis || treatment.diagnosisNotes || "—"}</td>
+                            <td data-label="Dentist">{treatment.dentist || "—"}</td>
+                            <td data-label="Amount Charged">{formatMoney(treatment.amountCharged)}</td>
+                            <td data-label="Amount Paid">{formatMoney(treatment.amountPaid)}</td>
+                            <td data-label="Balance">{formatMoney(treatmentBalance(treatment))}</td>
+                            <td data-label="Next Appointment">{nextAppointmentLabel(detail, treatment.nextAppointment)}</td>
                           </tr>
                         ))}
                       </tbody>
