@@ -173,57 +173,6 @@ function listValue(value) {
   return text || "—";
 }
 
-function DelegatedRequestQueue() {
-  const [requests, setRequests] = useState(null);
-
-  useEffect(() => {
-    api
-      .getDentistRecordAccessRequests()
-      .then((response) => setRequests(response.requests || []))
-      .catch(() => setRequests(null));
-  }, []);
-
-  if (!requests) return null;
-
-  async function decide(id, decision) {
-    await api.decideDentistRecordAccess(id, decision);
-    const response = await api.getDentistRecordAccessRequests();
-    setRequests(response.requests || []);
-  }
-
-  return (
-    <section className="dentist-card">
-      <h2>Cross-branch requests you may review</h2>
-      <p className="muted">
-        Sign in on Authorize Record Access in a separate browser profile to enter an approval code. Do not use the
-        requesting dentist’s session.
-      </p>
-      <p>
-        <a href="/record-access/authorize">Open authorization</a>
-      </p>
-      {!requests.length ? <p>No pending requests for your authorized branches.</p> : null}
-      {requests.map((request) => (
-        <p key={request.id}>
-          #{request.id} patient {request.patientRecordId} · {request.scope} · {request.status}
-          {request.status === "pending" ? (
-            <span>
-              {" "}
-              Authorize at the requesting workstation after signing in separately.{" "}
-              <a href="/record-access/authorize">Open authorization</a>
-            </span>
-          ) : null}
-          {request.status === "approved" ? (
-            <>
-              {" "}
-              <button type="button" onClick={() => decide(request.id, "revoked")}>Revoke</button>
-            </>
-          ) : null}
-        </p>
-      ))}
-    </section>
-  );
-}
-
 const RECORD_MENU = [
   {
     id: "personal",
@@ -1082,7 +1031,6 @@ export function DentistRecordsPage() {
       />
       )}
 
-      {!patientId ? <DelegatedRequestQueue /> : null}
       {error ? <p className="inline-alert inline-alert--error">{error}</p> : null}
       {success ? <p className="inline-alert inline-alert--success">{success}</p> : null}
 
