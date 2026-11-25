@@ -9,8 +9,9 @@ const page = fs.readFileSync(path.join(here, "AdminManageUsersPage.jsx"), "utf8"
 
 test("Set Credential shows a fixed mask and verifies the Admin login password", () => {
   assert.match(page, /CREDENTIAL_MASK = "••••••••"/);
-  assert.match(page, /Credential set\./);
-  assert.match(page, /No authorization credential is stored yet/);
+  assert.match(page, /Credential set/);
+  assert.match(page, /Authorization Credential/);
+  assert.match(page, /Not set/);
   assert.match(page, /getAdminDentistAuthorizationCredential/);
   assert.match(page, /Verify administrator/);
   assert.match(page, /verifyAdminDentistAuthorizationCredential/);

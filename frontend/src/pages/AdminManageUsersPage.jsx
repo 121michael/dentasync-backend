@@ -79,6 +79,17 @@ function credentialSetupAlert(form) {
   }
   return "";
 }
+
+function credentialEditorBadge({ form, resettingCredential, authPassword, authConfirm }) {
+  if (credentialSaveBlocked(form)) return { label: "Setup required", tone: "" };
+  if (form.authorizationCredentialStatus === "configured" && !resettingCredential) {
+    return { label: "Credential set", tone: "ok" };
+  }
+  if (authPassword || authConfirm) return { label: "Unsaved changes", tone: "unsaved" };
+  if (form.authorizationCredentialStatus === "revoked") return { label: "Revoked", tone: "" };
+  return { label: "Not set", tone: "" };
+}
+
 const PH_MOBILE_PATTERN = /^09[0-9]{9}$/;
 const PH_MOBILE_MESSAGE = "Enter a valid 11-digit mobile number starting with 09.";
 const INCOMPLETE_EMAIL_MESSAGE = "Enter a complete email address, including the full domain.";
@@ -213,6 +224,7 @@ export function AdminManageUsersPage() {
   const [authPassword, setAuthPassword] = useState("");
   const [authConfirm, setAuthConfirm] = useState("");
   const [showAuthPassword, setShowAuthPassword] = useState(false);
+  const [showAuthConfirm, setShowAuthConfirm] = useState(false);
   const [credentialBusy, setCredentialBusy] = useState(false);
   const [resettingCredential, setResettingCredential] = useState(false);
   const focusedRowRef = useRef(null);
@@ -405,6 +417,7 @@ export function AdminManageUsersPage() {
     setAuthPassword("");
     setAuthConfirm("");
     setShowAuthPassword(false);
+    setShowAuthConfirm(false);
     setResettingCredential(false);
     hideRevealedCredential();
     closeVerifyDialog();
@@ -445,6 +458,7 @@ export function AdminManageUsersPage() {
     setAuthPassword("");
     setAuthConfirm("");
     setShowAuthPassword(false);
+    setShowAuthConfirm(false);
     setResettingCredential(false);
     hideRevealedCredential();
     closeVerifyDialog();
@@ -634,6 +648,8 @@ export function AdminManageUsersPage() {
     );
     setAuthPassword("");
     setAuthConfirm("");
+    setShowAuthPassword(false);
+    setShowAuthConfirm(false);
     setResettingCredential(false);
     setCredentialError("");
     hideRevealedCredential();
@@ -1020,6 +1036,7 @@ export function AdminManageUsersPage() {
   }
 
   if (error && !data) return <ErrorState message={error} onRetry={load} />;
+  const editorBadge = credentialEditorBadge({ form, resettingCredential, authPassword, authConfirm });
   if (!data) return <LoadingState label="Loading user accounts…" />;
 
   const heading =
@@ -1608,31 +1625,31 @@ export function AdminManageUsersPage() {
                     </span>
                   </label>
                   {editing ? (
-                    <fieldset className="admin-form--manage-user__full admin-set-credential">
+                    <fieldset className="admin-form--manage-user__full admin-set-credential admin-set-credential--editor">
                       <legend>Set Credential</legend>
-                      <div className="admin-set-credential__heading">
-                        <p>
-                          Separate authorization password this dentist uses to approve another dentist’s access to
-                          restricted cross-branch records. It does not sign them in and does not open charts by itself.
-                        </p>
+                      <div className="admin-set-credential__header">
+                        <span className="admin-set-credential__icon" aria-hidden="true">
+                          <KeyRound size={18} strokeWidth={2.2} />
+                        </span>
+                        <div className="admin-set-credential__titles">
+                          <h3>Authorization Credential</h3>
+                          <p>
+                            Approves another dentist’s restricted cross-branch records. Not a login password and does
+                            not open charts.
+                          </p>
+                        </div>
                         <span
                           className={`admin-set-credential__badge${
-                            credentialSaveBlocked(form)
-                              ? ""
-                              : form.authorizationCredentialStatus === "configured" && !resettingCredential
-                                ? " admin-set-credential__badge--ok"
-                                : authPassword || authConfirm
-                                  ? " admin-set-credential__badge--unsaved"
+                            editorBadge.tone === "ok"
+                              ? " admin-set-credential__badge--ok"
+                              : editorBadge.tone === "unsaved"
+                                ? " admin-set-credential__badge--unsaved"
+                                : editorBadge.label === "Setup required"
+                                  ? " admin-set-credential__badge--warn"
                                   : ""
                           }`}
                         >
-                          {credentialSaveBlocked(form)
-                            ? "Setup required"
-                            : form.authorizationCredentialStatus === "configured" && !resettingCredential
-                              ? "Credential set"
-                              : authPassword || authConfirm
-                                ? "Unsaved changes"
-                                : "Not set"}
+                          {editorBadge.label}
                         </span>
                       </div>
                       {credentialSaveBlocked(form) ? (
@@ -1645,10 +1662,11 @@ export function AdminManageUsersPage() {
                       ) : null}
                       {form.authorizationCredentialStatus === "configured" && !resettingCredential ? (
                         <>
-                          <label>
+                          <label htmlFor="authorization-credential-mask">
                             Authorization password
                             <span className="admin-password-reset__input">
                               <input
+                                id="authorization-credential-mask"
                                 type={revealedPassword ? "text" : "password"}
                                 value={revealedPassword || CREDENTIAL_MASK}
                                 readOnly
@@ -1667,11 +1685,10 @@ export function AdminManageUsersPage() {
                                 }}
                                 aria-label="View authorization password"
                               >
-                                <Eye size={16} />
+                                <Eye size={18} />
                               </button>
                             </span>
                           </label>
-                          <p className="admin-set-credential__status admin-set-credential__status--ok">Credential set.</p>
                           {legacyRevealMessage ? (
                             <p className="admin-set-credential__status admin-set-credential__status--warn">{legacyRevealMessage}</p>
                           ) : null}
@@ -1700,16 +1717,15 @@ export function AdminManageUsersPage() {
                       ) : credentialSaveBlocked(form) ? null : (
                         <>
                           {form.authorizationCredentialStatus === "revoked" && !resettingCredential ? (
-                            <p className="admin-set-credential__status">Authorization revoked. Set a new credential to restore approval permission.</p>
+                            <p className="admin-set-credential__status">Set a new password to restore approval permission.</p>
                           ) : resettingCredential ? (
-                            <p className="admin-set-credential__status">Enter a new authorization password. The previous stored copy is replaced on save.</p>
-                          ) : (
-                            <p className="admin-set-credential__status">No authorization credential is stored yet.</p>
-                          )}
-                          <label>
+                            <p className="admin-set-credential__status">Enter a new password. Saving replaces the stored credential.</p>
+                          ) : null}
+                          <label htmlFor="ds-authorization-password">
                             Authorization password
                             <span className="admin-password-reset__input">
                               <input
+                                id="ds-authorization-password"
                                 type={showAuthPassword ? "text" : "password"}
                                 value={authPassword}
                                 name="ds-authorization-password"
@@ -1717,6 +1733,7 @@ export function AdminManageUsersPage() {
                                 data-1p-ignore="true"
                                 data-lpignore="true"
                                 aria-invalid={fieldErrors.authPassword ? "true" : "false"}
+                                aria-describedby={fieldErrors.authPassword ? "ds-authorization-password-error" : undefined}
                                 onChange={(event) => {
                                   setAuthPassword(event.target.value);
                                   clearFieldError("authPassword");
@@ -1728,32 +1745,50 @@ export function AdminManageUsersPage() {
                                 className="admin-set-credential__toggle"
                                 onClick={() => setShowAuthPassword((current) => !current)}
                                 aria-label={showAuthPassword ? "Hide authorization password" : "Show authorization password"}
+                                aria-pressed={showAuthPassword}
                               >
-                                {showAuthPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                                {showAuthPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                               </button>
                             </span>
                             {fieldErrors.authPassword ? (
-                              <span className="admin-form--manage-user__error">{fieldErrors.authPassword}</span>
+                              <span id="ds-authorization-password-error" className="admin-form--manage-user__error">
+                                {fieldErrors.authPassword}
+                              </span>
                             ) : null}
                           </label>
-                          <label>
+                          <label htmlFor="ds-authorization-confirm">
                             Confirm password
-                            <input
-                              type={showAuthPassword ? "text" : "password"}
-                              value={authConfirm}
-                              name="ds-authorization-confirm"
-                              autoComplete="off"
-                              data-1p-ignore="true"
-                              data-lpignore="true"
-                              aria-invalid={fieldErrors.authConfirm ? "true" : "false"}
-                              onChange={(event) => {
-                                setAuthConfirm(event.target.value);
-                                clearFieldError("authConfirm");
-                                setCredentialError("");
-                              }}
-                            />
+                            <span className="admin-password-reset__input">
+                              <input
+                                id="ds-authorization-confirm"
+                                type={showAuthConfirm ? "text" : "password"}
+                                value={authConfirm}
+                                name="ds-authorization-confirm"
+                                autoComplete="off"
+                                data-1p-ignore="true"
+                                data-lpignore="true"
+                                aria-invalid={fieldErrors.authConfirm ? "true" : "false"}
+                                aria-describedby={fieldErrors.authConfirm ? "ds-authorization-confirm-error" : undefined}
+                                onChange={(event) => {
+                                  setAuthConfirm(event.target.value);
+                                  clearFieldError("authConfirm");
+                                  setCredentialError("");
+                                }}
+                              />
+                              <button
+                                type="button"
+                                className="admin-set-credential__toggle"
+                                onClick={() => setShowAuthConfirm((current) => !current)}
+                                aria-label={showAuthConfirm ? "Hide confirmation password" : "Show confirmation password"}
+                                aria-pressed={showAuthConfirm}
+                              >
+                                {showAuthConfirm ? <EyeOff size={18} /> : <Eye size={18} />}
+                              </button>
+                            </span>
                             {fieldErrors.authConfirm ? (
-                              <span className="admin-form--manage-user__error">{fieldErrors.authConfirm}</span>
+                              <span id="ds-authorization-confirm-error" className="admin-form--manage-user__error">
+                                {fieldErrors.authConfirm}
+                              </span>
                             ) : null}
                           </label>
                           {credentialError ? (
@@ -1764,8 +1799,9 @@ export function AdminManageUsersPage() {
                           <div className="admin-set-credential__actions">
                             <button
                               type="button"
-                              className="button button--primary"
+                              className="button button--primary admin-set-credential__save"
                               disabled={credentialBusy}
+                              aria-busy={credentialBusy}
                               onClick={saveAuthorizationCredential}
                             >
                               {credentialBusy ? "Saving…" : resettingCredential ? "Save new credential" : "Save credential"}
@@ -1779,6 +1815,8 @@ export function AdminManageUsersPage() {
                                   setResettingCredential(false);
                                   setAuthPassword("");
                                   setAuthConfirm("");
+                                  setShowAuthPassword(false);
+                                  setShowAuthConfirm(false);
                                 }}
                               >
                                 Cancel reset
