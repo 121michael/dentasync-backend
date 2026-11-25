@@ -3,7 +3,11 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const lifecycle = require("../services/appointmentLifecycle");
-const { createUnproceededAppointmentCancelJob, AUTO_REASON } = require("../services/unproceededAppointmentCancelJob");
+const {
+  createUnproceededAppointmentCancelJob,
+  AUTO_REASON,
+  PENDING_CANCEL_REASON,
+} = require("../services/unproceededAppointmentCancelJob");
 
 test("patient-facing labels distinguish checked in from completed", () => {
   assert.equal(lifecycle.displayAppointmentStatus("pending"), "Pending");
@@ -141,8 +145,10 @@ test("missed appointment job is idempotent and never targets checked-in visits",
   assert.match(update.sql, /FOR UPDATE SKIP LOCKED/);
   assert.match(update.sql, /patient_portal_queue_entries/);
   assert.doesNotMatch(update.sql, /queue\.status IN/);
+  assert.match(update.sql, /WHEN closing\.previous_status = 'pending' THEN 'cancelled'/);
   assert.equal(update.params[1], "Asia/Manila");
   assert.equal(update.params[2], AUTO_REASON);
+  assert.equal(update.params[4], PENDING_CANCEL_REASON);
 
   const again = await job.runOnce(new Date("2026-10-29T01:05:00.000Z"));
   assert.equal(again.cancelled, 0);

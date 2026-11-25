@@ -30,7 +30,11 @@ test("missed appointments cancel after the clinic cutoff and update the branch c
   const { applyClinicBranchSchema } = require("../services/clinicBranches");
   const { applyBranchOperationSchema } = require("../services/branchAccess");
   const patientBranchBooking = require("../services/patientBranchBooking");
-  const { createUnproceededAppointmentCancelJob, AUTO_REASON } = require("../services/unproceededAppointmentCancelJob");
+  const {
+    createUnproceededAppointmentCancelJob,
+    AUTO_REASON,
+    PENDING_CANCEL_REASON,
+  } = require("../services/unproceededAppointmentCancelJob");
   const { createAdminPortalRouter } = require("../routes/adminPortal");
   const { authenticateToken } = require("../middleware/authMiddleware");
 
@@ -144,6 +148,13 @@ test("missed appointments cancel after the clinic cutoff and update the branch c
     status: "confirmed",
     branchId: pasigId,
   });
+  const pendingTodayId = await book({
+    userId: futurePatient,
+    date: "2026-10-29",
+    time: "13:00",
+    status: "pending",
+    branchId: mandaluyongId,
+  });
 
   const app = express();
   app.use(express.json());
@@ -165,12 +176,13 @@ test("missed appointments cancel after the clinic cutoff and update the branch c
   assert.equal(beforeSix.error, undefined, beforeSix.error);
   const afterMorning = await db.query(
     `SELECT id, status FROM patient_portal_appointments WHERE id = ANY($1::bigint[])`,
-    [[pastId, futureId, dateOnlyId, checkedId, pasigPastId]]
+    [[pastId, futureId, dateOnlyId, checkedId, pasigPastId, pendingTodayId]]
   );
   const byId = Object.fromEntries(afterMorning.rows.map((row) => [String(row.id), row.status]));
   assert.equal(byId[String(pastId)], "confirmed");
   assert.equal(byId[String(pasigPastId)], "confirmed");
   assert.equal(byId[String(futureId)], "pending");
+  assert.equal(byId[String(pendingTodayId)], "pending");
   assert.equal(byId[String(dateOnlyId)], "confirmed");
   assert.equal(byId[String(checkedId)], "checked_in");
 
@@ -181,7 +193,7 @@ test("missed appointments cancel after the clinic cutoff and update the branch c
   const month = await adminGet(`/api/admin/clinic-schedule?year=2026&month=10&branchId=${mandaluyongId}`);
   assert.equal(month.status, 200, JSON.stringify(month.body));
   const dayCell = month.body.days.find((day) => day.date === "2026-10-29");
-  assert.equal(dayCell.bookedCount, 3);
+  assert.equal(dayCell.bookedCount, 4);
   assert.equal(dayCell.hasBookings, true);
 
   const atSix = await job.runOnce(new Date("2026-10-29T10:00:00.000Z"));
@@ -196,10 +208,19 @@ test("missed appointments cancel after the clinic cutoff and update the branch c
   assert.equal(pastRow.rows[0].status, "no_show");
   const futureStill = await db.query(`SELECT status FROM patient_portal_appointments WHERE id = $1`, [futureId]);
   assert.equal(futureStill.rows[0].status, "pending");
+  const pendingToday = await db.query(
+    `SELECT status, cancellation_reason FROM patient_portal_appointments WHERE id = $1`,
+    [pendingTodayId]
+  );
+  assert.equal(pendingToday.rows[0].status, "cancelled");
+  assert.equal(pendingToday.rows[0].cancellation_reason, PENDING_CANCEL_REASON);
+  assert.ok((atSix.ids || []).map(String).includes(String(pendingTodayId)));
+  assert.equal(atSix.cancelled, 1);
   const checkedStill = await db.query(`SELECT status FROM patient_portal_appointments WHERE id = $1`, [checkedId]);
   assert.equal(checkedStill.rows[0].status, "checked_in");
   const again = await job.runOnce(new Date("2026-10-29T10:05:00.000Z"));
   assert.equal(again.noShows, 0);
+  assert.equal(again.cancelled, 0);
 
   const afterDateOnly = await adminGet(`/api/admin/clinic-schedule?year=2026&month=10&branchId=${mandaluyongId}`);
   assert.equal(afterDateOnly.body.days.find((day) => day.date === "2026-10-29").bookedCount, 1);

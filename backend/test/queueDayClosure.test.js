@@ -51,7 +51,10 @@ test("end-of-day queue closure and dentist review", { timeout: 120000 }, async (
   const { createDentistPortalRouter } = require("../routes/dentistPortal");
   const { createAdminPortalRouter } = require("../routes/adminPortal");
   const { authenticateToken } = require("../middleware/authMiddleware");
-  const { createUnproceededAppointmentCancelJob } = require("../services/unproceededAppointmentCancelJob");
+  const {
+    createUnproceededAppointmentCancelJob,
+    PENDING_CANCEL_REASON,
+  } = require("../services/unproceededAppointmentCancelJob");
   const lifecycle = require("../services/appointmentLifecycle");
 
   let server;
@@ -221,6 +224,16 @@ test("end-of-day queue closure and dentist review", { timeout: 120000 }, async (
      ) RETURNING id, status`,
     [String(patientB), String(dentist), mainId]
   );
+  const pendingNeverCheckedIn = await db.query(
+    `INSERT INTO patient_portal_appointments (
+       user_id, service_id, service_name, dentist_id, dentist_name,
+       appointment_date, appointment_time, coverage_type, estimated_cost, status, branch_id
+     ) VALUES (
+       $1, 'braces', 'Orthodontics / Braces', $2, 'Dr. Tala Queue',
+       '2026-11-20', '13:00', 'self_pay', 500, 'pending', $3
+     ) RETURNING id, status`,
+    [String(patientB), String(dentist), mainId]
+  );
   const otherBranch = await insertQueue({
     status: "waiting",
     token: "T-001",
@@ -305,7 +318,14 @@ test("end-of-day queue closure and dentist review", { timeout: 120000 }, async (
     neverCheckedIn.rows[0].id,
   ]);
   assert.equal(neverCheckedAfter.rows[0].status, "no_show");
+  const pendingCancelled = await db.query(
+    `SELECT status, cancellation_reason FROM patient_portal_appointments WHERE id = $1`,
+    [pendingNeverCheckedIn.rows[0].id]
+  );
+  assert.equal(pendingCancelled.rows[0].status, "cancelled");
+  assert.equal(pendingCancelled.rows[0].cancellation_reason, PENDING_CANCEL_REASON);
   assert.ok((missedAfterQueue.ids || []).map(String).includes(String(neverCheckedIn.rows[0].id)));
+  assert.ok((missedAfterQueue.ids || []).map(String).includes(String(pendingNeverCheckedIn.rows[0].id)));
   assert.equal((missedAfterQueue.ids || []).map(String).includes(String(appointmentId)), false);
 
   const audits = await db.query(
