@@ -65,14 +65,19 @@ function attachPrescriptionRoutes(router, { db, role, uploadDirectory, notifySta
     const branchId = req.branchAccess?.activeBranch?.id;
     if (role === "staff") {
       const relationship = await recordAccess.staffQualifyingRelationship(db, detail.record, branchId);
-      if (!relationship.allowed) throw recordAccess.denyNoRelationship(detail.record);
+      if (!relationship.allowed) {
+        const error = new Error("Patient record not found.");
+        error.status = 404;
+        throw error;
+      }
       return;
     }
     if (role === "dentist") {
-      const relationship = await recordAccess.qualifyingRelationship(db, req.dentist, detail.record, {
-        branchId: branchId || null,
-      });
-      if (!relationship.allowed) throw recordAccess.denyNoRelationship(detail.record, { includeIdentity: true });
+      if (!branchId) {
+        throw recordAccess.denyNoRelationship(detail.record, { includeIdentity: true });
+      }
+      const assigned = await recordAccess.dentistAssignedToBranch(db, req.dentist, branchId);
+      if (!assigned) throw recordAccess.denyNoRelationship(detail.record, { includeIdentity: true });
     }
   }
 
@@ -81,10 +86,19 @@ function attachPrescriptionRoutes(router, { db, role, uploadDirectory, notifySta
       const branchId = staffBranchId(req);
       if (branchId === null) return res.json({ prescriptions: [] });
       await requirePatientEligibility(req, req.params.patientId);
-      const list = await prescriptions.listPrescriptions(db, {
+      let list = await prescriptions.listPrescriptions(db, {
         clinicalRecordId: req.params.patientId,
-        staffBranchId: branchId,
+        staffBranchId: role === "staff" ? branchId : undefined,
       });
+      if (role === "dentist") {
+        const grants = await recordAccess.activeGrants(db, req.dentist.id, req.params.patientId);
+        const encounterBranchIds = req.branchAccess?.activeBranch?.id
+          ? [String(req.branchAccess.activeBranch.id)]
+          : [];
+        list = list.filter((row) =>
+          recordAccess.treatmentHistoryVisible(row, { encounterBranchIds, grants })
+        );
+      }
       return res.json({ prescriptions: list });
     } catch (error) {
       return sendError(res, error);

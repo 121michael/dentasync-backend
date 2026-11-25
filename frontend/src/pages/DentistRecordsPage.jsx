@@ -1078,7 +1078,7 @@ export function DentistRecordsPage() {
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search histories by patient keyword or ID..."
+              placeholder="Search by patient name or ID..."
             />
           </label>
           <button className="button button--secondary button--compact">Search</button>
@@ -1098,7 +1098,6 @@ export function DentistRecordsPage() {
                 <tr>
                   <th>Patient ID</th>
                   <th>Patient Name</th>
-                  <th>Sex</th>
                   <th>Action</th>
                 </tr>
               </thead>
@@ -1137,7 +1136,6 @@ export function DentistRecordsPage() {
                     <td>
                       <strong>{listValue(patient.fullName || patient.patientName)}</strong>
                     </td>
-                    <td>{displaySex(patient.gender)}</td>
                     <td>
                       <button
                         className="button button--secondary button--compact"
@@ -1154,7 +1152,7 @@ export function DentistRecordsPage() {
         ) : (
           <EmptyState
             title="No records found."
-            detail="Patients assigned to your clinical schedule will appear here."
+            detail="Search an existing patient by name or patient ID. Treatment history stays with the branch where it was recorded."
           />
         )}
       </section>
@@ -1301,6 +1299,14 @@ export function DentistRecordsPage() {
               ) : null}
             </div>
           </div>
+
+          {detail.restrictedHistory || detail.access?.restrictedHistory ? (
+            <p className="inline-alert inline-alert--warning dentist-restricted-history" role="status">
+              {detail.restrictedHistoryMessage ||
+                detail.access?.restrictedHistoryMessage ||
+                "Treatment history from another branch requires authorization."}
+            </p>
+          ) : null}
 
           <AccessRecordHistory
             compact
@@ -1900,6 +1906,13 @@ export function DentistRecordsPage() {
             </p>
 
             <div className="treatment-record__table-wrap">
+              {detail.restrictedHistory || detail.access?.restrictedHistory ? (
+                <p className="inline-alert inline-alert--warning dentist-restricted-history" role="status">
+                  {detail.restrictedHistoryMessage ||
+                    detail.access?.restrictedHistoryMessage ||
+                    "Treatment history from another branch requires authorization."}
+                </p>
+              ) : null}
               {(detail.treatments || []).length ? (
                 <table className="treatment-record__table">
                   <thead>

@@ -614,14 +614,33 @@ function createDentistPortalRouter({
       error.status = 404;
       throw error;
     }
-    const relationship = await recordAccess.qualifyingRelationship(db, req.dentist, detail.record, {
-      branchId: req.branchAccess?.activeBranch?.id || null,
-    });
-    if (!relationship.allowed) {
-      throw recordAccess.denyNoRelationship(detail.record, { includeIdentity: true });
+    const activeBranchId = req.branchAccess?.activeBranch?.id || null;
+    if (!activeBranchId && !req.branchAccess?.legacy) {
+      const error = new Error("Choose a clinic branch to open Patient Records.");
+      error.status = 403;
+      throw error;
     }
+    if (activeBranchId) {
+      const assigned = await recordAccess.dentistAssignedToBranch(db, req.dentist, activeBranchId);
+      if (!assigned) {
+        throw recordAccess.denyNoRelationship(detail.record, { includeIdentity: true });
+      }
+    }
+    const relationship = await recordAccess.qualifyingRelationship(db, req.dentist, detail.record, {
+      branchId: activeBranchId,
+    });
     const grants = await recordAccess.activeGrants(db, req.dentist.id, detail.record.id);
-    return { detail, access: { encounterBranchIds: relationship.branchIds, grants } };
+    const encounterBranchIds = activeBranchId
+      ? [String(activeBranchId)]
+      : relationship.branchIds;
+    return {
+      detail,
+      access: {
+        encounterBranchIds,
+        grants,
+        localRelationship: relationship.allowed,
+      },
+    };
   }
 
   async function visibleWellness(db, detail, access) {
@@ -1883,22 +1902,15 @@ function createDentistPortalRouter({
       const listOptions = {
         search,
         limit: 100,
-        ...(req.branchAccess?.legacy
-          ? {}
-          : { branchId, dentist: req.dentist, eligibleOnly: true }),
+        directory: true,
       };
       const [patients, total] = await Promise.all([
         clinicalPatients.listClinicalRecords(db, listOptions),
-        req.branchAccess?.legacy
-          ? Promise.resolve(null)
-          : clinicalPatients.countClinicalRecords(db, listOptions),
+        clinicalPatients.countClinicalRecords(db, listOptions),
       ]);
       const visible = patients.map((record) => ({
         ...recordAccess.identityOf(record),
-        recordCode: record.recordCode,
-        patientCategory: record.patientCategory || null,
-        lastTreatment: record.lastTreatment,
-        lastTreatmentDate: record.lastTreatmentDate,
+        recordCode: record.recordCode || null,
         isClinicalRecord: true,
       }));
       return res.json({ patients: visible, total: total == null ? visible.length : total });
@@ -2093,51 +2105,68 @@ function createDentistPortalRouter({
         detail: `Ordinary chart read. Encounter branches ${access.encounterBranchIds.join(",")}.`,
       });
 
+      const presentedHistory = recordAccess.presentVisibleTreatments(detail.treatments, access);
+      const localClinical = Boolean(access.localRelationship || presentedHistory.treatments.length);
+      const identity = {
+        ...recordAccess.identityOf(detail.record),
+        patientName: detail.record.fullName,
+        recordCode: detail.record.recordCode || null,
+        isClinicalRecord: true,
+      };
+      const treatments = presentedHistory.treatments.map((presented) => {
+        const row = detail.treatments.find((item) => String(item.id) === String(presented.id)) || {};
+        const amountCharged = Number(row.amountCharged || 0);
+        const amountPaid = Number(row.amountPaid || 0);
+        return {
+          ...presented,
+          originatingBranchName:
+            row.originatingBranchName ||
+            branchNames.get(String(row.originatingBranchId || presented.originatingBranchId || "")) ||
+            null,
+          durationMinutes: row.durationMinutes,
+          amountCharged,
+          amountPaid,
+          balance: Math.round((amountCharged - amountPaid) * 100) / 100,
+          appointmentId: row.appointmentId,
+          queueEntryId: row.queueEntryId || null,
+          visitSequence: row.visitSequence || null,
+        };
+      });
+      const patient = localClinical
+        ? {
+            ...detail.record,
+            ...identity,
+            ageSex:
+              detail.record.ageSex ||
+              clinicalPatients.formatAgeSex(detail.record.age, detail.record.gender),
+            accountStatus: detail.record.linkedUserId ? "linked_account" : "clinical_record",
+            patientCategory: detail.record.patientCategory || null,
+            profileLocked: Boolean(detail.record.profileLocked || detail.record.linkedUserId),
+            accountLinked: Boolean(detail.record.accountLinked || detail.record.linkedUserId),
+            linkedUserId: detail.record.linkedUserId || null,
+            lastTreatment: treatments[0]?.treatment || treatments[0]?.name || null,
+            lastTreatmentDate: treatments[0]?.treatmentDate || treatments[0]?.date || null,
+            amountPaid: treatments.reduce((sum, row) => sum + Number(row.amountPaid || 0), 0),
+            nextAppointmentDate: patientNextAppointment?.date || null,
+            nextAppointmentTime: patientNextAppointment?.time || null,
+          }
+        : identity;
+
       return res.json({
-        patient: {
-          ...detail.record,
-          patientName: detail.record.fullName,
-          ageSex:
-            detail.record.ageSex ||
-            clinicalPatients.formatAgeSex(detail.record.age, detail.record.gender),
-          accountStatus: detail.record.linkedUserId ? "linked_account" : "clinical_record",
-          isClinicalRecord: true,
-          patientId: detail.record.patientId || detail.record.recordCode || null,
-          patientCategory: detail.record.patientCategory || null,
-          profileLocked: Boolean(detail.record.profileLocked || detail.record.linkedUserId),
-          accountLinked: Boolean(detail.record.accountLinked || detail.record.linkedUserId),
-          linkedUserId: detail.record.linkedUserId || null,
-          amountPaid: detail.record.lastAmountPaid,
-          nextAppointmentDate: detail.record.nextAppointmentDate || patientNextAppointment?.date || null,
-          nextAppointmentTime: detail.record.nextAppointmentTime || patientNextAppointment?.time || null,
-        },
-        appointments,
-        nextAppointment: patientNextAppointment,
-        treatments: detail.treatments.map((row) => {
-          const presented = recordAccess.presentTreatment(row, access);
-          const amountCharged = Number(row.amountCharged || 0);
-          const amountPaid = Number(row.amountPaid || 0);
-          return {
-            ...presented,
-            originatingBranchName:
-              row.originatingBranchName ||
-              branchNames.get(String(row.originatingBranchId || presented.originatingBranchId || "")) ||
-              null,
-            durationMinutes: row.durationMinutes,
-            amountCharged,
-            amountPaid,
-            balance: Math.round((amountCharged - amountPaid) * 100) / 100,
-            appointmentId: row.appointmentId,
-            queueEntryId: row.queueEntryId || null,
-            visitSequence: row.visitSequence || null,
-          };
-        }),
+        patient,
+        appointments: localClinical ? appointments : [],
+        nextAppointment: localClinical ? patientNextAppointment : null,
+        treatments,
+        restrictedHistory: presentedHistory.restrictedHistory,
+        restrictedHistoryMessage: presentedHistory.restrictedHistoryMessage,
         access: {
           grantExpiresAt:
             (access.grants || [])
               .map((grant) => grant.expiresAt)
               .filter(Boolean)
               .sort()[0] || null,
+          restrictedHistory: presentedHistory.restrictedHistory,
+          restrictedHistoryMessage: presentedHistory.restrictedHistoryMessage,
         },
         currentVisit: await clinicalPatients.listCurrentVisitForRecord(db, detail.record, {
           branchId: req.branchAccess?.activeBranch?.id || null,
@@ -2558,7 +2587,14 @@ function createDentistPortalRouter({
     }
 
     try {
-      await openPatientChart(req, recordId);
+      const opened = await openPatientChart(req, recordId);
+      const presentedHistory = recordAccess.presentVisibleTreatments(opened.detail.treatments, opened.access);
+      const allowedOrigins = [
+        ...new Set([
+          ...(opened.access.encounterBranchIds || []).map(String),
+          ...(opened.access.grants || []).map((grant) => String(grant.branchId)),
+        ]),
+      ].filter(Boolean);
       const record = await db.query(
         `SELECT id FROM clinic_patient_records
          WHERE id = $1 AND COALESCE(is_archived, FALSE) = FALSE
@@ -2571,10 +2607,15 @@ function createDentistPortalRouter({
 
       // Ensure chart statuses reflect treatment history (DB-driven).
       try {
-        await dentalChartSync.rebuildChartFromTreatments(db, recordId, {
-          id: req.dentist.id,
-          role: "dentist",
-        });
+        await dentalChartSync.rebuildChartFromTreatments(
+          db,
+          recordId,
+          {
+            id: req.dentist.id,
+            role: "dentist",
+          },
+          { originatingBranchIds: allowedOrigins }
+        );
       } catch (rebuildError) {
         console.warn("Dental chart rebuild from treatments skipped:", rebuildError.message);
       }
@@ -2607,6 +2648,8 @@ function createDentistPortalRouter({
 
       return res.json({
         patientId: recordId,
+        restrictedHistory: presentedHistory.restrictedHistory,
+        restrictedHistoryMessage: presentedHistory.restrictedHistoryMessage,
         entries: result.rows.map((row) => {
           const conditions = Array.isArray(row.conditions_json)
             ? row.conditions_json

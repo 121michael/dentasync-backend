@@ -392,26 +392,48 @@ function buildClinicalRecordFilters({
   branchId = null,
   dentist = null,
   eligibleOnly = false,
+  directory = false,
+  performedOnly = false,
 } = {}) {
   const params = [];
   const clauses = [];
   if (!includeArchived) {
     clauses.push("COALESCE(record.is_archived, FALSE) = FALSE");
   }
-  if (eligibleOnly || branchId != null) {
+  if (directory) {
+    // Clinic-wide identification. History stays branch-owned.
+  } else if (performedOnly) {
+    clauses.push(recordAccess.appendPerformedProcedureClause(params, { branchId }));
+  } else if (eligibleOnly || branchId != null) {
     clauses.push(recordAccess.appendEligibilityClause(params, { branchId, dentist }));
   }
   if (search) {
     params.push(`%${search}%`);
-    clauses.push(`(
-      record.first_name ILIKE $${params.length}
-      OR record.last_name ILIKE $${params.length}
-      OR record.email ILIKE $${params.length}
-      OR record.phone ILIKE $${params.length}
-      OR record.record_code ILIKE $${params.length}
-      OR record.id::text ILIKE $${params.length}
-      OR record.linked_user_id ILIKE $${params.length}
-    )`);
+    const searchP = params.length;
+    if (directory) {
+      clauses.push(`(
+        record.first_name ILIKE $${searchP}
+        OR record.last_name ILIKE $${searchP}
+        OR CONCAT_WS(' ', record.first_name, record.last_name) ILIKE $${searchP}
+        OR record.record_code ILIKE $${searchP}
+        OR record.id::text ILIKE $${searchP}
+        OR EXISTS (
+          SELECT 1 FROM users AS account
+          WHERE account.id::text = record.linked_user_id::text
+            AND account.patient_id ILIKE $${searchP}
+        )
+      )`);
+    } else {
+      clauses.push(`(
+        record.first_name ILIKE $${searchP}
+        OR record.last_name ILIKE $${searchP}
+        OR record.email ILIKE $${searchP}
+        OR record.phone ILIKE $${searchP}
+        OR record.record_code ILIKE $${searchP}
+        OR record.id::text ILIKE $${searchP}
+        OR record.linked_user_id ILIKE $${searchP}
+      )`);
+    }
   }
   return {
     params,
@@ -430,7 +452,17 @@ async function countClinicalRecords(db, options = {}) {
 
 async function listClinicalRecords(
   db,
-  { search = null, includeArchived = false, limit = 100, offset = 0, branchId = null, dentist = null, eligibleOnly = false } = {}
+  {
+    search = null,
+    includeArchived = false,
+    limit = 100,
+    offset = 0,
+    branchId = null,
+    dentist = null,
+    eligibleOnly = false,
+    directory = false,
+    performedOnly = false,
+  } = {}
 ) {
   const { params, whereSql } = buildClinicalRecordFilters({
     search,
@@ -438,17 +470,11 @@ async function listClinicalRecords(
     branchId,
     dentist,
     eligibleOnly,
+    directory,
+    performedOnly,
   });
   const unlimited = limit == null;
-  let limitSql = "";
-  if (!unlimited) {
-    params.push(limit, offset);
-    limitSql = `LIMIT $${params.length - 1} OFFSET $${params.length}`;
-  }
-
-  const result = await db.query(
-    `SELECT
-       record.*,
+  let lastTreatmentSql = `
        (
          SELECT treatment.treatment
          FROM clinic_patient_treatments AS treatment
@@ -469,7 +495,51 @@ async function listClinicalRecords(
          WHERE treatment.clinical_record_id = record.id
          ORDER BY treatment.treatment_date DESC, treatment.id DESC
          LIMIT 1
-       ) AS last_amount_paid,
+       ) AS last_amount_paid`;
+  if (directory) {
+    lastTreatmentSql = `NULL AS last_treatment, NULL AS last_treatment_date, NULL AS last_amount_paid`;
+  } else if (performedOnly && branchId != null) {
+    params.push(String(branchId));
+    const originP = params.length;
+    params.push(["completed"]);
+    const statusP = params.length;
+    const local = `treatment.clinical_record_id = record.id
+         AND treatment.originating_branch_id IS NOT NULL
+         AND treatment.originating_branch_id::text = $${originP}
+         AND LOWER(COALESCE(treatment.status, '')) = ANY($${statusP}::text[])`;
+    lastTreatmentSql = `
+       (
+         SELECT treatment.treatment
+         FROM clinic_patient_treatments AS treatment
+         WHERE ${local}
+         ORDER BY treatment.treatment_date DESC, treatment.id DESC
+         LIMIT 1
+       ) AS last_treatment,
+       (
+         SELECT treatment.treatment_date
+         FROM clinic_patient_treatments AS treatment
+         WHERE ${local}
+         ORDER BY treatment.treatment_date DESC, treatment.id DESC
+         LIMIT 1
+       ) AS last_treatment_date,
+       (
+         SELECT treatment.amount_paid
+         FROM clinic_patient_treatments AS treatment
+         WHERE ${local}
+         ORDER BY treatment.treatment_date DESC, treatment.id DESC
+         LIMIT 1
+       ) AS last_amount_paid`;
+  }
+  let limitSql = "";
+  if (!unlimited) {
+    params.push(limit, offset);
+    limitSql = `LIMIT $${params.length - 1} OFFSET $${params.length}`;
+  }
+
+  const result = await db.query(
+    `SELECT
+       record.*,
+       ${lastTreatmentSql},
        CASE
          WHEN record.date_of_birth IS NULL THEN NULL
          ELSE DATE_PART('year', AGE(record.date_of_birth::timestamp))::int

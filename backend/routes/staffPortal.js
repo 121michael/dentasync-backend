@@ -1523,7 +1523,9 @@ function createStaffPortalRouter({
     }
     const relationship = await recordAccess.staffQualifyingRelationship(db, detail.record, branchId);
     if (!relationship.allowed) {
-      throw recordAccess.denyNoRelationship(detail.record);
+      const error = new Error("Patient record not found.");
+      error.status = 404;
+      throw error;
     }
     return { detail, relationship, branchId };
   }
@@ -1540,9 +1542,9 @@ function createStaffPortalRouter({
           search,
           limit: 100,
           branchId,
-          eligibleOnly: true,
+          performedOnly: true,
         }),
-        clinicalPatients.countClinicalRecords(db, { search, branchId, eligibleOnly: true }),
+        clinicalPatients.countClinicalRecords(db, { search, branchId, performedOnly: true }),
       ]);
       return res.json({
         total,
@@ -1967,10 +1969,19 @@ function createStaffPortalRouter({
       }
 
       try {
-        await dentalChartSync.rebuildChartFromTreatments(db, recordId, {
-          id: req.staff.id,
-          role: "staff",
-        });
+        await dentalChartSync.rebuildChartFromTreatments(
+          db,
+          recordId,
+          {
+            id: req.staff.id,
+            role: "staff",
+          },
+          {
+            originatingBranchIds: req.branchAccess?.activeBranch?.id
+              ? [String(req.branchAccess.activeBranch.id)]
+              : [],
+          }
+        );
       } catch (rebuildError) {
         console.warn("Staff dental chart rebuild skipped:", rebuildError.message);
       }

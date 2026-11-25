@@ -63,12 +63,14 @@ function attachDentalAuthorizationRoutes(router, { db, role, uploadDirectory }) 
       );
       const record = recordResult.rows[0];
       if (!record) return false;
-      const relationship = await recordAccess.qualifyingRelationship(db, req.dentist, {
-        id: record.id,
-        linkedUserId: record.linked_user_id,
-      });
-      if (!relationship.allowed) return false;
-      encounterBranchIds = relationship.branchIds;
+      const activeBranchId = req.branchAccess?.activeBranch?.id;
+      if (activeBranchId) {
+        const assigned = await recordAccess.dentistAssignedToBranch(db, req.dentist, activeBranchId);
+        if (!assigned) return false;
+        encounterBranchIds = [String(activeBranchId)];
+      } else {
+        return false;
+      }
       grants = await recordAccess.activeGrants(db, req.dentist.id, clinicalRecordId);
     } else if (role === "staff") {
       const staffBranchId = req.branchAccess?.activeBranch?.id;

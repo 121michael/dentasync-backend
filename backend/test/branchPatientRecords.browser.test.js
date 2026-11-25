@@ -15,7 +15,7 @@ const artifactsDir = "/opt/cursor/artifacts";
 const screenshotDir = path.join(__dirname, "../../screenshots/branch-patient-records");
 const frontendPort = 5231;
 
-test("Patient Records lists follow the assigned branch and clear on switch", { timeout: 180000 }, async (t) => {
+test("Dentist Patient Records identify patients across branches without exposing other-branch history", { timeout: 180000 }, async (t) => {
   if (!fs.existsSync(chrome)) {
     t.diagnostic("google-chrome is required");
     return;
@@ -23,20 +23,20 @@ test("Patient Records lists follow the assigned branch and clear on switch", { t
   const { jwtSecret } = resolveAppSecrets(process.env);
   const dentist = {
     id: "71",
-    first_name: "Drew",
-    last_name: "Branch",
-    email: "drew.branch@example.test",
+    first_name: "Marco",
+    last_name: "Mandaluyong",
+    email: "marco.mnd@example.test",
     phone: "09170007071",
     role: "dentist",
   };
   const branches = [
-    { id: 1, name: "Branch A", branchId: "BR-A", active: true },
-    { id: 2, name: "Branch B", branchId: "BR-B", active: true },
+    { id: 1, name: "Mandaluyong", branchId: "MND", active: true },
+    { id: 2, name: "Taguig", branchId: "TAG", active: true },
   ];
-  const byBranch = {
-    1: [{ id: 11, fullName: "Alpha Scope", patientId: "CR-A", isClinicalRecord: true }],
-    2: [{ id: 22, fullName: "Bravo Scope", patientId: "CR-B", isClinicalRecord: true }],
-  };
+  const directory = [
+    { id: 11, fullName: "Tomas Taguig", patientId: "PID-TAG", isClinicalRecord: true },
+    { id: 22, fullName: "Mina Mandaluyong", patientId: "PID-MND", isClinicalRecord: true },
+  ];
 
   const app = express();
   app.use(express.json());
@@ -71,22 +71,34 @@ test("Patient Records lists follow the assigned branch and clear on switch", { t
   app.get("/api/dentist/dashboard", (_req, res) => res.json({ metrics: { unreadNotifications: 0 } }));
   app.get("/api/dentist/notifications", (_req, res) => res.json({ notifications: [], unreadCount: 0 }));
   app.get("/api/dentist/profile", (_req, res) => res.json({ profile: formatUser(dentist) }));
-  app.get("/api/dentist/patients", (req, res) => {
-    const id = requestedBranch(req);
-    const patients = byBranch[id] || [];
-    res.json({ patients, total: patients.length });
+  app.get("/api/dentist/patients", (_req, res) => {
+    res.json({ patients: directory, total: directory.length });
   });
   app.get("/api/dentist/patients/:id", (req, res) => {
-    const id = requestedBranch(req);
-    const patient = (byBranch[id] || []).find((row) => String(row.id) === String(req.params.id));
-    if (!patient) {
-      return res.status(403).json({
-        message: "A confirmed appointment or an active encounter with this patient is required before the chart can be opened.",
-        code: "NO_TREATMENT_RELATIONSHIP",
+    const patient = directory.find((row) => String(row.id) === String(req.params.id));
+    if (!patient) return res.status(404).json({ message: "Patient record not found." });
+    const active = requestedBranch(req);
+    const local = String(patient.id) === "22" && active === "1" || String(patient.id) === "11" && active === "2";
+    if (local && String(patient.id) === "22") {
+      return res.json({
+        patient: { ...patient, patientName: patient.fullName },
+        treatments: [{ id: 1, treatment: "Mandaluyong filling", date: "2026-11-20" }],
+        appointments: [],
+        restrictedHistory: false,
       });
     }
-    return res.json({ patient, treatments: [], appointments: [] });
+    return res.json({
+      patient,
+      treatments: [],
+      appointments: [],
+      restrictedHistory: true,
+      restrictedHistoryMessage: "Treatment history from another branch requires authorization.",
+    });
   });
+  app.get("/api/dentist/patients/:id/dental-chart", (_req, res) => res.json({ patientId: 11, entries: [] }));
+  app.get("/api/dentist/patients/:id/xrays", (_req, res) => res.json({ xrays: [] }));
+  app.get("/api/dentist/patients/:id/medical-documents", (_req, res) => res.json({ documents: [] }));
+  app.get("/api/dentist/patients/:id/prescriptions", (_req, res) => res.json({ prescriptions: [] }));
 
   let apiServer;
   let vite;
@@ -159,36 +171,35 @@ test("Patient Records lists follow the assigned branch and clear on switch", { t
 
   await open(1280, 900, false);
   let text = await page.evaluate(() => document.body.innerText);
-  assert.match(text, /Alpha Scope/);
-  assert.doesNotMatch(text, /Bravo Scope/);
+  assert.match(text, /Tomas Taguig/);
+  assert.match(text, /Mina Mandaluyong/);
+  assert.doesNotMatch(text, /Mild stain/);
   await shot("branch-patient-records-a-desktop.png");
+  await shot("dentist-identity-directory-1280.png");
 
-  const switched = await page.evaluate(async () => {
-    const select = document.querySelector("select");
-    if (!select) return false;
-    select.value = "2";
-    select.dispatchEvent(new Event("change", { bubbles: true }));
-    return true;
-  });
-  assert.equal(switched, true);
-  await page.waitForFunction(() => document.body.innerText.includes("Bravo Scope"), { timeout: 10000 });
+  await page.goto(`${origin}/dentist/patient-records/11`, { waitUntil: "networkidle0" });
   text = await page.evaluate(() => document.body.innerText);
-  assert.match(text, /Bravo Scope/);
-  assert.doesNotMatch(text, /Alpha Scope/);
-  await shot("branch-patient-records-b-desktop.png");
-
-  await page.reload({ waitUntil: "networkidle0" });
-  text = await page.evaluate(() => document.body.innerText);
-  assert.match(text, /Bravo Scope/);
-  assert.doesNotMatch(text, /Alpha Scope/);
-  await shot("branch-patient-records-b-reload.png");
+  assert.match(text, /Tomas Taguig/);
+  assert.match(text, /Treatment history from another branch requires authorization/);
+  assert.doesNotMatch(text, /Taguig cleaning/);
+  assert.doesNotMatch(text, /Mild stain/);
+  await shot("dentist-restricted-history-1280.png");
 
   await open(390, 844, true);
+  text = await page.evaluate(() => document.body.innerText);
+  assert.match(text, /Tomas Taguig/);
   assert.equal(
     await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1),
     false
   );
   await shot("branch-patient-records-a-390.png");
+  await shot("dentist-identity-directory-390.png");
+  await page.goto(`${origin}/dentist/patient-records/11`, { waitUntil: "networkidle0" });
+  await page.waitForFunction(
+    () => document.body.innerText.includes("Treatment history from another branch requires authorization."),
+    { timeout: 10000 }
+  );
+  await shot("dentist-restricted-history-390.png");
 
   await open(320, 720, true);
   assert.equal(
@@ -196,4 +207,11 @@ test("Patient Records lists follow the assigned branch and clear on switch", { t
     false
   );
   await shot("branch-patient-records-a-320.png");
+  await shot("dentist-identity-directory-320.png");
+  await page.goto(`${origin}/dentist/patient-records/11`, { waitUntil: "networkidle0" });
+  await page.waitForFunction(
+    () => document.body.innerText.includes("Treatment history from another branch requires authorization."),
+    { timeout: 10000 }
+  );
+  await shot("dentist-restricted-history-320.png");
 });

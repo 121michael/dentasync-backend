@@ -26,7 +26,7 @@ function sqlFile(name) {
   return fs.readFileSync(path.join(__dirname, "..", "migrations", name), "utf8");
 }
 
-test("Staff and dentists only list patients with a qualifying appointment at their assigned branch", async (t) => {
+test("Staff lists performed local procedures; dentists identify patients without exposing other-branch history", async (t) => {
   await adminPool.query(`CREATE DATABASE ${dbName}`);
   const db = require("../db");
   db.on("error", () => {});
@@ -231,7 +231,7 @@ test("Staff and dentists only list patients with a qualifying appointment at the
   assert.equal(names(listA.body).includes("Alpha Scope"), true);
   assert.equal(names(listA.body).includes("Bravo Scope"), false);
   assert.equal(names(listA.body).includes("None Scope"), false);
-  assert.equal(names(listA.body).filter((name) => name.includes("Duplo")).length, 1);
+  assert.equal(names(listA.body).includes("Duplo Scope"), false);
   assert.equal(listA.body.total, names(listA.body).length);
 
   const spoof = await request("GET", `/api/staff/patients?branchId=${branchBId}&search=Bravo`, { token: tStaffA });
@@ -252,32 +252,37 @@ test("Staff and dentists only list patients with a qualifying appointment at the
   assert.equal(JSON.stringify(bothB.body).includes("Dual A note"), false);
 
   const denyB = await request("GET", `/api/staff/patients/${recordA}`, { token: tStaffB });
-  assert.equal(denyB.status, 403);
-  assert.equal(denyB.body.code, "NO_TREATMENT_RELATIONSHIP");
+  assert.equal(denyB.status, 404);
   assert.equal(denyB.body.patient, undefined);
   assert.equal(JSON.stringify(denyB.body).includes("Secret A note"), false);
+  assert.equal(JSON.stringify(denyB.body).includes("Alpha"), false);
 
   const denyNone = await request("GET", `/api/staff/patients/${recordNone}`, { token: tStaffA });
-  assert.equal(denyNone.status, 403);
+  assert.equal(denyNone.status, 404);
 
   const chartDeny = await request("GET", `/api/staff/patients/${recordB}/dental-chart`, { token: tStaffA });
-  assert.equal(chartDeny.status, 403);
+  assert.equal(chartDeny.status, 404);
 
   const rxDeny = await request("GET", `/api/staff/patients/${recordB}/prescriptions`, { token: tStaffA });
-  assert.equal(rxDeny.status, 403);
+  assert.equal(rxDeny.status, 404);
 
   const dentAList = await request("GET", "/api/dentist/patients", {
     token: tDentA,
     headers: { "x-dentasync-branch": String(branchA) },
   });
   assert.equal(names(dentAList.body).includes("Alpha Scope"), true);
-  assert.equal(names(dentAList.body).includes("Bravo Scope"), false);
+  assert.equal(names(dentAList.body).includes("Bravo Scope"), true);
+  assert.equal(dentAList.body.patients.some((row) => row.lastTreatment), false);
 
   const dentAOnB = await request("GET", `/api/dentist/patients/${recordB}`, {
     token: tDentA,
-    headers: { "x-dentasync-branch": String(branchBId) },
+    headers: { "x-dentasync-branch": String(branchA) },
   });
-  assert.equal(dentAOnB.status, 403);
+  assert.equal(dentAOnB.status, 200, JSON.stringify(dentAOnB.body));
+  assert.equal(dentAOnB.body.patient.fullName, "Bravo Scope");
+  assert.equal((dentAOnB.body.treatments || []).length, 0);
+  assert.equal(dentAOnB.body.restrictedHistory, true);
+  assert.equal(JSON.stringify(dentAOnB.body).includes("Secret B note"), false);
 
   const otherDentistOnA = await request("GET", `/api/dentist/patients/${recordA}`, {
     token: tDentB,
@@ -289,14 +294,15 @@ test("Staff and dentists only list patients with a qualifying appointment at the
     token: tDentBoth,
     headers: { "x-dentasync-branch": String(branchA) },
   });
-  assert.equal(names(dentBothOnA.body).includes("Alpha Scope"), false);
-  assert.equal(names(dentBothOnA.body).includes("Both Scope"), false);
+  assert.equal(names(dentBothOnA.body).includes("Alpha Scope"), true);
+  assert.equal(names(dentBothOnA.body).includes("Both Scope"), true);
 
   const xrays = await request("GET", `/api/dentist/patients/${recordB}/xrays`, {
     token: tDentA,
     headers: { "x-dentasync-branch": String(branchA) },
   });
-  assert.equal(xrays.status, 403);
+  assert.equal(xrays.status, 200);
+  assert.equal((xrays.body.xrays || []).length, 0);
 
   const exportA = await request("GET", "/api/staff/export/appointments", { token: tStaffA });
   assert.equal(exportA.status, 200);

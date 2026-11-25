@@ -282,15 +282,24 @@ async function clearOrphanedChartEntries(db, clinicalRecordId, activeTeeth) {
  * Rebuild chart statuses from full treatment history (latest applicable per tooth).
  * Does not delete prior treatment rows — only upserts chart entries.
  */
-async function rebuildChartFromTreatments(db, clinicalRecordId, actor = {}) {
+async function rebuildChartFromTreatments(db, clinicalRecordId, actor = {}, options = {}) {
   let treatments;
   try {
+    const allowed = (options.originatingBranchIds || []).map(String).filter(Boolean);
+    const params = [clinicalRecordId];
+    let originSql = "";
+    if (allowed.length) {
+      params.push(allowed);
+      originSql = ` AND originating_branch_id IS NOT NULL AND originating_branch_id::text = ANY($2::text[])`;
+    } else if (options.originatingBranchIds) {
+      originSql = " AND FALSE";
+    }
     treatments = await db.query(
       `SELECT id, treatment, treatment_date, tooth_number, diagnosis_notes, notes, status
        FROM clinic_patient_treatments
-       WHERE clinical_record_id = $1
+       WHERE clinical_record_id = $1${originSql}
        ORDER BY treatment_date ASC, id ASC`,
-      [clinicalRecordId]
+      params
     );
   } catch (error) {
     if (error?.code === "42P01") return [];

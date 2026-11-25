@@ -8594,13 +8594,11 @@ body.is-queue-display .staff-mobile-nav {
 .dentist-table { width: 100%; min-width: 760px; border-collapse: collapse; text-align: left; }
 .dentist-table.dentist-table--patient-list { min-width: 0; table-layout: fixed; }
 .dentist-table.dentist-table--patient-list th:nth-child(1),
-.dentist-table.dentist-table--patient-list td:nth-child(1) { width: 28%; overflow-wrap: anywhere; }
+.dentist-table.dentist-table--patient-list td:nth-child(1) { width: 32%; overflow-wrap: anywhere; }
 .dentist-table.dentist-table--patient-list th:nth-child(2),
-.dentist-table.dentist-table--patient-list td:nth-child(2) { width: 34%; overflow-wrap: anywhere; }
+.dentist-table.dentist-table--patient-list td:nth-child(2) { width: 46%; overflow-wrap: anywhere; }
 .dentist-table.dentist-table--patient-list th:nth-child(3),
-.dentist-table.dentist-table--patient-list td:nth-child(3) { width: 16%; white-space: nowrap; }
-.dentist-table.dentist-table--patient-list th:nth-child(4),
-.dentist-table.dentist-table--patient-list td:nth-child(4) { width: 22%; }
+.dentist-table.dentist-table--patient-list td:nth-child(3) { width: 22%; }
 .dentist-table.dentist-table--patient-list code { color: var(--text-strong); }
 .dentist-table.dentist-table--patient-list .button { white-space: nowrap; }
 .dentist-panel:has(.dentist-table--patient-list) .dentist-table-wrap { margin-inline: 0; }

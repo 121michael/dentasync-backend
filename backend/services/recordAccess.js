@@ -49,6 +49,9 @@ const RESTRICTED_SCOPES = [
 
 const OPEN_APPOINTMENT_STATUSES = ["confirmed", "checked_in"];
 const ACTIVE_ENCOUNTER_STATUSES = ["waiting", "checked_in", "preparing", "dentist"];
+const PERFORMED_TREATMENT_STATUSES = ["completed"];
+const RESTRICTED_HISTORY_MESSAGE =
+  "Treatment history from another branch requires authorization.";
 
 function httpError(message, status, extra = {}) {
   const error = new Error(message);
@@ -116,6 +119,24 @@ function dentistMatchParams(dentist) {
     names.push(`dr. ${fullName}`);
   }
   return { ids, names };
+}
+
+function appendPerformedProcedureClause(params, { branchId } = {}) {
+  if (branchId == null || branchId === "") return "FALSE";
+  params.push(String(branchId));
+  const branchP = params.length;
+  params.push(PERFORMED_TREATMENT_STATUSES);
+  const statusP = params.length;
+  return `(
+    EXISTS (
+      SELECT 1
+      FROM clinic_patient_treatments AS treatment
+      WHERE treatment.clinical_record_id = record.id
+        AND treatment.originating_branch_id IS NOT NULL
+        AND treatment.originating_branch_id::text = $${branchP}
+        AND LOWER(COALESCE(treatment.status, '')) = ANY($${statusP}::text[])
+    )
+  )`;
 }
 
 function appendEligibilityClause(params, { branchId, dentist = null } = {}) {
@@ -217,21 +238,34 @@ async function qualifyingRelationship(db, dentist, record, { branchId } = {}) {
 }
 
 async function staffQualifyingRelationship(db, record, branchId) {
-  const linkedUserId = record?.linkedUserId || record?.linked_user_id || null;
-  if (!linkedUserId || branchId == null || branchId === "") {
+  if (!record?.id || branchId == null || branchId === "") {
     return { allowed: false, branchIds: [] };
   }
-  let rows;
   try {
-    rows = await loadQualifyingRows(db, linkedUserId, [String(branchId)]);
+    const result = await db.query(
+      `SELECT 1
+       FROM clinic_patient_treatments
+       WHERE clinical_record_id = $1
+         AND originating_branch_id IS NOT NULL
+         AND originating_branch_id::text = $2
+         AND LOWER(COALESCE(status, '')) = ANY($3::text[])
+       LIMIT 1`,
+      [record.id, String(branchId), PERFORMED_TREATMENT_STATUSES]
+    );
+    const allowed = result.rows.length > 0;
+    return { allowed, branchIds: allowed ? [String(branchId)] : [] };
   } catch (error) {
     if (error.code === "42P01" || error.code === "42703") {
       return { allowed: false, branchIds: [] };
     }
     throw error;
   }
-  const allowed = rows.some((row) => String(row.branch_id) === String(branchId));
-  return { allowed, branchIds: allowed ? [String(branchId)] : [] };
+}
+
+async function dentistAssignedToBranch(db, dentist, branchId) {
+  if (!dentist?.id || branchId == null || branchId === "") return false;
+  const branches = await authorizedBranchIds(db, dentist.id);
+  return branches.includes(String(branchId));
 }
 
 function denyNoRelationship(record, { includeIdentity = false } = {}) {
@@ -305,6 +339,32 @@ function restrictedAllowed({ originatingBranchId, encounterBranchIds, grants, sc
   return (grants || []).some((grant) => grant.scope === scope && grant.branchId === branchId);
 }
 
+function treatmentHistoryVisible(treatment, access) {
+  const origin = treatment?.originatingBranchId ?? treatment?.originating_branch_id;
+  if (origin == null || origin === "") return false;
+  const branchId = String(origin);
+  if ((access?.encounterBranchIds || []).map(String).includes(branchId)) return true;
+  return (access?.grants || []).some((grant) => String(grant.branchId) === branchId);
+}
+
+function presentVisibleTreatments(treatments, access) {
+  const visible = [];
+  let hiddenCount = 0;
+  for (const treatment of treatments || []) {
+    if (!treatmentHistoryVisible(treatment, access)) {
+      hiddenCount += 1;
+      continue;
+    }
+    visible.push(presentTreatment(treatment, access));
+  }
+  return {
+    treatments: visible,
+    restrictedHistory: hiddenCount > 0,
+    restrictedHistoryMessage: hiddenCount > 0 ? RESTRICTED_HISTORY_MESSAGE : null,
+    hiddenCount,
+  };
+}
+
 function staffCanViewTreatment(treatment, staffBranchId) {
   if (staffBranchId == null || staffBranchId === "") return false;
   const origin = treatment?.originatingBranchId || treatment?.originating_branch_id;
@@ -369,16 +429,11 @@ async function createRequest(db, req, { record, requestingBranchId, originatingB
   }
   requestingBranchId = requestBranch;
   originatingBranchId = originBranch;
-  const relationship = await qualifyingRelationship(db, req.dentist, record);
-  if (!relationship.allowed) {
-    throw httpError(
-      "A confirmed appointment or an active encounter with this patient is required before requesting more of the chart.",
-      403,
-      { patient: identityOf(record), code: "NO_TREATMENT_RELATIONSHIP" }
-    );
-  }
-  if (!relationship.branchIds.map(String).includes(String(requestingBranchId))) {
-    throw httpError("Request the chart from a branch where you are seeing this patient.", 403);
+  const assigned = await dentistAssignedToBranch(db, req.dentist, requestingBranchId);
+  if (!assigned) {
+    throw httpError("Request the chart from a branch assigned to your dentist account.", 403, {
+      patient: identityOf(record),
+    });
   }
   const branches = await authorizedBranchIds(db, req.dentist.id);
   if (!branches.includes(String(originatingBranchId))) {
@@ -674,16 +729,11 @@ async function createChallenge(db, req, payload) {
     throw httpError("Choose the branch you are working from and the branch that holds the records.", 400);
   }
   const record = payload.record;
-  const relationship = await qualifyingRelationship(db, req.dentist, record);
-  if (!relationship.allowed) {
-    throw httpError(
-      "A confirmed appointment or an active encounter with this patient is required before requesting more of the chart.",
-      403,
-      { patient: identityOf(record), code: "NO_TREATMENT_RELATIONSHIP" }
-    );
-  }
-  if (!relationship.branchIds.map(String).includes(String(requestBranch))) {
-    throw httpError("Request the chart from a branch where you are seeing this patient.", 403);
+  const assigned = await dentistAssignedToBranch(db, req.dentist, requestBranch);
+  if (!assigned) {
+    throw httpError("Request the chart from a branch assigned to your dentist account.", 403, {
+      patient: identityOf(record),
+    });
   }
   const branches = await authorizedBranchIds(db, req.dentist.id);
   if (!branches.includes(String(originBranch))) {
@@ -1577,22 +1627,15 @@ async function unlockOwnRecordAccess(db, req, { record, licenseNumber, password 
     throw httpError(GENERIC_AUTH_MESSAGE, 401);
   }
 
-  const relationship = await qualifyingRelationship(db, req.dentist, record);
-  if (!relationship.allowed) {
-    recordAuthFailure(dentistId, req.ip);
-    throw httpError(
-      "A confirmed appointment or an active encounter with this patient is required before requesting more of the chart.",
-      403,
-      { patient: identityOf(record), code: "NO_TREATMENT_RELATIONSHIP" }
-    );
-  }
-
   const requestingBranchId = Number(req.branchAccess?.activeBranch?.id);
   if (!Number.isSafeInteger(requestingBranchId)) {
     throw httpError("Choose the branch you are working from.", 400);
   }
-  if (!relationship.branchIds.map(String).includes(String(requestingBranchId))) {
-    throw httpError("Request the chart from a branch where you are seeing this patient.", 403);
+  const assignedHere = await dentistAssignedToBranch(db, req.dentist, requestingBranchId);
+  if (!assignedHere) {
+    throw httpError("Request the chart from a branch assigned to your dentist account.", 403, {
+      patient: identityOf(record),
+    });
   }
 
   const assigned = await authorizedBranchIds(db, dentistId);
@@ -1953,15 +1996,20 @@ module.exports = {
   OPEN_APPOINTMENT_STATUSES,
   ACTIVE_ENCOUNTER_STATUSES,
   NO_TREATMENT_RELATIONSHIP_MESSAGE,
+  RESTRICTED_HISTORY_MESSAGE,
   identityOf,
   authorizedBranchIds,
+  dentistAssignedToBranch,
   dentistMatchParams,
   appendEligibilityClause,
+  appendPerformedProcedureClause,
   qualifyingRelationship,
   staffQualifyingRelationship,
   denyNoRelationship,
   activeGrants,
   restrictedAllowed,
+  treatmentHistoryVisible,
+  presentVisibleTreatments,
   staffCanViewTreatment,
   presentTreatment,
   createRequest,
