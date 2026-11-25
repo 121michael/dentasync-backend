@@ -3188,8 +3188,21 @@ html[data-theme="dark"] .portal-shell[data-theme="dark"] ~ .tooth-loader .tooth-
 .dentist-record-identity__actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: stretch;
   gap: 0.55rem;
   margin: 0.35rem 0 0.55rem;
+}
+
+.dentist-record-identity__actions .button {
+  min-height: 40px;
+  flex: 0 1 auto;
+}
+
+@media (max-width: 640px) {
+  .dentist-record-identity__actions .button {
+    flex: 1 1 calc(50% - 0.55rem);
+    justify-content: center;
+  }
 }
 
 .dentist-patient-record .profile-menu {

@@ -268,7 +268,25 @@ function StatusBadge({ status, children }) {
   return <span className={`dentist-status dentist-status--${tone}`}>{children || procedureStatusLabel(status)}</span>;
 }
 
-function AccessRecordHistory({ patientId, onAuthorized, grantExpiresAt, requestOpenRef, compact = false }) {
+function hasRestrictedCrossBranchHistory(detail) {
+  if (!detail) return false;
+  if (typeof detail.hasRestrictedCrossBranchHistory === "boolean") {
+    return detail.hasRestrictedCrossBranchHistory;
+  }
+  if (typeof detail.access?.hasRestrictedCrossBranchHistory === "boolean") {
+    return detail.access.hasRestrictedCrossBranchHistory;
+  }
+  return false;
+}
+
+function AccessRecordHistory({
+  patientId,
+  onAuthorized,
+  grantExpiresAt,
+  requestOpenRef,
+  compact = false,
+  allowRequest = false,
+}) {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const [licenseNumber, setLicenseNumber] = useState("");
@@ -282,15 +300,17 @@ function AccessRecordHistory({ patientId, onAuthorized, grantExpiresAt, requestO
 
   useEffect(() => {
     if (!requestOpenRef) return undefined;
-    requestOpenRef.current = () => {
-      setOpen(true);
-      setPassword("");
-      setMessage("");
-    };
+    requestOpenRef.current = allowRequest
+      ? () => {
+          setOpen(true);
+          setPassword("");
+          setMessage("");
+        }
+      : null;
     return () => {
       requestOpenRef.current = null;
     };
-  }, [requestOpenRef]);
+  }, [requestOpenRef, allowRequest]);
 
   useEffect(() => {
     if (!grantExpiresAt) return undefined;
@@ -342,18 +362,20 @@ function AccessRecordHistory({ patientId, onAuthorized, grantExpiresAt, requestO
             Ordinary history you are authorized to read. Restricted notes from other permitted branches stay hidden until
             you verify your Admin-configured authorization credential.
           </p>
-          <button
-            className="button button--primary"
-            type="button"
-            data-request-record-access="true"
-            onClick={() => {
-              setOpen(true);
-              setPassword("");
-              setMessage("");
-            }}
-          >
-            Request Record Access
-          </button>
+          {allowRequest ? (
+            <button
+              className="button button--primary"
+              type="button"
+              data-request-record-access="true"
+              onClick={() => {
+                setOpen(true);
+                setPassword("");
+                setMessage("");
+              }}
+            >
+              Request Record Access
+            </button>
+          ) : null}
         </section>
       )}
       {open ? (
@@ -633,6 +655,7 @@ export function DentistRecordsPage() {
     setSavingWellness(false);
     setFilesOpen(openFilesFromQuery);
     setRecordSection(openFilesFromQuery ? "clinical" : null);
+    setDetail(null);
     refreshPatientDetail(patientId)
       .then(() => {
         if (!cancelled) setError("");
@@ -1032,7 +1055,6 @@ export function DentistRecordsPage() {
     return (
       <div className="dentist-page">
         <ErrorState message={error} onRetry={() => refreshPatientDetail(patientId)} />
-        <AccessRecordHistory patientId={patientId} patient={null} />
         <button
           type="button"
           className="button button--secondary"
@@ -1253,13 +1275,15 @@ export function DentistRecordsPage() {
               Patient ID · {detail.patient.patientId || detail.patient.recordCode || detail.patient.id}
             </p>
             <div className="dentist-record-identity__actions">
-              <button
-                type="button"
-                className="button button--primary"
-                onClick={() => requestAccessRef.current?.()}
-              >
-                <KeyRound size={16} /> Request Record Access
-              </button>
+              {hasRestrictedCrossBranchHistory(detail) ? (
+                <button
+                  type="button"
+                  className="button button--primary"
+                  onClick={() => requestAccessRef.current?.()}
+                >
+                  <KeyRound size={16} /> Request Record Access
+                </button>
+              ) : null}
               {recordSection === "clinical" ? (
                 <>
                   <button
@@ -1300,7 +1324,7 @@ export function DentistRecordsPage() {
             </div>
           </div>
 
-          {detail.restrictedHistory || detail.access?.restrictedHistory ? (
+          {hasRestrictedCrossBranchHistory(detail) ? (
             <p className="inline-alert inline-alert--warning dentist-restricted-history" role="status">
               {detail.restrictedHistoryMessage ||
                 detail.access?.restrictedHistoryMessage ||
@@ -1310,6 +1334,7 @@ export function DentistRecordsPage() {
 
           <AccessRecordHistory
             compact
+            allowRequest={hasRestrictedCrossBranchHistory(detail)}
             patientId={patientId}
             patient={detail.patient}
             grantExpiresAt={detail.access?.grantExpiresAt}
@@ -1906,7 +1931,7 @@ export function DentistRecordsPage() {
             </p>
 
             <div className="treatment-record__table-wrap">
-              {detail.restrictedHistory || detail.access?.restrictedHistory ? (
+              {hasRestrictedCrossBranchHistory(detail) ? (
                 <p className="inline-alert inline-alert--warning dentist-restricted-history" role="status">
                   {detail.restrictedHistoryMessage ||
                     detail.access?.restrictedHistoryMessage ||

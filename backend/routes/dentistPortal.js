@@ -2157,7 +2157,8 @@ function createDentistPortalRouter({
         appointments: localClinical ? appointments : [],
         nextAppointment: localClinical ? patientNextAppointment : null,
         treatments,
-        restrictedHistory: presentedHistory.restrictedHistory,
+        hasRestrictedCrossBranchHistory: presentedHistory.hasRestrictedCrossBranchHistory,
+        restrictedHistory: presentedHistory.hasRestrictedCrossBranchHistory,
         restrictedHistoryMessage: presentedHistory.restrictedHistoryMessage,
         access: {
           grantExpiresAt:
@@ -2165,7 +2166,8 @@ function createDentistPortalRouter({
               .map((grant) => grant.expiresAt)
               .filter(Boolean)
               .sort()[0] || null,
-          restrictedHistory: presentedHistory.restrictedHistory,
+          hasRestrictedCrossBranchHistory: presentedHistory.hasRestrictedCrossBranchHistory,
+          restrictedHistory: presentedHistory.hasRestrictedCrossBranchHistory,
           restrictedHistoryMessage: presentedHistory.restrictedHistoryMessage,
         },
         currentVisit: await clinicalPatients.listCurrentVisitForRecord(db, detail.record, {
@@ -2648,7 +2650,8 @@ function createDentistPortalRouter({
 
       return res.json({
         patientId: recordId,
-        restrictedHistory: presentedHistory.restrictedHistory,
+        hasRestrictedCrossBranchHistory: presentedHistory.hasRestrictedCrossBranchHistory,
+        restrictedHistory: presentedHistory.hasRestrictedCrossBranchHistory,
         restrictedHistoryMessage: presentedHistory.restrictedHistoryMessage,
         entries: result.rows.map((row) => {
           const conditions = Array.isArray(row.conditions_json)

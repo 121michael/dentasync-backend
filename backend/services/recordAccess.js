@@ -339,12 +339,29 @@ function restrictedAllowed({ originatingBranchId, encounterBranchIds, grants, sc
   return (grants || []).some((grant) => grant.scope === scope && grant.branchId === branchId);
 }
 
-function treatmentHistoryVisible(treatment, access) {
+function knownOriginBranchId(treatment) {
   const origin = treatment?.originatingBranchId ?? treatment?.originating_branch_id;
-  if (origin == null || origin === "") return false;
-  const branchId = String(origin);
+  if (origin == null || origin === "") return null;
+  return String(origin);
+}
+
+function treatmentHistoryVisible(treatment, access) {
+  const branchId = knownOriginBranchId(treatment);
+  if (!branchId) return false;
   if ((access?.encounterBranchIds || []).map(String).includes(branchId)) return true;
   return (access?.grants || []).some((grant) => String(grant.branchId) === branchId);
+}
+
+function hasRestrictedCrossBranchHistory(treatments, access) {
+  const viewing = new Set((access?.encounterBranchIds || []).map(String).filter(Boolean));
+  const granted = new Set((access?.grants || []).map((grant) => String(grant.branchId)).filter(Boolean));
+  for (const treatment of treatments || []) {
+    const origin = knownOriginBranchId(treatment);
+    if (!origin) continue;
+    if (viewing.has(origin) || granted.has(origin)) continue;
+    return true;
+  }
+  return false;
 }
 
 function presentVisibleTreatments(treatments, access) {
@@ -357,10 +374,12 @@ function presentVisibleTreatments(treatments, access) {
     }
     visible.push(presentTreatment(treatment, access));
   }
+  const restrictedCrossBranch = hasRestrictedCrossBranchHistory(treatments, access);
   return {
     treatments: visible,
-    restrictedHistory: hiddenCount > 0,
-    restrictedHistoryMessage: hiddenCount > 0 ? RESTRICTED_HISTORY_MESSAGE : null,
+    hasRestrictedCrossBranchHistory: restrictedCrossBranch,
+    restrictedHistory: restrictedCrossBranch,
+    restrictedHistoryMessage: restrictedCrossBranch ? RESTRICTED_HISTORY_MESSAGE : null,
     hiddenCount,
   };
 }
@@ -2009,6 +2028,8 @@ module.exports = {
   activeGrants,
   restrictedAllowed,
   treatmentHistoryVisible,
+  knownOriginBranchId,
+  hasRestrictedCrossBranchHistory,
   presentVisibleTreatments,
   staffCanViewTreatment,
   presentTreatment,
