@@ -24,6 +24,7 @@ import {
   PATIENT_SEX_OPTIONS,
 } from "../patientDemographics";
 import { useAuth } from "../useAuth";
+import { PatientRecordSectionSelect } from "../components/PatientRecordCards";
 
 const PROFILE_MENU = [
   {
@@ -202,6 +203,20 @@ export function ProfilePage() {
     setActiveSection(null);
   }
 
+  function chooseProfileSection(sectionId) {
+    if (!sectionId) {
+      goBackToMenu();
+      return;
+    }
+    if (activeSection && sectionId !== activeSection && isSectionDirty()) {
+      const leave = window.confirm("You have unsaved changes. Leave this section without saving?");
+      if (!leave) return;
+      setForm(profileToForm(profile));
+      setPasswords({ currentPassword: "", newPassword: "" });
+    }
+    openSection(sectionId);
+  }
+
   async function saveProfile(event) {
     event.preventDefault();
     setError("");
@@ -309,6 +324,12 @@ export function ProfilePage() {
             </div>
           </section>
 
+          <PatientRecordSectionSelect
+            value={activeSection}
+            onChange={chooseProfileSection}
+            options={PROFILE_MENU}
+            label="Profile section"
+          />
           <nav className="profile-menu" aria-label="My Profile categories">
             {PROFILE_MENU.map((item) => {
               const Icon = item.icon;
@@ -337,6 +358,12 @@ export function ProfilePage() {
           <button type="button" className="button button--secondary profile-back" onClick={goBackToMenu}>
             <ChevronLeft size={16} /> Back to My Profile
           </button>
+          <PatientRecordSectionSelect
+            value={activeSection}
+            onChange={chooseProfileSection}
+            options={PROFILE_MENU}
+            label="Profile section"
+          />
 
           {PROFILE_FORM_SECTIONS.has(activeSection) ? (
             <form id="profile-form" onSubmit={saveProfile} className="profile-form-stack">

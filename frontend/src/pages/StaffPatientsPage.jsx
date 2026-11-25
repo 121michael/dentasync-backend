@@ -8,8 +8,10 @@ import {
   PatientRecordField,
   PatientRecordIdentity,
   PatientRecordSectionNav,
+  PatientRecordSectionSelect,
   hmoCoverageLabel,
 } from "../components/PatientRecordCards";
+import { PatientRegistryPicker } from "../components/PatientRegistryPicker";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { StaffModal, StaffStatusBadge } from "../components/StaffUI";
 import { useStaffUi } from "../components/StaffLayout";
@@ -309,7 +311,12 @@ export function StaffPatientsPage() {
         </form>
 
         {patients.length ? (
-          <div className="staff-table-wrap">
+          <>
+          <PatientRegistryPicker
+            items={patients}
+            onView={(item) => openDetail(item.id)}
+          />
+          <div className="staff-table-wrap patient-registry-table">
             <table className="staff-table staff-table--patient-list">
               <thead>
                 <tr>
@@ -345,6 +352,7 @@ export function StaffPatientsPage() {
               </tbody>
             </table>
           </div>
+          </>
         ) : (
           <EmptyState
             title="No patient records found"
@@ -443,6 +451,7 @@ export function StaffPatientsPage() {
             <div className="dentist-record-identity__actions">
               <StaffStatusBadge status={recordStatus(detail)} />
             </div>
+            <PatientRecordSectionSelect value={recordSection} onChange={setRecordSection} />
           </PatientRecordIdentity>
 
           {!recordSection ? (

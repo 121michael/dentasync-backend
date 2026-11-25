@@ -16,7 +16,7 @@ import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { RescheduleAppointmentModal } from "../components/RescheduleAppointmentModal";
-import { canManageAppointment, displayAppointmentStatus } from "../utils/appointmentStatus";
+import { canManageAppointment, clinicTodayYmd, displayAppointmentStatus } from "../utils/appointmentStatus";
 import { useAuth } from "../useAuth";
 import { matchesNotificationFocus } from "../notificationFocus";
 import { applyApprovedClinicPriceOverrides, getApprovedClinicPrice } from "../clinic/approvedClinicPrices";
@@ -1002,6 +1002,95 @@ export function AppointmentsPage() {
   if (!loaded) return <LoadingState label="Loading appointment history…" />;
 
   if (!isBooking) {
+    const today = clinicTodayYmd();
+    const upcoming = appointments.filter((row) => String(row.date || "") >= today);
+    const past = appointments.filter((row) => String(row.date || "") < today);
+    const renderAppointmentCard = (appointment) => {
+      const visitLabel =
+        appointment.visitTypeLabel ||
+        (appointment.visitType === "walk_in" ? "Walk-in visit" : "Booked appointment");
+      const manage = canManageAppointment(appointment);
+      return (
+        <article
+          key={appointment.id}
+          ref={matchesNotificationFocus(appointment, focusKey, ["id"]) ? focusedCardRef : null}
+          className={`appointment-history-card appointment-history-card--compact ${
+            matchesNotificationFocus(appointment, focusKey, ["id"]) ? "is-notification-focus" : ""
+          }`}
+        >
+          <header className="appointment-history-card__header">
+            <strong>{displayServiceName(appointment)}</strong>
+            <span className={`status-pill status-pill--${appointment.status}`}>{displayStatus(appointment)}</span>
+          </header>
+          <p className="appointment-history-card__summary">
+            <span>
+              {displayDate(appointment.date)}
+              {appointment.time ? ` · ${displayTime(appointment.time)}` : ""}
+            </span>
+            <span>
+              {appointment.branchName || "Clinic branch"}
+              {appointment.branchStatus === "inactive" ? " (inactive)" : ""}
+            </span>
+            <span>{visitLabel}</span>
+          </p>
+          {manage.cancel || manage.reschedule ? (
+            <div className="appointment-history-card__actions">
+              {manage.reschedule ? (
+                <button
+                  type="button"
+                  className="button button--secondary button--compact"
+                  onClick={() => {
+                    setRescheduleError("");
+                    setRescheduleTarget(appointment);
+                  }}
+                >
+                  Reschedule
+                </button>
+              ) : null}
+              {manage.cancel ? (
+                <button
+                  type="button"
+                  className="button button--secondary button--compact"
+                  onClick={() => setCancelTarget(appointment)}
+                >
+                  <X size={15} /> Cancel
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+          <details className="appointment-history-card__more">
+            <summary>View details</summary>
+            <dl className="appointment-history-card__details">
+              <div>
+                <dt>Date</dt>
+                <dd>{displayDate(appointment.date)}</dd>
+              </div>
+              <div>
+                <dt>Branch</dt>
+                <dd>
+                  {appointment.branchName || "Clinic branch"}
+                  {appointment.branchStatus === "inactive" ? " (inactive)" : ""}
+                </dd>
+              </div>
+              {appointment.time ? (
+                <div>
+                  <dt>Time</dt>
+                  <dd>{displayTime(appointment.time)}</dd>
+                </div>
+              ) : null}
+              <div className="appointment-history-card__service">
+                <dt>Service</dt>
+                <dd>{displayServiceName(appointment)}</dd>
+              </div>
+              <div>
+                <dt>Visit type</dt>
+                <dd>{visitLabel}</dd>
+              </div>
+            </dl>
+          </details>
+        </article>
+      );
+    };
     return (
       <div className="appointments-page appointments-page--list">
         <SectionHeading
@@ -1031,79 +1120,23 @@ export function AppointmentsPage() {
 
         <section className="appointment-history">
           {appointments.length ? (
-            <div className="appointment-history__cards">
-              {appointments.map((appointment) => (
-                <article
-                  key={appointment.id}
-                  ref={matchesNotificationFocus(appointment, focusKey, ["id"]) ? focusedCardRef : null}
-                  className={`appointment-history-card ${
-                    matchesNotificationFocus(appointment, focusKey, ["id"]) ? "is-notification-focus" : ""
-                  }`}
-                >
-                  <header className="appointment-history-card__header">
-                    <strong>{appointment.visitTypeLabel || (appointment.visitType === "walk_in" ? "Walk-in visit" : "Appointment")}</strong>
-                    <span className={`status-pill status-pill--${appointment.status}`}>
-                      {displayStatus(appointment)}
-                    </span>
-                  </header>
-                  <dl className="appointment-history-card__details">
-                    <div>
-                      <dt>Date</dt>
-                      <dd>{displayDate(appointment.date)}</dd>
-                    </div>
-                    <div>
-                      <dt>Branch</dt>
-                      <dd>
-                        {appointment.branchName || "Clinic branch"}
-                        {appointment.branchStatus === "inactive" ? " (inactive)" : ""}
-                      </dd>
-                    </div>
-                    {appointment.time ? (
-                    <div>
-                      <dt>Time</dt>
-                      <dd>{displayTime(appointment.time)}</dd>
-                    </div>
-                    ) : null}
-                    <div className="appointment-history-card__service">
-                      <dt>Service</dt>
-                      <dd>{displayServiceName(appointment)}</dd>
-                    </div>
-                    <div>
-                      <dt>Status</dt>
-                      <dd>{displayStatus(appointment)}</dd>
-                    </div>
-                    <div>
-                      <dt>Visit type</dt>
-                      <dd>{appointment.visitTypeLabel || (appointment.visitType === "walk_in" ? "Walk-in visit" : "Booked appointment")}</dd>
-                    </div>
-                  </dl>
-                  {canManageAppointment(appointment).cancel || canManageAppointment(appointment).reschedule ? (
-                    <div className="appointment-history-card__actions">
-                      {canManageAppointment(appointment).reschedule ? (
-                        <button
-                          type="button"
-                          className="button button--secondary button--compact"
-                          onClick={() => {
-                            setRescheduleError("");
-                            setRescheduleTarget(appointment);
-                          }}
-                        >
-                          Reschedule
-                        </button>
-                      ) : null}
-                      {canManageAppointment(appointment).cancel ? (
-                        <button
-                          type="button"
-                          className="button button--secondary button--compact"
-                          onClick={() => setCancelTarget(appointment)}
-                        >
-                          <X size={15} /> Cancel
-                        </button>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </article>
-              ))}
+            <div className="appointment-history__groups">
+              {upcoming.length ? (
+                <details className="appointment-history__group" open>
+                  <summary>
+                    Upcoming <span>{upcoming.length}</span>
+                  </summary>
+                  <div className="appointment-history__cards">{upcoming.map(renderAppointmentCard)}</div>
+                </details>
+              ) : null}
+              {past.length ? (
+                <details className="appointment-history__group" open={!upcoming.length}>
+                  <summary>
+                    Past visits <span>{past.length}</span>
+                  </summary>
+                  <div className="appointment-history__cards">{past.map(renderAppointmentCard)}</div>
+                </details>
+              ) : null}
             </div>
           ) : (
             <EmptyState

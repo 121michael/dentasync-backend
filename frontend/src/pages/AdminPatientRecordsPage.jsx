@@ -7,8 +7,10 @@ import {
   PatientRecordField,
   PatientRecordIdentity,
   PatientRecordSectionNav,
+  PatientRecordSectionSelect,
   hmoCoverageLabel,
 } from "../components/PatientRecordCards";
+import { PatientRegistryPicker } from "../components/PatientRegistryPicker";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { AdminModal } from "../components/AdminUI";
 import { useAdminUi } from "../components/AdminLayout";
@@ -254,7 +256,9 @@ export function AdminPatientRecordsPage() {
         ) : null}
 
         {records.length ? (
-          <div className="admin-table-wrap">
+          <>
+          <PatientRegistryPicker items={records} onView={viewRecord} focusKey={focusKey} focusedRef={focusedRowRef} />
+          <div className="admin-table-wrap patient-registry-table">
             <table className="admin-table admin-table--patient-list">
               <thead>
                 <tr>
@@ -292,6 +296,7 @@ export function AdminPatientRecordsPage() {
               </tbody>
             </table>
           </div>
+          </>
         ) : (
           <EmptyState
             title="No clinical records found"
@@ -368,10 +373,12 @@ export function AdminPatientRecordsPage() {
             name={record.fullName}
             patientId={record.patientId || record.recordCode || record.id}
             eyebrow="Administrative patient record"
-          />
+          >
+            <PatientRecordSectionSelect value={recordSection} onChange={setRecordSection} />
+          </PatientRecordIdentity>
 
           {!recordSection ? (
-            <PatientRecordSectionNav onSelect={setRecordSection} />
+            <PatientRecordSectionNav onSelect={setRecordSection} selectedId={recordSection} />
           ) : (
             <PatientRecordCardsBack onClick={() => setRecordSection(null)} />
           )}

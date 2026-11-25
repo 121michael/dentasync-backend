@@ -51,10 +51,35 @@ export function PatientRecordIdentity({ onBack, name, patientId, eyebrow = "Shar
   );
 }
 
-export function PatientRecordSectionNav({ onSelect, selectedId }) {
+export function PatientRecordSectionSelect({
+  value,
+  onChange,
+  options = PATIENT_RECORD_MENU,
+  label = "Record section",
+}) {
+  return (
+    <label className="record-section-select">
+      <span>{label}</span>
+      <select
+        value={value || ""}
+        onChange={(event) => onChange(event.target.value || null)}
+        aria-label={label}
+      >
+        <option value="">Overview</option>
+        {options.map((item) => (
+          <option key={item.id} value={item.id}>
+            {item.title}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+export function PatientRecordSectionNav({ onSelect, selectedId, options = PATIENT_RECORD_MENU }) {
   return (
     <nav className="profile-menu" aria-label="Patient record sections">
-      {PATIENT_RECORD_MENU.map((item) => {
+      {options.map((item) => {
         const Icon = item.icon;
         return (
           <button

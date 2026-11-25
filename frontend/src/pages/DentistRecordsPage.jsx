@@ -29,6 +29,8 @@ import { formatDentistDate } from "../dentistUtils";
 import { displayDateOfBirth, displaySex } from "../patientDemographics";
 import { matchesNotificationFocus } from "../notificationFocus";
 import { useAuth } from "../useAuth";
+import { PatientRecordSectionSelect } from "../components/PatientRecordCards";
+import { PatientRegistryPicker } from "../components/PatientRegistryPicker";
 
 const emptyForm = {
   firstName: "",
@@ -1062,7 +1064,9 @@ export function DentistRecordsPage() {
         </div>
 
         {patients.length ? (
-          <div className="dentist-table-wrap">
+          <>
+          <PatientRegistryPicker items={patients} onView={openPatientRecord} focusKey={focusKey} focusedRef={focusedRowRef} />
+          <div className="dentist-table-wrap patient-registry-table">
             <table className="dentist-table dentist-table--patient-list">
               <thead>
                 <tr>
@@ -1119,6 +1123,7 @@ export function DentistRecordsPage() {
               </tbody>
             </table>
           </div>
+          </>
         ) : (
           <EmptyState
             title="No records found."
@@ -1222,6 +1227,11 @@ export function DentistRecordsPage() {
             <p className="dentist-record-identity__id">
               Patient ID · {detail.patient.patientId || detail.patient.recordCode || detail.patient.id}
             </p>
+            <PatientRecordSectionSelect
+              value={recordSection}
+              onChange={setRecordSection}
+              options={RECORD_MENU}
+            />
             <div className="dentist-record-identity__actions">
               {hasRestrictedCrossBranchHistory(detail) ? (
                 <button

@@ -18,37 +18,36 @@ function viewportBox() {
   };
 }
 
-function menuClearance() {
-  if (typeof window === "undefined") return EDGE_PAD;
-  const mobile = window.matchMedia("(max-width: 980px)").matches;
-  return mobile ? 108 : EDGE_PAD;
+function safeBottom() {
+  return 12;
 }
 
 function defaultPosition() {
   const view = viewportBox();
+  const mobile = window.matchMedia("(max-width: 980px)").matches;
   return {
-    x: view.left + view.width - BUBBLE_SIZE - 18,
-    y: view.top + view.height - BUBBLE_SIZE - menuClearance() - 8,
+    x: view.left + EDGE_PAD + (mobile ? 6 : view.width - BUBBLE_SIZE - EDGE_PAD * 2),
+    y: view.top + view.height - BUBBLE_SIZE - EDGE_PAD - (mobile ? Math.max(12, safeBottom()) : 8),
   };
 }
 
 function clampPosition(x, y) {
   const view = viewportBox();
   const maxX = view.left + view.width - BUBBLE_SIZE - EDGE_PAD;
-  const maxY = view.top + view.height - BUBBLE_SIZE - menuClearance();
+  const maxY = view.top + view.height - BUBBLE_SIZE - EDGE_PAD;
   const minX = view.left + EDGE_PAD;
   const minY = view.top + EDGE_PAD;
   let nextX = Math.min(Math.max(x, minX), Math.max(minX, maxX));
   let nextY = Math.min(Math.max(y, minY), Math.max(minY, maxY));
 
   if (window.matchMedia("(max-width: 980px)").matches) {
-    const menuLeft = view.left + view.width / 2 - 44;
-    const menuRight = view.left + view.width / 2 + 44;
-    const menuTop = view.top + view.height - menuClearance() - 8;
+    const fabSize = 66;
+    const fabLeft = view.left + view.width - fabSize - EDGE_PAD - 8;
+    const fabTop = view.top + view.height - fabSize - EDGE_PAD - Math.max(8, safeBottom());
     const overlapsMenu =
-      nextX + BUBBLE_SIZE > menuLeft && nextX < menuRight && nextY + BUBBLE_SIZE > menuTop;
+      nextX + BUBBLE_SIZE > fabLeft - 12 && nextY + BUBBLE_SIZE > fabTop - 12;
     if (overlapsMenu) {
-      nextY = Math.max(minY, menuTop - BUBBLE_SIZE - 12);
+      nextX = Math.max(minX, fabLeft - BUBBLE_SIZE - 16);
     }
   }
 
