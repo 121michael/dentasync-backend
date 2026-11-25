@@ -15,6 +15,18 @@ test("patient-facing labels distinguish checked in from completed", () => {
   assert.equal(lifecycle.displayAppointmentStatus("no_show"), "No-show");
 });
 
+test("queue overlay keeps end-of-day cancel distinct from no-show and in-treatment review", () => {
+  const cancelled = lifecycle.overlayAppointmentStatus("checked_in", "cancelled");
+  assert.equal(cancelled.status, "cancelled");
+  assert.equal(cancelled.statusLabel, "Cancelled");
+  const review = lifecycle.overlayAppointmentStatus("checked_in", "needs_review");
+  assert.equal(review.status, "checked_in");
+  assert.equal(review.statusLabel, "Needs end-of-day review");
+  assert.equal(review.queueOutcome, "needs_review");
+  const completed = lifecycle.overlayAppointmentStatus("completed", "completed");
+  assert.equal(completed.statusLabel, "Completed");
+});
+
 test("patients cannot cancel or reschedule a visit already with the dentist", () => {
   assert.equal(lifecycle.canPatientCancel("checked_in", "waiting"), true);
   assert.equal(lifecycle.canPatientCancel("checked_in", "dentist"), false);
@@ -127,6 +139,8 @@ test("missed appointment job is idempotent and never targets checked-in visits",
   assert.doesNotMatch(update.sql, /status IN \('pending', 'confirmed', 'checked_in'\)/);
   assert.match(update.sql, /EXTRACT\(HOUR FROM/);
   assert.match(update.sql, /FOR UPDATE SKIP LOCKED/);
+  assert.match(update.sql, /patient_portal_queue_entries/);
+  assert.doesNotMatch(update.sql, /queue\.status IN/);
   assert.equal(update.params[1], "Asia/Manila");
   assert.equal(update.params[2], AUTO_REASON);
 

@@ -113,7 +113,11 @@ function overlayAppointmentStatus(appointmentStatus, queueStatus) {
     return { status: appointmentStatus, statusLabel: "Not served", queueOutcome: "not_served" };
   }
   if (queue === "needs_review") {
-    return { status: appointmentStatus, statusLabel: "Needs review", queueOutcome: "needs_review" };
+    return {
+      status: appointmentStatus,
+      statusLabel: "Needs end-of-day review",
+      queueOutcome: "needs_review",
+    };
   }
   const status = normalizeStatus(appointmentStatus) || "pending";
   return {

@@ -6,9 +6,9 @@
  * Swap HistoricalAveragePredictor for an MLPredictor later without changing callers.
  */
 
-const ACTIVE_STATUSES = new Set(["checked_in", "waiting", "preparing", "dentist"]);
+const ACTIVE_STATUSES = new Set(["checked_in", "waiting", "preparing", "called", "dentist"]);
 const SERVING_STATUSES = new Set(["dentist", "in_chair", "in_treatment"]);
-const WAITING_STATUSES = new Set(["checked_in", "waiting", "preparing"]);
+const WAITING_STATUSES = new Set(["checked_in", "waiting", "preparing", "called"]);
 
 let statsCache = { at: 0, byProcedure: new Map(), overall: null };
 
@@ -861,7 +861,7 @@ async function persistEstimate(db, entryId, estimate, waitPoint, { serving = fal
            wait_estimate_at = CURRENT_TIMESTAMP,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $1
-         AND status IN ('checked_in', 'waiting', 'preparing')`,
+         AND status IN ('checked_in', 'waiting', 'preparing', 'called')`,
       [
         entryId,
         midpoint || waitPoint || 0,
@@ -880,7 +880,7 @@ async function persistEstimate(db, entryId, estimate, waitPoint, { serving = fal
          SET estimated_wait_minutes = $2,
              updated_at = CURRENT_TIMESTAMP
          WHERE id = $1
-           AND status IN ('checked_in', 'waiting', 'preparing')`,
+           AND status IN ('checked_in', 'waiting', 'preparing', 'called')`,
         [entryId, midpoint || waitPoint || 0]
       );
       return;
@@ -971,7 +971,7 @@ async function loadPatientQueueBoard(db, { userId, waitEnabled = true } = {}) {
        FROM patient_portal_queue_entries AS queue
        WHERE queue.user_id = $1
          AND (queue.checked_in_at AT TIME ZONE $2)::date = (CURRENT_TIMESTAMP AT TIME ZONE $2)::date
-         AND LOWER(queue.status) IN ('checked_in', 'waiting', 'preparing', 'dentist')
+         AND LOWER(queue.status) IN ('checked_in', 'waiting', 'preparing', 'called', 'dentist')
        ORDER BY queue.checked_in_at DESC
        LIMIT 1`,
       [String(userId), zone]
@@ -983,7 +983,7 @@ async function loadPatientQueueBoard(db, { userId, waitEnabled = true } = {}) {
        FROM patient_portal_queue_entries
        WHERE user_id = $1
          AND DATE(checked_in_at) = CURRENT_DATE
-         AND LOWER(status) IN ('checked_in', 'waiting', 'preparing', 'dentist')
+         AND LOWER(status) IN ('checked_in', 'waiting', 'preparing', 'called', 'dentist')
        ORDER BY checked_in_at DESC
        LIMIT 1`,
       [String(userId)]
@@ -1012,7 +1012,7 @@ async function loadPatientQueueBoard(db, { userId, waitEnabled = true } = {}) {
        WHERE (queue.checked_in_at AT TIME ZONE $1)::date = (CURRENT_TIMESTAMP AT TIME ZONE $1)::date
          ${branchSql}
          AND (
-           LOWER(queue.status) IN ('checked_in', 'waiting', 'preparing', 'dentist')
+           LOWER(queue.status) IN ('checked_in', 'waiting', 'preparing', 'called', 'dentist')
            OR queue.user_id = $${params.length}
          )
        ORDER BY queue.position ASC, queue.id ASC`,

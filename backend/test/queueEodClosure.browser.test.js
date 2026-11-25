@@ -255,7 +255,7 @@ test("Queue 6 PM cancellation and dentist end-of-day review fit Amethyst layouts
     res.status(201).json({ message: "Procedures saved. Dental chart updated automatically." })
   );
 
-  const queue = [
+  const checkIns = [
     {
       id: 5,
       token: "A-001",
@@ -287,6 +287,7 @@ test("Queue 6 PM cancellation and dentist end-of-day review fit Amethyst layouts
       procedures: [],
     },
   ];
+  const queue = checkIns.filter((row) => row.status === "completed");
   app.get("/api/staff/queue/summary", (_req, res) =>
     res.json({ waiting: 0, called: 0, inTreatment: 0, completed: 1, cancelled: 1, needsReview: 1 })
   );
@@ -295,7 +296,7 @@ test("Queue 6 PM cancellation and dentist end-of-day review fit Amethyst layouts
   app.get("/api/staff/queue", (_req, res) => res.json({ queue, updatedAt: new Date().toISOString() }));
   app.get("/api/staff/check-ins", (_req, res) =>
     res.json({
-      checkIns: queue,
+      checkIns,
       label: "November 20, 2026",
       subtitle: "Date filter",
       emptyDetail: "No check-ins",
@@ -368,10 +369,11 @@ test("Queue 6 PM cancellation and dentist end-of-day review fit Amethyst layouts
   await page.setViewport({ width: 1280, height: 1100 });
   await signIn("staff");
   await page.goto(`${url}/staff/queue`, { waitUntil: "networkidle0" });
-  await page.waitForFunction(() => document.body.innerText.includes("Cancelled"));
+  await page.waitForFunction(() => document.body.innerText.includes("Completed"));
   const queueText = await page.evaluate(() => document.body.innerText);
-  assert.match(queueText, /Needs end-of-day review/i);
-  assert.match(queueText, /Completed/);
+  assert.match(queueText, /A-004/);
+  assert.doesNotMatch(queueText, /A-001/);
+  assert.doesNotMatch(queueText, /Needs end-of-day review/i);
   assert.doesNotMatch(queueText, /No-show/);
   await page.screenshot({ path: path.join(artifactsDir, "queue_eod_staff_queue_desktop.png"), fullPage: true });
 

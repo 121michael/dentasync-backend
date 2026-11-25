@@ -9,7 +9,7 @@ const LABELS = {
   no_show: "No-show",
   cancelled: "Cancelled",
   not_served: "Not served",
-  needs_review: "Needs review",
+  needs_review: "Needs end-of-day review",
 };
 
 export function displayAppointmentStatus(status, statusLabel) {
@@ -21,7 +21,18 @@ export function displayAppointmentStatus(status, statusLabel) {
 export function canManageAppointment(appointment) {
   const status = String(appointment?.status || "").toLowerCase();
   const outcome = String(appointment?.queueOutcome || appointment?.statusLabel || "").toLowerCase();
-  if (["cancelled", "not served", "not_served", "needs review", "needs_review", "no-show", "no_show"].includes(outcome)) {
+  if (
+    [
+      "cancelled",
+      "not served",
+      "not_served",
+      "needs review",
+      "needs_review",
+      "needs end-of-day review",
+      "no-show",
+      "no_show",
+    ].includes(outcome)
+  ) {
     return { cancel: false, reschedule: false };
   }
   if (appointment?.canCancel != null || appointment?.canReschedule != null) {

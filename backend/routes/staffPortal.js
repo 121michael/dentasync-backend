@@ -33,7 +33,7 @@ const recordAccess = require("../services/recordAccess");
 const branchCheckIn = require("../services/branchCheckIn");
 const dashboardOps = require("../services/dashboardOps");
 const hmoVerification = require("../services/hmoVerification");
-const { isClosedDayQueueStatus } = require("../services/queueStatuses");
+const { isClosedDayQueueStatus, CLOSED_DAY_STATUS_SQL } = require("../services/queueStatuses");
 const appointmentBookingServices = require("../services/appointmentBookingServices");
 
 const QUEUE_STATUS_MAP = {
@@ -711,7 +711,7 @@ function createStaffPortalRouter({
            ${
              dashboardOps.queueStatusSql("queue", stringValue(req.query.status, 40)?.toLowerCase())
                ? `AND ${dashboardOps.queueStatusSql("queue", stringValue(req.query.status, 40)?.toLowerCase())}`
-               : ""
+               : `AND queue.status NOT IN ${CLOSED_DAY_STATUS_SQL}`
            }
          ORDER BY
            CASE WHEN queue.status IN ('completed', 'no_show') THEN 1 ELSE 0 END,
@@ -753,6 +753,7 @@ function createStaffPortalRouter({
              LEFT JOIN patient_portal_appointments AS appointment ON appointment.id = queue.appointment_id
              WHERE DATE(queue.checked_in_at) = CURRENT_DATE
            AND appointment.branch_id = $1
+           AND queue.status NOT IN ${CLOSED_DAY_STATUS_SQL}
              ORDER BY
                CASE WHEN queue.status IN ('completed', 'no_show') THEN 1 ELSE 0 END,
                queue.position ASC`,
@@ -2787,7 +2788,7 @@ function createStaffPortalRouter({
         db.query(
           `SELECT COUNT(*) AS count FROM patient_portal_queue_entries AS queue
            WHERE ${dashboardOps.clinicQueueTodaySql("queue")}
-             AND queue.status IN ('checked_in', 'waiting', 'preparing')
+             AND queue.status IN ('checked_in', 'waiting', 'preparing', 'called')
              AND branch_id = $1`,
           [branchId]
         ),
@@ -2809,7 +2810,7 @@ function createStaffPortalRouter({
           `SELECT COALESCE(AVG(estimated_wait_minutes), 0) AS avg
            FROM patient_portal_queue_entries AS queue
            WHERE ${dashboardOps.clinicQueueTodaySql("queue")}
-             AND status IN ('checked_in', 'waiting', 'preparing')
+             AND status IN ('checked_in', 'waiting', 'preparing', 'called')
              AND branch_id = $1`,
           [branchId]
         ),

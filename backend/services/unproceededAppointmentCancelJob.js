@@ -7,7 +7,6 @@ const AUTO_REASON = "no_show_after_clinic_cutoff";
 const AUTO_NOTE =
   "Automatically marked no-show because the patient had not checked in by 6:00 PM on the appointment clinic date.";
 const NO_SHOW_TITLE = "Appointment marked as no-show";
-const ACTIVE_QUEUE = "('waiting', 'checked_in', 'preparing', 'called', 'dentist')";
 
 function missedWhere(alias = "appointment") {
   return `
@@ -23,7 +22,6 @@ function missedWhere(alias = "appointment") {
     SELECT 1
     FROM patient_portal_queue_entries AS queue
     WHERE queue.appointment_id = ${alias}.id
-      AND queue.status IN ${ACTIVE_QUEUE}
   )`;
 }
 

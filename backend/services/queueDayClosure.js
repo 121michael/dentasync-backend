@@ -300,6 +300,33 @@ async function finalizeNeedsReviewVisit(
       throw error;
     }
 
+    if (row.appointment_id && actor.actorId) {
+      const appointment = await client.query(
+        `SELECT dentist_id FROM patient_portal_appointments WHERE id = $1`,
+        [row.appointment_id]
+      );
+      const assigned = appointment.rows[0]?.dentist_id;
+      if (assigned) {
+        let allowed = String(assigned) === String(actor.actorId);
+        if (!allowed) {
+          try {
+            const profile = await client.query(
+              `SELECT catalog_dentist_id FROM admin_portal_dentist_profiles WHERE user_id = $1`,
+              [String(actor.actorId)]
+            );
+            allowed = String(profile.rows[0]?.catalog_dentist_id || "") === String(assigned);
+          } catch (profileError) {
+            if (profileError.code !== "42P01" && profileError.code !== "42703") throw profileError;
+          }
+        }
+        if (!allowed) {
+          const error = new Error("Only the assigned dentist can complete or cancel this end-of-day review.");
+          error.status = 403;
+          throw error;
+        }
+      }
+    }
+
     const updated = await client.query(
       `UPDATE patient_portal_queue_entries
        SET status = $1,
