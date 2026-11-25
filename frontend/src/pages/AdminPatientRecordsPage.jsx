@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Download, Eye, Search } from "lucide-react";
+import { CalendarDays, Download, Eye, HeartPulse, Search, ShieldCheck, UserRound } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
+import {
+  PatientRecordCardsBack,
+  PatientRecordField,
+  PatientRecordIdentity,
+  PatientRecordSectionNav,
+  hmoCoverageLabel,
+} from "../components/PatientRecordCards";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { AdminModal } from "../components/AdminUI";
 import { useAdminUi } from "../components/AdminLayout";
@@ -57,6 +64,7 @@ export function AdminPatientRecordsPage() {
   const [focusKey, setFocusKey] = useState(() => searchParams.get("focus") || "");
   const focusedRowRef = useRef(null);
   const focusHandledRef = useRef("");
+  const [recordSection, setRecordSection] = useState(null);
 
   const load = useCallback(async () => {
     try {
@@ -158,6 +166,7 @@ export function AdminPatientRecordsPage() {
   async function viewRecord(record) {
     try {
       setDetail(await api.getAdminClinicalRecord(record.id));
+      setRecordSection(null);
     } catch (viewError) {
       pushToast(viewError.message || "Unable to load patient record.", "error");
     }
@@ -197,8 +206,8 @@ export function AdminPatientRecordsPage() {
   }
 
   return (
-    <div className="admin-page">
-      <section className="admin-panel">
+    <div className={`admin-page${detail && record ? " admin-patient-record-page" : ""}`}>
+      {detail && record ? null : <section className="admin-panel">
         <div className="admin-panel__heading">
           <div>
             <span className="eyebrow">Patient Search Registry Array</span>
@@ -289,7 +298,7 @@ export function AdminPatientRecordsPage() {
             detail="Dentists and staff create clinical patient records from their portals."
           />
         )}
-      </section>
+      </section>}
 
       {exportJob ? (
         <AdminModal title="Export Data (.xlsx)" onClose={() => setExportJob(null)}>
@@ -350,128 +359,231 @@ export function AdminPatientRecordsPage() {
       ) : null}
 
       {detail && record ? (
-        <AdminModal title="Patient Record" onClose={() => setDetail(null)} wide>
-          <div className="admin-detail-grid admin-patient-record-details">
-            <p><small>Patient</small><strong>{record.fullName}</strong></p>
-            <p><small>Patient ID</small><strong>{record.patientId || record.recordCode || record.id}</strong></p>
-            <p><small>Date of birth</small><strong>{displayDateOfBirth(record.dateOfBirth)}</strong></p>
-            <p><small>Sex</small><strong>{displaySex(record.gender)}</strong></p>
-            <p><small>Contact</small><strong>{record.phone || "—"}</strong></p>
-            <p><small>Email</small><strong>{record.email || "—"}</strong></p>
-            <p><small>Address</small><strong>{record.address || "—"}</strong></p>
-            <p><small>Created by</small><strong className="capitalize">{record.createdByRole || "—"}</strong></p>
-          </div>
+        <div className="dentist-patient-record">
+          <PatientRecordIdentity
+            onBack={() => {
+              setDetail(null);
+              setRecordSection(null);
+            }}
+            name={record.fullName}
+            patientId={record.patientId || record.recordCode || record.id}
+            eyebrow="Administrative patient record"
+          />
 
-          <h3 className="admin-subheading">Appointments</h3>
-          <div className="admin-history-list">
-            {appointments.length ? (
-              appointments.map((appointment) => (
-                <article key={appointment.id}>
-                  <div>
-                    <strong>
-                      {formatAdminDate(appointment.date)} · {appointment.time || "—"}
-                    </strong>
-                    <small>
-                      {appointment.treatment || "Appointment"} · {appointment.status || "—"}
-                      {appointment.dentist ? ` · ${appointment.dentist}` : ""}
-                    </small>
-                  </div>
-                </article>
-              ))
-            ) : (
-              <p className="muted-copy">No appointments on file for this patient.</p>
-            )}
-          </div>
-
-          <section className="treatment-record treatment-record--readonly">
-            <div className="treatment-record__header">
-              <div>
-                <span className="eyebrow">Shared clinical ledger</span>
-                <h2>Treatment Record</h2>
-              </div>
-            </div>
-            <p className="muted-copy">
-              View only. Dentists maintain clinical treatment documentation on this same patient record.
-            </p>
-
-            <div className="treatment-record__patient">
-              <p>
-                <small>Name</small>
-                <strong>{record.fullName || "—"}</strong>
-              </p>
-              <p>
-                <small>Age</small>
-                <strong>{record.age != null && record.age !== "" ? record.age : "—"}</strong>
-              </p>
-              <p>
-                <small>Sex</small>
-                <strong>{displaySex(record.gender)}</strong>
-              </p>
-            </div>
-
-            <div className="treatment-record__table-wrap">
-              {treatments.length ? (
-                <table className="treatment-record__table">
-                  <thead>
-                    <tr>
-                      <th>Date</th>
-                      <th>Tooth No/s</th>
-                      <th>Procedure</th>
-                      <th>Dentist</th>
-                      <th>Amount Charged</th>
-                      <th>Amount Paid</th>
-                      <th>Balance</th>
-                      <th>Next Appt.</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {treatments.map((treatment) => (
-                      <tr key={treatment.id}>
-                        <td>{formatHistoryDate(treatment.treatmentDate)}</td>
-                        <td>{treatment.toothNumber || "—"}</td>
-                        <td>{treatment.treatment || "—"}</td>
-                        <td>{treatment.dentistName || "—"}</td>
-                        <td>{formatMoney(treatment.amountCharged)}</td>
-                        <td>{formatMoney(treatment.amountPaid)}</td>
-                        <td>{formatMoney(treatmentBalance(treatment))}</td>
-                        <td>{nextAppointmentLabel(treatment, nextAppointment)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : (
-                <p className="muted-copy">No treatments on file.</p>
-              )}
-            </div>
-          </section>
-
-          <h3 className="admin-subheading">Imported source documents</h3>
-          {sourceDocuments.length ? (
-            <div className="admin-history-list">
-              {sourceDocuments.map((document) => (
-                <article key={document.id}>
-                  <div>
-                    <strong>{document.originalName || "Source document"}</strong>
-                    <small>
-                      {document.syncedAt ? formatHistoryDate(document.syncedAt) : "Saved"}
-                      {document.approvedByName ? ` · approved by ${document.approvedByName}` : ""}
-                    </small>
-                  </div>
-                  <button
-                    type="button"
-                    className="button button--secondary button--compact"
-                    onClick={() => openSourceDocument(document)}
-                  >
-                    Open original
-                  </button>
-                </article>
-              ))}
-            </div>
+          {!recordSection ? (
+            <PatientRecordSectionNav onSelect={setRecordSection} />
           ) : (
-            <p className="muted-copy">No imported source document is attached to this record.</p>
+            <PatientRecordCardsBack onClick={() => setRecordSection(null)} />
           )}
 
-        </AdminModal>
+          {recordSection === "personal" ? (
+            <section className="glass-card profile-section">
+              <div className="card-heading">
+                <div>
+                  <span className="eyebrow">About the patient</span>
+                  <h2>Personal Information</h2>
+                </div>
+                <UserRound className="card-heading__icon" size={21} />
+              </div>
+              <div className="field-grid field-grid--two">
+                <PatientRecordField label="Full name">{record.fullName}</PatientRecordField>
+                <PatientRecordField label="Patient ID">
+                  {record.patientId || record.recordCode || record.id}
+                </PatientRecordField>
+                <PatientRecordField label="Age">
+                  {record.age != null && record.age !== "" ? record.age : "—"}
+                </PatientRecordField>
+                <PatientRecordField label="Sex">{displaySex(record.gender)}</PatientRecordField>
+                <PatientRecordField label="Date of birth">{displayDateOfBirth(record.dateOfBirth)}</PatientRecordField>
+                <PatientRecordField label="Email address">{record.email}</PatientRecordField>
+                <PatientRecordField label="Mobile number">{record.phone}</PatientRecordField>
+                <PatientRecordField label="Address">{record.address}</PatientRecordField>
+                <PatientRecordField label="Created by">
+                  <span className="capitalize">{record.createdByRole || "—"}</span>
+                </PatientRecordField>
+              </div>
+            </section>
+          ) : null}
+
+          {recordSection === "emergency" ? (
+            <section className="glass-card profile-section">
+              <div className="card-heading">
+                <div>
+                  <span className="eyebrow">For peace of mind</span>
+                  <h2>Emergency Contact</h2>
+                </div>
+                <ShieldCheck className="card-heading__icon" size={21} />
+              </div>
+              <div className="field-grid field-grid--three">
+                <PatientRecordField label="Contact name">{record.emergencyContactName?.trim()}</PatientRecordField>
+                <PatientRecordField label="Relationship">
+                  {record.emergencyContactRelationship?.trim()}
+                </PatientRecordField>
+                <PatientRecordField label="Mobile number">{record.emergencyContactPhone?.trim()}</PatientRecordField>
+              </div>
+            </section>
+          ) : null}
+
+          {recordSection === "clinical" ? (
+            <>
+              <section className="glass-card profile-section">
+                <div className="card-heading">
+                  <div>
+                    <span className="eyebrow">Shared securely with the care team</span>
+                    <h2>Clinical Information</h2>
+                  </div>
+                  <HeartPulse className="card-heading__icon" size={21} />
+                </div>
+                <div className="field-grid field-grid--two">
+                  <PatientRecordField label="Allergies" warning>{record.allergies?.trim()}</PatientRecordField>
+                  <PatientRecordField label="Existing conditions">{record.existingConditions?.trim()}</PatientRecordField>
+                  <PatientRecordField label="Current medications">{record.currentMedications?.trim()}</PatientRecordField>
+                  <PatientRecordField label="Dental concerns">{record.dentalConcerns?.trim()}</PatientRecordField>
+                </div>
+              </section>
+
+              <section className="glass-card profile-section">
+                <div className="card-heading">
+                  <div>
+                    <span className="eyebrow">Schedule</span>
+                    <h2>Appointments</h2>
+                  </div>
+                </div>
+                <div className="admin-history-list">
+                  {appointments.length ? (
+                    appointments.map((appointment) => (
+                      <article key={appointment.id}>
+                        <div>
+                          <strong>
+                            {formatAdminDate(appointment.date)} · {appointment.time || "—"}
+                          </strong>
+                          <small>
+                            {appointment.treatment || "Appointment"} · {appointment.status || "—"}
+                            {appointment.dentist ? ` · ${appointment.dentist}` : ""}
+                          </small>
+                        </div>
+                      </article>
+                    ))
+                  ) : (
+                    <p className="muted-copy">No appointments on file for this patient.</p>
+                  )}
+                </div>
+              </section>
+
+              <section className="glass-card profile-section treatment-record treatment-record--readonly">
+                <div className="treatment-record__header">
+                  <div>
+                    <span className="eyebrow">Shared clinical ledger</span>
+                    <h2>Treatment Record</h2>
+                  </div>
+                </div>
+                <p className="muted-copy">
+                  View only. Dentists maintain clinical treatment documentation on this same patient record.
+                </p>
+                <div className="treatment-record__table-wrap">
+                  {treatments.length ? (
+                    <table className="treatment-record__table">
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Tooth No/s</th>
+                          <th>Procedure</th>
+                          <th>Dentist</th>
+                          <th>Amount Charged</th>
+                          <th>Amount Paid</th>
+                          <th>Balance</th>
+                          <th>Next Appt.</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {treatments.map((treatment) => (
+                          <tr key={treatment.id}>
+                            <td>{formatHistoryDate(treatment.treatmentDate)}</td>
+                            <td>{treatment.toothNumber || "—"}</td>
+                            <td>{treatment.treatment || "—"}</td>
+                            <td>{treatment.dentistName || "—"}</td>
+                            <td>{formatMoney(treatment.amountCharged)}</td>
+                            <td>{formatMoney(treatment.amountPaid)}</td>
+                            <td>{formatMoney(treatmentBalance(treatment))}</td>
+                            <td>{nextAppointmentLabel(treatment, nextAppointment)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <p className="muted-copy">No treatments on file.</p>
+                  )}
+                </div>
+              </section>
+
+              <section className="glass-card profile-section">
+                <div className="card-heading">
+                  <div>
+                    <span className="eyebrow">Document sync</span>
+                    <h2>Imported source documents</h2>
+                  </div>
+                </div>
+                {sourceDocuments.length ? (
+                  <div className="admin-history-list">
+                    {sourceDocuments.map((document) => (
+                      <article key={document.id}>
+                        <div>
+                          <strong>{document.originalName || "Source document"}</strong>
+                          <small>
+                            {document.syncedAt ? formatHistoryDate(document.syncedAt) : "Saved"}
+                            {document.approvedByName ? ` · approved by ${document.approvedByName}` : ""}
+                          </small>
+                        </div>
+                        <button
+                          type="button"
+                          className="button button--secondary button--compact"
+                          onClick={() => openSourceDocument(document)}
+                        >
+                          Open original
+                        </button>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="muted-copy">No imported source document is attached to this record.</p>
+                )}
+              </section>
+            </>
+          ) : null}
+
+          {recordSection === "coverage" ? (
+            <section className="glass-card profile-section">
+              <div className="card-heading">
+                <div>
+                  <span className="eyebrow">Coverage and Wellness</span>
+                  <h2>HMO verification</h2>
+                </div>
+                <CalendarDays className="card-heading__icon" size={21} />
+              </div>
+              <div className={`verification-status${record.hmoStatus === "verified" ? "" : " is-pending"}`}>
+                <ShieldCheck size={18} />
+                <div>
+                  <strong>{hmoCoverageLabel(record)}</strong>
+                  <small>
+                    {record.hmoVerifiedAt
+                      ? `Verified ${formatHistoryDate(record.hmoVerifiedAt)}`
+                      : "Admin oversight of coverage on this clinical record."}
+                  </small>
+                </div>
+              </div>
+              <div className="field-grid field-grid--two" style={{ marginTop: "1rem" }}>
+                <PatientRecordField label="HMO provider">{record.hmoProvider}</PatientRecordField>
+                <PatientRecordField label="Coverage status">
+                  {(record.hmoStatus || "not_enrolled").replaceAll("_", " ")}
+                </PatientRecordField>
+                <PatientRecordField label="Staff verification">
+                  {(record.staffVerificationStatus || "pending").replaceAll("_", " ")}
+                </PatientRecordField>
+                <PatientRecordField label="Clinical notes">{record.notes}</PatientRecordField>
+              </div>
+            </section>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );

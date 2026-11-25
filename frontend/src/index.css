@@ -3137,7 +3137,9 @@ html[data-theme="dark"] .portal-shell[data-theme="dark"] ~ .tooth-loader .tooth-
   gap: 0.7rem;
 }
 
-.dentist-patient-record-page {
+.dentist-patient-record-page,
+.staff-patient-record-page,
+.admin-patient-record-page {
   display: grid;
   gap: 1.15rem;
   padding-bottom: max(1.5rem, env(safe-area-inset-bottom, 0px));
@@ -3205,12 +3207,25 @@ html[data-theme="dark"] .portal-shell[data-theme="dark"] ~ .tooth-loader .tooth-
   }
 }
 
-.dentist-patient-record .profile-menu {
+.dentist-patient-record .profile-menu,
+.staff-patient-record-page .profile-menu,
+.admin-patient-record-page .profile-menu {
   margin-top: 0.2rem;
   gap: 0.75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.dentist-patient-record .profile-menu__item {
+@media (max-width: 720px) {
+  .dentist-patient-record .profile-menu,
+  .staff-patient-record-page .profile-menu,
+  .admin-patient-record-page .profile-menu {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dentist-patient-record .profile-menu__item,
+.staff-patient-record-page .profile-menu__item,
+.admin-patient-record-page .profile-menu__item {
   min-height: 78px;
   padding: 1rem 1.1rem;
   border-radius: 18px;
@@ -3220,18 +3235,30 @@ html[data-theme="dark"] .portal-shell[data-theme="dark"] ~ .tooth-loader .tooth-
 .dentist-patient-record .profile-menu__item:first-child,
 .dentist-patient-record .profile-menu__item.is-selected,
 .dentist-patient-record .profile-menu__item:hover,
-.dentist-patient-record .profile-menu__item:focus-visible {
+.dentist-patient-record .profile-menu__item:focus-visible,
+.staff-patient-record-page .profile-menu__item:first-child,
+.staff-patient-record-page .profile-menu__item.is-selected,
+.staff-patient-record-page .profile-menu__item:hover,
+.staff-patient-record-page .profile-menu__item:focus-visible,
+.admin-patient-record-page .profile-menu__item:first-child,
+.admin-patient-record-page .profile-menu__item.is-selected,
+.admin-patient-record-page .profile-menu__item:hover,
+.admin-patient-record-page .profile-menu__item:focus-visible {
   border-color: #c9a6ea;
   background: #efe4fc;
   box-shadow: none;
   transform: none;
 }
 
-.dentist-patient-record .profile-menu__item:focus-visible {
+.dentist-patient-record .profile-menu__item:focus-visible,
+.staff-patient-record-page .profile-menu__item:focus-visible,
+.admin-patient-record-page .profile-menu__item:focus-visible {
   outline: none;
 }
 
-.dentist-patient-record .profile-menu__item:active {
+.dentist-patient-record .profile-menu__item:active,
+.staff-patient-record-page .profile-menu__item:active,
+.admin-patient-record-page .profile-menu__item:active {
   transform: none;
 }
 
@@ -3249,7 +3276,9 @@ html[data-theme="dark"] .portal-shell[data-theme="dark"] ~ .tooth-loader .tooth-
   overflow-wrap: anywhere;
 }
 
-.dentist-patient-record .profile-section {
+.dentist-patient-record .profile-section,
+.staff-patient-record-page .profile-section,
+.admin-patient-record-page .profile-section {
   padding: 1.3rem;
 }
 
@@ -12463,7 +12492,11 @@ body.is-queue-display .fab-menu {
   /* Keep the Menu FAB off Patient Details fields and action buttons.
      Header hamburger still opens the dentist sidebar. */
   body:has(.dentist-patient-record-page) .role-bottom-dock--wide,
-  body:has(.dentist-patient-record-page) .role-bottom-dock--compact {
+  body:has(.dentist-patient-record-page) .role-bottom-dock--compact,
+  body:has(.staff-patient-record-page) .role-bottom-dock--wide,
+  body:has(.staff-patient-record-page) .role-bottom-dock--compact,
+  body:has(.admin-patient-record-page) .role-bottom-dock--wide,
+  body:has(.admin-patient-record-page) .role-bottom-dock--compact {
     display: none;
   }
 

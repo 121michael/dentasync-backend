@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
-import { Plus, Search, Eye } from "lucide-react";
+import { CalendarDays, HeartPulse, Plus, Search, Eye, ShieldCheck, UserRound } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { DentalChart } from "../components/DentalChart";
+import {
+  PatientRecordCardsBack,
+  PatientRecordField,
+  PatientRecordIdentity,
+  PatientRecordSectionNav,
+  hmoCoverageLabel,
+} from "../components/PatientRecordCards";
 import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { StaffModal, StaffStatusBadge } from "../components/StaffUI";
 import { useStaffUi } from "../components/StaffLayout";
@@ -98,6 +105,7 @@ export function StaffPatientsPage() {
   const [paymentDrafts, setPaymentDrafts] = useState({});
   const [nextApptDate, setNextApptDate] = useState("");
   const [nextApptTime, setNextApptTime] = useState("");
+  const [recordSection, setRecordSection] = useState(null);
 
   const load = useCallback(async () => {
     try {
@@ -117,6 +125,7 @@ export function StaffPatientsPage() {
     function onBranchChange() {
       setPatients([]);
       setDetail(null);
+      setRecordSection(null);
       load();
     }
     window.addEventListener("dentasync-branch-change", onBranchChange);
@@ -131,6 +140,7 @@ export function StaffPatientsPage() {
         const response = await api.getStaffPatient(focusId);
         if (response?.patient) {
           setDetail(response.patient);
+          setRecordSection(null);
           seedStaffManagedFields(response.patient);
         }
       } catch (viewError) {
@@ -162,6 +172,7 @@ export function StaffPatientsPage() {
     try {
       const response = await api.getStaffPatient(patientId);
       setDetail(response.patient);
+      setRecordSection(null);
       seedStaffManagedFields(response.patient);
     } catch (viewError) {
       pushToast(viewError.message, "error");
@@ -265,10 +276,10 @@ export function StaffPatientsPage() {
     null;
 
   return (
-    <div className="staff-page">
+    <div className={`staff-page${detail ? " staff-patient-record-page" : ""}`}>
       {error ? <p className="inline-alert inline-alert--error">{error}</p> : null}
 
-      <section className="staff-panel">
+      {detail ? null : <section className="staff-panel">
         <div className="staff-panel__heading">
           <div>
             <span className="eyebrow">Clinical registry</span>
@@ -340,9 +351,9 @@ export function StaffPatientsPage() {
             detail="Add a walk-in clinical patient record or adjust your search."
           />
         )}
-      </section>
+      </section>}
 
-      {formOpen ? (
+      {formOpen && !detail ? (
         <StaffModal title="Register walk-in patient (no login account)" onClose={() => setFormOpen(false)} wide>
           <p className="muted-copy">
             Use this for patients without a portal account. Account-linked patients sync Name, Sex,
@@ -420,291 +431,359 @@ export function StaffPatientsPage() {
       ) : null}
 
       {detail ? (
-        <StaffModal
-          title={detail.fullName || detail.patientName || "Patient Record"}
-          onClose={() => setDetail(null)}
-          wide
-          record
-        >
-          <section className="dentist-patient-info">
-            <div className="dentist-panel__heading">
-              <div>
-                <span className="eyebrow">Shared patient record</span>
-                <h2>Patient Information</h2>
-              </div>
+        <div className="dentist-patient-record">
+          <PatientRecordIdentity
+            onBack={() => {
+              setDetail(null);
+              setRecordSection(null);
+            }}
+            name={detail.fullName || detail.patientName}
+            patientId={detail.patientId || detail.recordCode || detail.id}
+          >
+            <div className="dentist-record-identity__actions">
               <StaffStatusBadge status={recordStatus(detail)} />
             </div>
-            <div className="dentist-detail-grid">
-              <p>
-                <strong>Patient ID:</strong> {detail.patientId || detail.recordCode || detail.id}
-              </p>
-              <p>
-                <strong>Name:</strong> {detail.fullName || detail.patientName}
-              </p>
-              <p>
-                <strong>Age:</strong>{" "}
-                {detail.age != null && detail.age !== "" ? detail.age : "—"}
-              </p>
-              <p>
-                <strong>Sex:</strong> {displaySex(detail.gender || detail.profile?.gender)}
-              </p>
-              <p>
-                <strong>Date of birth:</strong>{" "}
-                {displayDateOfBirth(detail.dateOfBirth || detail.profile?.date_of_birth)}
-              </p>
-              <p>
-                <strong>Phone Number:</strong> {detail.phone || "—"}
-              </p>
-              <p>
-                <strong>Email:</strong> {detail.email || "—"}
-              </p>
-              <p>
-                <strong>Category:</strong> {detail.patientCategory || "—"}
-              </p>
-              <p>
-                <strong>Record type:</strong>{" "}
-                {isProfileLocked(detail)
-                  ? "Linked account (profile synced)"
-                  : "Walk-in clinical record"}
-              </p>
-              <p>
-                <strong>Next Appointment:</strong> {nextAppointmentLabel(detail)}
-              </p>
-              <p>
-                <strong>HMO coverage:</strong>{" "}
-                {detail.hmoStatus === "verified"
-                  ? `HMO Verified${detail.hmoProvider ? ` · ${detail.hmoProvider}` : ""}${
-                      detail.hmoVerifiedAt ? ` · ${formatDentistDate(detail.hmoVerifiedAt)}` : ""
-                    }`
-                  : (detail.hmoStatus || "not_enrolled").replaceAll("_", " ")}
-              </p>
-            </div>
-            {!isProfileLocked(detail) ? (
-              <p className="muted-copy">
-                Walk-in clinical record. Basic patient information remains read-only for Staff.
-              </p>
-            ) : null}
-          </section>
+          </PatientRecordIdentity>
 
-          <PrescriptionsPanel role="staff" patientId={detail.id} />
+          {!recordSection ? (
+            <PatientRecordSectionNav onSelect={setRecordSection} />
+          ) : (
+            <PatientRecordCardsBack onClick={() => setRecordSection(null)} />
+          )}
 
-          <DentalChart
-            patientId={detail.id}
-            patientCategory={detail.patientCategory}
-            patientAge={detail.age}
-            readOnly
-            loadChartApi={api.getStaffDentalChart}
-          />
-
-          {detail.currentVisit?.procedures?.length ? (
-            <section className="treatment-record" style={{ marginTop: "1.25rem" }}>
-              <div className="treatment-record__header">
+          {recordSection === "personal" ? (
+            <section className="glass-card profile-section">
+              <div className="card-heading">
                 <div>
-                  <span className="eyebrow">Current visit</span>
-                  <h2>Today&apos;s Procedures</h2>
+                  <span className="eyebrow">About the patient</span>
+                  <h2>Personal Information</h2>
                 </div>
-                <span className="staff-readonly-badge">View only</span>
+                <UserRound className="card-heading__icon" size={21} />
               </div>
-              <ol className="visit-procedure-list">
-                {detail.currentVisit.procedures.map((procedure, index) => (
-                  <li key={procedure.id || index}>
-                    <strong>
-                      {index + 1}. {procedure.treatment || procedure.name}
-                    </strong>
-                    <span>Tooth: {procedure.toothNumber ? `#${procedure.toothNumber}` : "—"}</span>
-                    <span>
-                      Status:{" "}
-                      {String(procedure.status || "").toLowerCase() === "planned"
-                        ? "Pending"
-                        : String(procedure.status || "").toLowerCase() === "in_progress"
-                          ? "In Treatment"
-                          : String(procedure.status || "").replaceAll("_", " ")}
-                    </span>
-                  </li>
-                ))}
-              </ol>
+              <div className="field-grid field-grid--two">
+                <PatientRecordField label="Full name">{detail.fullName || detail.patientName}</PatientRecordField>
+                <PatientRecordField label="Patient ID">
+                  {detail.patientId || detail.recordCode || detail.id}
+                </PatientRecordField>
+                <PatientRecordField label="Age">
+                  {detail.age != null && detail.age !== "" ? detail.age : "—"}
+                </PatientRecordField>
+                <PatientRecordField label="Sex">{displaySex(detail.gender || detail.profile?.gender)}</PatientRecordField>
+                <PatientRecordField label="Date of birth">
+                  {displayDateOfBirth(detail.dateOfBirth || detail.profile?.date_of_birth)}
+                </PatientRecordField>
+                <PatientRecordField label="Patient category">{detail.patientCategory}</PatientRecordField>
+                <PatientRecordField label="Email address">{detail.email}</PatientRecordField>
+                <PatientRecordField label="Mobile number">{detail.phone}</PatientRecordField>
+                <PatientRecordField label="Record type">
+                  {isProfileLocked(detail) ? "Linked account (profile synced)" : "Walk-in clinical record"}
+                </PatientRecordField>
+                <PatientRecordField label="Next appointment">{nextAppointmentLabel(detail)}</PatientRecordField>
+              </div>
+              {!isProfileLocked(detail) ? (
+                <p className="muted-copy">
+                  Walk-in clinical record. Basic patient information remains read-only for Staff.
+                </p>
+              ) : null}
             </section>
           ) : null}
 
-          <section className="treatment-record" style={{ marginTop: "1.25rem" }}>
-            <div className="treatment-record__header">
-              <div>
-                <span className="eyebrow">Shared patient dental record</span>
-                <h2>Dental Treatment History</h2>
-              </div>
-              <span className="staff-readonly-badge">Clinical fields read only</span>
-            </div>
-            <p className="muted-copy">
-              Amount Paid stays in this table. Staff update payments below; clinical rows are
-              dentist-owned.
-            </p>
-            <div className="treatment-record__table-wrap">
-              {treatments.length ? (
-                <table className="treatment-record__table">
-                  <thead>
-                    <tr>
-                      <th>Date</th>
-                      <th>Tooth</th>
-                      <th>Procedure</th>
-                      <th>Status</th>
-                      <th>Diagnosis</th>
-                      <th>Dentist</th>
-                      <th>Amount Charged</th>
-                      <th>Amount Paid</th>
-                      <th>Balance</th>
-                      <th>Next Appointment</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {treatments.map((treatment) => (
-                      <tr key={treatment.id}>
-                        <td>{formatDentistDate(treatment.date || treatment.treatmentDate)}</td>
-                        <td>{treatment.toothNumber ? `#${treatment.toothNumber}` : "—"}</td>
-                        <td>{treatment.treatment || treatment.name || "—"}</td>
-                        <td>
-                          {String(treatment.status || "").toLowerCase() === "planned"
-                            ? "Pending"
-                            : treatment.status
-                              ? String(treatment.status).replaceAll("_", " ")
-                              : "—"}
-                        </td>
-                        <td>{treatment.diagnosis || treatment.diagnosisNotes || "—"}</td>
-                        <td>{treatment.dentist || "—"}</td>
-                        <td>{formatMoney(treatment.amountCharged)}</td>
-                        <td>{formatMoney(treatment.amountPaid)}</td>
-                        <td>{formatMoney(treatmentBalance(treatment))}</td>
-                        <td>{nextAppointmentLabel(detail, treatment.nextAppointment)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : (
-                <p className="muted-copy">No treatments on file yet.</p>
-              )}
-            </div>
-          </section>
-
-          <section className="dentist-patient-info" style={{ marginTop: "1.25rem" }}>
-            <div className="dentist-panel__heading">
-              <div>
-                <span className="eyebrow">Staff-managed</span>
-                <h2>Appointment</h2>
-              </div>
-            </div>
-            <div className="dentist-detail-grid">
-              <p>
-                <strong>Current Appointment:</strong>{" "}
-                {appointmentDate(currentAppointment)
-                  ? `${formatDentistDate(appointmentDate(currentAppointment))} ${formatAppointmentTime(appointmentTime(currentAppointment))}`
-                  : "No current appointment"}
-              </p>
-              <p>
-                <strong>Next Appointment:</strong> {nextAppointmentLabel(detail)}
-              </p>
-            </div>
-            <form className="dentist-form" onSubmit={saveAppointment}>
-              <div className="field-grid field-grid--two">
-                <label className="field">
-                  <span>Next appointment date</span>
-                  <input
-                    type="date"
-                    value={nextApptDate}
-                    onChange={(event) => setNextApptDate(event.target.value)}
-                  />
-                </label>
-                <label className="field">
-                  <span>Next appointment time</span>
-                  <input
-                    type="time"
-                    value={nextApptTime}
-                    onChange={(event) => setNextApptTime(event.target.value)}
-                  />
-                </label>
-              </div>
-              <div className="dentist-form__actions">
-                <button className="button button--primary" disabled={Boolean(busy)}>
-                  {busy === "appointment" ? "Saving Appointment…" : "Save Appointment"}
-                </button>
-              </div>
-            </form>
-          </section>
-
-          <section className="dentist-patient-info">
-            <div className="dentist-panel__heading">
-              <div>
-                <span className="eyebrow">Staff-managed</span>
-                <h2>Payment</h2>
-              </div>
-            </div>
-            <div className="dentist-detail-grid">
-              <p>
-                <strong>Treatment Cost:</strong> {formatMoney(totalCharged)}
-              </p>
-              <p>
-                <strong>Amount Paid:</strong> {formatMoney(totalPaid)}
-              </p>
-              <p>
-                <strong>Balance:</strong> {formatMoney(totalBalance)}
-              </p>
-              <p>
-                <strong>Payment Status:</strong>{" "}
-                <StaffStatusBadge status={paymentStatus(totalCharged, totalPaid)} />
-              </p>
-            </div>
-            <form className="dentist-form" onSubmit={savePayments}>
-              {treatments.length ? (
-                <div className="staff-payment-list">
-                  {treatments.map((treatment) => (
-                    <label className="staff-payment-line" key={`pay-${treatment.id}`}>
-                      <span>
-                        <strong>{treatment.treatment || treatment.name || "Treatment"}</strong>
-                        <small>
-                          {treatment.toothNumber ? `Tooth #${treatment.toothNumber} · ` : ""}
-                          Cost {formatMoney(treatment.amountCharged)}
-                        </small>
-                      </span>
-                      <span className="staff-money-input">
-                        <small>Amount paid</small>
-                        <span>
-                          ₱
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={paymentDrafts[treatment.id] ?? ""}
-                            onChange={(event) =>
-                              setPaymentDrafts((current) => ({
-                                ...current,
-                                [treatment.id]: event.target.value,
-                              }))
-                            }
-                          />
-                        </span>
-                      </span>
-                    </label>
-                  ))}
+          {recordSection === "emergency" ? (
+            <section className="glass-card profile-section">
+              <div className="card-heading">
+                <div>
+                  <span className="eyebrow">For peace of mind</span>
+                  <h2>Emergency Contact</h2>
                 </div>
-              ) : (
-                <p className="muted-copy">A dentist treatment is required before recording a payment.</p>
-              )}
-              <div className="dentist-form__actions">
-                <button
-                  className="button button--primary"
-                  disabled={Boolean(busy) || !treatments.length}
-                >
-                  {busy === "payment" ? "Saving Payment…" : "Save Payment"}
-                </button>
+                <ShieldCheck className="card-heading__icon" size={21} />
               </div>
-            </form>
-          </section>
+              <div className="field-grid field-grid--three">
+                <PatientRecordField label="Contact name">
+                  {detail.emergencyContactName?.trim() || detail.profile?.emergency_contact_name?.trim()}
+                </PatientRecordField>
+                <PatientRecordField label="Relationship">
+                  {detail.emergencyContactRelationship?.trim() ||
+                    detail.profile?.emergency_contact_relationship?.trim()}
+                </PatientRecordField>
+                <PatientRecordField label="Mobile number">
+                  {detail.emergencyContactPhone?.trim() || detail.profile?.emergency_contact_phone?.trim()}
+                </PatientRecordField>
+              </div>
+            </section>
+          ) : null}
 
-          <div className="staff-record-footer">
-            <p className="muted-copy">
-              Clinical data is read-only. Staff controls are limited to appointment and payment
-              handling.
-            </p>
-          </div>
-        </StaffModal>
+          {recordSection === "clinical" ? (
+            <>
+              <section className="glass-card profile-section">
+                <div className="card-heading">
+                  <div>
+                    <span className="eyebrow">Shared securely with the care team</span>
+                    <h2>Clinical Information</h2>
+                  </div>
+                  <HeartPulse className="card-heading__icon" size={21} />
+                </div>
+                <div className="field-grid field-grid--two">
+                  <PatientRecordField label="Allergies" warning>
+                    {detail.allergies?.trim() || detail.profile?.allergies?.trim()}
+                  </PatientRecordField>
+                  <PatientRecordField label="Existing conditions">
+                    {detail.existingConditions?.trim() || detail.profile?.existing_conditions?.trim()}
+                  </PatientRecordField>
+                  <PatientRecordField label="Current medications">
+                    {detail.currentMedications?.trim() || detail.profile?.current_medications?.trim()}
+                  </PatientRecordField>
+                  <PatientRecordField label="Dental concerns">
+                    {detail.dentalConcerns?.trim() || detail.profile?.dental_concerns?.trim()}
+                  </PatientRecordField>
+                </div>
+              </section>
+
+              <PrescriptionsPanel role="staff" patientId={detail.id} />
+
+              <DentalChart
+                patientId={detail.id}
+                patientCategory={detail.patientCategory}
+                patientAge={detail.age}
+                readOnly
+                loadChartApi={api.getStaffDentalChart}
+              />
+
+              {detail.currentVisit?.procedures?.length ? (
+                <section className="glass-card profile-section treatment-record">
+                  <div className="treatment-record__header">
+                    <div>
+                      <span className="eyebrow">Current visit</span>
+                      <h2>Today&apos;s Procedures</h2>
+                    </div>
+                    <span className="staff-readonly-badge">View only</span>
+                  </div>
+                  <ol className="visit-procedure-list">
+                    {detail.currentVisit.procedures.map((procedure, index) => (
+                      <li key={procedure.id || index}>
+                        <strong>
+                          {index + 1}. {procedure.treatment || procedure.name}
+                        </strong>
+                        <span>Tooth: {procedure.toothNumber ? `#${procedure.toothNumber}` : "—"}</span>
+                        <span>
+                          Status:{" "}
+                          {String(procedure.status || "").toLowerCase() === "planned"
+                            ? "Pending"
+                            : String(procedure.status || "").toLowerCase() === "in_progress"
+                              ? "In Treatment"
+                              : String(procedure.status || "").replaceAll("_", " ")}
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                </section>
+              ) : null}
+
+              <section className="glass-card profile-section treatment-record">
+                <div className="treatment-record__header">
+                  <div>
+                    <span className="eyebrow">Shared patient dental record</span>
+                    <h2>Dental Treatment History</h2>
+                  </div>
+                  <span className="staff-readonly-badge">Clinical fields read only</span>
+                </div>
+                <p className="muted-copy">
+                  Amount Paid stays in this table. Staff update payments below; clinical rows are
+                  dentist-owned.
+                </p>
+                <div className="treatment-record__table-wrap">
+                  {treatments.length ? (
+                    <table className="treatment-record__table">
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Tooth</th>
+                          <th>Procedure</th>
+                          <th>Status</th>
+                          <th>Diagnosis</th>
+                          <th>Dentist</th>
+                          <th>Amount Charged</th>
+                          <th>Amount Paid</th>
+                          <th>Balance</th>
+                          <th>Next Appointment</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {treatments.map((treatment) => (
+                          <tr key={treatment.id}>
+                            <td>{formatDentistDate(treatment.date || treatment.treatmentDate)}</td>
+                            <td>{treatment.toothNumber ? `#${treatment.toothNumber}` : "—"}</td>
+                            <td>{treatment.treatment || treatment.name || "—"}</td>
+                            <td>
+                              {String(treatment.status || "").toLowerCase() === "planned"
+                                ? "Pending"
+                                : treatment.status
+                                  ? String(treatment.status).replaceAll("_", " ")
+                                  : "—"}
+                            </td>
+                            <td>{treatment.diagnosis || treatment.diagnosisNotes || "—"}</td>
+                            <td>{treatment.dentist || "—"}</td>
+                            <td>{formatMoney(treatment.amountCharged)}</td>
+                            <td>{formatMoney(treatment.amountPaid)}</td>
+                            <td>{formatMoney(treatmentBalance(treatment))}</td>
+                            <td>{nextAppointmentLabel(detail, treatment.nextAppointment)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <p className="muted-copy">No treatments on file yet.</p>
+                  )}
+                </div>
+              </section>
+
+              <section className="glass-card profile-section">
+                <div className="card-heading">
+                  <div>
+                    <span className="eyebrow">Staff-managed</span>
+                    <h2>Appointment</h2>
+                  </div>
+                </div>
+                <div className="field-grid field-grid--two">
+                  <PatientRecordField label="Current appointment">
+                    {appointmentDate(currentAppointment)
+                      ? `${formatDentistDate(appointmentDate(currentAppointment))} ${formatAppointmentTime(appointmentTime(currentAppointment))}`
+                      : "No current appointment"}
+                  </PatientRecordField>
+                  <PatientRecordField label="Next appointment">{nextAppointmentLabel(detail)}</PatientRecordField>
+                </div>
+                <form className="dentist-form" onSubmit={saveAppointment}>
+                  <div className="field-grid field-grid--two">
+                    <label className="field">
+                      <span>Next appointment date</span>
+                      <input
+                        type="date"
+                        value={nextApptDate}
+                        onChange={(event) => setNextApptDate(event.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Next appointment time</span>
+                      <input
+                        type="time"
+                        value={nextApptTime}
+                        onChange={(event) => setNextApptTime(event.target.value)}
+                      />
+                    </label>
+                  </div>
+                  <div className="dentist-form__actions">
+                    <button className="button button--primary" disabled={Boolean(busy)}>
+                      {busy === "appointment" ? "Saving Appointment…" : "Save Appointment"}
+                    </button>
+                  </div>
+                </form>
+              </section>
+
+              <section className="glass-card profile-section">
+                <div className="card-heading">
+                  <div>
+                    <span className="eyebrow">Staff-managed</span>
+                    <h2>Payment</h2>
+                  </div>
+                </div>
+                <div className="field-grid field-grid--two">
+                  <PatientRecordField label="Treatment cost">{formatMoney(totalCharged)}</PatientRecordField>
+                  <PatientRecordField label="Amount paid">{formatMoney(totalPaid)}</PatientRecordField>
+                  <PatientRecordField label="Balance">{formatMoney(totalBalance)}</PatientRecordField>
+                  <div className="field">
+                    <span>Payment status</span>
+                    <p className="field-readonly">
+                      <StaffStatusBadge status={paymentStatus(totalCharged, totalPaid)} />
+                    </p>
+                  </div>
+                </div>
+                <form className="dentist-form" onSubmit={savePayments}>
+                  {treatments.length ? (
+                    <div className="staff-payment-list">
+                      {treatments.map((treatment) => (
+                        <label className="staff-payment-line" key={`pay-${treatment.id}`}>
+                          <span>
+                            <strong>{treatment.treatment || treatment.name || "Treatment"}</strong>
+                            <small>
+                              {treatment.toothNumber ? `Tooth #${treatment.toothNumber} · ` : ""}
+                              Cost {formatMoney(treatment.amountCharged)}
+                            </small>
+                          </span>
+                          <span className="staff-money-input">
+                            <small>Amount paid</small>
+                            <span>
+                              ₱
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={paymentDrafts[treatment.id] ?? ""}
+                                onChange={(event) =>
+                                  setPaymentDrafts((current) => ({
+                                    ...current,
+                                    [treatment.id]: event.target.value,
+                                  }))
+                                }
+                              />
+                            </span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="muted-copy">A dentist treatment is required before recording a payment.</p>
+                  )}
+                  <div className="dentist-form__actions">
+                    <button
+                      className="button button--primary"
+                      disabled={Boolean(busy) || !treatments.length}
+                    >
+                      {busy === "payment" ? "Saving Payment…" : "Save Payment"}
+                    </button>
+                  </div>
+                </form>
+                <p className="muted-copy">
+                  Clinical data is read-only. Staff controls are limited to appointment and payment
+                  handling.
+                </p>
+              </section>
+            </>
+          ) : null}
+
+          {recordSection === "coverage" ? (
+            <section className="glass-card profile-section">
+              <div className="card-heading">
+                <div>
+                  <span className="eyebrow">Coverage and Wellness</span>
+                  <h2>HMO verification</h2>
+                </div>
+                <CalendarDays className="card-heading__icon" size={21} />
+              </div>
+              <div className={`verification-status${detail.hmoStatus === "verified" ? "" : " is-pending"}`}>
+                <ShieldCheck size={18} />
+                <div>
+                  <strong>{hmoCoverageLabel(detail)}</strong>
+                  <small>
+                    {detail.hmoVerifiedAt
+                      ? `Verified ${formatDentistDate(detail.hmoVerifiedAt)}`
+                      : "Coverage shown for this staff branch only."}
+                  </small>
+                </div>
+              </div>
+              <div className="field-grid field-grid--two" style={{ marginTop: "1rem" }}>
+                <PatientRecordField label="HMO provider">{detail.hmoProvider}</PatientRecordField>
+                <PatientRecordField label="Coverage status">
+                  {(detail.hmoStatus || "not_enrolled").replaceAll("_", " ")}
+                </PatientRecordField>
+                <PatientRecordField label="Staff verification">
+                  {(detail.staffVerificationStatus || "pending").replaceAll("_", " ")}
+                </PatientRecordField>
+                <PatientRecordField label="Wellness notes">
+                  {detail.wellness?.clinicalNotes || detail.notes}
+                </PatientRecordField>
+              </div>
+            </section>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );
