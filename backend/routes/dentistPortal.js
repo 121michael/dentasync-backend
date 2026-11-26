@@ -33,6 +33,7 @@ const {
 const dashboardOps = require("../services/dashboardOps");
 const { isClosedDayQueueStatus, isReviewableQueueStatus } = require("../services/queueStatuses");
 const { finalizeNeedsReviewVisit } = require("../services/queueDayClosure");
+const { recordQueueStatusEvent, previousStatusLabel } = require("../services/queueStatusHistory");
 const appointmentBookingServices = require("../services/appointmentBookingServices");
 
 const QUEUE_STATUS_MAP = {
@@ -326,6 +327,11 @@ function mapQueueEntry(row) {
       (row.procedures || []).map((procedure) => procedure.clinicalRecordId).find(Boolean) ||
       row.clinical_record_id ||
       null,
+    visitDate: row.visit_date ? String(row.visit_date).slice(0, 10) : null,
+    branchName: row.branch_name || null,
+    previousStatus: row.closure_from_status || null,
+    previousStatusLabel: previousStatusLabel(row.closure_from_status || row.status),
+    clinicPatientId: row.clinic_patient_id || row.patient_id || null,
     currentProcedure: (() => {
       const list = row.procedures || [];
       const raw =
@@ -817,6 +823,7 @@ function createDentistPortalRouter({
     }
     const scope = dentistScopeClause("appointment", req.dentist, req.branchAccess.activeBranch?.id);
     const tab = stringValue(req.query.tab, 40)?.toLowerCase() || "inline";
+    const needsReviewTab = tab === "needs_review" || tab === "review";
     let statusFilter;
     if (tab === "inline" || tab === "in_line") {
       statusFilter = `queue.status IN ('checked_in', 'waiting')`;
@@ -828,9 +835,14 @@ function createDentistPortalRouter({
       statusFilter = `queue.status = 'waiting'`;
     } else if (tab === "checked_in") {
       statusFilter = `queue.status = 'checked_in'`;
+    } else if (needsReviewTab) {
+      statusFilter = `queue.status = 'needs_review'`;
     } else {
       statusFilter = `queue.status IN ('preparing', 'dentist')`;
     }
+    const dateFilter = needsReviewTab
+      ? `queue.status = 'needs_review'`
+      : clinicTodayQueueSql("queue");
 
     try {
       await repairOrphanWalkInQueueForDentist(db, req.dentist, req.branchAccess?.activeBranch?.id || null);
@@ -852,35 +864,54 @@ function createDentistPortalRouter({
            queue.checked_in_at,
            queue.appointment_id,
            queue.user_id,
+           queue.closure_from_status,
+           queue.branch_id,
+           (queue.checked_in_at AT TIME ZONE '${clinicTimezone().replace(/'/g, "''")}')::date AS visit_date,
+           branch.name AS branch_name,
            appointment.service_name,
            appointment.dentist_id,
            appointment.dentist_name,
            appointment.appointment_date,
            appointment.appointment_time,
            patient.id AS patient_id,
+           patient.id::text AS clinic_patient_id,
            CONCAT_WS(' ', patient.first_name, patient.last_name) AS patient_name,
            patient.phone AS patient_phone
          FROM patient_portal_queue_entries AS queue
          JOIN patient_portal_appointments AS appointment
            ON appointment.id = queue.appointment_id
          JOIN users AS patient ON patient.id::text = queue.user_id
+         LEFT JOIN clinic_branches AS branch ON branch.id = queue.branch_id
          WHERE ${scope.sql}
-           AND ${clinicTodayQueueSql("queue")}
+           AND ${dateFilter}
            AND ${statusFilter}
-         ORDER BY ${require("../services/branchCheckIn").QUEUE_ORDER_SQL}`,
+         ORDER BY ${
+           needsReviewTab
+             ? "queue.checked_in_at ASC, queue.id ASC"
+             : require("../services/branchCheckIn").QUEUE_ORDER_SQL
+         }`,
         scope.params
       );
 
       const countsResult = await db.query(
         `SELECT
-           COUNT(*) FILTER (WHERE queue.status IN ('preparing', 'dentist')) AS ongoing,
-           COUNT(*) FILTER (WHERE queue.status IN ('checked_in', 'waiting')) AS inline,
-           COUNT(*) FILTER (WHERE queue.status IN ('completed', 'no_show')) AS completed
+           COUNT(*) FILTER (
+             WHERE queue.status IN ('preparing', 'dentist')
+               AND ${clinicTodayQueueSql("queue")}
+           ) AS ongoing,
+           COUNT(*) FILTER (
+             WHERE queue.status IN ('checked_in', 'waiting')
+               AND ${clinicTodayQueueSql("queue")}
+           ) AS inline,
+           COUNT(*) FILTER (
+             WHERE queue.status IN ('completed', 'no_show')
+               AND ${clinicTodayQueueSql("queue")}
+           ) AS completed,
+           COUNT(*) FILTER (WHERE queue.status = 'needs_review') AS needs_review
          FROM patient_portal_queue_entries AS queue
          JOIN patient_portal_appointments AS appointment
            ON appointment.id = queue.appointment_id
-         WHERE ${scope.sql}
-           AND ${clinicTodayQueueSql("queue")}`,
+         WHERE ${scope.sql}`,
         scope.params
       );
 
@@ -909,12 +940,66 @@ function createDentistPortalRouter({
           ongoing: count(countsResult.rows[0], "ongoing"),
           inline: count(countsResult.rows[0], "inline"),
           completed: count(countsResult.rows[0], "completed"),
+          needs_review: count(countsResult.rows[0], "needs_review"),
         },
         queue: queueRows.map(mapQueueEntry),
       });
     } catch (error) {
       console.error("Dentist queue error:", error.message);
       return res.status(500).json({ message: "Unable to load the treatment queue." });
+    }
+  });
+
+  router.post("/queue/:id/review", async (req, res) => {
+    const queueId = numericId(req.params.id);
+    const outcome = stringValue(req.body?.outcome, 40)?.toLowerCase();
+    if (!queueId) {
+      return res.status(400).json({ message: "A valid visit is required." });
+    }
+    try {
+      const scope = dentistScopeClause("appointment", req.dentist, req.branchAccess?.activeBranch?.id);
+      const belongs = await db.query(
+        `SELECT queue.id, queue.user_id, queue.status, queue.branch_id
+         FROM patient_portal_queue_entries AS queue
+         JOIN patient_portal_appointments AS appointment ON appointment.id = queue.appointment_id
+         WHERE queue.id = $${scope.params.length + 1}
+           AND ${scope.sql}`,
+        [...scope.params, queueId]
+      );
+      const row = belongs.rows[0];
+      if (!row) {
+        return res.status(403).json({ message: "Only the assigned dentist can review this encounter." });
+      }
+      const saved = await finalizeNeedsReviewVisit(db, {
+        queueId,
+        patientUserId: row.user_id,
+        branchId: req.branchAccess?.activeBranch?.id || null,
+        outcome,
+        reason: stringValue(req.body?.reason, 500),
+        actor: {
+          actorId: req.dentist.id,
+          actorName: `Dr. ${`${req.dentist.first_name || ""} ${req.dentist.last_name || ""}`.trim()}`.trim(),
+          actorRole: "dentist",
+        },
+      });
+      return res.json({
+        message:
+          saved.status === "completed"
+            ? "Visit marked Completed after dentist review."
+            : "Visit marked Cancelled after dentist review.",
+        visit: {
+          queueEntryId: Number(saved.id),
+          token: saved.token,
+          status: displayQueueStatus(saved.status),
+          checkedInAt: saved.checked_in_at,
+          reviewedAt: saved.reviewed_at,
+          reviewedBy: saved.reviewed_by || null,
+        },
+      });
+    } catch (error) {
+      if (error.status) return sendAccessError(res, error, error.message);
+      console.error("Dentist queue review error:", error.message);
+      return res.status(500).json({ message: "Unable to finalize this visit." });
     }
   });
 
@@ -1030,11 +1115,20 @@ function createDentistPortalRouter({
 
       const updatedResult = await client.query(
         `UPDATE patient_portal_queue_entries
-         SET status = 'preparing', updated_at = CURRENT_TIMESTAMP
+         SET status = 'preparing',
+             called_at = COALESCE(called_at, CURRENT_TIMESTAMP),
+             updated_at = CURRENT_TIMESTAMP
          WHERE id = $1
          RETURNING *`,
         [queueId]
       );
+      await recordQueueStatusEvent(client, {
+        queueEntryId: queueId,
+        fromStatus: current.status,
+        toStatus: "preparing",
+        actorId: req.dentist.id,
+        actorRole: "dentist",
+      });
       await recomputeWaitsBehind(client, 1);
 
       if (current.appointment_id) {
@@ -1487,7 +1581,7 @@ function createDentistPortalRouter({
         await client.query("ROLLBACK");
         transactionOpen = false;
         return res.status(409).json({
-          message: "Closed-day visits are finalized from Patient Records, not the live queue.",
+          message: "Closed-day visits are finalized from Needs Review, not the live queue.",
         });
       }
       if (req.branchAccess?.paused) {
@@ -1543,11 +1637,23 @@ function createDentistPortalRouter({
 
       const updatedResult = await client.query(
         `UPDATE patient_portal_queue_entries
-         SET status = $1, updated_at = CURRENT_TIMESTAMP
+         SET status = $1,
+             called_at = CASE
+               WHEN $1 IN ('preparing', 'called', 'dentist') THEN COALESCE(called_at, CURRENT_TIMESTAMP)
+               ELSE called_at
+             END,
+             updated_at = CURRENT_TIMESTAMP
          WHERE id = $2
          RETURNING *`,
         [queueStatus, queueId]
       );
+      await recordQueueStatusEvent(client, {
+        queueEntryId: queueId,
+        fromStatus: current.status,
+        toStatus: queueStatus,
+        actorId: req.dentist.id,
+        actorRole: "dentist",
+      });
 
       if (current.appointment_id) {
         const appointmentStatus =

@@ -1744,11 +1744,11 @@ export function DentistRecordsPage() {
               <div className="treatment-record__header">
                 <div>
                   <span className="eyebrow">Closed-day follow-up</span>
-                  <h2>Needs end-of-day review</h2>
+                  <h2>Needs Review</h2>
                   <p className="muted-copy">
-                    These encounters were still In Treatment at 6:00 PM on the original clinic date. They are not new
-                    queue tickets and are not placed ahead of today&apos;s patients. Add any missing treatment on the
-                    original service date, then choose Complete visit or Cancel visit.
+                    These Called or In Treatment encounters were still unresolved at 6:00 PM on the original clinic
+                    date. They are not today&apos;s tickets and are not used in wait estimates. Add any missing
+                    treatment on the original service date, then choose Complete visit or Cancel visit.
                   </p>
                 </div>
               </div>
@@ -1760,7 +1760,7 @@ export function DentistRecordsPage() {
                       <div className="dentist-needs-review-card__meta">
                         <strong>Queue {visit.token || visit.queueEntryId}</strong>
                         <span>Visit date {visit.visitDate || "—"}</span>
-                        <StatusBadge status="needs_review">Needs end-of-day review</StatusBadge>
+                        <StatusBadge status="needs_review">Needs Dentist review</StatusBadge>
                       </div>
                       {(visit.procedures || []).length ? (
                         <ol className="visit-procedure-list">

@@ -373,13 +373,13 @@ test("Queue 6 PM cancellation and dentist end-of-day review fit Amethyst layouts
   const queueText = await page.evaluate(() => document.body.innerText);
   assert.match(queueText, /A-004/);
   assert.doesNotMatch(queueText, /A-001/);
-  assert.doesNotMatch(queueText, /Needs end-of-day review/i);
+  assert.doesNotMatch(queueText, /Needs Dentist review/i);
   assert.doesNotMatch(queueText, /No-show/);
   await page.screenshot({ path: path.join(artifactsDir, "queue_eod_staff_queue_desktop.png"), fullPage: true });
 
   await page.goto(`${url}/staff/check-in`, { waitUntil: "networkidle0" });
   await page.waitForFunction(() => document.body.innerText.includes("Cancelled"));
-  assert.match(await page.evaluate(() => document.body.innerText), /Needs end-of-day review/i);
+  assert.match(await page.evaluate(() => document.body.innerText), /Needs Dentist review/i);
   await page.screenshot({ path: path.join(artifactsDir, "queue_eod_staff_checkin_desktop.png"), fullPage: true });
 
   await page.goto(`${url}/staff/appointments?tab=cancelled`, { waitUntil: "networkidle0" });
@@ -410,14 +410,14 @@ test("Queue 6 PM cancellation and dentist end-of-day review fit Amethyst layouts
       /Clinical Information/i.test(button.textContent || "")
     )?.click()
   );
-  await page.waitForFunction(() => /needs end-of-day review/i.test(document.body.innerText));
+  await page.waitForFunction(() => /needs dentist review/i.test(document.body.innerText));
   const clinical = await page.evaluate(() => document.body.innerText);
   assert.match(clinical, /Queue A-003/);
   assert.match(clinical, /2026-11-20/);
   assert.match(clinical, /Queue A-009/);
   assert.match(clinical, /Complete visit/);
   assert.match(clinical, /Cancel visit/);
-  assert.match(clinical, /not new queue tickets/i);
+  assert.match(clinical, /not today/i);
   await page.screenshot({ path: path.join(artifactsDir, "queue_eod_dentist_review_desktop.png"), fullPage: true });
 
   await page.evaluate(() =>
@@ -453,7 +453,7 @@ test("Queue 6 PM cancellation and dentist end-of-day review fit Amethyst layouts
       /Clinical Information/i.test(button.textContent || "")
     )?.click()
   );
-  await page.waitForFunction(() => /needs end-of-day review/i.test(document.body.innerText));
+  await page.waitForFunction(() => /needs dentist review/i.test(document.body.innerText));
   const overflow320 = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1);
   assert.equal(overflow320, false);
   const overlap = await page.evaluate(() => {

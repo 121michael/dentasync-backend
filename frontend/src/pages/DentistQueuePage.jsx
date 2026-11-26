@@ -23,11 +23,13 @@ const tabs = [
   { id: "ongoing", label: "On Going" },
   { id: "inline", label: "In Line" },
   { id: "completed", label: "Completed" },
+  { id: "needs_review", label: "Needs Review" },
 ];
 const QUEUE_TAB_IDS = new Set([
   "ongoing",
   "inline",
   "completed",
+  "needs_review",
   "checked_in",
   "waiting",
   "no_show",
@@ -245,6 +247,8 @@ function statusLabel(status) {
   if (status === "in_chair") return "In Treatment";
   if (status === "called") return "Called";
   if (status === "completed") return "Completed";
+  if (status === "needs_review") return "Needs Dentist review";
+  if (status === "cancelled") return "Cancelled";
   return "Waiting";
 }
 
@@ -272,6 +276,8 @@ export function DentistQueuePage() {
   const [success, setSuccess] = useState("");
   const [busy, setBusy] = useState("");
   const [pendingComplete, setPendingComplete] = useState(null);
+  const [pendingReview, setPendingReview] = useState(null);
+  const [reviewReason, setReviewReason] = useState("");
   const [durationMinutes, setDurationMinutes] = useState("");
   const [treatmentEntryId, setTreatmentEntryId] = useState(null);
   const [procedureDrafts, setProcedureDrafts] = useState(() => [emptyProcedureDraft()]);
@@ -331,7 +337,7 @@ export function DentistQueuePage() {
       };
     }
 
-    const order = ["inline", "ongoing", "completed"];
+    const order = ["inline", "ongoing", "completed", "needs_review"];
     triedTabsRef.current.add(tab);
     const nextTab = order.find((item) => !triedTabsRef.current.has(item));
     if (nextTab) setTab(nextTab);
@@ -507,6 +513,37 @@ export function DentistQueuePage() {
       setData(await api.getDentistQueue("ongoing", { silent: true }));
     } catch (startError) {
       setError(startError.message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function confirmReview(entry, outcome) {
+    setPendingReview({ entry, outcome });
+    setReviewReason("");
+  }
+
+  async function submitReview() {
+    if (!pendingReview?.entry) return;
+    const outcome = pendingReview.outcome;
+    if (outcome === "cancelled" && String(reviewReason || "").trim().length < 3) {
+      setError("A cancellation reason is required.");
+      return;
+    }
+    setBusy(`review-${pendingReview.entry.id}`);
+    setError("");
+    setSuccess("");
+    try {
+      const response = await api.reviewDentistQueueEntry(pendingReview.entry.id, {
+        outcome,
+        reason: reviewReason,
+      });
+      setSuccess(response.message || "Visit review saved.");
+      setPendingReview(null);
+      setReviewReason("");
+      await load();
+    } catch (reviewError) {
+      setError(reviewError.message);
     } finally {
       setBusy("");
     }
@@ -717,7 +754,9 @@ export function DentistQueuePage() {
                 type="button"
                 role="tab"
                 aria-selected={tab === item.id}
-                className={`dentist-tab ${tab === item.id ? "is-active" : ""}`}
+                className={`dentist-tab ${tab === item.id ? "is-active" : ""}${
+                  item.id === "needs_review" ? " dentist-tab--review" : ""
+                }`}
                 onClick={() => setTab(item.id)}
               >
                 {item.label}
@@ -734,10 +773,13 @@ export function DentistQueuePage() {
                 <tr>
                   <th>Sequence</th>
                   <th>Patient Profile</th>
+                  {tab === "needs_review" ? <th>Visit date</th> : null}
+                  {tab === "needs_review" ? <th>Branch</th> : null}
+                  {tab === "needs_review" ? <th>Previous status</th> : null}
                   <th>Procedure Schema</th>
-                  <th>Est. Duration</th>
-                  <th>Est. Wait</th>
-                  <th>Est. Call</th>
+                  {tab === "needs_review" ? null : <th>Est. Duration</th>}
+                  {tab === "needs_review" ? null : <th>Est. Wait</th>}
+                  {tab === "needs_review" ? null : <th>Est. Call</th>}
                   <th>Status Check</th>
                   <th>Operational Control</th>
                 </tr>
@@ -762,19 +804,39 @@ export function DentistQueuePage() {
                         .join(" ") || undefined
                     }
                     onClick={() => {
+                      if (tab === "needs_review") return;
                       if (entry.status === "called" || entry.status === "in_chair") openTreatment(entry);
                     }}
                   >
                     <td data-label="Sequence">
-                      <strong>#{String(entry.sequence).padStart(2, "0")}</strong>
+                      <strong>
+                        {entry.sequence != null && entry.sequence !== ""
+                          ? `#${String(entry.sequence).padStart(2, "0")}`
+                          : entry.token || "—"}
+                      </strong>
+                      {entry.sequence != null && entry.token ? <small>{entry.token}</small> : null}
                     </td>
                     <td data-label="Patient Profile">
                       <strong>{entry.patientName}</strong>
-                      <small>{entry.patientPhone || entry.token || "Checked in"}</small>
+                      <small>
+                        {entry.clinicPatientId ? `ID ${entry.clinicPatientId}` : entry.patientId || "Patient"}
+                        {entry.patientPhone ? ` · ${entry.patientPhone}` : ""}
+                      </small>
                     </td>
+                    {tab === "needs_review" ? (
+                      <td data-label="Visit date">{entry.visitDate || entry.appointmentDate || "—"}</td>
+                    ) : null}
+                    {tab === "needs_review" ? (
+                      <td data-label="Branch">{entry.branchName || "Clinic branch"}</td>
+                    ) : null}
+                    {tab === "needs_review" ? (
+                      <td data-label="Previous status">{entry.previousStatusLabel || statusLabel(entry.previousStatus)}</td>
+                    ) : null}
                     <td data-label="Procedure Schema">
                       <QueueProcedureList entry={entry} />
                     </td>
+                    {tab === "needs_review" ? null : (
+                      <>
                     <td data-label="Est. Duration">
                       {formatDurationMinutes(visitDurationMinutes(entry)) !== "—"
                         ? formatDurationMinutes(visitDurationMinutes(entry))
@@ -790,12 +852,40 @@ export function DentistQueuePage() {
                           ? "—"
                           : callRangeFromEntry(entry)}
                     </td>
+                      </>
+                    )}
                     <td data-label="Status Check">
-                      <DentistStatusBadge status={entry.status} />
+                      <DentistStatusBadge status={tab === "needs_review" ? "needs_review" : entry.status} />
                     </td>
                     <td data-label="Operational Control">
                       <div className="dentist-row-actions">
-                        {entry.status === "called" || entry.status === "in_chair" ? (
+                        {tab === "needs_review" ? (
+                          <>
+                            <button
+                              type="button"
+                              className="button button--primary button--compact"
+                              disabled={Boolean(busy)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                confirmReview(entry, "completed");
+                              }}
+                            >
+                              Complete visit
+                            </button>
+                            <button
+                              type="button"
+                              className="button button--secondary button--compact"
+                              disabled={Boolean(busy)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                confirmReview(entry, "cancelled");
+                              }}
+                            >
+                              Cancel visit
+                            </button>
+                          </>
+                        ) : null}
+                        {tab !== "needs_review" && (entry.status === "called" || entry.status === "in_chair") ? (
                           <button
                             type="button"
                             className="button button--secondary button--compact"
@@ -808,7 +898,7 @@ export function DentistQueuePage() {
                             Open treatment
                           </button>
                         ) : null}
-                        {entry.status === "in_chair" ? (
+                        {tab !== "needs_review" && entry.status === "in_chair" ? (
                           <button
                             type="button"
                             className="button button--primary button--compact"
@@ -821,7 +911,8 @@ export function DentistQueuePage() {
                             {busy === `complete-${entry.id}` ? "Saving…" : "Done & Save"}
                           </button>
                         ) : null}
-                        {entry.status !== "completed" &&
+                        {tab !== "needs_review" &&
+                        entry.status !== "completed" &&
                         entry.status !== "no_show" &&
                         entry.status !== "in_chair" &&
                         entry.status !== "called" ? (
@@ -846,8 +937,12 @@ export function DentistQueuePage() {
           </div>
         ) : (
           <EmptyState
-            title="No records found."
-            detail="After staff RFID or desk check-in, patients appear under In Line for your dentist schedule. Use Call Next to move them to On Going."
+            title={tab === "needs_review" ? "No visits waiting for review." : "No records found."}
+            detail={
+              tab === "needs_review"
+                ? "Called and In Treatment encounters still open after 6:00 PM Asia/Manila appear here. They are not today's live tickets."
+                : "After staff RFID or desk check-in, patients appear under In Line for your dentist schedule. Use Call Next to move them to On Going."
+            }
           />
         )}
       </section>
@@ -890,6 +985,54 @@ export function DentistQueuePage() {
               disabled={Boolean(busy)}
             >
               {busy.startsWith("complete-") ? "Saving…" : "Done & Save"}
+            </button>
+          </div>
+        </DentistModal>
+      ) : null}
+
+      {pendingReview ? (
+        <DentistModal
+          title={pendingReview.outcome === "completed" ? "Complete visit?" : "Cancel visit?"}
+          onClose={() => {
+            if (!busy) setPendingReview(null);
+          }}
+        >
+          <p className="dentist-confirm-copy">
+            {pendingReview.outcome === "completed"
+              ? `Complete ${pendingReview.entry.patientName}'s visit ${pendingReview.entry.token || pendingReview.entry.id} from ${pendingReview.entry.visitDate || "the original clinic date"}? Treatment documentation already on the record is required. This does not create a new check-in.`
+              : `Cancel ${pendingReview.entry.patientName}'s visit ${pendingReview.entry.token || pendingReview.entry.id} from ${pendingReview.entry.visitDate || "the original clinic date"}? Saved treatments, notes, and prescriptions stay on the record.`}
+          </p>
+          {pendingReview.outcome === "cancelled" ? (
+            <label className="field">
+              <span>Cancellation reason</span>
+              <textarea
+                value={reviewReason}
+                onChange={(event) => setReviewReason(event.target.value)}
+                rows={3}
+                required
+              />
+            </label>
+          ) : null}
+          <div className="dentist-modal__actions">
+            <button
+              type="button"
+              className="button button--secondary"
+              onClick={() => setPendingReview(null)}
+              disabled={Boolean(busy)}
+            >
+              Keep review open
+            </button>
+            <button
+              type="button"
+              className="button button--primary"
+              onClick={submitReview}
+              disabled={Boolean(busy)}
+            >
+              {busy.startsWith("review-")
+                ? "Saving…"
+                : pendingReview.outcome === "completed"
+                  ? "Complete visit"
+                  : "Cancel visit"}
             </button>
           </div>
         </DentistModal>

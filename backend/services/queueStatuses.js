@@ -29,12 +29,12 @@ function isReviewableQueueStatus(status) {
   return key === "needs_review" || ACTIVE_QUEUE_STATUSES.includes(key);
 }
 
-function closedDayTargetStatus(status) {
+function closedDayTargetStatus(status, { wasCalled = false } = {}) {
   const key = normalizeQueueStatus(status);
-  if (key === "dentist") return "needs_review";
   if (key === "completed") return "completed";
   if (key === "cancelled") return "cancelled";
-  if (key === "checked_in" || key === "waiting" || key === "preparing" || key === "called") return "cancelled";
+  if (key === "dentist" || key === "called" || key === "preparing" || wasCalled) return "needs_review";
+  if (key === "checked_in" || key === "waiting") return "cancelled";
   return null;
 }
 

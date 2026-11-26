@@ -50,7 +50,7 @@ export function displayQueueStatus(status) {
     return "In Treatment";
   }
   if (normalized === "completed") return "Finished";
-  if (normalized === "needs_review") return "Needs end-of-day review";
+  if (normalized === "needs_review") return "Needs Dentist review";
   if (normalized === "no_show") return "No-show";
   if (normalized === "cancelled" || normalized === "skipped") {
     return "Cancelled";

@@ -8607,6 +8607,14 @@ body.is-queue-display .staff-mobile-nav {
   border-radius: 999px;
   background: rgba(91, 42, 134, .08);
 }
+.dentist-tab--review span {
+  background: var(--amber-wash);
+  color: var(--amber);
+}
+.dentist-tab--review.is-active span {
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
 .dentist-tab.is-active {
   color: #fff;
   border-color: transparent;

@@ -34,6 +34,7 @@ const branchCheckIn = require("../services/branchCheckIn");
 const dashboardOps = require("../services/dashboardOps");
 const hmoVerification = require("../services/hmoVerification");
 const { isClosedDayQueueStatus, CLOSED_DAY_STATUS_SQL } = require("../services/queueStatuses");
+const { recordQueueStatusEvent } = require("../services/queueStatusHistory");
 const appointmentBookingServices = require("../services/appointmentBookingServices");
 
 const QUEUE_STATUS_MAP = {
@@ -820,7 +821,7 @@ function createStaffPortalRouter({
         await client.query("ROLLBACK");
         transactionOpen = false;
         return res.status(409).json({
-          message: "Closed-day visits cannot be changed from Queue Management. Dentists review unresolved In Treatment visits in Patient Records.",
+          message: "Closed-day visits cannot be changed from Queue Management. Dentists finalize Needs Review encounters in the Dentist Queue.",
         });
       }
       if (req.branchAccess?.paused) {
@@ -839,11 +840,22 @@ function createStaffPortalRouter({
         `UPDATE patient_portal_queue_entries
          SET status = $1,
              estimated_wait_minutes = COALESCE($2, estimated_wait_minutes),
+             called_at = CASE
+               WHEN $1 IN ('preparing', 'called', 'dentist') THEN COALESCE(called_at, CURRENT_TIMESTAMP)
+               ELSE called_at
+             END,
              updated_at = CURRENT_TIMESTAMP
          WHERE id = $3
          RETURNING *`,
         [databaseStatus, waitMinutes, queueId]
       );
+      await recordQueueStatusEvent(client, {
+        queueEntryId: queueId,
+        fromStatus: current.status,
+        toStatus: databaseStatus,
+        actorId: req.staff?.id,
+        actorRole: "staff",
+      });
 
       if (current.appointment_id) {
         const appointmentStatus =

@@ -25,7 +25,7 @@ test("queue overlay keeps end-of-day cancel distinct from no-show and in-treatme
   assert.equal(cancelled.statusLabel, "Cancelled");
   const review = lifecycle.overlayAppointmentStatus("checked_in", "needs_review");
   assert.equal(review.status, "checked_in");
-  assert.equal(review.statusLabel, "Needs end-of-day review");
+  assert.equal(review.statusLabel, "Needs Dentist review");
   assert.equal(review.queueOutcome, "needs_review");
   const completed = lifecycle.overlayAppointmentStatus("completed", "completed");
   assert.equal(completed.statusLabel, "Completed");

@@ -115,7 +115,7 @@ function overlayAppointmentStatus(appointmentStatus, queueStatus) {
   if (queue === "needs_review") {
     return {
       status: appointmentStatus,
-      statusLabel: "Needs end-of-day review",
+      statusLabel: "Needs Dentist review",
       queueOutcome: "needs_review",
     };
   }

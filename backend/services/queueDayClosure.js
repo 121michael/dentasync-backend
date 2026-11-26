@@ -5,6 +5,8 @@ const path = require("path");
 const clinicSchedule = require("./clinicSchedule");
 const { writeAdminAudit } = require("./adminAudit");
 const lifecycle = require("./appointmentLifecycle");
+const clinicalPatients = require("./clinicalPatients");
+const { recordQueueStatusEvent } = require("./queueStatusHistory");
 
 const LOOKBACK_DAYS = 14;
 const ADVISORY_LOCK_NS = 87201401;
@@ -46,10 +48,10 @@ function isClosingDue(isoDate, hours, now = new Date()) {
 }
 
 async function applyQueueDayClosureSchema(db) {
-  for (const name of ["062_queue_day_closure.sql", "063_queue_eod_cancelled.sql"]) {
+  for (const name of ["062_queue_day_closure.sql", "063_queue_eod_cancelled.sql", "064_queue_called_review.sql"]) {
     await db.query(fs.readFileSync(path.join(__dirname, "..", "migrations", name), "utf8"));
   }
-  return { file: "063_queue_eod_cancelled.sql" };
+  return { file: "064_queue_called_review.sql" };
 }
 
 async function listCloseableBranches(db) {
@@ -107,7 +109,7 @@ async function closeBranchOperatingDate(client, { branchId, operatingDate, now =
 
   const updated = await client.query(
     `WITH closing AS (
-       SELECT id, status AS previous_status, token, user_id, appointment_id
+       SELECT id, status AS previous_status, token, user_id, appointment_id, called_at, serving_started_at
        FROM patient_portal_queue_entries
        WHERE branch_id = $1
          AND (checked_in_at AT TIME ZONE $2)::date = $3::date
@@ -116,10 +118,20 @@ async function closeBranchOperatingDate(client, { branchId, operatingDate, now =
      )
      UPDATE patient_portal_queue_entries AS queue
      SET status = CASE
-           WHEN queue.status = 'dentist' THEN 'needs_review'
-           WHEN queue.status IN ('checked_in', 'waiting', 'preparing', 'called') THEN 'cancelled'
+           WHEN closing.previous_status IN ('called', 'preparing', 'dentist')
+             OR closing.called_at IS NOT NULL
+             OR closing.serving_started_at IS NOT NULL
+             OR EXISTS (
+               SELECT 1
+               FROM patient_portal_queue_status_events AS ev
+               WHERE ev.queue_entry_id = closing.id
+                 AND ev.to_status IN ('called', 'preparing', 'dentist')
+             )
+           THEN 'needs_review'
+           WHEN closing.previous_status IN ('checked_in', 'waiting') THEN 'cancelled'
            ELSE queue.status
          END,
+         closure_from_status = COALESCE(queue.closure_from_status, closing.previous_status),
          closed_at = COALESCE(queue.closed_at, CURRENT_TIMESTAMP),
          closed_operating_date = $3::date,
          updated_at = CURRENT_TIMESTAMP
@@ -156,7 +168,7 @@ async function closeBranchOperatingDate(client, { branchId, operatingDate, now =
     const detail =
       row.status === "cancelled"
         ? `Automatic 6:00 PM Asia/Manila end-of-day cancel on ${operatingDate}. Status ${fromStatus} → cancelled. ${END_OF_DAY_CANCEL_NOTE}. Check-in timestamp unchanged.`
-        : `Automatic 6:00 PM Asia/Manila end-of-day review on ${operatingDate}. Status ${fromStatus} → ${row.status}. Encounter left unresolved for the assigned dentist. Check-in timestamp unchanged.`;
+        : `Automatic 6:00 PM Asia/Manila end-of-day review on ${operatingDate}. Status ${fromStatus} → ${row.status}. Called or In Treatment encounters need dentist review. Check-in timestamp unchanged.`;
     await writeAdminAudit(client, {
       ...SYSTEM_ACTOR,
       action: "queue_day_closure",
@@ -272,7 +284,7 @@ async function finalizeNeedsReviewVisit(
     await client.query("BEGIN");
     transactionOpen = true;
     const current = await client.query(
-      `SELECT id, user_id, appointment_id, token, status, branch_id, checked_in_at, reviewed_at
+      `SELECT id, user_id, appointment_id, token, status, branch_id, checked_in_at, reviewed_at, reviewed_by
        FROM patient_portal_queue_entries
        WHERE id = $1
        FOR UPDATE`,
@@ -298,6 +310,29 @@ async function finalizeNeedsReviewVisit(
       const error = new Error("This visit is no longer waiting for dentist review.");
       error.status = 409;
       throw error;
+    }
+    if (row.reviewed_at || row.reviewed_by) {
+      const error = new Error("This visit has already been finalized.");
+      error.status = 409;
+      throw error;
+    }
+
+    if (nextStatus === "completed") {
+      const treatments = await clinicalPatients.listTreatmentsForVisit(client, {
+        queueEntryId: queueId,
+        appointmentId: row.appointment_id || null,
+      });
+      const documented = (treatments || []).some((item) => {
+        const status = String(item.status || "").toLowerCase();
+        return status && status !== "cancelled";
+      });
+      if (!documented) {
+        const error = new Error(
+          "Add or verify treatment documentation before completing this visit. Do not invent procedure details."
+        );
+        error.status = 400;
+        throw error;
+      }
     }
 
     if (row.appointment_id && actor.actorId) {
@@ -331,11 +366,14 @@ async function finalizeNeedsReviewVisit(
       `UPDATE patient_portal_queue_entries
        SET status = $1,
            reviewed_at = CURRENT_TIMESTAMP,
+           reviewed_by = COALESCE($3, reviewed_by),
+           review_outcome = $1,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $2
          AND status = 'needs_review'
-       RETURNING id, token, status, checked_in_at, reviewed_at, appointment_id, branch_id`,
-      [nextStatus, queueId]
+         AND reviewed_at IS NULL
+       RETURNING id, token, status, checked_in_at, reviewed_at, reviewed_by, review_outcome, appointment_id, branch_id`,
+      [nextStatus, queueId, actor.actorId ? String(actor.actorId) : null]
     );
     if (!updated.rowCount) {
       const error = new Error("This visit is no longer waiting for dentist review.");
@@ -356,6 +394,13 @@ async function finalizeNeedsReviewVisit(
     }
 
     const saved = updated.rows[0];
+    await recordQueueStatusEvent(client, {
+      queueEntryId: saved.id,
+      fromStatus: "needs_review",
+      toStatus: nextStatus,
+      actorId: actor.actorId,
+      actorRole: actor.actorRole || "dentist",
+    });
     await writeAdminAudit(client, {
       actorId: actor.actorId || null,
       actorName: actor.actorName || null,

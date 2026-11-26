@@ -79,6 +79,7 @@ test("end-of-day queue closure and dentist review", { timeout: 120000 }, async (
     ALTER TABLE users ADD COLUMN IF NOT EXISTS patient_id TEXT;
     ALTER TABLE patient_portal_queue_entries ADD COLUMN IF NOT EXISTS check_in_method TEXT;
     ALTER TABLE patient_portal_queue_entries ADD COLUMN IF NOT EXISTS branch_id BIGINT;
+    ALTER TABLE clinic_patient_treatments ADD COLUMN IF NOT EXISTS queue_entry_id BIGINT;
     ALTER TABLE patient_portal_appointments ADD COLUMN IF NOT EXISTS branch_id BIGINT;
     ALTER TABLE clinic_patient_records ADD COLUMN IF NOT EXISTS archived BOOLEAN DEFAULT FALSE;
     CREATE TABLE IF NOT EXISTS clinic_daily_queue_counters (
@@ -273,8 +274,8 @@ test("end-of-day queue closure and dentist review", { timeout: 120000 }, async (
   );
   const byId = Object.fromEntries(afterClose.rows.map((row) => [Number(row.id), row]));
   assert.equal(byId[waiting.id].status, "cancelled");
-  assert.equal(byId[called.id].status, "cancelled");
-  assert.equal(byId[calledTicket.id].status, "cancelled");
+  assert.equal(byId[called.id].status, "needs_review");
+  assert.equal(byId[calledTicket.id].status, "needs_review");
   assert.equal(byId[treating.id].status, "needs_review");
   assert.equal(byId[done.id].status, "completed");
   assert.equal(byId[otherBranch.id].status, "cancelled");
@@ -300,7 +301,7 @@ test("end-of-day queue closure and dentist review", { timeout: 120000 }, async (
   );
   assert.equal(overlayCancelled.statusLabel, "Cancelled");
   const overlayReview = lifecycle.overlayAppointmentStatus("checked_in", byId[treating.id].status);
-  assert.equal(overlayReview.statusLabel, "Needs end-of-day review");
+  assert.equal(overlayReview.statusLabel, "Needs Dentist review");
 
   const missedJob = createUnproceededAppointmentCancelJob({ db });
   const missedAfterQueue = await missedJob.runOnce(manilaInstant(day, "18:02"));
@@ -340,6 +341,17 @@ test("end-of-day queue closure and dentist review", { timeout: 120000 }, async (
   );
   assert.equal(auditsAgain.rows[0].count, 5);
 
+  const returnedToWaiting = await insertQueue({
+    status: "waiting",
+    token: "A-004b",
+    at: manilaInstant("2026-11-19", "10:30"),
+    userId: patientB,
+  });
+  await db.query(
+    `INSERT INTO patient_portal_queue_status_events (queue_entry_id, from_status, to_status, actor_role)
+     VALUES ($1, 'waiting', 'preparing', 'dentist')`,
+    [returnedToWaiting.id]
+  );
   const leftover = await insertQueue({
     status: "waiting",
     token: "A-005",
@@ -349,6 +361,10 @@ test("end-of-day queue closure and dentist review", { timeout: 120000 }, async (
   assert.ok(catchUp.closed >= 1);
   const leftoverRow = await db.query(`SELECT status FROM patient_portal_queue_entries WHERE id = $1`, [leftover.id]);
   assert.equal(leftoverRow.rows[0].status, "cancelled");
+  const returnedRow = await db.query(`SELECT status FROM patient_portal_queue_entries WHERE id = $1`, [
+    returnedToWaiting.id,
+  ]);
+  assert.equal(returnedRow.rows[0].status, "needs_review");
 
   const concurrentA = insertQueue({
     status: "waiting",
@@ -378,6 +394,12 @@ test("end-of-day queue closure and dentist review", { timeout: 120000 }, async (
   assert.equal(
     nextDayCloseTooEarly.results.some((row) => row.operatingDate === "2026-11-21" && row.updated > 0),
     false
+  );
+
+  await db.query(
+    `INSERT INTO clinic_patient_treatments (clinical_record_id, queue_entry_id, treatment, treatment_date, status)
+     VALUES ($1, $2, 'Cleaning / Oral Prophylaxis', $3::date, 'in_progress')`,
+    [recordId, treating.id, day]
   );
 
   const reviewed = await finalizeNeedsReviewVisit(db, {
@@ -496,6 +518,11 @@ test("end-of-day queue closure and dentist review", { timeout: 120000 }, async (
     appointmentId: reviewAppointment.rows[0].id,
   });
   await closeDueQueueDays(db, manilaInstant(day, "18:45"));
+  await db.query(
+    `INSERT INTO clinic_patient_treatments (clinical_record_id, queue_entry_id, treatment, treatment_date, status)
+     VALUES ($1, $2, 'Filling', $3::date, 'in_progress')`,
+    [recordId, needsReviewVisit.id, day]
+  );
   const dentistDenied = await request(
     "POST",
     `/api/dentist/patients/${recordId}/queue-visits/${needsReviewVisit.id}/review`,
@@ -530,6 +557,22 @@ test("end-of-day queue closure and dentist review", { timeout: 120000 }, async (
   assert.equal(waitingLog.status, "cancelled");
   assert.ok(treatingLog);
   assert.equal(treatingLog.status, "completed");
+  const calledLog = source.find((row) => row.token === "A-002" || row.token === "A-002c");
+  assert.ok(calledLog);
+  assert.equal(calledLog.status, "needs_review");
+
+  const reviewQueue = await request("GET", "/api/dentist/queue?tab=needs_review", {
+    id: dentist,
+    role: "dentist",
+  });
+  assert.equal(reviewQueue.status, 200, JSON.stringify(reviewQueue.payload));
+  assert.ok((reviewQueue.payload.counts?.needs_review || 0) >= 1);
+  const staffReview = await request("POST", `/api/dentist/queue/${called.id}/review`, {
+    id: staff,
+    role: "staff",
+    body: { outcome: "cancelled", reason: "Staff cannot finalize" },
+  });
+  assert.equal(staffReview.status, 403);
 
   const todayQueue = await request("GET", "/api/staff/queue", { id: staff, role: "staff" });
   assert.equal(todayQueue.status, 200);

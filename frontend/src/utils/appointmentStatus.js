@@ -9,7 +9,7 @@ const LABELS = {
   no_show: "No-show",
   cancelled: "Cancelled",
   not_served: "Not served",
-  needs_review: "Needs end-of-day review",
+  needs_review: "Needs Dentist review",
 };
 
 export function displayAppointmentStatus(status, statusLabel) {
