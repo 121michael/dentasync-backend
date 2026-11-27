@@ -1,6 +1,12 @@
 "use strict";
 
 const { createAppointmentSms, queueUpdateMessage } = require("./appointmentSms");
+const {
+  createQueueSmsJob,
+  notifyQueueApproachingSms,
+  notifyQueueCalledSms,
+  processApproachingQueueSms,
+} = require("./queueSmsNotifications");
 
 function formatPhoneE164(phone) {
   if (phone == null) return null;
@@ -471,6 +477,33 @@ function createClinicSmsService({
       }
     }
 
+    if (idempotencyKey) {
+      try {
+        const claimed = await db.query(
+          `INSERT INTO clinic_sms_idempotency (idempotency_key, delivery_status)
+           VALUES ($1, 'processing')
+           ON CONFLICT (idempotency_key) DO UPDATE
+             SET delivery_status = 'processing',
+                 updated_at = CURRENT_TIMESTAMP
+           WHERE clinic_sms_idempotency.delivery_status IN ('failed')
+           RETURNING idempotency_key, delivery_status`,
+          [idempotencyKey]
+        );
+        if (!claimed.rows.length) {
+          const existing = await readIdempotency(idempotencyKey);
+          const status = String(existing?.delivery_status || "");
+          if (["sent", "delivered"].includes(status)) {
+            return { status, logId: existing.sms_log_id, duplicate: true };
+          }
+          return { status: "skipped", reason: "in_flight", duplicate: true };
+        }
+      } catch (error) {
+        if (error?.code !== "42P01") {
+          console.warn("Unable to claim SMS idempotency key:", error.message);
+        }
+      }
+    }
+
     try {
       const dispatched = await dispatchSms(targetPhone, body);
       const log = await writeLog({
@@ -635,6 +668,20 @@ function createClinicSmsService({
     actorId = null,
     force = false,
   }) {
+    const status = String(queueEntry?.status || "").toLowerCase();
+    if (["preparing", "called"].includes(status)) {
+      return notifyQueueCalledSms({
+        db,
+        clinicSms: service,
+        userId,
+        queueEntry,
+        actorRole,
+        actorId,
+      });
+    }
+    if (["dentist", "in_chair", "in_treatment", "completed", "cancelled", "no_show", "needs_review"].includes(status)) {
+      return { status: "skipped", reason: "queue-status-not-notified" };
+    }
     const settings = await getSmsSettings();
     const message = queueMessage({
       token: queueEntry.token,
@@ -704,6 +751,12 @@ function createClinicSmsService({
     sendClinicSms,
     notifyAppointmentSms,
     notifyQueueSms,
+    notifyQueueCalledSms: (options) => notifyQueueCalledSms({ db, clinicSms: service, ...options }),
+    notifyQueueApproachingSms: (options) =>
+      notifyQueueApproachingSms({ db, clinicSms: service, ...options }),
+    processApproachingQueueSms: (options) =>
+      processApproachingQueueSms({ db, clinicSms: service, ...options }),
+    createQueueSmsJob: (options) => createQueueSmsJob({ db, clinicSms: service, ...options }),
     formatPhoneE164,
     formatPhoneSemaphore,
     isValidPhMobile,

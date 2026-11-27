@@ -434,6 +434,13 @@ function createStaffPortalRouter({
 }) {
   const router = express.Router();
 
+  function scheduleApproachingQueueSms(branchId) {
+    if (!clinicSms?.processApproachingQueueSms) return;
+    Promise.resolve(clinicSms.processApproachingQueueSms({ branchId: branchId || null })).catch((error) =>
+      console.warn("Approaching-turn SMS check failed:", error.message)
+    );
+  }
+
   router.use(authenticateToken, requireStaffAccount(db), branchAccess.attachBranchAccess(db, "staff"));
 
   router.get("/branch-context", (req, res) => {
@@ -938,6 +945,7 @@ function createStaffPortalRouter({
           })
           .catch((smsError) => console.warn("Queue SMS failed:", smsError.message));
       }
+      scheduleApproachingQueueSms(current.branch_id || req.branchAccess?.activeBranch?.id);
 
       return res.json({
         queueEntry: {
@@ -2845,6 +2853,9 @@ function createStaffPortalRouter({
         fromPosition: 1,
         branchId: req.branchAccess?.activeBranch?.id || null,
       });
+      if (result.ok) {
+        scheduleApproachingQueueSms(req.branchAccess?.activeBranch?.id);
+      }
       return res.json({
         message: result.ok
           ? "Queue wait estimates recalculated."

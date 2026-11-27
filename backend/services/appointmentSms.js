@@ -167,18 +167,28 @@ function updateMessage({ serviceName, date, time, change }) {
   return `Your appointment for ${service} was updated to ${when}. ${arrival} Thank you.`;
 }
 
+const QUEUE_CALLED_SMS = "You have been called, please proceed";
+const QUEUE_APPROACHING_SMS =
+  "Your turn is approaching. Please remain available and watch for updates from Amethyst Dental Clinic. Thank you.";
+
+function queueCalledMessage() {
+  return QUEUE_CALLED_SMS;
+}
+
+function queueApproachingMessage() {
+  return QUEUE_APPROACHING_SMS;
+}
+
 function queueUpdateMessage({ waitMinutes, status, clinicName }) {
-  const place = clinicName || "Amethyst Dental Clinic";
-  const approaching = ["preparing", "called", "dentist", "in_chair", "in_treatment"].includes(
-    String(status || "").toLowerCase()
-  );
-  if (approaching) {
-    return `Your turn is approaching. Please remain available and watch for updates from ${place}. Thank you.`;
+  const place = clinicName || "the clinic";
+  const statusKey = String(status || "").toLowerCase();
+  if (["preparing", "called"].includes(statusKey)) {
+    return queueCalledMessage();
   }
   if (waitMinutes != null && Number.isFinite(Number(waitMinutes))) {
     return `Your queue status has been updated. Estimated waiting time is about ${Number(waitMinutes)} minutes. Please check your Patient Portal for the latest details. Thank you.`;
   }
-  return `Your queue status has been updated. Please check your Patient Portal for the latest estimated waiting time. Thank you.`;
+  return `Your queue status has been updated. Please check your Patient Portal for the latest estimated waiting time from ${place}. Thank you.`;
 }
 
 function isRemindableStatus(status) {
@@ -629,8 +639,10 @@ function createAppointmentSms({ db, clinicSms }) {
           status: queueEntry?.status,
           clinicName,
         });
+      case "queue_called":
+        return queueCalledMessage();
       case "queue_approaching":
-        return queueUpdateMessage({ status: "preparing", clinicName });
+        return queueApproachingMessage();
       default:
         return customMessage || "";
     }
@@ -655,6 +667,10 @@ module.exports = {
   rescheduleMessage,
   cancelMessage,
   updateMessage,
+  QUEUE_APPROACHING_SMS,
+  QUEUE_CALLED_SMS,
+  queueApproachingMessage,
+  queueCalledMessage,
   queueUpdateMessage,
   whenPhrase,
   appointmentInstant,

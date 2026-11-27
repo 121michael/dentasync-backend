@@ -324,6 +324,7 @@ const backupScheduleJob = createBackupScheduleJob({ db });
 const unproceededAppointmentJob = createUnproceededAppointmentCancelJob({ db });
 const { createQueueDayClosureJob } = require("./services/queueDayClosure");
 const queueDayClosureJob = createQueueDayClosureJob({ db });
+const queueSmsJob = clinicSms.createQueueSmsJob();
 
 app.post(
   "/api/internal/backups/run",
@@ -385,6 +386,7 @@ if (require.main === module) {
     backupScheduleJob.start();
     unproceededAppointmentJob.start();
     queueDayClosureJob.start();
+    queueSmsJob.start();
     applyPrescriptionSchema(db)
       .then(() => applyPrescriptionBranchSchema(db))
       .then(() => console.log("Prescription tables ready (CREATE IF NOT EXISTS)."))
@@ -406,6 +408,7 @@ if (require.main === module) {
     );
     console.log("Pending and confirmed appointments are cancelled after their scheduled clinic time if the patient has not checked in.");
     console.log("Queue entries close at 6:00 PM Asia/Manila: Waiting/Called → Cancelled (not no-show), In Treatment → dentist end-of-day review.");
+    console.log("Queue SMS: Called on dentist/staff Called transition; approaching-turn when next in that dentist's lane with ≤10 minutes remaining.");
       });
     })
     .catch((error) => {

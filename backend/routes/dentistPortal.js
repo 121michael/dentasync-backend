@@ -596,6 +596,13 @@ function createDentistPortalRouter({
 }) {
   const router = express.Router();
 
+  function scheduleApproachingQueueSms(branchId) {
+    if (!clinicSms?.processApproachingQueueSms) return;
+    Promise.resolve(clinicSms.processApproachingQueueSms({ branchId: branchId || null })).catch((error) =>
+      console.warn("Approaching-turn SMS check failed:", error.message)
+    );
+  }
+
   function sendAccessError(res, error, fallback) {
     if (error?.status) {
       return res.status(error.status).json({
@@ -1025,12 +1032,15 @@ function createDentistPortalRouter({
     return result.rows[0] || null;
   }
 
-  router.post("/queue/recalculate-estimates", async (_req, res) => {
+  router.post("/queue/recalculate-estimates", async (req, res) => {
     try {
       const result = await safeRecalculateQueueWaitEstimates(db, {
         fromPosition: 1,
         branchId: req.branchAccess?.activeBranch?.id || null,
       });
+      if (result.ok) {
+        scheduleApproachingQueueSms(req.branchAccess?.activeBranch?.id);
+      }
       return res.json({
         message: result.ok
           ? "Queue wait estimates recalculated."
@@ -1170,6 +1180,7 @@ function createDentistPortalRouter({
           })
           .catch((smsError) => console.warn("Dentist queue SMS failed:", smsError.message));
       }
+      scheduleApproachingQueueSms(current.branch_id || req.branchAccess?.activeBranch?.id);
 
       const detail = await db.query(
         `SELECT
@@ -1730,6 +1741,7 @@ function createDentistPortalRouter({
           })
           .catch((smsError) => console.warn("Dentist queue SMS failed:", smsError.message));
       }
+      scheduleApproachingQueueSms(current.branch_id || req.branchAccess?.activeBranch?.id);
 
       return res.json({
         message:
@@ -3194,6 +3206,7 @@ function createDentistPortalRouter({
         fromPosition: 1,
         branchId: req.branchAccess?.activeBranch?.id || null,
       });
+      scheduleApproachingQueueSms(req.branchAccess?.activeBranch?.id);
 
       for (const row of rows) {
         auditDentistTreatment(
@@ -3268,6 +3281,7 @@ function createDentistPortalRouter({
         fromPosition: 1,
         branchId: req.branchAccess?.activeBranch?.id || null,
       });
+      scheduleApproachingQueueSms(req.branchAccess?.activeBranch?.id);
 
       return res.json({
         message: "Treatment updated. Dental chart recalculated from the treatment history.",
@@ -3311,6 +3325,7 @@ function createDentistPortalRouter({
         fromPosition: 1,
         branchId: req.branchAccess?.activeBranch?.id || null,
       });
+      scheduleApproachingQueueSms(req.branchAccess?.activeBranch?.id);
 
       return res.json({
         message: "Treatment deleted. Dental chart recalculated from the remaining treatments.",

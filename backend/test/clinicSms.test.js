@@ -9,6 +9,9 @@ const {
   reminderMessage,
   rescheduleMessage,
   whenPhrase,
+  queueApproachingMessage,
+  queueCalledMessage,
+  queueUpdateMessage,
 } = require("../services/appointmentSms");
 
 test("formatPhoneE164 normalizes PH local numbers", () => {
@@ -91,6 +94,18 @@ test("monthsBetween supports cleaning reminder windows", () => {
   assert.equal(monthsBetween("2026-02-24", new Date("2026-08-24")), 6);
   assert.equal(monthsBetween("2026-03-24", new Date("2026-08-24")), 5);
   assert.equal(monthsBetween("2026-04-24", new Date("2026-08-24")), 4);
+});
+
+test("queue Called and approaching-turn SMS use distinct exact copy", () => {
+  assert.equal(queueCalledMessage(), "You have been called, please proceed");
+  assert.equal(
+    queueApproachingMessage(),
+    "Your turn is approaching. Please remain available and watch for updates from Amethyst Dental Clinic. Thank you."
+  );
+  assert.equal(queueUpdateMessage({ status: "preparing" }), queueCalledMessage());
+  assert.equal(queueUpdateMessage({ status: "called" }), queueCalledMessage());
+  assert.notEqual(queueUpdateMessage({ status: "dentist" }), queueApproachingMessage());
+  assert.notEqual(queueUpdateMessage({ status: "waiting", waitMinutes: 12 }), queueApproachingMessage());
 });
 
 test("reschedule message uses the updated appointment details", () => {
