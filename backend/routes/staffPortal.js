@@ -36,6 +36,7 @@ const hmoVerification = require("../services/hmoVerification");
 const { isClosedDayQueueStatus, CLOSED_DAY_STATUS_SQL } = require("../services/queueStatuses");
 const { recordQueueStatusEvent } = require("../services/queueStatusHistory");
 const appointmentBookingServices = require("../services/appointmentBookingServices");
+const appointmentLifecycle = require("../services/appointmentLifecycle");
 
 const QUEUE_STATUS_MAP = {
   checked_in: "checked_in",
@@ -174,6 +175,20 @@ function mapCheckIn(row) {
     },
     status: displayQueueStatus(row.status),
     checkInMethod: row.check_in_method || null,
+    visitType: appointmentLifecycle.visitTypeFromAppointment({
+      service_name: row.service_name,
+      notes: row.notes,
+      dentist_id: row.dentist_id,
+      visit_origin: row.visit_origin,
+    }),
+    visitTypeLabel: appointmentLifecycle.visitTypeLabel(
+      appointmentLifecycle.visitTypeFromAppointment({
+        service_name: row.service_name,
+        notes: row.notes,
+        dentist_id: row.dentist_id,
+        visit_origin: row.visit_origin,
+      })
+    ),
     waitMinutes: Number(row.estimated_wait_minutes || 0),
     estimatedDurationMinutes:
       row.wait_estimate_duration_minutes != null ? Number(row.wait_estimate_duration_minutes) : null,
@@ -234,6 +249,8 @@ function mapAppointment(row) {
     hmoVerificationStatus: row.hmo_verification_status || "not_applicable",
     estimatedCost: row.estimated_cost != null ? Number(row.estimated_cost) : null,
     createdAt: row.created_at,
+    visitType: appointmentLifecycle.visitTypeFromAppointment(row),
+    visitTypeLabel: appointmentLifecycle.visitTypeLabel(appointmentLifecycle.visitTypeFromAppointment(row)),
   };
 }
 
@@ -705,6 +722,8 @@ function createStaffPortalRouter({
            queue.check_in_method,
            queue.appointment_id,
            appointment.service_name,
+           appointment.notes,
+           appointment.dentist_id,
            appointment.dentist_name,
            appointment.appointment_date,
            appointment.appointment_time,

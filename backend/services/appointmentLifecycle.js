@@ -15,11 +15,19 @@ const PATIENT_STATUS_LABELS = {
   confirmed: "Confirmed",
   booked: "Confirmed",
   checked_in: "Checked In",
+  called: "Called",
+  in_treatment: "In Treatment",
   completed: "Completed",
   cancelled: "Cancelled",
   rescheduled: "Rescheduled",
   no_show: "No-show",
+  not_served: "Not served",
+  needs_review: "Needs Dentist review",
 };
+
+const TERMINAL_HISTORY = new Set(["completed", "cancelled", "rescheduled", "no_show", "not_served"]);
+const CURRENT_QUEUE = new Set(["checked_in", "waiting", "preparing", "called", "dentist"]);
+const CURRENT_OVERLAY = new Set(["checked_in", "called", "in_treatment"]);
 
 function clinicTimezone() {
   return CLINIC_TIMEZONE();
@@ -40,12 +48,16 @@ function isTerminalAppointment(status) {
 
 function canPatientCancel(status, queueStatus) {
   if (!CANCELABLE_APPOINTMENT.has(normalizeStatus(status))) return false;
-  return !IN_TREATMENT_QUEUE.has(normalizeStatus(queueStatus));
+  const queue = normalizeStatus(queueStatus);
+  if (IN_TREATMENT_QUEUE.has(queue) || queue === "needs_review") return false;
+  return true;
 }
 
 function canPatientReschedule(status, queueStatus) {
   if (!RESCHEDULABLE_APPOINTMENT.has(normalizeStatus(status))) return false;
-  return !IN_TREATMENT_QUEUE.has(normalizeStatus(queueStatus));
+  const queue = normalizeStatus(queueStatus);
+  if (IN_TREATMENT_QUEUE.has(queue) || queue === "needs_review") return false;
+  return true;
 }
 
 function queueHasProceeded(queueStatus) {
@@ -98,10 +110,26 @@ function normalizeClock(value) {
 // Timed visits cancel after the scheduled clock time in clinic TZ.
 // Date-only visits stay eligible through that clinic date and cancel the next local day.
 function isWalkInAppointment(appointment = {}) {
+  const origin = normalizeStatus(
+    appointment.visit_origin || appointment.visitOrigin || appointment.visit_type || appointment.visitType
+  );
+  if (origin === "walk_in") return true;
+  if (origin === "booked") return false;
   const service = `${appointment.service_name || appointment.service || appointment.treatment || ""}`;
   const notes = `${appointment.notes || ""}`;
-  const method = `${appointment.check_in_method || appointment.checkInMethod || ""}`;
-  return /walk-?in/i.test(service) || /walk-in check-in/i.test(notes) || /^(rfid|qr)$/i.test(method);
+  const dentistId = `${appointment.dentist_id || appointment.dentistId || ""}`;
+  if (/^walk-in consultation$/i.test(service.trim())) return true;
+  if (/auto-created from (rfid|qr) walk-in check-in/i.test(notes)) return true;
+  if (/^walk-in-/i.test(dentistId)) return true;
+  return false;
+}
+
+function visitTypeFromAppointment(appointment = {}) {
+  return isWalkInAppointment(appointment) ? "walk_in" : "booked";
+}
+
+function visitTypeLabel(visitType) {
+  return visitType === "walk_in" ? "Walk-in visit" : "Booked appointment";
 }
 
 function overlayAppointmentStatus(appointmentStatus, queueStatus) {
@@ -110,14 +138,29 @@ function overlayAppointmentStatus(appointmentStatus, queueStatus) {
     return { status: "cancelled", statusLabel: "Cancelled", queueOutcome: "cancelled" };
   }
   if (queue === "not_served") {
-    return { status: appointmentStatus, statusLabel: "Not served", queueOutcome: "not_served" };
+    return { status: "not_served", statusLabel: "Not served", queueOutcome: "not_served" };
   }
   if (queue === "needs_review") {
     return {
-      status: appointmentStatus,
+      status: "needs_review",
       statusLabel: "Needs Dentist review",
       queueOutcome: "needs_review",
     };
+  }
+  if (queue === "preparing" || queue === "called") {
+    return { status: "called", statusLabel: "Called", queueOutcome: queue };
+  }
+  if (queue === "dentist") {
+    return { status: "in_treatment", statusLabel: "In Treatment", queueOutcome: "dentist" };
+  }
+  if (queue === "waiting" || queue === "checked_in") {
+    return { status: "checked_in", statusLabel: "Checked In", queueOutcome: queue };
+  }
+  if (queue === "completed") {
+    return { status: "completed", statusLabel: "Completed", queueOutcome: "completed" };
+  }
+  if (queue === "no_show") {
+    return { status: "no_show", statusLabel: "No-show", queueOutcome: "no_show" };
   }
   const status = normalizeStatus(appointmentStatus) || "pending";
   return {
@@ -125,6 +168,20 @@ function overlayAppointmentStatus(appointmentStatus, queueStatus) {
     statusLabel: displayAppointmentStatus(status),
     queueOutcome: queue || null,
   };
+}
+
+function historySectionForAppointment({ appointmentDate, overlay, today = null } = {}) {
+  const date = String(appointmentDate || "").slice(0, 10);
+  const clinicToday = today || clinicParts().date;
+  const status = normalizeStatus(overlay?.status);
+  const outcome = normalizeStatus(overlay?.queueOutcome);
+  if (status === "needs_review" || outcome === "needs_review") return "review";
+  if (TERMINAL_HISTORY.has(status) || TERMINAL_HISTORY.has(outcome)) return "past";
+  if (date === clinicToday && (CURRENT_OVERLAY.has(status) || CURRENT_QUEUE.has(outcome))) {
+    return "current";
+  }
+  if (["pending", "confirmed"].includes(status) && date >= clinicToday) return "upcoming";
+  return "past";
 }
 
 // Missed booked visits become no-show at 18:00 on the appointment's clinic date.
@@ -150,6 +207,24 @@ function appointmentOwnershipSql(alias = "appointments") {
         AND removed_at IS NULL
     )
   )`;
+}
+
+async function loadLatestQueueForAppointment(db, appointmentId) {
+  if (!appointmentId) return null;
+  try {
+    const result = await db.query(
+      `SELECT id, status, checked_in_at, appointment_id
+       FROM patient_portal_queue_entries
+       WHERE appointment_id = $1
+       ORDER BY checked_in_at DESC
+       LIMIT 1`,
+      [appointmentId]
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    if (error.code === "42P01") return null;
+    throw error;
+  }
 }
 
 async function loadActiveQueueForAppointment(db, appointmentId) {
@@ -203,8 +278,12 @@ module.exports = {
   shouldRunAutoCancel,
   missedCutoffPassed,
   isWalkInAppointment,
+  visitTypeFromAppointment,
+  visitTypeLabel,
   overlayAppointmentStatus,
+  historySectionForAppointment,
   appointmentOwnershipSql,
+  loadLatestQueueForAppointment,
   loadActiveQueueForAppointment,
   closeQueueForAppointment,
 };

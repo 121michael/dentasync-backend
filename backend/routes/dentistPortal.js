@@ -35,6 +35,7 @@ const { isClosedDayQueueStatus, isReviewableQueueStatus } = require("../services
 const { finalizeNeedsReviewVisit } = require("../services/queueDayClosure");
 const { recordQueueStatusEvent, previousStatusLabel } = require("../services/queueStatusHistory");
 const appointmentBookingServices = require("../services/appointmentBookingServices");
+const appointmentLifecycle = require("../services/appointmentLifecycle");
 
 const QUEUE_STATUS_MAP = {
   checked_in: "checked_in",
@@ -288,6 +289,8 @@ function mapQueueEntry(row) {
     patientName: row.patient_name || "Patient",
     patientPhone: row.patient_phone || null,
     procedure: row.service_name || "Dental visit",
+    visitType: appointmentLifecycle.visitTypeFromAppointment(row),
+    visitTypeLabel: appointmentLifecycle.visitTypeLabel(appointmentLifecycle.visitTypeFromAppointment(row)),
     dentistId: row.dentist_id || null,
     dentist: row.dentist_name || "Unassigned",
     appointmentId: row.appointment_id || null,
@@ -369,6 +372,8 @@ function mapAppointment(row) {
     status: row.status,
     notes: row.notes || "",
     createdAt: row.created_at,
+    visitType: appointmentLifecycle.visitTypeFromAppointment(row),
+    visitTypeLabel: appointmentLifecycle.visitTypeLabel(appointmentLifecycle.visitTypeFromAppointment(row)),
   };
 }
 
@@ -747,6 +752,7 @@ function createDentistPortalRouter({
              queue.checked_in_at,
              queue.appointment_id,
              appointment.service_name,
+             appointment.notes,
              appointment.dentist_id,
              appointment.dentist_name,
              appointment.appointment_date,
@@ -876,6 +882,7 @@ function createDentistPortalRouter({
            (queue.checked_in_at AT TIME ZONE '${clinicTimezone().replace(/'/g, "''")}')::date AS visit_date,
            branch.name AS branch_name,
            appointment.service_name,
+           appointment.notes,
            appointment.dentist_id,
            appointment.dentist_name,
            appointment.appointment_date,

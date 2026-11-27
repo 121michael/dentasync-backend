@@ -385,9 +385,27 @@ async function insertAppointment(client, values) {
     values.clinicLocation || null,
     values.rescheduledFromId || null,
     durationMinutes,
+    values.visitOrigin || values.visit_origin || "booked",
   ];
   let inserted;
   try {
+    inserted = await queryOrRollback(client,
+      `INSERT INTO patient_portal_appointments (
+         user_id, service_id, service_name, dentist_id, dentist_name,
+         appointment_date, appointment_time, coverage_type, hmo_provider,
+         hmo_member_number, hmo_company_name, hmo_birth_date, hmo_verification_status,
+         authorization_document_id, estimated_cost, notes, status, branch_id,
+         clinic_location, rescheduled_from_id, duration_minutes, visit_origin
+       ) VALUES (
+         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
+       )
+       RETURNING *`,
+      params
+    );
+  } catch (error) {
+    if (error?.code !== "42703") throw error;
+  }
+  if (!inserted) try {
     inserted = await queryOrRollback(client,
       `INSERT INTO patient_portal_appointments (
          user_id, service_id, service_name, dentist_id, dentist_name,
@@ -399,7 +417,7 @@ async function insertAppointment(client, values) {
          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
        )
        RETURNING *`,
-      params
+      params.slice(0, 21)
     );
   } catch (error) {
     if (error?.code !== "42703") throw error;
@@ -538,6 +556,7 @@ async function createBooking(db, input) {
       dentist,
       branchId,
       status: "pending",
+      visitOrigin: input.visitOrigin || "booked",
       clinicLocation: input.clinicLocation || resolved.branch?.name || "Amethyst Dental Clinic",
     });
     await appointmentBookingServices.saveForAppointment(client, inserted.rows[0].id, services);
@@ -617,6 +636,7 @@ async function rescheduleBooking(db, { current, appointmentDate, appointmentTime
       authorizationDocumentId: current.authorization_document_id,
       notes: current.notes,
       status: nextStatus,
+      visitOrigin: current.visit_origin || current.visitOrigin || "booked",
       branchId,
       clinicLocation: current.clinic_location,
       rescheduledFromId: current.id,

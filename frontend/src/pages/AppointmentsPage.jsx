@@ -16,7 +16,12 @@ import { api } from "../api";
 import { EmptyState, ErrorState, LoadingState, SectionHeading } from "../components/UI";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { RescheduleAppointmentModal } from "../components/RescheduleAppointmentModal";
-import { canManageAppointment, clinicTodayYmd, displayAppointmentStatus } from "../utils/appointmentStatus";
+import {
+  canManageAppointment,
+  clinicTodayYmd,
+  displayAppointmentStatus,
+  historySectionOf,
+} from "../utils/appointmentStatus";
 import { useAuth } from "../useAuth";
 import { matchesNotificationFocus } from "../notificationFocus";
 import { applyApprovedClinicPriceOverrides, getApprovedClinicPrice } from "../clinic/approvedClinicPrices";
@@ -1002,14 +1007,28 @@ export function AppointmentsPage() {
   if (!loaded) return <LoadingState label="Loading appointment history…" />;
 
   if (!isBooking) {
-    const today = clinicTodayYmd();
-    const upcoming = appointments.filter((row) => String(row.date || "") >= today);
-    const past = appointments.filter((row) => String(row.date || "") < today);
+    const grouped = appointments.reduce(
+      (groups, row) => {
+        const section = historySectionOf(row);
+        if (groups[section]) groups[section].push(row);
+        else groups.past.push(row);
+        return groups;
+      },
+      { current: [], review: [], upcoming: [], past: [] }
+    );
+    const current = grouped.current;
+    const review = grouped.review;
+    const upcoming = grouped.upcoming;
+    const past = grouped.past;
     const renderAppointmentCard = (appointment) => {
       const visitLabel =
         appointment.visitTypeLabel ||
         (appointment.visitType === "walk_in" ? "Walk-in visit" : "Booked appointment");
       const manage = canManageAppointment(appointment);
+      const pillStatus =
+        appointment.queueOutcome === "needs_review" || appointment.status === "needs_review"
+          ? "needs_review"
+          : appointment.status;
       return (
         <article
           key={appointment.id}
@@ -1020,7 +1039,7 @@ export function AppointmentsPage() {
         >
           <header className="appointment-history-card__header">
             <strong>{displayServiceName(appointment)}</strong>
-            <span className={`status-pill status-pill--${appointment.status}`}>{displayStatus(appointment)}</span>
+            <span className={`status-pill status-pill--${pillStatus}`}>{displayStatus(appointment)}</span>
           </header>
           <p className="appointment-history-card__summary">
             <span>
@@ -1121,8 +1140,24 @@ export function AppointmentsPage() {
         <section className="appointment-history">
           {appointments.length ? (
             <div className="appointment-history__groups">
-              {upcoming.length ? (
+              {current.length ? (
                 <details className="appointment-history__group" open>
+                  <summary>
+                    Current visit <span>{current.length}</span>
+                  </summary>
+                  <div className="appointment-history__cards">{current.map(renderAppointmentCard)}</div>
+                </details>
+              ) : null}
+              {review.length ? (
+                <details className="appointment-history__group" open>
+                  <summary>
+                    Needs Dentist review <span>{review.length}</span>
+                  </summary>
+                  <div className="appointment-history__cards">{review.map(renderAppointmentCard)}</div>
+                </details>
+              ) : null}
+              {upcoming.length ? (
+                <details className="appointment-history__group" open={!current.length && !review.length}>
                   <summary>
                     Upcoming <span>{upcoming.length}</span>
                   </summary>
@@ -1130,7 +1165,10 @@ export function AppointmentsPage() {
                 </details>
               ) : null}
               {past.length ? (
-                <details className="appointment-history__group" open={!upcoming.length}>
+                <details
+                  className="appointment-history__group"
+                  open={!current.length && !review.length && !upcoming.length}
+                >
                   <summary>
                     Past visits <span>{past.length}</span>
                   </summary>

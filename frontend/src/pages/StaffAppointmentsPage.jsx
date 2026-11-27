@@ -360,7 +360,10 @@ export function StaffAppointmentsPage() {
                       {appointment.time ? formatStaffTime(String(appointment.time).slice(0, 5)) : "—"}
                       {appointment.queueHoldReason ? <small>{appointment.queueHoldReason}</small> : null}
                     </td>
-                    <td data-label="Service">{appointment.service || appointment.treatment}</td>
+                    <td data-label="Service">
+                      {appointment.service || appointment.treatment}
+                      {appointment.visitTypeLabel ? <small>{appointment.visitTypeLabel}</small> : null}
+                    </td>
                     <td data-label="Dentist">{appointment.dentist}</td>
                     <td data-label="HMO">
                       {appointment.coverageType === "hmo" ? (

@@ -834,6 +834,7 @@ export function DentistQueuePage() {
                     ) : null}
                     <td data-label="Procedure Schema">
                       <QueueProcedureList entry={entry} />
+                      {entry.visitTypeLabel ? <small>{entry.visitTypeLabel}</small> : null}
                     </td>
                     {tab === "needs_review" ? null : (
                       <>

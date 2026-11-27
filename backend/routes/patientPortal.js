@@ -51,6 +51,8 @@ const prescriptions = require("../services/prescriptions");
 const { loadApprovedClinicCatalog, resolveCatalog } = require("../services/approvedClinicCatalog");
 const medicalDocuments = require("../services/medicalDocuments");
 const appointmentLifecycle = require("../services/appointmentLifecycle");
+const { writeAdminAudit } = require("../services/adminAudit");
+const { recordQueueStatusEvent } = require("../services/queueStatusHistory");
 const dashboardOps = require("../services/dashboardOps");
 const hmoVerification = require("../services/hmoVerification");
 const appointmentBookingServices = require("../services/appointmentBookingServices");
@@ -451,11 +453,15 @@ function mapAppointment(appointment, queueStatus) {
   }
 
   const overlay = appointmentLifecycle.overlayAppointmentStatus(appointment.status, queueStatus);
-  const visitType = appointmentLifecycle.isWalkInAppointment(appointment) ? "walk_in" : "booked";
+  const visitType = appointmentLifecycle.visitTypeFromAppointment(appointment);
   const closedQueue = ["cancelled", "not_served", "needs_review", "completed", "no_show"].includes(
     String(queueStatus || "").toLowerCase()
   );
   const activeQueue = closedQueue ? null : queueStatus;
+  const historySection = appointmentLifecycle.historySectionForAppointment({
+    appointmentDate: appointment.appointment_date,
+    overlay,
+  });
 
   // Patient-facing appointment payload intentionally omits assigned dentist.
   // Dentist assignment remains stored internally for staff/dentist workflows.
@@ -484,8 +490,10 @@ function mapAppointment(appointment, queueStatus) {
     estimatedCost: Number(appointment.estimated_cost),
     status: overlay.status || appointment.status,
     statusLabel: overlay.statusLabel,
+    historySection,
     visitType,
-    visitTypeLabel: visitType === "walk_in" ? "Walk-in visit" : "Booked appointment",
+    visitTypeLabel: appointmentLifecycle.visitTypeLabel(visitType),
+    visitOrigin: appointment.visit_origin || visitType,
     queueStatus: queueStatus || null,
     queueOutcome: overlay.queueOutcome,
     notes: appointment.notes,
@@ -892,7 +900,8 @@ function createPatientPortalRouter({
         ),
         db.query(
           `SELECT queue.token, queue.position, queue.status, queue.estimated_wait_minutes, queue.appointment_id,
-                  queue.branch_id, queue.check_in_method, appointment.service_name, appointment.notes
+                  queue.branch_id, queue.check_in_method, appointment.service_name, appointment.notes,
+                  appointment.dentist_id, appointment.visit_origin
            FROM patient_portal_queue_entries AS queue
            LEFT JOIN patient_portal_appointments AS appointment ON appointment.id = queue.appointment_id
            WHERE queue.user_id = $1
@@ -1029,7 +1038,10 @@ function createPatientPortalRouter({
               token: queue.token,
               position: queue.position,
               status: queue.status,
-              visitType: appointmentLifecycle.isWalkInAppointment(queue) ? "walk_in" : "booked",
+              visitType: appointmentLifecycle.visitTypeFromAppointment(queue),
+              visitTypeLabel: appointmentLifecycle.visitTypeLabel(
+                appointmentLifecycle.visitTypeFromAppointment(queue)
+              ),
               estimatedWaitMinutes: waitEnabled ? queue.estimated_wait_minutes : null,
               waitEstimate:
                 queueBoard.current?.waitEstimate ||
@@ -1447,12 +1459,19 @@ function createPatientPortalRouter({
       if (!current) {
         return res.status(404).json({ message: "A cancellable appointment was not found." });
       }
-      const queue = await appointmentLifecycle.loadActiveQueueForAppointment(db, current.id);
+      const queue = await appointmentLifecycle.loadLatestQueueForAppointment(db, current.id);
       if (!appointmentLifecycle.canPatientCancel(current.status, queue?.status)) {
+        const queueStatus = String(queue?.status || "").toLowerCase();
+        const reviewBlocked = queueStatus === "needs_review";
+        const treatmentBlocked = queueStatus === "dentist";
         return res.status(409).json({
           message: appointmentLifecycle.isTerminalAppointment(current.status)
             ? "This appointment can no longer be cancelled."
-            : "This visit is already with the dentist and cannot be cancelled here.",
+            : reviewBlocked
+              ? "This visit is waiting for dentist review and cannot be cancelled here."
+              : treatmentBlocked
+                ? "This visit is already with the dentist and cannot be cancelled here."
+                : "This appointment can no longer be cancelled.",
         });
       }
 
@@ -1486,7 +1505,27 @@ function createPatientPortalRouter({
         return res.status(409).json({ message: "This appointment can no longer be cancelled." });
       }
 
-      await appointmentLifecycle.closeQueueForAppointment(db, current.id, "no_show");
+      await appointmentLifecycle.closeQueueForAppointment(db, current.id, "cancelled");
+      if (queue?.id) {
+        await recordQueueStatusEvent(db, {
+          queueEntryId: queue.id,
+          fromStatus: queue.status,
+          toStatus: "cancelled",
+          actorId: actorUserId,
+          actorRole: "patient",
+        });
+      }
+      await writeAdminAudit(db, {
+        actorId: actorUserId,
+        actorName: null,
+        actorRole: "patient",
+        action: "patient_cancel_appointment",
+        targetType: "appointment",
+        targetId: String(result.rows[0].id),
+        targetLabel: result.rows[0].service_name || `appointment-${result.rows[0].id}`,
+        result: "success",
+        detail: `Patient cancelled appointment ${result.rows[0].id}. Reason: ${reason}. Queue closed as cancelled, not no-show. Clinical records unchanged.`,
+      });
       await notifyClinicStaff({
         type: "appointment",
         title: "Appointment cancellation",
@@ -1517,7 +1556,7 @@ function createPatientPortalRouter({
       }
       return res.json({
         message: "Your appointment has been cancelled.",
-        appointment: mapAppointment(result.rows[0]),
+        appointment: mapAppointment(result.rows[0], "cancelled"),
       });
     } catch (error) {
       console.error("Cancel appointment error:", error.message);
@@ -1554,7 +1593,7 @@ function createPatientPortalRouter({
           message: "Rescheduling stays at the original clinic branch.",
         });
       }
-      const queue = await appointmentLifecycle.loadActiveQueueForAppointment(db, current.id);
+      const queue = await appointmentLifecycle.loadLatestQueueForAppointment(db, current.id);
       if (!appointmentLifecycle.canPatientReschedule(current.status, queue?.status)) {
         return res.status(409).json({
           message: appointmentLifecycle.isTerminalAppointment(current.status)
@@ -1625,7 +1664,7 @@ function createPatientPortalRouter({
           `SELECT queue.id, queue.token, queue.position, queue.status, queue.estimated_wait_minutes,
                   queue.checked_in_at, queue.check_in_method, queue.appointment_id, queue.branch_id,
                   branch.name AS branch_name,
-                  appointment.service_name, appointment.notes,
+                  appointment.service_name, appointment.notes, appointment.dentist_id, appointment.visit_origin,
                   queue.wait_estimate_min_minutes, queue.wait_estimate_max_minutes, queue.wait_estimate_duration_minutes,
                   queue.wait_estimate_call_start, queue.wait_estimate_call_end, queue.wait_estimate_at
            FROM patient_portal_queue_entries AS queue
@@ -1745,13 +1784,10 @@ function createPatientPortalRouter({
                 queueStatus: current.status,
               }),
               appointmentId: current.appointment_id || null,
-              visitType: appointmentLifecycle.isWalkInAppointment({
-                service_name: current.service_name,
-                notes: current.notes,
-                check_in_method: current.check_in_method,
-              })
-                ? "walk_in"
-                : "booked",
+              visitType: appointmentLifecycle.visitTypeFromAppointment(current),
+              visitTypeLabel: appointmentLifecycle.visitTypeLabel(
+                appointmentLifecycle.visitTypeFromAppointment(current)
+              ),
               branchId: current.branch_id || null,
               branchName: current.branch_name || null,
               steps: queueSteps(current.status),

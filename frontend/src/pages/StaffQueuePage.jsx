@@ -314,6 +314,7 @@ export function StaffQueuePage() {
                         ) : (
                           entry.appointment?.treatment || "—"
                         )}
+                        {entry.visitTypeLabel ? <small>{entry.visitTypeLabel}</small> : null}
                       </td>
                       <td data-label="Dentist">{entry.appointment?.dentist || "—"}</td>
                       <td data-label="Check-In Time">{formatStaffDateTime(entry.timestamp)}</td>

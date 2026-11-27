@@ -178,6 +178,8 @@ function checkInLogSelectSql({ includeClinicPatientId = true, includeMethod = tr
            ${methodColumn}
            queue.appointment_id,
            appointment.service_name,
+           appointment.notes,
+           appointment.dentist_id,
            appointment.dentist_name,
            appointment.appointment_date,
            appointment.appointment_time,
@@ -654,12 +656,12 @@ async function createWalkInAppointmentForPatient(client, patient, { branchId = n
     inserted = await client.query(
       `INSERT INTO patient_portal_appointments (
          user_id, service_id, service_name, dentist_id, dentist_name,
-         appointment_date, appointment_time, coverage_type, estimated_cost, notes, status, branch_id
+         appointment_date, appointment_time, coverage_type, estimated_cost, notes, status, branch_id, visit_origin
        ) VALUES (
          $1, 'general-consultation', 'Walk-in Consultation',
          COALESCE(NULLIF(BTRIM($2), ''), $8),
          COALESCE(NULLIF(BTRIM($3), ''), $9),
-         $4, $5::time, 'self_pay', $6, $7, 'confirmed', $10
+         $4, $5::time, 'self_pay', $6, $7, 'confirmed', $10, 'walk_in'
        )
        RETURNING *`,
       [
@@ -676,19 +678,46 @@ async function createWalkInAppointmentForPatient(client, patient, { branchId = n
       ]
     );
   } catch (error) {
-    if (error?.code === "23505") {
+    if (error?.code === "42703") {
+      inserted = await client.query(
+        `INSERT INTO patient_portal_appointments (
+           user_id, service_id, service_name, dentist_id, dentist_name,
+           appointment_date, appointment_time, coverage_type, estimated_cost, notes, status, branch_id
+         ) VALUES (
+           $1, 'general-consultation', 'Walk-in Consultation',
+           COALESCE(NULLIF(BTRIM($2), ''), $8),
+           COALESCE(NULLIF(BTRIM($3), ''), $9),
+           $4, $5::time, 'self_pay', $6, $7, 'confirmed', $10
+         )
+         RETURNING *`,
+        [
+          String(patient.id),
+          dentist.dentistId,
+          dentist.dentistName,
+          claimed.date,
+          claimed.time,
+          800,
+          "Auto-created from RFID walk-in check-in.",
+          DEFAULT_WALK_IN_DENTIST_ID,
+          DEFAULT_WALK_IN_DENTIST_NAME,
+          scopedBranchId,
+        ]
+      );
+    } else if (error?.code === "23505") {
       const conflict = new Error(NO_WALK_IN_SLOTS_MESSAGE);
       conflict.status = 409;
       conflict.errorCode = rfidScanErrors.RFID_ERROR_CODES.NO_WALK_IN_SLOT;
       throw conflict;
+    } else {
+      throw error;
     }
-    throw error;
   }
 
   const appointment = inserted.rows[0];
   appointment.patient_name = `${patient.first_name || ""} ${patient.last_name || ""}`.trim();
   appointment.patient_phone = patient.phone || null;
   appointment.patient_email = patient.email || null;
+  appointment.visit_origin = appointment.visit_origin || "walk_in";
   appointment._walkInCreated = true;
   return appointment;
 }
