@@ -459,7 +459,7 @@ function mapAppointment(appointment, queueStatus) {
   );
   const activeQueue = closedQueue ? null : queueStatus;
   const historySection = appointmentLifecycle.historySectionForAppointment({
-    appointmentDate: appointment.appointment_date,
+    appointmentDate: normalizeIsoDate(appointment.appointment_date) || appointment.appointment_date,
     overlay,
   });
 

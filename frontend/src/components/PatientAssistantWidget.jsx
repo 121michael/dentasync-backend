@@ -47,7 +47,9 @@ function clampPosition(x, y) {
     const overlapsMenu =
       nextX + BUBBLE_SIZE > fabLeft - 12 && nextY + BUBBLE_SIZE > fabTop - 12;
     if (overlapsMenu) {
-      nextX = Math.max(minX, fabLeft - BUBBLE_SIZE - 16);
+      const home = defaultPosition();
+      nextX = home.x;
+      nextY = home.y;
     }
   }
 

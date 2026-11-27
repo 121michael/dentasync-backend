@@ -1,5 +1,7 @@
 "use strict";
 
+const { calendarDate } = require("./patientData");
+
 const CLINIC_TIMEZONE = () => process.env.CLINIC_TIMEZONE || "Asia/Manila";
 const AUTO_CANCEL_HOUR = 18;
 const WAIT_TOO_LONG_MS = 2 * 60 * 60 * 1000;
@@ -171,7 +173,7 @@ function overlayAppointmentStatus(appointmentStatus, queueStatus) {
 }
 
 function historySectionForAppointment({ appointmentDate, overlay, today = null } = {}) {
-  const date = String(appointmentDate || "").slice(0, 10);
+  const date = calendarDate(appointmentDate);
   const clinicToday = today || clinicParts().date;
   const status = normalizeStatus(overlay?.status);
   const outcome = normalizeStatus(overlay?.queueOutcome);
@@ -188,7 +190,7 @@ function historySectionForAppointment({ appointmentDate, overlay, today = null }
 // Catch-up includes earlier clinic dates. Scheduled start time is not a cutoff.
 function missedCutoffPassed({ appointmentDate, now = new Date(), timeZone = clinicTimezone() }) {
   const parts = clinicParts(now, timeZone);
-  const date = String(appointmentDate || "").slice(0, 10);
+  const date = calendarDate(appointmentDate);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
   if (parts.date > date) return true;
   if (parts.date < date) return false;

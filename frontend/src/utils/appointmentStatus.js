@@ -23,12 +23,17 @@ const TERMINAL_SECTIONS = new Set([
 
 export function historySectionOf(appointment, today = clinicTodayYmd()) {
   if (appointment?.historySection) return appointment.historySection;
-  const date = String(appointment?.date || "").slice(0, 10);
+  const rawDate = appointment?.date;
+  const date =
+    rawDate instanceof Date && !Number.isNaN(rawDate.getTime())
+      ? rawDate.toISOString().slice(0, 10)
+      : String(rawDate || "").slice(0, 10);
   const status = String(appointment?.status || "").toLowerCase();
   const outcome = String(appointment?.queueOutcome || "").toLowerCase();
   if (status === "needs_review" || outcome === "needs_review") return "review";
   if (TERMINAL_SECTIONS.has(status) || TERMINAL_SECTIONS.has(outcome)) return "past";
   if (
+    /^\d{4}-\d{2}-\d{2}$/.test(date) &&
     date === today &&
     ["checked_in", "called", "in_treatment", "waiting", "preparing", "dentist"].includes(status)
   ) {

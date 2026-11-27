@@ -2247,7 +2247,7 @@ html[data-theme="dark"] .portal-shell[data-theme="dark"] ~ .tooth-loader .tooth-
   }
 
   .appointments-page--list .section-heading {
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     align-items: flex-start;
     gap: 0.55rem 0.7rem;
   }
@@ -3753,7 +3753,9 @@ html[data-theme="dark"] .portal-shell[data-theme="dark"] ~ .tooth-loader .tooth-
 body.booking-summary-open .fab-menu,
 body.booking-summary-open .role-bottom-dock,
 body.booking-summary-open .patient-assistant__bubble,
-body.booking-summary-open .patient-assistant__panel {
+body.booking-summary-open .patient-assistant__panel,
+body:has(.fab-menu.is-open) .patient-assistant__bubble,
+body:has(.fab-menu.is-open) .patient-assistant__panel {
   visibility: hidden !important;
   pointer-events: none !important;
 }
@@ -16580,7 +16582,7 @@ html[data-theme="dark"] .admin-set-credential__badge--warn,
   }
 
   .appointments-page--list {
-    padding-bottom: 1.25rem;
+    padding-bottom: 6.5rem;
   }
 
   .appointment-history-card__header {

@@ -24,7 +24,7 @@ test("queue overlay keeps end-of-day cancel distinct from no-show and in-treatme
   assert.equal(cancelled.status, "cancelled");
   assert.equal(cancelled.statusLabel, "Cancelled");
   const review = lifecycle.overlayAppointmentStatus("checked_in", "needs_review");
-  assert.equal(review.status, "checked_in");
+  assert.equal(review.status, "needs_review");
   assert.equal(review.statusLabel, "Needs Dentist review");
   assert.equal(review.queueOutcome, "needs_review");
   const completed = lifecycle.overlayAppointmentStatus("completed", "completed");
@@ -72,6 +72,53 @@ test("waited-too-long uses check-in time and ignores inactive or in-chair visits
       now,
     }),
     false
+  );
+});
+
+test("history sections use calendar dates across Manila midnight and pg Date values", () => {
+  const overlay = { status: "called", queueOutcome: "preparing" };
+  const inChair = { status: "in_treatment", queueOutcome: "dentist" };
+  const checkedIn = { status: "checked_in", queueOutcome: "waiting" };
+  const completed = { status: "completed", queueOutcome: "completed" };
+  const manilaNov27 = "2026-11-27";
+  const pgDate = new Date("2026-11-27T00:00:00.000Z");
+
+  assert.equal(
+    lifecycle.historySectionForAppointment({ appointmentDate: pgDate, overlay, today: manilaNov27 }),
+    "current"
+  );
+  assert.equal(
+    lifecycle.historySectionForAppointment({ appointmentDate: pgDate, overlay: inChair, today: manilaNov27 }),
+    "current"
+  );
+  assert.equal(
+    lifecycle.historySectionForAppointment({ appointmentDate: pgDate, overlay: checkedIn, today: manilaNov27 }),
+    "current"
+  );
+  assert.equal(
+    lifecycle.historySectionForAppointment({ appointmentDate: pgDate, overlay: completed, today: manilaNov27 }),
+    "past"
+  );
+
+  const justBeforeMidnight = new Date("2026-11-27T15:59:00.000Z");
+  const justAfterMidnight = new Date("2026-11-27T16:00:00.000Z");
+  assert.equal(lifecycle.clinicParts(justBeforeMidnight).date, "2026-11-27");
+  assert.equal(lifecycle.clinicParts(justAfterMidnight).date, "2026-11-28");
+  assert.equal(
+    lifecycle.historySectionForAppointment({
+      appointmentDate: pgDate,
+      overlay,
+      today: lifecycle.clinicParts(justBeforeMidnight).date,
+    }),
+    "current"
+  );
+  assert.equal(
+    lifecycle.historySectionForAppointment({
+      appointmentDate: pgDate,
+      overlay,
+      today: lifecycle.clinicParts(justAfterMidnight).date,
+    }),
+    "past"
   );
 });
 
