@@ -14,6 +14,7 @@ const {
   publicWaitEstimate,
   waitEstimateFromRow,
   loadPatientQueueBoard,
+  safeRecalculateQueueWaitEstimates,
 } = require("../services/queueWaitPrediction");
 const {
   answerWithOptionalGemini,
@@ -40,6 +41,7 @@ const staffCheckIn = require("../services/staffCheckIn");
 const { insertPatientNotification, mapPatientNotification } = require("../services/patientPortalNotifications");
 const dentalWellness = require("../services/dentalWellness");
 const staffWalkInQr = require("../services/staffWalkInQr");
+const { withSavepoint, safeRollback, schemaError, checkInFailureResponse, logCheckInFailure } = require("../services/postgresTxn");
 const staffRfidEvents = require("../services/staffRfidEvents");
 const clinicSchedule = require("../services/clinicSchedule");
 const patientBranchBooking = require("../services/patientBranchBooking");
@@ -3419,24 +3421,34 @@ function createPatientPortalRouter({
       });
 
       try {
-        await client.query(
-          `INSERT INTO staff_walkin_qr_redemptions (
-             session_id, patient_user_id, appointment_id, queue_entry_id
-           ) VALUES ($1, $2, $3, $4)
-           ON CONFLICT (session_id, patient_user_id) DO NOTHING`,
-          [
-            validity.session.id,
-            String(userId),
-            appointment.id,
-            checkIn.queueEntry.id,
-          ]
+        await withSavepoint(client, "qr_redemption", () =>
+          client.query(
+            `INSERT INTO staff_walkin_qr_redemptions (
+               session_id, patient_user_id, appointment_id, queue_entry_id
+             ) VALUES ($1, $2, $3, $4)
+             ON CONFLICT (session_id, patient_user_id) DO NOTHING`,
+            [
+              validity.session.id,
+              String(userId),
+              appointment.id,
+              checkIn.queueEntry.id,
+            ]
+          )
         );
       } catch (redemptionError) {
-        if (redemptionError.code !== "42P01") throw redemptionError;
+        const setup = schemaError(redemptionError);
+        if (setup) throw setup;
+        throw redemptionError;
       }
 
       await client.query("COMMIT");
       transactionOpen = false;
+      safeRecalculateQueueWaitEstimates(db, {
+        fromPosition: 1,
+        branchId: sessionBranchId,
+      }).catch((estimateError) => {
+        console.warn("Walk-in QR wait estimate skipped:", estimateError.message);
+      });
 
       if (!checkIn.alreadyCheckedIn && clinicSms?.notifyQueueSms) {
         clinicSms
@@ -3493,17 +3505,20 @@ function createPatientPortalRouter({
       });
     } catch (error) {
       if (transactionOpen) {
-        await client.query("ROLLBACK");
+        await safeRollback(client);
       }
-      if (staffWalkInQr.isMissingRelation(error)) {
+      if (staffWalkInQr.isMissingRelation(error) || error.code === "SETUP_REQUIRED") {
+        const failure = checkInFailureResponse(error);
+        logCheckInFailure("Walk-in QR redeem", error);
         return res.status(503).json({
-          message: "Walk-in QR check-in is not available. Ask staff for help.",
+          message: failure.message || "Walk-in QR check-in is not available. Ask staff for help.",
+          code: failure.code,
         });
       }
       if (error.status) {
-        return res.status(error.status).json({ message: error.message });
+        return res.status(error.status).json({ message: checkInFailureResponse(error).message });
       }
-      console.error("Walk-in QR redeem error:", error.message);
+      logCheckInFailure("Walk-in QR redeem", error);
       return res.status(500).json({ message: "Unable to complete walk-in check-in." });
     } finally {
       client.release();

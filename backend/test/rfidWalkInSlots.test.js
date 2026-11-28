@@ -82,6 +82,7 @@ test("RFID walk-in claims the earliest remaining clinic slot", async (t) => {
     CREATE TABLE IF NOT EXISTS clinic_patient_treatments (id BIGSERIAL PRIMARY KEY, clinical_record_id BIGINT, treatment TEXT);
   `);
   await db.query(fs.readFileSync(path.join(__dirname, "..", "migrations", "016_staff_walkin_qr.sql"), "utf8"));
+  await db.query(fs.readFileSync(path.join(__dirname, "..", "migrations", "066_appointment_visit_origin.sql"), "utf8"));
   await db.query(fs.readFileSync(path.join(__dirname, "..", "migrations", "031_clinic_schedule.sql"), "utf8"));
   await applyClinicBranchSchema(db);
   await applyBranchOperationSchema(db);

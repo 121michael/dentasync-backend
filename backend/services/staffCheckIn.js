@@ -1,12 +1,12 @@
 "use strict";
 
 const { insertPatientNotification } = require("./patientPortalNotifications");
-const { safeRecalculateQueueWaitEstimates } = require("./queueWaitPrediction");
 const queueNumbers = require("./queueNumbers");
 const branchAccess = require("./branchAccess");
 const branchCheckIn = require("./branchCheckIn");
 const patientBranchBooking = require("./patientBranchBooking");
 const rfidScanErrors = require("./rfidScanErrors");
+const { withSavepoint, schemaError } = require("./postgresTxn");
 
 const NO_WALK_IN_SLOTS_MESSAGE = patientBranchBooking.NO_WALK_IN_SLOTS_MESSAGE;
 
@@ -376,16 +376,31 @@ async function findPatient(client, { patientId, rfidTag, code, phone, email }) {
 async function findRfidCardHolder(client, rfidTag) {
   const tag = normalizeRfidTag(rfidTag);
   if (!tag) return null;
-  const result = await client.query(
-    `SELECT id, first_name, last_name, email, phone, role, status, is_verified, rfid_tag,
-            COALESCE(is_archived, FALSE) AS is_archived
-     FROM users
-     WHERE LOWER(COALESCE(rfid_tag, '')) = LOWER($1)
-     ORDER BY id DESC
-     LIMIT 1`,
-    [tag]
-  );
-  return result.rows[0] || null;
+  try {
+    const result = await withSavepoint(client, "rfid_card_holder", () =>
+      client.query(
+        `SELECT id, first_name, last_name, email, phone, role, status, is_verified, rfid_tag,
+                COALESCE(is_archived, FALSE) AS is_archived
+         FROM users
+         WHERE LOWER(COALESCE(rfid_tag, '')) = LOWER($1)
+         ORDER BY id DESC
+         LIMIT 1`,
+        [tag]
+      )
+    );
+    return result.rows[0] || null;
+  } catch (error) {
+    if (error.code !== "42703") throw error;
+    const result = await client.query(
+      `SELECT id, first_name, last_name, email, phone, role, status, is_verified, rfid_tag
+       FROM users
+       WHERE LOWER(COALESCE(rfid_tag, '')) = LOWER($1)
+       ORDER BY id DESC
+       LIMIT 1`,
+      [tag]
+    );
+    return result.rows[0] || null;
+  }
 }
 
 async function findAppointmentForCheckIn(client, { appointmentId, patientId, branchId = null }) {
@@ -653,41 +668,16 @@ async function createWalkInAppointmentForPatient(client, patient, { branchId = n
 
   let inserted;
   try {
-    inserted = await client.query(
-      `INSERT INTO patient_portal_appointments (
-         user_id, service_id, service_name, dentist_id, dentist_name,
-         appointment_date, appointment_time, coverage_type, estimated_cost, notes, status, branch_id, visit_origin
-       ) VALUES (
-         $1, 'general-consultation', 'Walk-in Consultation',
-         COALESCE(NULLIF(BTRIM($2), ''), $8),
-         COALESCE(NULLIF(BTRIM($3), ''), $9),
-         $4, $5::time, 'self_pay', $6, $7, 'confirmed', $10, 'walk_in'
-       )
-       RETURNING *`,
-      [
-        String(patient.id),
-        dentist.dentistId,
-        dentist.dentistName,
-        claimed.date,
-        claimed.time,
-        800,
-        "Auto-created from RFID walk-in check-in.",
-        DEFAULT_WALK_IN_DENTIST_ID,
-        DEFAULT_WALK_IN_DENTIST_NAME,
-        scopedBranchId,
-      ]
-    );
-  } catch (error) {
-    if (error?.code === "42703") {
-      inserted = await client.query(
+    inserted = await withSavepoint(client, "walkin_insert_origin", () =>
+      client.query(
         `INSERT INTO patient_portal_appointments (
            user_id, service_id, service_name, dentist_id, dentist_name,
-           appointment_date, appointment_time, coverage_type, estimated_cost, notes, status, branch_id
+           appointment_date, appointment_time, coverage_type, estimated_cost, notes, status, branch_id, visit_origin
          ) VALUES (
            $1, 'general-consultation', 'Walk-in Consultation',
            COALESCE(NULLIF(BTRIM($2), ''), $8),
            COALESCE(NULLIF(BTRIM($3), ''), $9),
-           $4, $5::time, 'self_pay', $6, $7, 'confirmed', $10
+           $4, $5::time, 'self_pay', $6, $7, 'confirmed', $10, 'walk_in'
          )
          RETURNING *`,
         [
@@ -702,15 +692,18 @@ async function createWalkInAppointmentForPatient(client, patient, { branchId = n
           DEFAULT_WALK_IN_DENTIST_NAME,
           scopedBranchId,
         ]
-      );
-    } else if (error?.code === "23505") {
+      )
+    );
+  } catch (error) {
+    const setup = schemaError(error);
+    if (setup) throw setup;
+    if (error?.code === "23505") {
       const conflict = new Error(NO_WALK_IN_SLOTS_MESSAGE);
       conflict.status = 409;
       conflict.errorCode = rfidScanErrors.RFID_ERROR_CODES.NO_WALK_IN_SLOT;
       throw conflict;
-    } else {
-      throw error;
     }
+    throw error;
   }
 
   const appointment = inserted.rows[0];
@@ -727,18 +720,20 @@ async function findTodayAppointmentOutsideBranch(client, patientId, branchId) {
   if (!scopedBranchId || !patientId) return null;
   const clinicTz = process.env.CLINIC_TIMEZONE || "Asia/Manila";
   try {
-    const result = await client.query(
-      `SELECT appointment.id, appointment.branch_id, branch.name AS branch_name
-       FROM patient_portal_appointments AS appointment
-       LEFT JOIN clinic_branches AS branch ON branch.id = appointment.branch_id
-       WHERE appointment.user_id::text = $1::text
-         AND appointment.appointment_date = (CURRENT_TIMESTAMP AT TIME ZONE $2)::date
-         AND LOWER(appointment.status) IN ('confirmed', 'checked_in', 'pending')
-         AND appointment.branch_id IS NOT NULL
-         AND appointment.branch_id <> $3
-       ORDER BY appointment.appointment_time ASC NULLS LAST
-       LIMIT 1`,
-      [String(patientId), clinicTz, scopedBranchId]
+    const result = await withSavepoint(client, "today_appt_other_branch", () =>
+      client.query(
+        `SELECT appointment.id, appointment.branch_id, branch.name AS branch_name
+         FROM patient_portal_appointments AS appointment
+         LEFT JOIN clinic_branches AS branch ON branch.id = appointment.branch_id
+         WHERE appointment.user_id::text = $1::text
+           AND appointment.appointment_date = (CURRENT_TIMESTAMP AT TIME ZONE $2)::date
+           AND LOWER(appointment.status) IN ('confirmed', 'checked_in', 'pending')
+           AND appointment.branch_id IS NOT NULL
+           AND appointment.branch_id <> $3
+         ORDER BY appointment.appointment_time ASC NULLS LAST
+         LIMIT 1`,
+        [String(patientId), clinicTz, scopedBranchId]
+      )
     );
     return result.rows[0] || null;
   } catch (error) {
@@ -804,28 +799,6 @@ async function findAppointmentsForRfidLookup(client, patientId, branchId = null)
   return result.rows;
 }
 
-async function withSavepoint(client, name, fn) {
-  const savepoint = String(name || "sp").replace(/[^a-zA-Z0-9_]/g, "_");
-  await client.query(`SAVEPOINT ${savepoint}`);
-  try {
-    const result = await fn();
-    try {
-      await client.query(`RELEASE SAVEPOINT ${savepoint}`);
-    } catch (releaseError) {
-      await client.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
-      await client.query(`RELEASE SAVEPOINT ${savepoint}`);
-    }
-    return result;
-  } catch (error) {
-    try {
-      await client.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
-    } catch (rollbackError) {
-      error.savepointRollbackError = rollbackError.message;
-    }
-    throw error;
-  }
-}
-
 async function findActiveQueueForPatient(client, patientId, branchId = null) {
   if (!patientId) return null;
   const scopedBranchId = await concreteBranchId(client, branchId);
@@ -879,12 +852,14 @@ async function findActiveQueueForPatient(client, patientId, branchId = null) {
 
 async function loadPatientQueueIdentity(client, userId) {
   try {
-    const result = await client.query(
-      `SELECT patient_category, patient_id
-       FROM users
-       WHERE id::text = $1
-       LIMIT 1`,
-      [String(userId)]
+    const result = await withSavepoint(client, "queue_identity", () =>
+      client.query(
+        `SELECT patient_category, patient_id
+         FROM users
+         WHERE id::text = $1
+         LIMIT 1`,
+        [String(userId)]
+      )
     );
     return result.rows[0] || {};
   } catch (error) {
@@ -1051,16 +1026,6 @@ async function performStaffCheckIn(client, { appointment, staff, notifyClinicSta
     // Missing notifications table (or optional columns) must not abort check-in.
     if (error.code !== "42P01" && error.code !== "42703") {
       throw error;
-    }
-  }
-
-  try {
-    await withSavepoint(client, "queue_wait_estimates", async () => {
-      await safeRecalculateQueueWaitEstimates(client, { fromPosition: 1, branchId: scopedBranchId });
-    });
-  } catch (error) {
-    if (error.code !== "42P01" && error.code !== "42703") {
-      console.warn("Check-in wait estimate skipped:", error.message);
     }
   }
 

@@ -6,6 +6,8 @@ const staffRfidEvents = require("./staffRfidEvents");
 const branchCheckIn = require("./branchCheckIn");
 const branchAccess = require("./branchAccess");
 const rfidScanErrors = require("./rfidScanErrors");
+const { safeRollback, logCheckInFailure, checkInFailureResponse } = require("./postgresTxn");
+const { safeRecalculateQueueWaitEstimates } = require("./queueWaitPrediction");
 
 function resolvedDeviceSecret(env = process.env) {
   return String(env.RFID_DEVICE_SECRET || "").trim();
@@ -226,6 +228,14 @@ async function checkInByRfidTag(db, { rfidTag, notifyClinicStaff, notifyClinicDe
     });
     await client.query("COMMIT");
     transactionOpen = false;
+    if (typeof db.query === "function") {
+      safeRecalculateQueueWaitEstimates(db, {
+        fromPosition: 1,
+        branchId: readerBranchId,
+      }).catch((estimateError) => {
+        console.warn("RFID check-in wait estimate skipped:", estimateError.message);
+      });
+    }
 
     const payload = mapSuccess(resolved.appointment, checkIn, resolved.walkInCreated);
     staffRfidEvents.recordRfidEvent({
@@ -242,21 +252,29 @@ async function checkInByRfidTag(db, { rfidTag, notifyClinicStaff, notifyClinicDe
     return { ok: true, status: checkIn.alreadyCheckedIn ? 200 : 201, payload };
   } catch (error) {
     if (transactionOpen) {
-      await client.query("ROLLBACK");
+      await safeRollback(client);
     }
-    const errorCode = rfidScanErrors.classifyCheckInError(error);
+    const failure = checkInFailureResponse(error);
+    const errorCode = rfidScanErrors.classifyCheckInError(error) || failure.errorCode;
+    if (failure.status >= 500 || failure.code === "SETUP_REQUIRED") {
+      logCheckInFailure("RFID desk check-in", error);
+    }
     staffRfidEvents.recordRfidEvent({
       rfidTag: tag,
       method: "rfid",
       branchId: readerBranchId,
       status: "failed",
-      message: error.message || "Unable to complete patient check-in.",
+      message: failure.message,
       errorCode,
     });
-    if (error.status) {
-      return { ok: false, status: error.status, message: error.message, errorCode };
+    if (failure.status < 500 || error.status) {
+      return { ok: false, status: failure.status, message: failure.message, errorCode, code: failure.code };
     }
-    throw error;
+    const wrapped = new Error(failure.message);
+    wrapped.status = failure.status;
+    wrapped.code = failure.code;
+    wrapped.errorCode = errorCode;
+    throw wrapped;
   } finally {
     client.release();
   }

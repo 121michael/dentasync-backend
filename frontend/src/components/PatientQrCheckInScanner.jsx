@@ -142,9 +142,23 @@ export function PatientQrCheckInScanner({ onCheckedIn, compact = false }) {
           {error ? <p className="inline-alert inline-alert--error">{error}</p> : null}
 
           {!cameraSupported ? (
-            <p className="muted-copy">
-              If the camera will not open, use the phone camera app on the staff QR, or paste the link below.
-            </p>
+            <>
+              <p className="muted-copy">
+                If the camera will not open, use the phone camera app on the staff QR, or paste the link below.
+              </p>
+              <button
+                type="button"
+                className="button button--secondary button--compact"
+                onClick={() => {
+                  setError("");
+                  setCameraSupported(true);
+                  setOpen(false);
+                  window.setTimeout(() => startScanner(), 0);
+                }}
+              >
+                Retry camera
+              </button>
+            </>
           ) : null}
 
           <form

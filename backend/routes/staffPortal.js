@@ -11,6 +11,7 @@ const staffWalkInQr = require("../services/staffWalkInQr");
 const { insertPatientNotification } = require("../services/patientPortalNotifications");
 const staffRfidEvents = require("../services/staffRfidEvents");
 const rfidScanErrors = require("../services/rfidScanErrors");
+const { safeRollback, logCheckInFailure, checkInFailureResponse } = require("../services/postgresTxn");
 const {
   safeRecalculateQueueWaitEstimates,
   staffWaitEstimate,
@@ -2617,6 +2618,12 @@ function createStaffPortalRouter({
 
       await client.query("COMMIT");
       transactionOpen = false;
+      safeRecalculateQueueWaitEstimates(db, {
+        fromPosition: 1,
+        branchId: req.branchAccess?.activeBranch?.id || appointment.branch_id || null,
+      }).catch((estimateError) => {
+        console.warn("Staff check-in wait estimate skipped:", estimateError.message);
+      });
 
       if (walkInCreated && clinicSms?.handleAppointmentEvent) {
         clinicSms
@@ -2690,28 +2697,26 @@ function createStaffPortalRouter({
       return res.status(checkIn.alreadyCheckedIn ? 200 : 201).json(successPayload);
     } catch (error) {
       if (transactionOpen) {
-        await client.query("ROLLBACK");
+        await safeRollback(client);
       }
+      const failure = checkInFailureResponse(error);
       if (!error.status || error.status >= 500) {
-        console.error("Staff check-in error:", error.message, error.code || "", error.detail || "");
+        logCheckInFailure("Staff check-in", error);
       }
-      const errorCode = method === "rfid" ? rfidScanErrors.classifyCheckInError(error) : null;
+      const errorCode = method === "rfid" ? rfidScanErrors.classifyCheckInError(error) || failure.errorCode : failure.errorCode;
       if (method === "rfid") {
         staffRfidEvents.recordRfidEvent({
           rfidTag,
           branchId: req.branchAccess?.activeBranch?.id || null,
           status: "failed",
-          message: error.message || "Unable to complete patient check-in.",
+          message: failure.message,
           errorCode,
         });
       }
-      return res.status(error.status || 500).json({
-        message: error.message?.includes("estimated_cost")
-          ? "Unable to create walk-in appointment for check-in."
-          : error.message || "Unable to complete patient check-in.",
-        detail: error.message,
-        code: error.code || undefined,
+      return res.status(failure.status).json({
+        message: failure.message,
         errorCode: errorCode || undefined,
+        code: failure.code,
       });
     } finally {
       client.release();

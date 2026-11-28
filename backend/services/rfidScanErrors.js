@@ -29,6 +29,7 @@ function isInactivePatientStatus(patient) {
 function classifyCheckInError(error) {
   if (!error) return null;
   if (error.errorCode) return error.errorCode;
+  if (error.code === "SETUP_REQUIRED") return "SETUP_REQUIRED";
   if (error.message === NO_WALK_IN_SLOTS_MESSAGE) return RFID_ERROR_CODES.NO_WALK_IN_SLOT;
   if (/staffed desk|another clinic branch/i.test(String(error.message || ""))) {
     return RFID_ERROR_CODES.WRONG_BRANCH;

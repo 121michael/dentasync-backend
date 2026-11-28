@@ -40,8 +40,14 @@ function registerPublicRfidRoutes(app, { db, notifyActiveStaff, notifyDentists }
       }
       return res.status(result.status).json(result.payload);
     } catch (error) {
-      console.error("Public RFID check-in error:", error.message);
-      return res.status(500).json({ message: "Unable to complete RFID check-in." });
+      const { checkInFailureResponse, logCheckInFailure } = require("../services/postgresTxn");
+      logCheckInFailure("Public RFID check-in", error);
+      const failure = checkInFailureResponse(error);
+      return res.status(failure.status).json({
+        message: failure.message,
+        errorCode: failure.errorCode,
+        code: failure.code,
+      });
     }
   });
 }

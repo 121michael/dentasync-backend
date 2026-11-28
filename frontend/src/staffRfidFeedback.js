@@ -17,3 +17,24 @@ export function staffReaderStatusLabel({ readerOffline, scannerState }) {
   if (scannerState === "success") return "Success";
   return "Connected";
 }
+
+export function sanitizeStaffCheckInMessage(text, fallback = "Unable to complete patient check-in. Try again.") {
+  const message = String(text || "").trim();
+  if (!message) return fallback;
+  if (
+    /current transaction is aborted/i.test(message) ||
+    /commands ignored until end of transaction/i.test(message) ||
+    /column "[^"]+" does not exist/i.test(message) ||
+    /relation "[^"]+" does not exist/i.test(message) ||
+    /duplicate key value/i.test(message) ||
+    /violates .+ constraint/i.test(message)
+  ) {
+    return fallback;
+  }
+  return message;
+}
+
+export function shouldSkipDuplicateToast(previous, message, tone, now = Date.now()) {
+  if (!previous || !message) return false;
+  return previous.key === `${tone}:${message}` && now - previous.at < 4000;
+}

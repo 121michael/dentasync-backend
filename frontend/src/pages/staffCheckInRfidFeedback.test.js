@@ -7,6 +7,8 @@ import {
   isRfidReaderConnectionFailure,
   RFID_SCAN_HOLD_MS,
   RFID_UNASSIGNED_MESSAGE,
+  sanitizeStaffCheckInMessage,
+  shouldSkipDuplicateToast,
   staffReaderStatusLabel,
 } from "../staffRfidFeedback.js";
 
@@ -28,4 +30,22 @@ test("rejected RFID cards keep the reader connected and replace the previous sca
   assert.match(page, /newest\.errorCode/);
   assert.match(page, /RFID_SCAN_HOLD_MS/);
   assert.doesNotMatch(page, /Reader status:[\s\S]*scannerState === "error"[\s\S]*\? "Error"/);
+  assert.match(page, /sanitizeStaffCheckInMessage/);
+  assert.match(page, /shouldSkipDuplicateToast|notifyOnce/);
+  assert.equal(
+    sanitizeStaffCheckInMessage("current transaction is aborted, commands ignored until end of transaction block"),
+    "Unable to complete patient check-in. Try again."
+  );
+  assert.equal(
+    sanitizeStaffCheckInMessage(RFID_UNASSIGNED_MESSAGE),
+    RFID_UNASSIGNED_MESSAGE
+  );
+  assert.equal(
+    shouldSkipDuplicateToast({ key: "error:fail", at: 1000 }, "fail", "error", 2000),
+    true
+  );
+  assert.equal(
+    shouldSkipDuplicateToast({ key: "error:fail", at: 1000 }, "fail", "error", 6000),
+    false
+  );
 });

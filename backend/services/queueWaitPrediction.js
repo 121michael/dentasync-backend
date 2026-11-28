@@ -106,7 +106,8 @@ async function loadDurationSamples(db, settings) {
   const durationSql = `duration_minutes BETWEEN $1 AND $2`;
 
   try {
-    const recorded = await db.query(
+    const recorded = await isolateQuery(
+      db,
       `SELECT procedure_type, duration_minutes
        FROM clinic_treatment_durations
        WHERE completed_at IS NOT NULL
@@ -128,7 +129,8 @@ async function loadDurationSamples(db, settings) {
   }
 
   try {
-    const treatments = await db.query(
+    const treatments = await isolateQuery(
+      db,
       `SELECT treatment, duration_minutes
        FROM clinic_patient_treatments
        WHERE LOWER(COALESCE(status, '')) = 'completed'
@@ -320,7 +322,8 @@ async function loadVisitProcedures(db, entry) {
   const appointmentId = Number(entry.appointment_id || entry.appointmentId) || null;
   if (!queueEntryId && !appointmentId) return [];
   try {
-    const result = await db.query(
+    const result = await isolateQuery(
+      db,
       `SELECT id, treatment, status, duration_minutes, started_at, visit_sequence, queue_entry_id, appointment_id
        FROM clinic_patient_treatments
        WHERE ($1::bigint IS NOT NULL AND queue_entry_id = $1)
@@ -331,14 +334,20 @@ async function loadVisitProcedures(db, entry) {
     return result.rows;
   } catch (error) {
     if (error?.code === "42703" && appointmentId) {
-      const result = await db.query(
-        `SELECT id, treatment, status, duration_minutes
-         FROM clinic_patient_treatments
-         WHERE appointment_id = $1
-         ORDER BY id ASC`,
-        [appointmentId]
-      );
-      return result.rows;
+      try {
+        const result = await isolateQuery(
+          db,
+          `SELECT id, treatment, status, duration_minutes
+           FROM clinic_patient_treatments
+           WHERE appointment_id = $1
+           ORDER BY id ASC`,
+          [appointmentId]
+        );
+        return result.rows;
+      } catch (retryError) {
+        if (retryError?.code === "42P01" || retryError?.code === "42703") return [];
+        throw retryError;
+      }
     }
     if (error?.code === "42P01" || error?.code === "42703") return [];
     throw error;
@@ -626,7 +635,8 @@ async function loadTodayQueue(db, branchId = null) {
       params.push(branchId);
       branchSql = ` AND queue.branch_id = $${params.length}`;
     }
-    const result = await db.query(
+    const result = await isolateQuery(
+      db,
       `SELECT
          queue.id,
          queue.user_id,
@@ -655,7 +665,8 @@ async function loadTodayQueue(db, branchId = null) {
     return result.rows;
   } catch (error) {
     if (error?.code === "42703") {
-      const result = await db.query(
+      const result = await isolateQuery(
+        db,
         `SELECT
            queue.id,
            queue.user_id,
@@ -875,7 +886,8 @@ async function persistEstimate(db, entryId, estimate, waitPoint, { serving = fal
     );
   } catch (error) {
     if (error?.code === "42703") {
-      await db.query(
+      await isolateQuery(
+        db,
         `UPDATE patient_portal_queue_entries
          SET estimated_wait_minutes = $2,
              updated_at = CURRENT_TIMESTAMP

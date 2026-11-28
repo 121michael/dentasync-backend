@@ -15,7 +15,13 @@ import { EmptyState, ErrorState, LoadingState } from "../components/UI";
 import { StaffModal, StaffStatusBadge } from "../components/StaffUI";
 import { useStaffUi } from "../components/StaffLayout";
 import { formatStaffDateTime, formatStaffLogDate, formatStaffLogTime, formatStaffTime } from "../staffUtils";
-import { isRfidReaderConnectionFailure, RFID_SCAN_HOLD_MS, staffReaderStatusLabel } from "../staffRfidFeedback";
+import {
+  isRfidReaderConnectionFailure,
+  RFID_SCAN_HOLD_MS,
+  sanitizeStaffCheckInMessage,
+  shouldSkipDuplicateToast,
+  staffReaderStatusLabel,
+} from "../staffRfidFeedback";
 
 const MONTHS = [
   { value: 1, label: "January" },
@@ -110,6 +116,7 @@ export function StaffCheckInPage() {
   const seenCheckInIdsRef = useRef(new Set());
   const bootstrappedLogRef = useRef(false);
   const lastEventIdRef = useRef(0);
+  const lastToastRef = useRef({ key: "", at: 0 });
   const [mode, setMode] = useState("rfid");
   const [rfidCode, setRfidCode] = useState("");
   const [verified, setVerified] = useState(null);
@@ -131,6 +138,15 @@ export function StaffCheckInPage() {
   const [scannerState, setScannerState] = useState("ready");
   const [readerOffline, setReaderOffline] = useState(false);
   const scanHoldTimerRef = useRef(null);
+
+  function notifyOnce(message, tone = "success") {
+    const sanitized = sanitizeStaffCheckInMessage(message, message);
+    if (!sanitized) return;
+    const now = Date.now();
+    if (shouldSkipDuplicateToast(lastToastRef.current, sanitized, tone, now)) return;
+    lastToastRef.current = { key: `${tone}:${sanitized}`, at: now };
+    pushToast(sanitized, tone);
+  }
 
   function holdScanFeedback(nextState) {
     if (scanHoldTimerRef.current) {
@@ -175,11 +191,11 @@ export function StaffCheckInPage() {
         setVerified(checkInToVerified(fresh));
         setScannerState("success");
         setError("");
-        pushToast(`${fresh.patientName} checked in · Queue ${fresh.token || fresh.queueNumber}`);
+        notifyOnce(`${fresh.patientName} checked in · Queue ${fresh.token || fresh.queueNumber}`);
         window.setTimeout(() => setScannerState("ready"), 1600);
       }
     } catch (loadError) {
-      setError(loadError.message);
+      setError(sanitizeStaffCheckInMessage(loadError.message, "Unable to load today's check-in log."));
     }
   }, [logFilter, pushToast]);
 
@@ -198,7 +214,7 @@ export function StaffCheckInPage() {
         setReaderOffline(false);
         setError("");
         holdScanFeedback("success");
-        pushToast(newest.message || "Patient checked in from RFID tap.");
+        notifyOnce(newest.message || "Patient checked in from RFID tap.");
         const today = defaultLogFilter();
         setFilterTab("today");
         setDraftFilter(today);
@@ -209,9 +225,13 @@ export function StaffCheckInPage() {
 
       const readerFailure = isRfidReaderConnectionFailure(newest.errorCode);
       setReaderOffline(readerFailure);
-      setError(newest.message || "RFID tap failed.");
+      const failedMessage = sanitizeStaffCheckInMessage(
+        newest.message,
+        "Unable to complete patient check-in. Try again."
+      );
+      setError(failedMessage);
       holdScanFeedback("error");
-      pushToast(newest.message || "RFID tap failed.", "error");
+      notifyOnce(failedMessage, "error");
     } catch {
       // Keep listening even if the live feed briefly fails.
     }
@@ -284,7 +304,7 @@ export function StaffCheckInPage() {
       setReaderOffline(false);
       setError("");
       holdScanFeedback("success");
-      pushToast(response.message || "Patient checked in successfully.");
+      notifyOnce(response.message || "Patient checked in successfully.");
       setRfidCode("");
       const today = defaultLogFilter();
       setFilterTab("today");
@@ -292,14 +312,14 @@ export function StaffCheckInPage() {
       setLogFilter(today);
       await loadLog({ query: today });
     } catch (checkInError) {
-      const detail = checkInError?.data?.detail || checkInError?.data?.diagnosis?.hint;
-      const message = detail
-        ? `${checkInError.message}${checkInError.message.includes(detail) ? "" : ` (${detail})`}`
-        : checkInError.message;
+      const message = sanitizeStaffCheckInMessage(
+        checkInError.message,
+        "Unable to complete patient check-in. Try again."
+      );
       setReaderOffline(isRfidReaderConnectionFailure(checkInError?.data?.errorCode));
       setError(message);
       holdScanFeedback("error");
-      pushToast(message, "error");
+      notifyOnce(message, "error");
       setRfidCode("");
     } finally {
       setBusy(false);
