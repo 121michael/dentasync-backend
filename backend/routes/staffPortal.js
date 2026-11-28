@@ -867,10 +867,6 @@ function createStaffPortalRouter({
         `UPDATE patient_portal_queue_entries
          SET status = $1,
              estimated_wait_minutes = COALESCE($2, estimated_wait_minutes),
-             called_at = CASE
-               WHEN $1 IN ('preparing', 'called', 'dentist') THEN COALESCE(called_at, CURRENT_TIMESTAMP)
-               ELSE called_at
-             END,
              updated_at = CURRENT_TIMESTAMP
          WHERE id = $3
          RETURNING *`,
