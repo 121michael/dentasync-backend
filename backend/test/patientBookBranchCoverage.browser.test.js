@@ -275,7 +275,7 @@ test("Patient booking requires branch and coverage before compact service cards"
   await page.evaluate(() =>
     [...document.querySelectorAll("button")].find((button) => /Continue to schedule/i.test(button.textContent || ""))?.click()
   );
-  await page.waitForFunction(() => document.body.innerText.includes("Choose date and optional time"));
+  await page.waitForFunction(() => document.body.innerText.includes("Choose your schedule"));
   await page.waitForFunction(() => document.body.innerText.includes("9:00 AM") || document.body.innerText.includes("09:00"));
   await page.evaluate(() =>
     [...document.querySelectorAll(".time-slot")].find((button) => /9:00/.test(button.textContent || ""))?.click()
@@ -313,7 +313,7 @@ test("Patient booking requires branch and coverage before compact service cards"
   await page.evaluate(() =>
     [...document.querySelectorAll("button")].find((button) => /Continue to schedule/i.test(button.textContent || ""))?.click()
   );
-  await page.waitForFunction(() => document.body.innerText.includes("Choose date and optional time"));
+  await page.waitForFunction(() => document.body.innerText.includes("Choose your schedule"));
   await page.evaluate(() =>
     [...document.querySelectorAll(".filter-pill")].find((button) => /Afternoon/i.test(button.textContent || ""))?.click()
   );

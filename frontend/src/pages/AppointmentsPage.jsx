@@ -431,13 +431,12 @@ function validateBooking(form, { selectedServicePrice, availability, throughStep
     if (availability?.closed) {
       return { step: 3, message: `The clinic is closed on ${displayDate(form.appointmentDate)}. Choose another date.` };
     }
-    if (form.appointmentTime) {
-      const bookable = availability?.availableTimes || [];
-      if (availability && !bookable.includes(form.appointmentTime)) {
-        return { step: 3, message: "That time is no longer available. Choose another appointment slot." };
-      }
-    } else if (availability && availability.dateOnlyBookable === false) {
-      return { step: 3, message: "That date is fully booked. Choose another date or a preferred time that is still open." };
+    if (!form.appointmentTime) {
+      return { step: 3, message: "Select an available appointment time." };
+    }
+    const bookable = availability?.availableTimes || [];
+    if (availability && !bookable.includes(form.appointmentTime)) {
+      return { step: 3, message: "That time is no longer available. Choose another appointment slot." };
     }
   }
   return null;
@@ -458,7 +457,6 @@ export function AppointmentsPage() {
   const [isBusy, setIsBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [timePeriod, setTimePeriod] = useState("Morning");
-  const [preferSpecificTime, setPreferSpecificTime] = useState(false);
   const [pendingMedicalFile, setPendingMedicalFile] = useState(null);
   const [availability, setAvailability] = useState(null);
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
@@ -687,13 +685,18 @@ export function AppointmentsPage() {
   );
   const bookableSlots = (availability?.slots || []).filter((slot) => slot.bookable);
   const periodSlots = bookableSlots.filter((slot) => slot.period === timePeriod);
-  const schedulePeriods = PERIOD_ORDER.filter(
-    (period) =>
-      period === "Morning" ||
-      period === "Afternoon" ||
-      bookableSlots.some((slot) => slot.period === period)
+  const schedulePeriods = PERIOD_ORDER.filter((period) =>
+    bookableSlots.some((slot) => slot.period === period)
   );
-  const choosingTime = preferSpecificTime || Boolean(form.appointmentTime);
+  const canReviewSchedule = Boolean(
+    form.appointmentDate &&
+      form.appointmentTime &&
+      !availabilityLoading &&
+      !availabilityError &&
+      availability &&
+      !availability.closed &&
+      (availability.availableTimes || []).includes(form.appointmentTime)
+  );
   const slotsNeeded =
     availability?.slotsNeeded ||
     (selectedDurationMinutes ? Math.ceil(selectedDurationMinutes / 30) : 0);
@@ -983,7 +986,6 @@ export function AppointmentsPage() {
       setAuthorizationFile(null);
       setMedicalDocument(null);
       setPendingMedicalFile(null);
-      setPreferSpecificTime(false);
       setMedicalDocumentType("");
       setMedicalUploadError("");
       setMedicalUploadSuccess("");
@@ -1603,74 +1605,50 @@ export function AppointmentsPage() {
               </p>
             ) : null}
             {!availabilityLoading && availability && !availability.closed ? (
-              <>
-                <div className="schedule-mode" role="group" aria-label="Optional appointment time">
-                  <button
-                    type="button"
-                    className={`schedule-mode__option${!choosingTime ? " is-selected" : ""}`}
-                    aria-pressed={!choosingTime}
-                    onClick={() => {
-                      setPreferSpecificTime(false);
-                      setForm((current) => ({ ...current, appointmentTime: "" }));
-                    }}
-                  >
-                    <strong>Date only</strong>
-                    <small>No time selected</small>
-                  </button>
-                  <button
-                    type="button"
-                    className={`schedule-mode__option${choosingTime ? " is-selected" : ""}`}
-                    aria-pressed={choosingTime}
-                    onClick={() => setPreferSpecificTime(true)}
-                  >
-                    <strong>Choose a time</strong>
-                    <small>Optional preferred slot</small>
-                  </button>
-                </div>
-                {choosingTime ? (
-                  <div className="schedule-time-panel">
-                    <div className="time-filter-row">
-                      {schedulePeriods.map((period) => (
-                        <button
-                          type="button"
-                          key={period}
-                          className={`filter-pill ${timePeriod === period ? "is-active" : ""}`}
-                          aria-pressed={timePeriod === period}
-                          onClick={() => setTimePeriod(period)}
-                        >
-                          {period}
-                        </button>
-                      ))}
-                    </div>
-                    {periodSlots.length ? (
-                      <div className="time-slots">
-                        {periodSlots.map((slot) => (
-                          <button
-                            type="button"
-                            key={slot.time}
-                            className={`time-slot ${form.appointmentTime === slot.time ? "is-selected" : ""}`}
-                            aria-pressed={form.appointmentTime === slot.time}
-                            onClick={() => {
-                              setPreferSpecificTime(true);
-                              setForm((current) => ({ ...current, appointmentTime: slot.time }));
-                            }}
-                          >
-                            <Clock3 size={15} /> {displayTime(slot.time)}
-                          </button>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="schedule-status" role="status">
-                        {bookableSlots.length
-                          ? `No available ${timePeriod.toLowerCase()} slots on this date.`
-                          : "No available slots on this date."}
-                      </p>
-                    )}
+              <div className="schedule-time-panel">
+                <p className="schedule-time-label">Available times</p>
+                {schedulePeriods.length ? (
+                  <div className="time-filter-row">
+                    {schedulePeriods.map((period) => (
+                      <button
+                        type="button"
+                        key={period}
+                        className={`filter-pill ${timePeriod === period ? "is-active" : ""}`}
+                        aria-pressed={timePeriod === period}
+                        onClick={() => setTimePeriod(period)}
+                      >
+                        {period}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                {periodSlots.length ? (
+                  <div className="time-slots" role="group" aria-label="Available appointment times">
+                    {periodSlots.map((slot) => (
+                      <button
+                        type="button"
+                        key={slot.time}
+                        className={`time-slot ${form.appointmentTime === slot.time ? "is-selected" : ""}`}
+                        aria-pressed={form.appointmentTime === slot.time}
+                        onClick={() => setForm((current) => ({ ...current, appointmentTime: slot.time }))}
+                      >
+                        <Clock3 size={15} /> {displayTime(slot.time)}
+                      </button>
+                    ))}
                   </div>
                 ) : (
-                  <p className="schedule-status">Time is optional. Leave Date only selected to book without a slot.</p>
+                  <p className="schedule-status" role="status">
+                    {bookableSlots.length
+                      ? `No available ${timePeriod.toLowerCase()} slots on this date.`
+                      : "No available slots on this date. Choose another date."}
+                  </p>
                 )}
-              </>
+                {bookableSlots.length && !form.appointmentTime ? (
+                  <p className="schedule-status" role="status">
+                    Select an available time to continue.
+                  </p>
+                ) : null}
+              </div>
             ) : null}
           </section>
 
@@ -1826,7 +1804,12 @@ export function AppointmentsPage() {
               <button type="button" className="button button--secondary" onClick={() => goToBookingStep(2)}>
                 <ChevronLeft size={16} /> Back
               </button>
-              <button type="button" className="button button--primary booking-done" onClick={openVisitSummary}>
+              <button
+                type="button"
+                className="button button--primary booking-done"
+                onClick={openVisitSummary}
+                disabled={!canReviewSchedule}
+              >
                 Review confirmation <ChevronRight size={18} />
               </button>
             </div>
@@ -1904,12 +1887,10 @@ export function AppointmentsPage() {
                       <span>Date</span>
                       <strong>{form.appointmentDate ? displayDate(form.appointmentDate) : "Choose a date"}</strong>
                     </div>
-                    {form.appointmentTime ? (
                     <div className="booking-summary__line">
                       <span>Appointment time</span>
-                      <strong>{displayTime(form.appointmentTime)}</strong>
+                      <strong>{form.appointmentTime ? displayTime(form.appointmentTime) : "Select a time"}</strong>
                     </div>
-                    ) : null}
                     <div className="booking-summary__line">
                       <span>Status</span>
                       <strong>Pending</strong>

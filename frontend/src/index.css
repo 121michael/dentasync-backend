@@ -2351,6 +2351,11 @@ html[data-theme="dark"] .portal-shell[data-theme="dark"] ~ .tooth-loader .tooth-
   overflow: visible;
 }
 
+.booking-section[hidden],
+.booking-section.is-hidden {
+  display: none !important;
+}
+
 .booking-section:has(.treatment-option-wrap.is-open) {
   z-index: 4;
 }
@@ -2963,7 +2968,6 @@ html[data-theme="dark"] .portal-shell[data-theme="dark"] ~ .tooth-loader .tooth-
 .booking-section--schedule,
 .booking-section--notes {
   width: 100%;
-  max-width: 42rem;
   min-width: 0;
 }
 
@@ -3027,40 +3031,11 @@ html[data-theme="dark"] .portal-shell[data-theme="dark"] ~ .tooth-loader .tooth-
   line-height: 1.45;
 }
 
-.schedule-mode {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.5rem;
-}
-
-.schedule-mode__option {
-  display: grid;
-  gap: 0.12rem;
-  min-height: 52px;
-  padding: 0.55rem 0.7rem;
-  border: 1px solid var(--border);
-  border-radius: 13px;
-  text-align: left;
-  color: var(--text);
-  background: var(--surface-solid);
-}
-
-.schedule-mode__option strong {
-  font-size: 0.8rem;
-  letter-spacing: -0.02em;
-}
-
-.schedule-mode__option small {
-  color: var(--text-muted);
-  font-size: 0.66rem;
-  line-height: 1.35;
-}
-
-.schedule-mode__option.is-selected {
-  border-color: var(--amethyst-500);
-  color: var(--amethyst-700);
-  background: var(--amethyst-100);
-  box-shadow: 0 0 0 2px rgba(152, 100, 215, 0.14);
+.schedule-time-label {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 0.78rem;
+  font-weight: 750;
 }
 
 .schedule-time-panel {
@@ -4984,7 +4959,6 @@ body:has(.fab-menu.is-open) .patient-assistant__panel {
   .wellness-card, .quick-actions-card { padding: 1.05rem; }
   .time-slots { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .booking-medical-docs__fields { grid-template-columns: 1fr; }
-  .schedule-mode { grid-template-columns: 1fr 1fr; }
   .booking-file-row {
     grid-template-columns: 1fr;
   }
@@ -5350,9 +5324,6 @@ body:has(.fab-menu.is-open) .patient-assistant__panel {
   }
   .time-slots {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .schedule-mode {
-    grid-template-columns: 1fr;
   }
   .booking-section--schedule,
   .booking-section--notes {
@@ -12779,10 +12750,6 @@ body.is-queue-display .fab-menu {
   .role-bottom-dock--wide .fab-menu,
   .role-bottom-dock--compact .fab-menu {
     display: none;
-  }
-
-  .booking-layout:has(.booking-section--schedule:not([hidden])) {
-    max-width: 46rem;
   }
 }
 

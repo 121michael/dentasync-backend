@@ -521,6 +521,9 @@ async function createBooking(db, input) {
   const resolved = await resolveBookingBranch(db, input.branchId);
   const services = input.services?.length ? input.services : input.service ? [input.service] : [];
   const durationMinutes = appointmentBookingServices.totalDurationMinutes(services);
+  if (!clinicSchedule.normalizeTime(input.appointmentTime == null ? "" : String(input.appointmentTime))) {
+    throw bookingError("Choose an available appointment time.", 400);
+  }
   const client = await db.connect();
   let open = false;
   try {
