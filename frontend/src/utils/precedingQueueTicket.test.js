@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { dashboardPrecedingTicket } from "./precedingQueueTicket.js";
+import { dashboardPrecedingTicket, peopleAheadLabel } from "./precedingQueueTicket.js";
 
 const lane = [
   { token: "A-001", status: "dentist", position: 1, dentistId: "d1", isCurrentPatient: false },
@@ -15,12 +15,14 @@ test("first waiting patient sees the in-treatment ticket ahead, not tickets behi
   assert.equal(result.kind, "ahead");
   assert.equal(result.ticket.token, "A-001");
   assert.equal(result.ticket.status, "dentist");
+  assert.equal(result.peopleAhead, 1);
 });
 
 test("middle waiting patient sees only the ticket immediately ahead in the dentist lane", () => {
   const result = dashboardPrecedingTicket(lane, { token: "A-003", status: "waiting", dentistId: "d1" });
   assert.equal(result.kind, "ahead");
   assert.equal(result.ticket.token, "A-002");
+  assert.equal(result.peopleAhead, 2);
   assert.doesNotMatch(JSON.stringify(result), /A-201/);
   assert.doesNotMatch(JSON.stringify(result), /A-001/);
 });
@@ -34,6 +36,7 @@ test("first in an empty chair is next in line", () => {
     { token: "A-010", status: "waiting", dentistId: "d1", isCurrentPatient: true }
   );
   assert.equal(result.kind, "next");
+  assert.equal(result.peopleAhead, 0);
 });
 
 test("last waiting patient still uses queue order instead of ticket-number math", () => {
@@ -46,6 +49,7 @@ test("last waiting patient still uses queue order instead of ticket-number math"
   );
   assert.equal(result.kind, "ahead");
   assert.equal(result.ticket.token, "A-010");
+  assert.equal(result.peopleAhead, 1);
 });
 
 test("signed-in patient already in treatment sees in-progress, not other tickets", () => {
@@ -56,6 +60,7 @@ test("signed-in patient already in treatment sees in-progress, not other tickets
     isCurrentPatient: true,
   });
   assert.equal(result.kind, "in_progress");
+  assert.equal(result.peopleAhead, 0);
 });
 
 test("completed and cancelled tickets are not treated as ahead", () => {
@@ -68,4 +73,11 @@ test("completed and cancelled tickets are not treated as ahead", () => {
     { token: "A-003", status: "waiting", dentistId: "d1", isCurrentPatient: true }
   );
   assert.equal(result.kind, "next");
+  assert.equal(result.peopleAhead, 0);
+});
+
+test("people-ahead label is readable without listing other tickets", () => {
+  assert.equal(peopleAheadLabel(0), "0 people ahead");
+  assert.equal(peopleAheadLabel(1), "1 person ahead");
+  assert.equal(peopleAheadLabel(2), "2 people ahead");
 });

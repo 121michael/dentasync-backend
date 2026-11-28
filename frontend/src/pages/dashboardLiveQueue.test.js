@@ -15,7 +15,8 @@ test("Dashboard Live Queue uses the preceding-ticket card only", () => {
   assert.doesNotMatch(dashboard, /<PatientQueueBoard/);
   assert.match(liveQueue, /You are next in line/);
   assert.match(liveQueue, /Your treatment is in progress/);
-  assert.match(liveQueue, /The ticket immediately ahead of you/);
+  assert.match(liveQueue, /peopleAheadLabel/);
+  assert.match(liveQueue, /How many people are ahead of you/);
   assert.doesNotMatch(liveQueue, /queueStatusWaitLabel/);
   assert.doesNotMatch(liveQueue, /patientName/);
 });

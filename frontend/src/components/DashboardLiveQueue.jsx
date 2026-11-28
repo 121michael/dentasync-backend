@@ -1,7 +1,7 @@
 import { UsersRound } from "lucide-react";
 import { displayQueueStatus } from "../utils/walkInQr";
 import { formatWaitUpdatedAt } from "../utils/queueWaitEstimate";
-import { dashboardPrecedingTicket } from "../utils/precedingQueueTicket";
+import { dashboardPrecedingTicket, peopleAheadLabel } from "../utils/precedingQueueTicket";
 import { LIVE_QUEUE_FOOTER } from "./PatientQueueBoard";
 
 export function DashboardLiveQueue({ entries = [], current = null, lastUpdatedAt }) {
@@ -13,31 +13,38 @@ export function DashboardLiveQueue({ entries = [], current = null, lastUpdatedAt
     body = (
       <div className="patient-queue-board__empty">
         <strong>No active queue ticket</strong>
-        <p>Check in at the clinic to see the ticket ahead of you.</p>
+        <p>Check in at the clinic to see how many people are ahead of you.</p>
       </div>
     );
   } else if (result.kind === "in_progress") {
     body = (
       <div className="patient-queue-board__empty">
         <strong>Your treatment is in progress.</strong>
+        <p>There is no one ahead of you.</p>
       </div>
     );
   } else if (result.kind === "next") {
     body = (
       <div className="patient-queue-board__empty">
         <strong>You are next in line.</strong>
+        <p>0 people ahead</p>
       </div>
     );
   } else if (result.ticket?.token) {
     body = (
-      <ul className="patient-queue-board__list">
-        <li className="patient-queue-board__row patient-queue-board__row--ahead">
-          <div className="patient-queue-board__identity">
-            <strong>{result.ticket.token}</strong>
-          </div>
-          <span className="patient-queue-board__status">{displayQueueStatus(result.ticket.status)}</span>
-        </li>
-      </ul>
+      <>
+        <p className="patient-queue-board__ahead-count">
+          <strong>{peopleAheadLabel(result.peopleAhead)}</strong>
+        </p>
+        <ul className="patient-queue-board__list">
+          <li className="patient-queue-board__row patient-queue-board__row--ahead">
+            <div className="patient-queue-board__identity">
+              <strong>{result.ticket.token}</strong>
+            </div>
+            <span className="patient-queue-board__status">{displayQueueStatus(result.ticket.status)}</span>
+          </li>
+        </ul>
+      </>
     );
   }
 
@@ -50,7 +57,7 @@ export function DashboardLiveQueue({ entries = [], current = null, lastUpdatedAt
           </span>
           <div>
             <h2>Live Queue</h2>
-            <p>The ticket immediately ahead of you.</p>
+            <p>How many people are ahead of you, and the ticket immediately in front.</p>
           </div>
         </div>
         {updated ? <p className="patient-queue-board__updated">Last updated {updated}</p> : null}
