@@ -34,6 +34,7 @@ const dashboardOps = require("../services/dashboardOps");
 const { isClosedDayQueueStatus, isReviewableQueueStatus } = require("../services/queueStatuses");
 const { finalizeNeedsReviewVisit } = require("../services/queueDayClosure");
 const { recordQueueStatusEvent, previousStatusLabel } = require("../services/queueStatusHistory");
+const { withSavepoint } = require("../services/postgresTxn");
 const appointmentBookingServices = require("../services/appointmentBookingServices");
 const appointmentLifecycle = require("../services/appointmentLifecycle");
 
@@ -400,17 +401,13 @@ function mapQueueEntry(row) {
     status,
     waitMinutes,
     durationMinutes:
-      status === "in_chair"
-        ? row.wait_estimate_duration_minutes != null
-          ? Number(row.wait_estimate_duration_minutes)
-          : waitMinutes
+      row.wait_estimate_duration_minutes != null
+        ? Number(row.wait_estimate_duration_minutes)
         : null,
     estimatedDurationMinutes:
       row.wait_estimate_duration_minutes != null
         ? Number(row.wait_estimate_duration_minutes)
-        : status === "in_chair"
-          ? waitMinutes
-          : null,
+        : null,
     waitEstimate: staffWaitEstimate(waitEstimateFromRow(row)),
     checkedInAt: row.checked_in_at || null,
     servingStartedAt: row.serving_started_at || null,
@@ -1937,13 +1934,42 @@ function createDentistPortalRouter({
         });
       }
 
-      await client.query(
-        `UPDATE patient_portal_queue_entries
-         SET estimated_wait_minutes = $1,
-             updated_at = CURRENT_TIMESTAMP
-         WHERE id = $2`,
-        [durationMinutes, queueId]
-      );
+      try {
+        await withSavepoint(client, "queue_duration_estimate", () =>
+          client.query(
+            `UPDATE patient_portal_queue_entries
+             SET wait_estimate_duration_minutes = $1,
+                 wait_estimate_at = CURRENT_TIMESTAMP,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $2`,
+            [durationMinutes, queueId]
+          )
+        );
+      } catch (error) {
+        if (error?.code !== "42703") throw error;
+      }
+
+      try {
+        await withSavepoint(client, "queue_duration_treatment", () =>
+          client.query(
+            `UPDATE clinic_patient_treatments
+             SET duration_minutes = $1
+             WHERE id = (
+               SELECT id
+               FROM clinic_patient_treatments
+               WHERE queue_entry_id = $2
+                 AND LOWER(COALESCE(status, '')) IN ('in_progress', 'planned', 'pending')
+               ORDER BY CASE WHEN LOWER(COALESCE(status, '')) = 'in_progress' THEN 0 ELSE 1 END,
+                        visit_sequence ASC NULLS LAST,
+                        id ASC
+               LIMIT 1
+             )`,
+            [durationMinutes, queueId]
+          )
+        );
+      } catch (error) {
+        if (error?.code !== "42703" && error?.code !== "42P01") throw error;
+      }
 
       if (appointment?.user_id) {
         const clinical = await client.query(
@@ -1967,12 +1993,17 @@ function createDentistPortalRouter({
                SELECT id
                FROM clinic_patient_treatments
                WHERE clinical_record_id = $2
-                 AND treatment_date = CURRENT_DATE
-               ORDER BY id DESC
+                 AND (
+                   queue_entry_id = $3
+                   OR (queue_entry_id IS NULL AND treatment_date = CURRENT_DATE)
+                 )
+                 AND LOWER(COALESCE(status, '')) IN ('in_progress', 'planned', 'pending')
+               ORDER BY CASE WHEN LOWER(COALESCE(status, '')) = 'in_progress' THEN 0 ELSE 1 END,
+                        id DESC
                LIMIT 1
              )
              RETURNING id`,
-            [durationMinutes, clinical.rows[0].id]
+            [durationMinutes, clinical.rows[0].id, queueId]
           ).catch((error) => {
             if (error?.code === "42703" || error?.code === "42P01") return { rows: [] };
             throw error;

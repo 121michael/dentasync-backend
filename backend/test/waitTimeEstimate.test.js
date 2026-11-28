@@ -16,7 +16,7 @@ test("estimateWaitMinutesForPosition uses in-service procedure duration for curr
     aheadEntries: [
       {
         status: "dentist",
-        estimated_wait_minutes: 40,
+        duration_minutes: 40,
         service_name: "Cleaning",
       },
     ],
@@ -25,13 +25,10 @@ test("estimateWaitMinutesForPosition uses in-service procedure duration for curr
   assert.equal(wait, 40);
 });
 
-test("estimateWaitMinutesForPosition falls back to service catalog for waiting patients ahead", async () => {
+test("estimateWaitMinutesForPosition uses remaining chair time plus 10 minutes per waiter ahead", async () => {
   const db = {
-    async query(sql) {
-      if (sql.includes("clinic_service_durations") && sql.includes("service_name")) {
-        return { rows: [{ default_duration_minutes: 25 }] };
-      }
-      return { rows: [] };
+    async query() {
+      throw new Error("Waiting patients use a fixed 10-minute allowance, not catalog duration");
     },
   };
 
@@ -39,9 +36,9 @@ test("estimateWaitMinutesForPosition falls back to service catalog for waiting p
     position: 3,
     aheadEntries: [
       { status: "waiting", service_name: "Filling" },
-      { status: "dentist", estimated_wait_minutes: 30 },
+      { status: "dentist", duration_minutes: 30 },
     ],
   });
 
-  assert.equal(wait, 55);
+  assert.equal(wait, 40);
 });

@@ -10726,6 +10726,12 @@ body.is-queue-display .staff-mobile-nav {
   margin: 0;
   padding-left: 1.1rem;
 }
+.queue-duration-field {
+  max-width: 12rem;
+}
+.queue-duration-field input {
+  width: 100%;
+}
 
 .fdi-pick-chips {
   display: flex;

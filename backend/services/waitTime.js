@@ -9,6 +9,9 @@
 const {
   remainingServingMinutes,
   getPredictionSettings,
+  SERVING_STATUSES,
+  WAITING_STATUSES,
+  waitingAllowanceMinutes,
 } = require("./queueWaitPrediction");
 
 const DEFAULT_MINUTES = 45;
@@ -70,28 +73,26 @@ async function estimateWaitMinutesForPosition(db, {
   const safePosition = Math.max(1, Number(position) || 1);
 
   if (aheadEntries.length) {
-    let total = 0;
+    let remainingChair = 0;
+    let waitingAhead = 0;
     for (const entry of aheadEntries) {
+      const status = String(entry.status || "").toLowerCase();
+      if (WAITING_STATUSES.has(status)) {
+        waitingAhead += 1;
+        continue;
+      }
+      if (!SERVING_STATUSES.has(status) && status !== "dentist") continue;
       const stored = Number(
         entry.procedureDurationMinutes ??
           entry.procedure_duration_minutes ??
           entry.durationMinutes ??
           entry.duration_minutes ??
-          entry.estimated_wait_minutes ??
-          entry.estimatedWaitMinutes ??
+          entry.wait_estimate_duration_minutes ??
           0
       );
-      const full =
-        stored > 0
-          ? stored
-          : await getServiceDurationMinutes(
-              db,
-              entry.serviceId || entry.service_id,
-              entry.serviceName || entry.service_name || entry.procedure
-            );
-      total += remainingServingMinutes(entry, full, now);
+      remainingChair += remainingServingMinutes(entry, stored > 0 ? stored : 0, now);
     }
-    return total;
+    return remainingChair + waitingAhead * waitingAllowanceMinutes();
   }
 
   if (safePosition <= 1) {

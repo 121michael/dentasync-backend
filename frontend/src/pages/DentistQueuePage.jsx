@@ -16,6 +16,7 @@ import {
   callRangeFromEntry,
   durationFromEntry,
   QUEUE_WAIT_DISCLAIMER,
+  remainingRangeFromEntry,
   waitRangeFromEntry,
 } from "../utils/queueWaitEstimate";
 
@@ -110,7 +111,7 @@ function visitDurationMinutes(entry) {
     return Number.isFinite(minutes) && minutes > 0 ? sum + minutes : sum;
   }, 0);
   if (fromProcedures > 0) return fromProcedures;
-  const estimate = Number(entry?.estimatedDurationMinutes ?? entry?.durationMinutes ?? entry?.waitMinutes);
+  const estimate = Number(entry?.estimatedDurationMinutes ?? entry?.durationMinutes);
   return Number.isFinite(estimate) && estimate > 0 ? estimate : 0;
 }
 
@@ -159,8 +160,11 @@ function QueueProcedureList({ entry }) {
 
 function formatWaitLabel(entry) {
   if (entry.status === "in_chair") {
-    const remaining = durationFromEntry(entry);
-    return remaining && remaining !== "—" ? `${remaining} remaining` : "In treatment";
+    if (entry?.waitEstimate?.unavailable) return "Estimate unavailable";
+    const remaining = remainingRangeFromEntry(entry);
+    if (remaining && remaining !== "Estimate unavailable") return `${remaining} remaining`;
+    const duration = durationFromEntry(entry);
+    return duration && duration !== "—" ? `${duration} remaining` : "Estimate unavailable";
   }
   if (entry.status === "completed" || entry.status === "no_show") {
     return "—";
@@ -217,6 +221,18 @@ function ProcedureFields({ draft, onChange, requiredTooth }) {
           value={draft.amountCharged}
           onChange={(event) => onChange({ amountCharged: event.target.value })}
           placeholder="₱"
+        />
+      </label>
+      <label className="field">
+        <span>Estimated duration (minutes)</span>
+        <input
+          type="number"
+          min="1"
+          step="1"
+          inputMode="numeric"
+          value={draft.durationMinutes}
+          onChange={(event) => onChange({ durationMinutes: event.target.value })}
+          placeholder="e.g. 30"
         />
       </label>
     </div>
@@ -279,6 +295,7 @@ export function DentistQueuePage() {
   const [pendingReview, setPendingReview] = useState(null);
   const [reviewReason, setReviewReason] = useState("");
   const [durationMinutes, setDurationMinutes] = useState("");
+  const [liveDurationMinutes, setLiveDurationMinutes] = useState("");
   const [treatmentEntryId, setTreatmentEntryId] = useState(null);
   const [procedureDrafts, setProcedureDrafts] = useState(() => [emptyProcedureDraft()]);
   const [activeDraftIndex, setActiveDraftIndex] = useState(0);
@@ -381,11 +398,21 @@ export function DentistQueuePage() {
     }
   }
 
+  function durationDraftFromEntry(entry) {
+    const minutes =
+      currentVisitProcedure(entry)?.durationMinutes ||
+      entry?.estimatedDurationMinutes ||
+      entry?.durationMinutes ||
+      "";
+    return minutes ? String(minutes) : "";
+  }
+
   function openTreatment(entry) {
     if (entry.status !== "called" && entry.status !== "in_chair") return;
     setTreatmentEntryId(entry.id);
     setError("");
     setProcedureErrors({});
+    setLiveDurationMinutes(durationDraftFromEntry(entry));
     if (entry.status === "in_chair") {
       setProcedureDrafts([]);
       setActiveDraftIndex(0);
@@ -395,10 +422,34 @@ export function DentistQueuePage() {
     }
   }
 
+  async function saveLiveDuration(entry) {
+    const minutes = Number.parseInt(liveDurationMinutes, 10);
+    if (!Number.isSafeInteger(minutes) || minutes <= 0) {
+      setError("Enter a positive estimated duration in minutes.");
+      return;
+    }
+    setBusy(`duration-${entry.id}`);
+    setError("");
+    try {
+      await api.setDentistProcedureDuration(entry.id, { durationMinutes: minutes });
+      setSuccess("Estimated duration saved. Waiting times were recalculated.");
+      await load({ silent: true });
+    } catch (durationError) {
+      setError(durationError.message);
+    } finally {
+      setBusy("");
+    }
+  }
+
   function openComplete(entry) {
     setPendingComplete(entry);
     setDurationMinutes(
-      entry.durationMinutes || entry.duration_minutes || entry.procedureDurationMinutes || entry.waitMinutes || ""
+      currentVisitProcedure(entry)?.durationMinutes ||
+        entry.estimatedDurationMinutes ||
+        entry.durationMinutes ||
+        entry.duration_minutes ||
+        entry.procedureDurationMinutes ||
+        ""
     );
   }
 
@@ -552,6 +603,14 @@ export function DentistQueuePage() {
     }
   }
 
+  useEffect(() => {
+    if (!treatmentEntryId || !data?.queue) return;
+    const entry = data.queue.find((row) => String(row.id) === String(treatmentEntryId));
+    if (!entry || entry.status !== "in_chair") return;
+    const next = durationDraftFromEntry(entry);
+    setLiveDurationMinutes((current) => (current ? current : next));
+  }, [data, treatmentEntryId]);
+
   async function markCalled(entry) {
     setBusy(`call-${entry.id}`);
     setError("");
@@ -638,6 +697,32 @@ export function DentistQueuePage() {
                   Current procedure: {procedureLine(currentVisitProcedure(treatmentEntry))} · In Treatment
                 </p>
               ) : null}
+              <p>
+                Estimated duration:{" "}
+                {formatDurationMinutes(visitDurationMinutes(treatmentEntry)) !== "—"
+                  ? formatDurationMinutes(visitDurationMinutes(treatmentEntry))
+                  : "Estimate unavailable"}
+              </p>
+              <label className="field queue-duration-field">
+                <span>Estimated duration (minutes)</span>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  inputMode="numeric"
+                  value={liveDurationMinutes}
+                  onChange={(event) => setLiveDurationMinutes(event.target.value)}
+                  placeholder="e.g. 30"
+                />
+              </label>
+              <button
+                type="button"
+                className="button button--secondary button--compact"
+                disabled={Boolean(busy)}
+                onClick={() => saveLiveDuration(treatmentEntry)}
+              >
+                {busy === `duration-${treatmentEntry.id}` ? "Saving…" : "Save estimate"}
+              </button>
               {plannedVisitProcedures(treatmentEntry).length ? (
                 <>
                   <strong>Pending procedures</strong>
@@ -844,7 +929,9 @@ export function DentistQueuePage() {
                     <td data-label="Est. Duration">
                       {formatDurationMinutes(visitDurationMinutes(entry)) !== "—"
                         ? formatDurationMinutes(visitDurationMinutes(entry))
-                        : durationFromEntry(entry)}
+                        : durationFromEntry(entry) !== "—"
+                          ? durationFromEntry(entry)
+                          : "Estimate unavailable"}
                     </td>
                     <td data-label="Est. Wait">
                       <strong>{formatWaitLabel(entry)}</strong>

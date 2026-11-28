@@ -264,7 +264,7 @@ test("patients behind a multi-procedure visit wait for the remaining total", asy
   // Remaining restoration 20 + crown 90 = 110.
   assert.equal(estimate.estimatedWaitMinutes.min, 110);
   assert.equal(estimate.estimatedWaitMinutes.max, 110);
-  assert.equal(estimate.estimatedDurationMinutes, 35);
+  assert.equal(estimate.estimatedDurationMinutes, null);
 });
 
 function createBatchDb({ failAfterFirstInsert = false } = {}) {
