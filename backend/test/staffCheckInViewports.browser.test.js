@@ -75,9 +75,10 @@ test("Staff Check-In RFID/QR UI sanitizes SQL errors at 320, 390, and desktop", 
   app.get("/api/staff/rfid-events", (_req, res) => res.json({ latest: null, events: [] }));
   app.get("/api/staff/check-in/qr-session", (_req, res) => res.json({ session: null }));
   app.post("/api/staff/check-in", (_req, res) => {
-    res.status(500).json({
-      message: "Unable to complete patient check-in. Try again.",
+    res.status(503).json({
+      message: "Check-in setup is incomplete. Apply backend/migrations/066_appointment_visit_origin.sql and retry.",
       errorCode: "SETUP_REQUIRED",
+      code: "SETUP_REQUIRED",
     });
   });
   app.post("/api/staff/check-in/qr-session", (_req, res) => {
@@ -163,10 +164,11 @@ test("Staff Check-In RFID/QR UI sanitizes SQL errors at 320, 390, and desktop", 
   await page.focus('input[aria-label="Hidden RFID capture"]');
   await page.keyboard.type("AABBCCDDEE01");
   await page.waitForFunction(
-    () => document.body.innerText.includes("Unable to complete patient check-in. Try again.")
+    () => document.body.innerText.includes("Check-in is temporarily unavailable. Contact an administrator to complete setup.")
   );
   const afterFail = await page.evaluate(() => document.body.innerText);
-  assert.match(afterFail, /Unable to complete patient check-in/);
+  assert.match(afterFail, /Check-in is temporarily unavailable/);
+  assert.doesNotMatch(afterFail, /066_appointment_visit_origin/);
   assert.doesNotMatch(afterFail, /current transaction is aborted/);
   assert.match(afterFail, /Connected/);
   await page.screenshot({ path: path.join(artifactsDir, "staff_checkin_sanitized_error.png"), fullPage: true });
@@ -180,5 +182,15 @@ test("Staff Check-In RFID/QR UI sanitizes SQL errors at 320, 390, and desktop", 
   });
   assert.equal(clickedQr, true);
   await page.waitForFunction(() => document.body.innerText.toLowerCase().includes("generate"));
+  const qrTab = await page.evaluate(() => document.body.innerText);
+  assert.doesNotMatch(qrTab, /066_appointment_visit_origin/);
+  assert.match(qrTab, /Generate QR Check-In/);
+  await page.evaluate(() => {
+    const button = [...document.querySelectorAll("button")].find((node) =>
+      /Generate QR Check-In/i.test(node.textContent || "")
+    );
+    button?.click();
+  });
+  await page.waitForFunction(() => document.body.innerText.includes("Ask the patient to scan"));
   await page.screenshot({ path: path.join(artifactsDir, "staff_checkin_qr_tab.png"), fullPage: true });
 });

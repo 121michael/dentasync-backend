@@ -134,6 +134,7 @@ export function StaffCheckInPage() {
   const [qrSession, setQrSession] = useState(null);
   const [countdown, setCountdown] = useState(0);
   const [error, setError] = useState("");
+  const [qrError, setQrError] = useState("");
   const [busy, setBusy] = useState(false);
   const [scannerState, setScannerState] = useState("ready");
   const [readerOffline, setReaderOffline] = useState(false);
@@ -191,6 +192,7 @@ export function StaffCheckInPage() {
         setVerified(checkInToVerified(fresh));
         setScannerState("success");
         setError("");
+        setQrError("");
         notifyOnce(`${fresh.patientName} checked in · Queue ${fresh.token || fresh.queueNumber}`);
         window.setTimeout(() => setScannerState("ready"), 1600);
       }
@@ -213,6 +215,7 @@ export function StaffCheckInPage() {
         setVerified(eventToVerified(newest));
         setReaderOffline(false);
         setError("");
+        setQrError("");
         holdScanFeedback("success");
         notifyOnce(newest.message || "Patient checked in from RFID tap.");
         const today = defaultLogFilter();
@@ -226,12 +229,14 @@ export function StaffCheckInPage() {
       const readerFailure = isRfidReaderConnectionFailure(newest.errorCode);
       setReaderOffline(readerFailure);
       const failedMessage = sanitizeStaffCheckInMessage(
-        newest.message,
+        newest.errorCode === "SETUP_REQUIRED"
+          ? newest.message || "Check-in is temporarily unavailable. Contact an administrator to complete setup."
+          : newest.message,
         "Unable to complete patient check-in. Try again."
       );
       setError(failedMessage);
       holdScanFeedback("error");
-      notifyOnce(failedMessage, "error");
+      if (newest.errorCode !== "SETUP_REQUIRED") notifyOnce(failedMessage, "error");
     } catch {
       // Keep listening even if the live feed briefly fails.
     }
@@ -303,6 +308,7 @@ export function StaffCheckInPage() {
       setVerified({ ...response, method: "rfid" });
       setReaderOffline(false);
       setError("");
+      setQrError("");
       holdScanFeedback("success");
       notifyOnce(response.message || "Patient checked in successfully.");
       setRfidCode("");
@@ -313,13 +319,17 @@ export function StaffCheckInPage() {
       await loadLog({ query: today });
     } catch (checkInError) {
       const message = sanitizeStaffCheckInMessage(
-        checkInError.message,
+        checkInError?.data?.code === "SETUP_REQUIRED" || checkInError?.data?.errorCode === "SETUP_REQUIRED"
+          ? "Check-in is temporarily unavailable. Contact an administrator to complete setup."
+          : checkInError.message,
         "Unable to complete patient check-in. Try again."
       );
       setReaderOffline(isRfidReaderConnectionFailure(checkInError?.data?.errorCode));
       setError(message);
       holdScanFeedback("error");
-      notifyOnce(message, "error");
+      if (checkInError?.data?.code !== "SETUP_REQUIRED" && checkInError?.data?.errorCode !== "SETUP_REQUIRED") {
+        notifyOnce(message, "error");
+      }
       setRfidCode("");
     } finally {
       setBusy(false);
@@ -328,15 +338,19 @@ export function StaffCheckInPage() {
 
   async function generateQr() {
     setBusy(true);
-    setError("");
+    setQrError("");
     try {
       const response = await api.createStaffWalkInQrSession();
       setQrSession(response.session);
       setMode("qr");
-      pushToast(response.message || "Walk-in QR code ready for patients.");
-    } catch (qrError) {
-      setError(qrError.message);
-      pushToast(qrError.message, "error");
+      notifyOnce(response.message || "Walk-in QR code ready for patients.");
+    } catch (generateError) {
+      const message = sanitizeStaffCheckInMessage(
+        generateError.message,
+        "Unable to generate the walk-in QR code."
+      );
+      setQrError(message);
+      notifyOnce(message, "error");
     } finally {
       setBusy(false);
     }
@@ -386,7 +400,7 @@ export function StaffCheckInPage() {
 
   return (
     <div className="staff-page">
-      {error ? <p className="inline-alert inline-alert--error">{error}</p> : null}
+      {mode === "rfid" && error ? <p className="inline-alert inline-alert--error">{error}</p> : null}
 
       <section className="staff-panel">
         <div className="staff-panel__heading">
@@ -485,11 +499,7 @@ export function StaffCheckInPage() {
                   <button type="button" className="button button--primary" onClick={generateQr} disabled={busy}>
                     <QrCode size={16} /> Generate QR Check-In
                   </button>
-                  {error ? (
-                    <p className="inline-alert inline-alert--error">
-                      {error} You can try generating the QR code again.
-                    </p>
-                  ) : null}
+                  {qrError ? <p className="inline-alert inline-alert--error">{qrError}</p> : null}
                 </>
               )}
             </article>

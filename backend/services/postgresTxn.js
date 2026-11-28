@@ -16,13 +16,15 @@ const SCHEMA_HINTS = {
   patient_portal_queue_entries: "002_create_patient_portal.sql",
 };
 
+const STAFF_SETUP_UNAVAILABLE_MESSAGE =
+  "Check-in is temporarily unavailable. Contact an administrator to complete setup.";
+
 function setupRequiredError(migration, original) {
-  const error = new Error(
-    `Check-in setup is incomplete. Apply backend/migrations/${migration} and retry.`
-  );
+  const error = new Error(STAFF_SETUP_UNAVAILABLE_MESSAGE);
   error.status = 503;
   error.code = "SETUP_REQUIRED";
   error.migration = migration;
+  error.adminMessage = `Apply backend/migrations/${migration} and retry.`;
   error.originalCode = original?.code;
   error.originalMessage = original?.message;
   return error;
@@ -59,7 +61,7 @@ function isRawSqlMessage(text) {
 function publicCheckInMessage(error, fallback = "Unable to complete patient check-in. Try again.") {
   if (!error) return fallback;
   const mapped = schemaError(error);
-  if (mapped) return mapped.message;
+  if (mapped) return STAFF_SETUP_UNAVAILABLE_MESSAGE;
   if (String(error.message || "").includes("estimated_cost")) {
     return "Unable to create walk-in appointment for check-in.";
   }
@@ -90,6 +92,7 @@ function logCheckInFailure(scope, error) {
     `${scope}:`,
     error?.code || "",
     mapped?.migration || error?.migration || "",
+    mapped?.adminMessage || error?.adminMessage || "",
     error?.originalCode || columnFromUndefined(error) || relationFromMissing(error) || "",
     error?.originalMessage || error?.message || ""
   );
@@ -134,4 +137,5 @@ module.exports = {
   checkInFailureResponse,
   isRawSqlMessage,
   logCheckInFailure,
+  STAFF_SETUP_UNAVAILABLE_MESSAGE,
 };

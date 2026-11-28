@@ -14,8 +14,13 @@ test("undefined visit_origin maps to setup-required for 066", () => {
   const mapped = schemaError(error);
   assert.equal(mapped.status, 503);
   assert.equal(mapped.code, "SETUP_REQUIRED");
-  assert.match(mapped.message, /066_appointment_visit_origin\.sql/);
-  assert.equal(publicCheckInMessage(error).includes("does not exist"), false);
+  assert.equal(mapped.migration, "066_appointment_visit_origin.sql");
+  assert.match(mapped.adminMessage, /066_appointment_visit_origin\.sql/);
+  assert.equal(
+    publicCheckInMessage(error),
+    "Check-in is temporarily unavailable. Contact an administrator to complete setup."
+  );
+  assert.doesNotMatch(publicCheckInMessage(error), /066_appointment_visit_origin/);
   assert.doesNotMatch(publicCheckInMessage(error), /aborted/);
 });
 
@@ -26,6 +31,10 @@ test("missing QR redemption table maps to setup-required for 016", () => {
   const mapped = schemaError(error);
   assert.equal(mapped.migration, "016_staff_walkin_qr.sql");
   assert.equal(checkInFailureResponse(error).status, 503);
+  assert.equal(
+    checkInFailureResponse(error).message,
+    "Check-in is temporarily unavailable. Contact an administrator to complete setup."
+  );
 });
 
 test("withSavepoint rolls back optional SQL so the outer transaction can continue", async () => {

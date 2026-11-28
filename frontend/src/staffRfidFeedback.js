@@ -18,9 +18,20 @@ export function staffReaderStatusLabel({ readerOffline, scannerState }) {
   return "Connected";
 }
 
+export const STAFF_SETUP_UNAVAILABLE_MESSAGE =
+  "Check-in is temporarily unavailable. Contact an administrator to complete setup.";
+
 export function sanitizeStaffCheckInMessage(text, fallback = "Unable to complete patient check-in. Try again.") {
   const message = String(text || "").trim();
   if (!message) return fallback;
+  if (
+    /check-in setup is incomplete/i.test(message) ||
+    /066_appointment_visit_origin/i.test(message) ||
+    /016_staff_walkin_qr/i.test(message) ||
+    /055_branch_check_in/i.test(message)
+  ) {
+    return STAFF_SETUP_UNAVAILABLE_MESSAGE;
+  }
   if (
     /current transaction is aborted/i.test(message) ||
     /commands ignored until end of transaction/i.test(message) ||

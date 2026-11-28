@@ -116,12 +116,39 @@ test("RFID/QR check-in recovers from missing visit_origin and stays atomic", { t
     mainId,
   ]);
 
+  const qrBeforeSchema = await staffWalkInQr.createWalkInQrSession(db, {
+    staffId: staffUser,
+    branchId: mainId,
+    ttlSeconds: 600,
+  });
+  assert.ok(qrBeforeSchema.token);
+  assert.equal(qrBeforeSchema.branchId, mainId);
+
+  const bookedBeforePatient = await addUser("patient", "booked.before@example.test", "BookedBefore", "TXNDEADBEEF00");
+  await db.query(
+    `INSERT INTO patient_portal_appointments (
+       user_id, service_id, service_name, dentist_id, dentist_name,
+       appointment_date, appointment_time, coverage_type, estimated_cost, status, branch_id
+     ) VALUES (
+       $1, 'cleaning', 'Cleaning', 'dr-sarah-cruz', 'Dr. Sarah Cruz',
+       (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date, '09:00'::time, 'self_pay', 500, 'confirmed', $2
+     )`,
+    [String(bookedBeforePatient), mainId]
+  );
+  const bookedBefore = await rfidDesk.checkInByRfidTag(db, { rfidTag: "TXNDEADBEEF00" });
+  assert.equal(bookedBefore.ok, true, JSON.stringify(bookedBefore));
+  assert.equal(bookedBefore.payload.walkInCreated, false);
+
   const missingColumnPatient = await addUser("patient", "missing.origin@example.test", "Origin", "TXNDEADBEEF01");
   const setupFail = await rfidDesk.checkInByRfidTag(db, { rfidTag: "TXNDEADBEEF01" });
   assert.equal(setupFail.ok, false, JSON.stringify(setupFail));
   assert.equal(setupFail.status, 503);
   assert.equal(setupFail.code, "SETUP_REQUIRED");
-  assert.match(String(setupFail.message), /066_appointment_visit_origin\.sql/);
+  assert.equal(
+    setupFail.message,
+    "Check-in is temporarily unavailable. Contact an administrator to complete setup."
+  );
+  assert.doesNotMatch(String(setupFail.message), /066_appointment_visit_origin/);
   assert.doesNotMatch(String(setupFail.message), /aborted/);
   const leaked = await db.query(
     `SELECT COUNT(*)::int AS count FROM patient_portal_appointments WHERE user_id = $1`,

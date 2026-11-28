@@ -9,6 +9,7 @@ import {
   RFID_UNASSIGNED_MESSAGE,
   sanitizeStaffCheckInMessage,
   shouldSkipDuplicateToast,
+  STAFF_SETUP_UNAVAILABLE_MESSAGE,
   staffReaderStatusLabel,
 } from "../staffRfidFeedback.js";
 
@@ -32,6 +33,13 @@ test("rejected RFID cards keep the reader connected and replace the previous sca
   assert.doesNotMatch(page, /Reader status:[\s\S]*scannerState === "error"[\s\S]*\? "Error"/);
   assert.match(page, /sanitizeStaffCheckInMessage/);
   assert.match(page, /shouldSkipDuplicateToast|notifyOnce/);
+  assert.match(page, /qrError/);
+  assert.equal(
+    sanitizeStaffCheckInMessage(
+      "Check-in setup is incomplete. Apply backend/migrations/066_appointment_visit_origin.sql and retry."
+    ),
+    STAFF_SETUP_UNAVAILABLE_MESSAGE
+  );
   assert.equal(
     sanitizeStaffCheckInMessage("current transaction is aborted, commands ignored until end of transaction block"),
     "Unable to complete patient check-in. Try again."
