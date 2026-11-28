@@ -1950,6 +1950,10 @@ html[data-theme="dark"] .portal-shell[data-theme="dark"] ~ .tooth-loader .tooth-
   overflow-wrap: anywhere;
 }
 
+.patient-queue-board__row--ahead {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .patient-queue-board__row.is-you {
   border-color: color-mix(in srgb, var(--amethyst-700, #6b4bb8) 38%, var(--border));
   background: color-mix(in srgb, var(--amethyst-700, #6b4bb8) 9%, var(--surface));
@@ -2011,7 +2015,8 @@ html[data-theme="dark"] .portal-shell[data-theme="dark"] ~ .tooth-loader .tooth-
   .patient-queue-board__header {
     flex-direction: column;
   }
-  .patient-queue-board__row {
+  .patient-queue-board__row,
+  .patient-queue-board__row--ahead {
     grid-template-columns: minmax(0, 1fr);
     align-items: flex-start;
   }

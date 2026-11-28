@@ -15,7 +15,7 @@ import { api } from "../api";
 import { useAuth } from "../useAuth";
 import { DetailLink, ErrorState, LoadingState } from "../components/UI";
 import { PatientQrCheckInScanner } from "../components/PatientQrCheckInScanner";
-import { PatientQueueBoard } from "../components/PatientQueueBoard";
+import { DashboardLiveQueue } from "../components/DashboardLiveQueue";
 import { PatientQueueTicket } from "../components/PatientQueueTicket";
 import { getPatientNotificationTarget } from "../patientNotificationNav";
 import { compactQueueWaitCaption } from "../utils/queueWaitEstimate";
@@ -252,8 +252,9 @@ export function DashboardPage() {
         />
       ) : null}
 
-      <PatientQueueBoard
-        entries={dashboard.queueBoard?.entries || (dashboard.queue ? [{ ...dashboard.queue, isCurrentPatient: true }] : [])}
+      <DashboardLiveQueue
+        entries={dashboard.queueBoard?.entries || []}
+        current={dashboard.queue}
         lastUpdatedAt={dashboard.queueBoard?.lastUpdatedAt || dashboard.queue?.waitEstimate?.calculatedAt}
       />
 
