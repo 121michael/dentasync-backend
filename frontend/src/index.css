@@ -2960,21 +2960,130 @@ html[data-theme="dark"] .portal-shell[data-theme="dark"] ~ .tooth-loader .tooth-
   margin-top: 1.1rem;
 }
 
+.booking-section--schedule,
+.booking-section--notes {
+  width: 100%;
+  max-width: 42rem;
+  min-width: 0;
+}
+
+.booking-section--schedule .field,
+.booking-section--notes .field {
+  min-width: 0;
+}
+
+.booking-section--schedule {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.booking-section__patient {
+  margin: 0;
+}
+
+.schedule-cluster {
+  display: grid;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.schedule-cluster__date {
+  min-width: 0;
+  margin: 0;
+}
+
+.schedule-cluster__date input[type="date"] {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.schedule-info-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.schedule-info-badge {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 0.32rem 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--amethyst-400) 45%, var(--border));
+  border-radius: 999px;
+  color: var(--amethyst-700);
+  background: var(--amethyst-100);
+  font-size: 0.7rem;
+  font-weight: 750;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.schedule-status {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
+.schedule-mode {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.schedule-mode__option {
+  display: grid;
+  gap: 0.12rem;
+  min-height: 52px;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  text-align: left;
+  color: var(--text);
+  background: var(--surface-solid);
+}
+
+.schedule-mode__option strong {
+  font-size: 0.8rem;
+  letter-spacing: -0.02em;
+}
+
+.schedule-mode__option small {
+  color: var(--text-muted);
+  font-size: 0.66rem;
+  line-height: 1.35;
+}
+
+.schedule-mode__option.is-selected {
+  border-color: var(--amethyst-500);
+  color: var(--amethyst-700);
+  background: var(--amethyst-100);
+  box-shadow: 0 0 0 2px rgba(152, 100, 215, 0.14);
+}
+
+.schedule-time-panel {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
 .time-filter-row {
   display: flex;
   flex-wrap: wrap;
   gap: 0.45rem;
-  margin: 1.1rem 0 0.72rem;
+  margin: 0;
 }
 
 .filter-pill {
-  min-height: 32px;
-  padding: 0 0.75rem;
+  min-height: 40px;
+  padding: 0 0.9rem;
   border: 1px solid var(--border);
   border-radius: 999px;
   color: var(--text-muted);
   background: var(--surface-solid);
-  font-size: 0.71rem;
+  font-size: 0.74rem;
   font-weight: 750;
 }
 
@@ -2986,7 +3095,7 @@ html[data-theme="dark"] .portal-shell[data-theme="dark"] ~ .tooth-loader .tooth-
 
 .time-slots {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.5rem;
 }
 
@@ -2995,19 +3104,21 @@ html[data-theme="dark"] .portal-shell[data-theme="dark"] ~ .tooth-loader .tooth-
   align-items: center;
   justify-content: center;
   gap: 0.3rem;
-  min-height: 39px;
+  min-height: 44px;
+  padding: 0.4rem 0.45rem;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 11px;
   color: var(--text);
   background: var(--surface-solid);
-  font-size: 0.7rem;
+  font-size: 0.74rem;
   font-weight: 700;
 }
 
 .time-slot.is-selected {
-  border-color: var(--emerald);
-  color: var(--emerald);
-  background: var(--emerald-wash);
+  border-color: var(--amethyst-600);
+  color: var(--amethyst-700);
+  background: var(--amethyst-100);
+  box-shadow: 0 0 0 2px rgba(152, 100, 215, 0.16);
 }
 
 .coverage-options {
@@ -3067,15 +3178,45 @@ html[data-theme="dark"] .portal-shell[data-theme="dark"] ~ .tooth-loader .tooth-
 .file-drop input { display: none; }
 
 .booking-section__notes {
-  margin-top: 1.1rem;
+  margin-top: 0.55rem;
+}
+
+.booking-optional-panel {
+  min-width: 0;
+  padding: 0.45rem 0.8rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-solid);
+}
+
+.booking-optional-panel + .booking-optional-panel {
+  margin-top: 0.7rem;
+}
+
+.booking-optional-panel > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.28rem 0.6rem;
+  min-height: 40px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.booking-optional-panel > summary::-webkit-details-marker {
+  display: none;
+}
+
+.booking-optional-panel > summary strong {
+  font-size: 0.92rem;
+  letter-spacing: -0.02em;
 }
 
 .booking-medical-docs {
   display: grid;
-  gap: 0.55rem;
-  margin-top: 1.15rem;
-  padding-top: 1rem;
-  border-top: 1px solid var(--border);
+  gap: 0.65rem;
+  min-width: 0;
+  margin-top: 0.35rem;
 }
 
 .booking-medical-docs h3 {
@@ -3086,9 +3227,15 @@ html[data-theme="dark"] .portal-shell[data-theme="dark"] ~ .tooth-loader .tooth-
 
 .booking-medical-docs p {
   margin: 0;
-  color: var(--text);
-  font-size: 0.78rem;
-  line-height: 1.5;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.booking-medical-docs__fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.7rem;
 }
 
 .booking-medical-docs__type small {
@@ -3107,7 +3254,8 @@ html[data-theme="dark"] .portal-shell[data-theme="dark"] ~ .tooth-loader .tooth-
   clip: rect(0, 0, 0, 0);
 }
 
-.booking-medical-docs__actions {
+.booking-medical-docs__actions,
+.booking-medical-docs__picker {
   display: flex;
   flex-wrap: wrap;
   gap: 0.55rem;
@@ -3122,14 +3270,44 @@ html[data-theme="dark"] .portal-shell[data-theme="dark"] ~ .tooth-loader .tooth-
   background: var(--surface-muted);
 }
 
-.booking-medical-docs__file strong {
+.booking-medical-docs__file strong,
+.booking-file-row strong {
   font-size: 0.78rem;
   overflow-wrap: anywhere;
 }
 
-.booking-medical-docs__file small {
+.booking-medical-docs__file small,
+.booking-file-row small {
   color: var(--text-muted);
   font-size: 0.68rem;
+}
+
+.booking-file-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.55rem 0.7rem;
+  align-items: center;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-muted);
+}
+
+.booking-file-row > div {
+  min-width: 0;
+  display: grid;
+  gap: 0.12rem;
+}
+
+.booking-file-row__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+
+.booking-file-row__actions .button {
+  min-height: 40px;
 }
 
 .dentist-medical-docs {
@@ -3743,6 +3921,16 @@ html[data-theme="dark"] .portal-shell[data-theme="dark"] ~ .tooth-loader .tooth-
 
 .booking-step-actions--coverage {
   padding-bottom: max(5.75rem, calc(4.5rem + env(safe-area-inset-bottom, 0px)));
+}
+
+.booking-step-actions--schedule {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  margin-top: 0.85rem;
+  padding: 0.65rem 0 max(0.75rem, env(safe-area-inset-bottom, 0px));
+  background: color-mix(in srgb, var(--surface) 88%, white);
+  backdrop-filter: blur(12px);
 }
 
 .booking-done {
@@ -4794,7 +4982,18 @@ body:has(.fab-menu.is-open) .patient-assistant__panel {
     gap: .65rem;
   }
   .wellness-card, .quick-actions-card { padding: 1.05rem; }
-  .time-slots { grid-template-columns: repeat(3, 1fr); }
+  .time-slots { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .booking-medical-docs__fields { grid-template-columns: 1fr; }
+  .schedule-mode { grid-template-columns: 1fr 1fr; }
+  .booking-file-row {
+    grid-template-columns: 1fr;
+  }
+  .booking-file-row__actions {
+    justify-content: stretch;
+  }
+  .booking-file-row__actions .button {
+    flex: 1 1 auto;
+  }
   .treatment-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.5rem;
@@ -5148,6 +5347,26 @@ body:has(.fab-menu.is-open) .patient-assistant__panel {
   .treatment-option__media,
   .treatment-option.is-selected .treatment-option__media {
     max-height: 8.5rem;
+  }
+  .time-slots {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .schedule-mode {
+    grid-template-columns: 1fr;
+  }
+  .booking-section--schedule,
+  .booking-section--notes {
+    padding: 0.8rem 0.75rem 0.85rem;
+  }
+}
+
+@media (max-width: 320px) {
+  .time-slots {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .booking-medical-docs__picker .button,
+  .booking-step-actions--schedule .button {
+    min-width: 0;
   }
 }
 
@@ -12546,6 +12765,10 @@ body.is-queue-display .fab-menu {
     padding-bottom: 8.75rem;
   }
 
+  .booking-step-actions--schedule {
+    padding-bottom: max(5.75rem, calc(4.5rem + env(safe-area-inset-bottom, 0px)));
+  }
+
   .booking-summary-layer {
     padding: 0.75rem;
   }
@@ -12556,6 +12779,10 @@ body.is-queue-display .fab-menu {
   .role-bottom-dock--wide .fab-menu,
   .role-bottom-dock--compact .fab-menu {
     display: none;
+  }
+
+  .booking-layout:has(.booking-section--schedule:not([hidden])) {
+    max-width: 46rem;
   }
 }
 

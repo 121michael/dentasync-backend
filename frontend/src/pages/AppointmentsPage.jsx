@@ -8,6 +8,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock3,
+  Eye,
+  FileText,
   FileUp,
   ShieldCheck,
   X,
@@ -456,6 +458,8 @@ export function AppointmentsPage() {
   const [isBusy, setIsBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [timePeriod, setTimePeriod] = useState("Morning");
+  const [preferSpecificTime, setPreferSpecificTime] = useState(false);
+  const [pendingMedicalFile, setPendingMedicalFile] = useState(null);
   const [availability, setAvailability] = useState(null);
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const [availabilityError, setAvailabilityError] = useState("");
@@ -681,6 +685,18 @@ export function AppointmentsPage() {
     (sum, service) => sum + Math.max(Number(service.durationMinutes) || 30, 1),
     0
   );
+  const bookableSlots = (availability?.slots || []).filter((slot) => slot.bookable);
+  const periodSlots = bookableSlots.filter((slot) => slot.period === timePeriod);
+  const schedulePeriods = PERIOD_ORDER.filter(
+    (period) =>
+      period === "Morning" ||
+      period === "Afternoon" ||
+      bookableSlots.some((slot) => slot.period === period)
+  );
+  const choosingTime = preferSpecificTime || Boolean(form.appointmentTime);
+  const slotsNeeded =
+    availability?.slotsNeeded ||
+    (selectedDurationMinutes ? Math.ceil(selectedDurationMinutes / 30) : 0);
   const selectedService = selectedServices[selectedServices.length - 1] || null;
   const selectedServicePrice = useMemo(
     () => getApprovedClinicPrice(selectedService),
@@ -875,6 +891,7 @@ export function AppointmentsPage() {
         category: response.document?.category || description,
         documentType: response.document?.documentType || medicalDocumentType,
       });
+      setPendingMedicalFile(null);
       setMedicalDocumentDescription(response.document?.name || description);
       setMedicalUploadSuccess(response.message || "Dental document saved for your dentist to review.");
     } catch (uploadError) {
@@ -891,9 +908,23 @@ export function AppointmentsPage() {
       await api.removeMedicalDocument(medicalDocument.id).catch(() => {});
     }
     setMedicalDocument(null);
+    setPendingMedicalFile(null);
     setMedicalUploadError("");
     setMedicalUploadSuccess("");
     if (medicalFileInputRef.current) medicalFileInputRef.current.value = "";
+  }
+
+  async function viewMedicalDocument() {
+    if (!medicalDocument?.id) return;
+    setMedicalUploadError("");
+    try {
+      await api.downloadPortalDocument({
+        id: medicalDocument.id,
+        name: medicalDocument.filename || medicalDocument.name,
+      });
+    } catch (viewError) {
+      setMedicalUploadError(viewError.message || "Unable to open the document.");
+    }
   }
 
   async function confirmAppointment(event) {
@@ -951,6 +982,8 @@ export function AppointmentsPage() {
       setDetailsDismissed(false);
       setAuthorizationFile(null);
       setMedicalDocument(null);
+      setPendingMedicalFile(null);
+      setPreferSpecificTime(false);
       setMedicalDocumentType("");
       setMedicalUploadError("");
       setMedicalUploadSuccess("");
@@ -1497,16 +1530,19 @@ export function AppointmentsPage() {
             </div>
           </section>
 
-          <section className={`glass-card booking-section${bookingStep === 3 ? "" : " is-hidden"}`} hidden={bookingStep !== 3}>
+          <section
+            className={`glass-card booking-section booking-section--schedule${bookingStep === 3 ? "" : " is-hidden"}`}
+            hidden={bookingStep !== 3}
+          >
             <div className="card-heading">
               <div>
                 <span className="eyebrow">03 — Schedule</span>
-                <h2>Choose date and optional time</h2>
+                <h2>Choose your schedule</h2>
               </div>
               <CalendarDays className="card-heading__icon" size={21} />
             </div>
             {dependents.length && !actingAs ? (
-              <label className="field" style={{ marginBottom: "1rem" }}>
+              <label className="field booking-section__patient">
                 <span>Patient</span>
                 <select name="forPatientUserId" value={form.forPatientUserId} onChange={updateForm}>
                   <option value="">
@@ -1523,8 +1559,8 @@ export function AppointmentsPage() {
                 </select>
               </label>
             ) : null}
-            <div className="schedule-fields">
-              <label className="field">
+            <div className="schedule-cluster">
+              <label className="field schedule-cluster__date">
                 <span>Appointment date</span>
                 <input
                   type="date"
@@ -1535,8 +1571,27 @@ export function AppointmentsPage() {
                   required
                 />
               </label>
+              {availability && !availability.closed && availability.hours ? (
+                <div className="schedule-info-badges" role="status">
+                  <span className="schedule-info-badge">
+                    Clinic hours {displayTime(availability.hours.open)} – {displayTime(availability.hours.close)}
+                  </span>
+                  {selectedDurationMinutes ? (
+                    <span className="schedule-info-badge">
+                      {selectedDurationMinutes} min
+                      {slotsNeeded
+                        ? ` · ${slotsNeeded} consecutive slot${slotsNeeded === 1 ? "" : "s"}`
+                        : ""}
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
-            {availabilityLoading ? <p className="muted">Loading availability…</p> : null}
+            {availabilityLoading ? (
+              <p className="schedule-status" role="status">
+                Loading available times…
+              </p>
+            ) : null}
             {availabilityError ? (
               <p className="inline-alert inline-alert--error" role="alert">
                 {availabilityError}
@@ -1544,198 +1599,235 @@ export function AppointmentsPage() {
             ) : null}
             {availability?.closed ? (
               <p className="inline-alert" role="status">
-                The clinic is closed on {displayDate(form.appointmentDate)}. Choose another date.
+                This date is unavailable. The clinic is closed on {displayDate(form.appointmentDate)}.
               </p>
             ) : null}
-            {availability && !availability.closed && availability.hours ? (
-              <p className="muted">
-                Clinic hours: {displayTime(availability.hours.open)} – {displayTime(availability.hours.close)}
-                {selectedDurationMinutes
-                  ? ` · Selected services need ${selectedDurationMinutes} minutes (${availability.slotsNeeded || Math.ceil(selectedDurationMinutes / 30)} consecutive slot${(availability.slotsNeeded || 1) === 1 ? "" : "s"}).`
-                  : ""}
-              </p>
-            ) : null}
-            <div className="time-filter-row">
-              {PERIOD_ORDER.filter((period) =>
-                (availability?.slots || []).some((slot) => slot.bookable && slot.period === period)
-              ).map((period) => (
-                <button
-                  type="button"
-                  key={period}
-                  className={`filter-pill ${timePeriod === period ? "is-active" : ""}`}
-                  onClick={() => setTimePeriod(period)}
-                >
-                  {period}
-                </button>
-              ))}
-            </div>
-            <div className="time-slots">
-              {(availability?.slots || [])
-                .filter((slot) => slot.bookable && slot.period === timePeriod)
-                .map((slot) => (
+            {!availabilityLoading && availability && !availability.closed ? (
+              <>
+                <div className="schedule-mode" role="group" aria-label="Optional appointment time">
                   <button
                     type="button"
-                    key={slot.time}
-                    className={`time-slot ${form.appointmentTime === slot.time ? "is-selected" : ""}`}
-                    onClick={() => setForm((current) => ({ ...current, appointmentTime: slot.time }))}
+                    className={`schedule-mode__option${!choosingTime ? " is-selected" : ""}`}
+                    aria-pressed={!choosingTime}
+                    onClick={() => {
+                      setPreferSpecificTime(false);
+                      setForm((current) => ({ ...current, appointmentTime: "" }));
+                    }}
                   >
-                    <Clock3 size={15} /> {displayTime(slot.time)}
+                    <strong>Date only</strong>
+                    <small>No time selected</small>
                   </button>
-                ))}
-            </div>
-            <p className="muted">Appointment time (optional)</p>
-            {form.appointmentTime ? (
-              <button
-                type="button"
-                className="button button--secondary button--compact"
-                onClick={() => setForm((current) => ({ ...current, appointmentTime: "" }))}
-              >
-                Clear selected time
-              </button>
-            ) : (
-              <p className="muted">Leave the time blank to book the date only.</p>
-            )}
-            {availability && !availability.closed && !(availability.availableTimes || []).length ? (
-              <p className="muted">No appointment slots are available on this date.</p>
+                  <button
+                    type="button"
+                    className={`schedule-mode__option${choosingTime ? " is-selected" : ""}`}
+                    aria-pressed={choosingTime}
+                    onClick={() => setPreferSpecificTime(true)}
+                  >
+                    <strong>Choose a time</strong>
+                    <small>Optional preferred slot</small>
+                  </button>
+                </div>
+                {choosingTime ? (
+                  <div className="schedule-time-panel">
+                    <div className="time-filter-row">
+                      {schedulePeriods.map((period) => (
+                        <button
+                          type="button"
+                          key={period}
+                          className={`filter-pill ${timePeriod === period ? "is-active" : ""}`}
+                          aria-pressed={timePeriod === period}
+                          onClick={() => setTimePeriod(period)}
+                        >
+                          {period}
+                        </button>
+                      ))}
+                    </div>
+                    {periodSlots.length ? (
+                      <div className="time-slots">
+                        {periodSlots.map((slot) => (
+                          <button
+                            type="button"
+                            key={slot.time}
+                            className={`time-slot ${form.appointmentTime === slot.time ? "is-selected" : ""}`}
+                            aria-pressed={form.appointmentTime === slot.time}
+                            onClick={() => {
+                              setPreferSpecificTime(true);
+                              setForm((current) => ({ ...current, appointmentTime: slot.time }));
+                            }}
+                          >
+                            <Clock3 size={15} /> {displayTime(slot.time)}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="schedule-status" role="status">
+                        {bookableSlots.length
+                          ? `No available ${timePeriod.toLowerCase()} slots on this date.`
+                          : "No available slots on this date."}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="schedule-status">Time is optional. Leave Date only selected to book without a slot.</p>
+                )}
+              </>
             ) : null}
-            <div className="booking-step-actions">
+          </section>
+
+          <section
+            className={`glass-card booking-section booking-section--notes${bookingStep === 3 ? "" : " is-hidden"}`}
+            hidden={bookingStep !== 3}
+          >
+            <details className="booking-optional-panel" open>
+              <summary>
+                <span className="eyebrow">Optional</span>
+                <strong>Notes for your care team</strong>
+              </summary>
+              <label className="field booking-section__notes">
+                <span className="sr-only">Anything your care team should know?</span>
+                <textarea
+                  name="notes"
+                  rows="3"
+                  value={form.notes}
+                  onChange={updateForm}
+                  placeholder="Share accessibility needs, concerns, or preferences."
+                />
+              </label>
+            </details>
+
+            <details className="booking-optional-panel" open>
+              <summary>
+                <span className="eyebrow">Optional</span>
+                <strong>Dental documents</strong>
+              </summary>
+              <section className="booking-medical-docs">
+                <p>
+                  Upload a supporting file for your dentist if you already have one. PDF, JPG, or PNG — up to 5 MB.
+                </p>
+                <div className="booking-medical-docs__fields">
+                  <label className="field booking-medical-docs__type">
+                    <span>Document Type</span>
+                    <select
+                      value={medicalDocumentType}
+                      onChange={(event) => {
+                        const nextType = event.target.value;
+                        const next = medicalDocumentTypes.find((item) => item.id === nextType);
+                        const previous = medicalDocumentTypes.find((item) => item.id === medicalDocumentType);
+                        setMedicalUploadError("");
+                        setMedicalDocumentType(nextType);
+                        setMedicalDocumentDescription((current) => {
+                          if (!current.trim() || current.trim() === previous?.label) {
+                            return next?.label || "";
+                          }
+                          return current;
+                        });
+                      }}
+                    >
+                      <option value="">Select a document type</option>
+                      {medicalDocumentTypes.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field booking-medical-docs__type">
+                    <span>Document description</span>
+                    <input
+                      value={medicalDocumentDescription}
+                      onChange={(event) => {
+                        setMedicalUploadError("");
+                        setMedicalDocumentDescription(event.target.value);
+                      }}
+                      maxLength={160}
+                      placeholder="e.g. Medical Clearance"
+                    />
+                  </label>
+                </div>
+                <input
+                  ref={medicalFileInputRef}
+                  className="booking-medical-docs__input"
+                  type="file"
+                  accept=".pdf,image/jpeg,image/png,.jpg,.jpeg,.png"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0] || null;
+                    setPendingMedicalFile(file);
+                    setMedicalUploadError("");
+                    setMedicalUploadSuccess("");
+                  }}
+                />
+                <div className="booking-medical-docs__picker">
+                  <button
+                    type="button"
+                    className="button button--secondary"
+                    disabled={medicalUploading}
+                    onClick={() => medicalFileInputRef.current?.click()}
+                  >
+                    <FileText size={16} /> {pendingMedicalFile ? "Change file" : "Choose file"}
+                  </button>
+                  <button
+                    type="button"
+                    className="button button--primary"
+                    disabled={medicalUploading || !pendingMedicalFile}
+                    onClick={() => uploadMedicalDocument(pendingMedicalFile)}
+                  >
+                    <FileUp size={16} /> {medicalUploading ? "Uploading…" : "Upload"}
+                  </button>
+                </div>
+                {pendingMedicalFile ? (
+                  <div className="booking-file-row" role="status">
+                    <div>
+                      <strong>{pendingMedicalFile.name}</strong>
+                      <small>
+                        Selected · {fileKindLabel(pendingMedicalFile.name, pendingMedicalFile.type)} ·{" "}
+                        {formatFileSize(pendingMedicalFile.size)}
+                      </small>
+                    </div>
+                  </div>
+                ) : null}
+                {medicalDocument ? (
+                  <div className="booking-file-row" role="status">
+                    <div>
+                      <strong>{medicalDocument.filename || medicalDocument.name}</strong>
+                      <small>
+                        Uploaded
+                        {medicalDocument.name ? ` · ${medicalDocument.name}` : ""} ·{" "}
+                        {fileKindLabel(
+                          medicalDocument.filename || medicalDocument.name,
+                          medicalDocument.mimeType
+                        )}{" "}
+                        · {formatFileSize(medicalDocument.size)}
+                      </small>
+                    </div>
+                    <div className="booking-file-row__actions">
+                      <button type="button" className="button button--secondary button--compact" onClick={viewMedicalDocument}>
+                        <Eye size={15} /> View
+                      </button>
+                      <button type="button" className="button button--secondary button--compact" onClick={removeMedicalDocument}>
+                        <X size={15} /> Remove
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+                {medicalUploadSuccess ? (
+                  <p className="inline-alert inline-alert--success">
+                    <Check size={17} /> {medicalUploadSuccess}
+                  </p>
+                ) : null}
+                {medicalUploadError ? (
+                  <p className="inline-alert inline-alert--error" role="alert">
+                    {medicalUploadError}
+                  </p>
+                ) : null}
+              </section>
+            </details>
+
+            <div className="booking-step-actions booking-step-actions--schedule">
               <button type="button" className="button button--secondary" onClick={() => goToBookingStep(2)}>
                 <ChevronLeft size={16} /> Back
               </button>
               <button type="button" className="button button--primary booking-done" onClick={openVisitSummary}>
                 Review confirmation <ChevronRight size={18} />
-              </button>
-            </div>
-          </section>
-
-          <section className={`glass-card booking-section${bookingStep === 3 ? "" : " is-hidden"}`} hidden={bookingStep !== 3}>
-            <label className="field booking-section__notes">
-              <span>
-                Anything your care team should know? <small>(optional)</small>
-              </span>
-              <textarea
-                name="notes"
-                rows="3"
-                value={form.notes}
-                onChange={updateForm}
-                placeholder="Share accessibility needs, concerns, or preferences."
-              />
-            </label>
-
-            <section className="booking-medical-docs">
-              <div className="card-heading">
-                <div>
-                  <span className="eyebrow">Optional</span>
-                  <h3>Dental Documents (Optional)</h3>
-                </div>
-              </div>
-              <p>
-                Do you have a medical clearance, physician&apos;s certificate, or other important document
-                related to your dental treatment? You may upload it here for your dentist to review.
-              </p>
-              <p className="muted">
-                Examples: medical clearance for dental treatment, physician&apos;s certificate, or other
-                relevant dental documents. Uploading is optional. Your dentist may request additional
-                documentation if clinically necessary.
-              </p>
-              <p className="muted">Accepted files: PDF, JPG, or PNG — up to 5 MB.</p>
-              <label className="field booking-medical-docs__type">
-                <span>Document Type</span>
-                <select
-                  value={medicalDocumentType}
-                  onChange={(event) => {
-                    const nextType = event.target.value;
-                    const next = medicalDocumentTypes.find((item) => item.id === nextType);
-                    const previous = medicalDocumentTypes.find((item) => item.id === medicalDocumentType);
-                    setMedicalUploadError("");
-                    setMedicalDocumentType(nextType);
-                    setMedicalDocumentDescription((current) => {
-                      if (!current.trim() || current.trim() === previous?.label) {
-                        return next?.label || "";
-                      }
-                      return current;
-                    });
-                  }}
-                  required
-                >
-                  <option value="">Select a document type</option>
-                  {medicalDocumentTypes.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
-                <small>
-                  {selectedMedicalType?.description ||
-                    "Choose the option that best describes the file. Uploading remains optional."}
-                </small>
-              </label>
-              <label className="field booking-medical-docs__type">
-                <span>Document description</span>
-                <input
-                  value={medicalDocumentDescription}
-                  onChange={(event) => {
-                    setMedicalUploadError("");
-                    setMedicalDocumentDescription(event.target.value);
-                  }}
-                  maxLength={160}
-                  placeholder="e.g. Medical Clearance"
-                />
-                <small>Your dentist will see this name in Dental Documents on the patient record.</small>
-              </label>
-              <input
-                ref={medicalFileInputRef}
-                className="booking-medical-docs__input"
-                type="file"
-                accept=".pdf,image/jpeg,image/png,.jpg,.jpeg,.png"
-                onChange={(event) => uploadMedicalDocument(event.target.files?.[0] || null)}
-              />
-              <div className="booking-medical-docs__actions">
-                <button
-                  type="button"
-                  className="button button--secondary"
-                  disabled={medicalUploading}
-                  onClick={() => medicalFileInputRef.current?.click()}
-                >
-                  <FileUp size={16} /> {medicalUploading ? "Uploading…" : "Upload Document"}
-                </button>
-                {medicalDocument ? (
-                  <button type="button" className="button button--secondary" onClick={removeMedicalDocument}>
-                    <X size={16} /> Remove
-                  </button>
-                ) : null}
-              </div>
-              {medicalDocument ? (
-                <p className="booking-medical-docs__file" role="status">
-                  <strong>{medicalDocument.name}</strong>
-                  <small>
-                    {medicalDocument.filename || "File attached"} ·{" "}
-                    {fileKindLabel(
-                      medicalDocument.filename || medicalDocument.name,
-                      medicalDocument.mimeType
-                    )}{" "}
-                    · {formatFileSize(medicalDocument.size)}
-                  </small>
-                </p>
-              ) : null}
-              {medicalUploadSuccess ? (
-                <p className="inline-alert inline-alert--success">
-                  <Check size={17} /> {medicalUploadSuccess}
-                </p>
-              ) : null}
-              {medicalUploadError ? (
-                <p className="inline-alert inline-alert--error" role="alert">
-                  {medicalUploadError}
-                </p>
-              ) : null}
-            </section>
-
-            <div className="booking-step-actions booking-step-actions--coverage">
-              <button type="button" className="button button--secondary" onClick={() => goToBookingStep(2)}>
-                <ChevronLeft size={16} /> Back
-              </button>
-              <button type="button" className="button button--primary booking-done" onClick={openVisitSummary}>
-                Done
               </button>
             </div>
           </section>
