@@ -69,16 +69,16 @@ function isSameTicket(entry, current) {
   return false;
 }
 
-export function dashboardPrecedingTicket(entries, current) {
+export function dashboardNextInLine(entries, current) {
   const you =
     current ||
     (Array.isArray(entries) ? entries.find((entry) => entry?.isCurrentPatient) : null) ||
     null;
   if (!you) {
-    return { kind: "empty", peopleAhead: 0 };
+    return { kind: "empty" };
   }
   if (queueStatusKey(you.status) === "dentist") {
-    return { kind: "in_progress", peopleAhead: 0 };
+    return { kind: "in_progress" };
   }
 
   const active = (Array.isArray(entries) ? entries : []).filter(isActiveQueueEntry);
@@ -86,24 +86,19 @@ export function dashboardPrecedingTicket(entries, current) {
   const lane = dentistLaneId(you);
   const scoped = hasLane ? active.filter((entry) => dentistLaneId(entry) === lane) : active;
   const ordered = [...scoped].sort(compareActiveQueueOrder);
-  const index = ordered.findIndex((entry) => isSameTicket(entry, you));
-  const peopleAhead = index > 0 ? index : 0;
-  if (index <= 0) {
-    return { kind: "next", peopleAhead: 0 };
+  const next = ordered.find((entry) => queueStatusKey(entry.status) !== "dentist") || null;
+  if (!next || isSameTicket(next, you)) {
+    return { kind: "next" };
   }
-  const ahead = ordered[index - 1];
   return {
-    kind: "ahead",
-    peopleAhead,
+    kind: "next_person",
     ticket: {
-      token: ahead.token || ahead.queueNumber || null,
-      status: ahead.status,
+      token: next.token || next.queueNumber || null,
+      status: next.status,
     },
   };
 }
 
-export function peopleAheadLabel(count) {
-  const people = Math.max(0, Number(count) || 0);
-  if (people === 1) return "1 person ahead";
-  return `${people} people ahead`;
+export function dashboardPrecedingTicket(entries, current) {
+  return dashboardNextInLine(entries, current);
 }

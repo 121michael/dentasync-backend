@@ -1,40 +1,39 @@
 import { UsersRound } from "lucide-react";
 import { displayQueueStatus } from "../utils/walkInQr";
 import { formatWaitUpdatedAt } from "../utils/queueWaitEstimate";
-import { dashboardPrecedingTicket, peopleAheadLabel } from "../utils/precedingQueueTicket";
+import { dashboardNextInLine } from "../utils/precedingQueueTicket";
 import { LIVE_QUEUE_FOOTER } from "./PatientQueueBoard";
 
 export function DashboardLiveQueue({ entries = [], current = null, lastUpdatedAt }) {
   const updated = formatWaitUpdatedAt(lastUpdatedAt);
-  const result = dashboardPrecedingTicket(entries, current);
+  const result = dashboardNextInLine(entries, current);
 
   let body = null;
   if (result.kind === "empty") {
     body = (
       <div className="patient-queue-board__empty">
         <strong>No active queue ticket</strong>
-        <p>Check in at the clinic to see how many people are ahead of you.</p>
+        <p>Check in at the clinic to see who is next in line.</p>
       </div>
     );
   } else if (result.kind === "in_progress") {
     body = (
       <div className="patient-queue-board__empty">
         <strong>Your treatment is in progress.</strong>
-        <p>There is no one ahead of you.</p>
+        <p>You are with the dentist now.</p>
       </div>
     );
   } else if (result.kind === "next") {
     body = (
       <div className="patient-queue-board__empty">
         <strong>You are next in line.</strong>
-        <p>0 people ahead</p>
       </div>
     );
   } else if (result.ticket?.token) {
     body = (
       <>
         <p className="patient-queue-board__ahead-count">
-          <strong>{peopleAheadLabel(result.peopleAhead)}</strong>
+          <strong>Next in line</strong>
         </p>
         <ul className="patient-queue-board__list">
           <li className="patient-queue-board__row patient-queue-board__row--ahead">
@@ -57,7 +56,7 @@ export function DashboardLiveQueue({ entries = [], current = null, lastUpdatedAt
           </span>
           <div>
             <h2>Live Queue</h2>
-            <p>How many people are ahead of you, and the ticket immediately in front.</p>
+            <p>The person next in line for your dentist.</p>
           </div>
         </div>
         {updated ? <p className="patient-queue-board__updated">Last updated {updated}</p> : null}

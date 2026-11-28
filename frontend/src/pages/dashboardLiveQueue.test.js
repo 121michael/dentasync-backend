@@ -10,13 +10,15 @@ const queuePage = fs.readFileSync(path.join(root, "pages", "QueuePage.jsx"), "ut
 const liveQueue = fs.readFileSync(path.join(root, "components", "DashboardLiveQueue.jsx"), "utf8");
 const board = fs.readFileSync(path.join(root, "components", "PatientQueueBoard.jsx"), "utf8");
 
-test("Dashboard Live Queue uses the preceding-ticket card only", () => {
+test("Dashboard Live Queue shows the person next in line, not people ahead", () => {
   assert.match(dashboard, /DashboardLiveQueue/);
   assert.doesNotMatch(dashboard, /<PatientQueueBoard/);
   assert.match(liveQueue, /You are next in line/);
   assert.match(liveQueue, /Your treatment is in progress/);
-  assert.match(liveQueue, /peopleAheadLabel/);
-  assert.match(liveQueue, /How many people are ahead of you/);
+  assert.match(liveQueue, /The person next in line for your dentist/);
+  assert.match(liveQueue, /dashboardNextInLine/);
+  assert.doesNotMatch(liveQueue, /peopleAheadLabel/);
+  assert.doesNotMatch(liveQueue, /How many people are ahead/);
   assert.doesNotMatch(liveQueue, /queueStatusWaitLabel/);
   assert.doesNotMatch(liveQueue, /patientName/);
 });
