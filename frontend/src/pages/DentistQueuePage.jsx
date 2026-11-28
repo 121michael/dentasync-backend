@@ -292,6 +292,9 @@ export function DentistQueuePage() {
       setData(await api.getDentistQueue(tab, options));
       setError("");
     } catch (loadError) {
+      if (loadError?.status === 401 || loadError?.status === 403) {
+        setData(null);
+      }
       setError(loadError.message);
     }
   }, [tab]);
@@ -768,7 +771,7 @@ export function DentistQueuePage() {
 
         {queue.length ? (
           <div className="dentist-table-wrap">
-            <table className="dentist-table">
+            <table className="dentist-table dentist-table--queue">
               <thead>
                 <tr>
                   <th>Sequence</th>

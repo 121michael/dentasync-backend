@@ -8991,9 +8991,16 @@ body.is-queue-display .staff-mobile-nav {
   .dentist-content { padding: 1.1rem 1rem 1.45rem; }
   .dentist-page .section-heading { align-items: flex-start; flex-direction: column; }
   .dentist-heading-actions { width: 100%; }
-  .dentist-heading-actions .button { flex: 1; }
+  .dentist-heading-actions .button { flex: 1; min-height: 44px; }
   .dentist-table-wrap { margin: 0 -1rem; }
   .dentist-detail-grid { grid-template-columns: 1fr; }
+  .dentist-table.dentist-table--queue { min-width: 560px; }
+}
+
+@media (max-width: 390px) {
+  .dentist-page .dentist-tabs { width: 100%; }
+  .dentist-tab { flex: 1 1 calc(50% - 0.4rem); justify-content: center; }
+  .dentist-table.dentist-table--queue { min-width: 520px; }
 }
 
 .admin-sync-raw { margin-top: .85rem; }

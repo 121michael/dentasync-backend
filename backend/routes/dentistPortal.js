@@ -265,6 +265,107 @@ function clinicTodayQueueSql(alias = "queue") {
   return `(${alias}.checked_in_at AT TIME ZONE '${tz}')::date = (CURRENT_TIMESTAMP AT TIME ZONE '${tz}')::date`;
 }
 
+function clinicDateFromInstant(value) {
+  if (!value) return null;
+  const instant = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(instant.getTime())) return null;
+  return instant.toLocaleDateString("en-CA", { timeZone: clinicTimezone() });
+}
+
+function isOptionalQueueSchemaError(error) {
+  const text = `${error?.message || ""} ${error?.column || ""}`.toLowerCase();
+  if (error?.code === "42P01" && /clinic_branches/.test(text)) return true;
+  if (error?.code !== "42703") return false;
+  return [
+    "wait_estimate_",
+    "serving_started_at",
+    "closure_from_status",
+    "called_at",
+    "branch_name",
+    "visit_date",
+  ].some((token) => text.includes(token));
+}
+
+function dentistQueueSetupFailure(error) {
+  const text = String(error?.message || "");
+  if (error?.code === "42P01" && /patient_portal_queue_entries|patient_portal_appointments/i.test(text)) {
+    return {
+      setupRequired: true,
+      code: "QUEUE_SCHEMA_MISSING",
+      migration: "002_create_patient_portal.sql",
+      message:
+        "Patient queue tables are missing. Apply backend/migrations/002_create_patient_portal.sql before using Dentist Patient Queue.",
+    };
+  }
+  if (error?.code === "42703" && /branch_id/i.test(text)) {
+    return {
+      setupRequired: true,
+      code: "QUEUE_BRANCH_SCHEMA_MISSING",
+      migration: "clinic branch schema (052) and patient branch booking (054)",
+      message:
+        "Queue branch columns are missing. Apply the clinic branch and patient branch-booking migrations before using Dentist Patient Queue. Branch isolation cannot be skipped.",
+    };
+  }
+  return null;
+}
+
+async function queryAssignedDentistQueue(db, { scope, dateFilter, statusFilter, needsReviewTab, includeOptional }) {
+  const tz = clinicTimezone().replace(/'/g, "''");
+  const optionalSelect = includeOptional
+    ? `queue.wait_estimate_min_minutes,
+           queue.wait_estimate_max_minutes,
+           queue.wait_estimate_duration_minutes,
+           queue.wait_estimate_call_start,
+           queue.wait_estimate_call_end,
+           queue.wait_estimate_method,
+           queue.wait_estimate_at,
+           queue.serving_started_at,
+           queue.closure_from_status,
+           queue.branch_id,
+           (queue.checked_in_at AT TIME ZONE '${tz}')::date AS visit_date,
+           branch.name AS branch_name,`
+    : "";
+  const branchJoin = includeOptional
+    ? "LEFT JOIN clinic_branches AS branch ON branch.id = queue.branch_id"
+    : "";
+  return db.query(
+    `SELECT
+           ${optionalSelect}
+           queue.id,
+           queue.token,
+           queue.position,
+           queue.status,
+           queue.estimated_wait_minutes,
+           queue.checked_in_at,
+           queue.appointment_id,
+           queue.user_id,
+           appointment.service_name,
+           appointment.notes,
+           appointment.dentist_id,
+           appointment.dentist_name,
+           appointment.appointment_date,
+           appointment.appointment_time,
+           patient.id AS patient_id,
+           patient.id::text AS clinic_patient_id,
+           CONCAT_WS(' ', patient.first_name, patient.last_name) AS patient_name,
+           patient.phone AS patient_phone
+         FROM patient_portal_queue_entries AS queue
+         JOIN patient_portal_appointments AS appointment
+           ON appointment.id = queue.appointment_id
+         JOIN users AS patient ON patient.id::text = queue.user_id
+         ${branchJoin}
+         WHERE ${scope.sql}
+           AND ${dateFilter}
+           AND ${statusFilter}
+         ORDER BY ${
+           needsReviewTab
+             ? "queue.checked_in_at ASC, queue.id ASC"
+             : require("../services/branchCheckIn").QUEUE_ORDER_SQL
+         }`,
+    scope.params
+  );
+}
+
 function ageFromDob(value) {
   if (!value) return null;
   const dob = new Date(value);
@@ -330,7 +431,9 @@ function mapQueueEntry(row) {
       (row.procedures || []).map((procedure) => procedure.clinicalRecordId).find(Boolean) ||
       row.clinical_record_id ||
       null,
-    visitDate: row.visit_date ? String(row.visit_date).slice(0, 10) : null,
+    visitDate: row.visit_date
+      ? String(row.visit_date).slice(0, 10)
+      : clinicDateFromInstant(row.checked_in_at),
     branchName: row.branch_name || null,
     previousStatus: row.closure_from_status || null,
     previousStatusLabel: previousStatusLabel(row.closure_from_status || row.status),
@@ -859,75 +962,48 @@ function createDentistPortalRouter({
 
     try {
       await repairOrphanWalkInQueueForDentist(db, req.dentist, req.branchAccess?.activeBranch?.id || null);
-      const result = await db.query(
-        `SELECT
-           queue.id,
-           queue.token,
-           queue.position,
-           queue.status,
-           queue.estimated_wait_minutes,
-           queue.wait_estimate_min_minutes,
-           queue.wait_estimate_max_minutes,
-           queue.wait_estimate_duration_minutes,
-           queue.wait_estimate_call_start,
-           queue.wait_estimate_call_end,
-           queue.wait_estimate_method,
-           queue.wait_estimate_at,
-           queue.serving_started_at,
-           queue.checked_in_at,
-           queue.appointment_id,
-           queue.user_id,
-           queue.closure_from_status,
-           queue.branch_id,
-           (queue.checked_in_at AT TIME ZONE '${clinicTimezone().replace(/'/g, "''")}')::date AS visit_date,
-           branch.name AS branch_name,
-           appointment.service_name,
-           appointment.notes,
-           appointment.dentist_id,
-           appointment.dentist_name,
-           appointment.appointment_date,
-           appointment.appointment_time,
-           patient.id AS patient_id,
-           patient.id::text AS clinic_patient_id,
-           CONCAT_WS(' ', patient.first_name, patient.last_name) AS patient_name,
-           patient.phone AS patient_phone
-         FROM patient_portal_queue_entries AS queue
-         JOIN patient_portal_appointments AS appointment
-           ON appointment.id = queue.appointment_id
-         JOIN users AS patient ON patient.id::text = queue.user_id
-         LEFT JOIN clinic_branches AS branch ON branch.id = queue.branch_id
-         WHERE ${scope.sql}
-           AND ${dateFilter}
-           AND ${statusFilter}
-         ORDER BY ${
-           needsReviewTab
-             ? "queue.checked_in_at ASC, queue.id ASC"
-             : require("../services/branchCheckIn").QUEUE_ORDER_SQL
-         }`,
-        scope.params
-      );
+      const queryArgs = { scope, dateFilter, statusFilter, needsReviewTab };
+      let result;
+      try {
+        result = await queryAssignedDentistQueue(db, { ...queryArgs, includeOptional: true });
+      } catch (schemaError) {
+        if (!isOptionalQueueSchemaError(schemaError)) throw schemaError;
+        console.warn("Dentist queue optional columns skipped:", schemaError.code, schemaError.message);
+        result = await queryAssignedDentistQueue(db, { ...queryArgs, includeOptional: false });
+      }
 
-      const countsResult = await db.query(
-        `SELECT
-           COUNT(*) FILTER (
-             WHERE queue.status IN ('preparing', 'dentist')
-               AND ${clinicTodayQueueSql("queue")}
-           ) AS ongoing,
-           COUNT(*) FILTER (
-             WHERE queue.status IN ('checked_in', 'waiting')
-               AND ${clinicTodayQueueSql("queue")}
-           ) AS inline,
-           COUNT(*) FILTER (
-             WHERE queue.status IN ('completed', 'no_show')
-               AND ${clinicTodayQueueSql("queue")}
-           ) AS completed,
-           COUNT(*) FILTER (WHERE queue.status = 'needs_review') AS needs_review
-         FROM patient_portal_queue_entries AS queue
-         JOIN patient_portal_appointments AS appointment
-           ON appointment.id = queue.appointment_id
-         WHERE ${scope.sql}`,
-        scope.params
-      );
+      let counts = { ongoing: 0, inline: 0, completed: 0, needs_review: 0 };
+      try {
+        const countsResult = await db.query(
+          `SELECT
+             COUNT(*) FILTER (
+               WHERE queue.status IN ('preparing', 'dentist')
+                 AND ${clinicTodayQueueSql("queue")}
+             ) AS ongoing,
+             COUNT(*) FILTER (
+               WHERE queue.status IN ('checked_in', 'waiting')
+                 AND ${clinicTodayQueueSql("queue")}
+             ) AS inline,
+             COUNT(*) FILTER (
+               WHERE queue.status IN ('completed', 'no_show')
+                 AND ${clinicTodayQueueSql("queue")}
+             ) AS completed,
+             COUNT(*) FILTER (WHERE queue.status = 'needs_review') AS needs_review
+           FROM patient_portal_queue_entries AS queue
+           JOIN patient_portal_appointments AS appointment
+             ON appointment.id = queue.appointment_id
+           WHERE ${scope.sql}`,
+          scope.params
+        );
+        counts = {
+          ongoing: count(countsResult.rows[0], "ongoing"),
+          inline: count(countsResult.rows[0], "inline"),
+          completed: count(countsResult.rows[0], "completed"),
+          needs_review: count(countsResult.rows[0], "needs_review"),
+        };
+      } catch (countError) {
+        console.warn("Dentist queue counts skipped:", countError.code, countError.message);
+      }
 
       const grouped = await clinicalPatients.listTreatmentsForQueueEntries(
         db,
@@ -950,16 +1026,16 @@ function createDentistPortalRouter({
       return res.json({
         updatedAt: new Date().toISOString(),
         tab,
-        counts: {
-          ongoing: count(countsResult.rows[0], "ongoing"),
-          inline: count(countsResult.rows[0], "inline"),
-          completed: count(countsResult.rows[0], "completed"),
-          needs_review: count(countsResult.rows[0], "needs_review"),
-        },
+        counts,
         queue: queueRows.map(mapQueueEntry),
       });
     } catch (error) {
-      console.error("Dentist queue error:", error.message);
+      const setup = dentistQueueSetupFailure(error);
+      if (setup) {
+        console.error("Dentist queue setup required:", error.code, error.message);
+        return res.status(503).json(setup);
+      }
+      console.error("Dentist queue error:", error.code || "unknown", error.message);
       return res.status(500).json({ message: "Unable to load the treatment queue." });
     }
   });
